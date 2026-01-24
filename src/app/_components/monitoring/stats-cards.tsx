@@ -148,20 +148,37 @@ function StatCard({
           </div>
           <h3 className="text-sm font-medium text-foreground">{title}</h3>
         </div>
-        {trend && (
-          <div
-            className="flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium"
-            style={{
-              backgroundColor: `${accentColor}20`,
-              color: accentColor
-            }}
-          >
-            {trend === "up" && <ArrowUp className="h-3 w-3" />}
-            {trend === "down" && <ArrowDown className="h-3 w-3" />}
-            {trend === "stable" && <TrendingUp className="h-3 w-3" />}
-            {trendValue}
-          </div>
-        )}
+        <AnimatePresence mode="wait">
+          {trend && (
+            <motion.div
+              key={`${trend}-${trendValue}`}
+              className="flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-colors duration-500"
+              style={{
+                backgroundColor: `${accentColor}20`,
+                color: accentColor
+              }}
+              initial={{ opacity: 0, scale: 0.8, x: 10 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.8, x: -10 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              {trend === "up" && <ArrowUp className="h-3 w-3" />}
+              {trend === "down" && <ArrowDown className="h-3 w-3" />}
+              {trend === "stable" && <TrendingUp className="h-3 w-3" />}
+              <AnimatePresence mode="wait">
+                <motion.span
+                  key={trendValue}
+                  initial={{ opacity: 0, x: 5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -5 }}
+                  transition={{ duration: 0.2, delay: 0.1 }}
+                >
+                  {trendValue}
+                </motion.span>
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Main Value */}
