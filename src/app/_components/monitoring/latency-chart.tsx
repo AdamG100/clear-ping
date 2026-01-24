@@ -48,7 +48,7 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = (payload[0] as any).payload
-  const latency = Number(data.latency).toFixed(1)
+  const latency = data.isOnline ? Number(data.originalLatency).toFixed(1) : 'Offline'
   const packetLoss = Number(data.packetLoss || 0).toFixed(2)
 
   return (
@@ -82,7 +82,7 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.2 }}
             >
-              {latency}ms
+              {latency}
             </motion.span>
           </AnimatePresence>
         </div>
@@ -108,20 +108,24 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
 
 export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartProps) {
   const chartData = useMemo(() => {
-    // Show actual measurement data points, not rolling averages
+    // Show all measurement data points, including offline ones
     return data
-      .filter(point => point.latency !== null) // Only show points with actual measurements
       .map((point) => {
+        const packetLoss = point.isOnline === false ? 100 : (point.packetLoss || 0)
         const color = point.isOnline 
-          ? getPacketLossColor(point.packetLoss || 0)
+          ? getPacketLossColor(packetLoss)
           : '#ef4444' // Red for offline
+        
+        // For offline points, show a small bar to indicate the measurement occurred
+        const displayLatency = point.isOnline === false ? 1 : point.latency
 
         return {
           time: point.timestamp.getTime(),
-          latency: point.latency,
-          packetLoss: point.packetLoss,
+          latency: displayLatency,
+          packetLoss: packetLoss,
           isOnline: point.isOnline,
           color,
+          originalLatency: point.latency, // Keep original for tooltip
         }
       })
   }, [data])
@@ -155,8 +159,11 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
-                minTickGap={32}
+                minTickGap={50}
                 tickFormatter={formatXAxis}
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
               />
               <YAxis
                 tickLine={false}
@@ -170,7 +177,7 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
               />
               <Bar dataKey="latency" radius={[4, 4, 0, 0]} animationDuration={500}>
                 {chartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color || '#00FF00'} />
+                  <Cell key={`cell-${index}`} fill={entry.color || '#22c55e'} />
                 ))}
               </Bar>
             </BarChart>
@@ -179,19 +186,19 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
       
         <div className="flex items-center justify-center gap-6 mt-4 text-xs pb-2">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#00FF00' }} />
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#22c55e' }} />
             <span className="text-muted-foreground">Perfect (0% loss)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#00FFFF' }} />
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#06b6d4' }} />
             <span className="text-muted-foreground">Minor loss (1-2 packets)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#FF00FF' }} />
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#d946ef' }} />
             <span className="text-muted-foreground">Moderate-severe loss</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#FF0000' }} />
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#dc2626' }} />
             <span className="text-muted-foreground">High loss/failure</span>
           </div>
         </div>

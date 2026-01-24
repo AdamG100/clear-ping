@@ -18,10 +18,10 @@ export interface PacketLossColorScheme {
  * @returns Color in hex format
  */
 export function getPacketLossColor(lossPercent: number): string {
-  if (lossPercent === 0) return '#00FF00'; // Bright green - perfect connection
-  if (lossPercent <= 10) return '#00FFFF'; // Cyan - minor loss (1-2 packets)
-  if (lossPercent <= 50) return '#FF00FF'; // Magenta - moderate to severe loss
-  return '#FF0000'; // Red - high packet loss or total unreachability
+  if (lossPercent === 0) return '#22c55e'; // Muted green - perfect connection (matches bg-green-500)
+  if (lossPercent <= 10) return '#06b6d4'; // Muted cyan - minor loss (matches bg-cyan-400)
+  if (lossPercent <= 50) return '#d946ef'; // Muted magenta - moderate to severe loss (matches bg-fuchsia-500)
+  return '#dc2626'; // Muted red - high packet loss or total unreachability (matches bg-red-600)
 }
 
 /**
@@ -31,10 +31,10 @@ export function getPacketLossColor(lossPercent: number): string {
  * @returns Color in OKLCH format
  */
 export function getPacketLossColorOKLCH(lossPercent: number): string {
-  if (lossPercent === 0) return 'oklch(0.85 0.25 145)'; // Bright green
-  if (lossPercent <= 10) return 'oklch(0.85 0.20 195)'; // Cyan
-  if (lossPercent <= 50) return 'oklch(0.65 0.28 320)'; // Magenta
-  return 'oklch(0.60 0.25 25)'; // Red
+  if (lossPercent === 0) return 'oklch(0.65 0.15 145)'; // Muted green
+  if (lossPercent <= 10) return 'oklch(0.65 0.15 195)'; // Muted cyan
+  if (lossPercent <= 50) return 'oklch(0.65 0.20 320)'; // Muted magenta
+  return 'oklch(0.60 0.20 25)'; // Muted red
 }
 
 /**
@@ -45,31 +45,31 @@ export function getPacketLossColorOKLCH(lossPercent: number): string {
 export function getPacketLossColorInfo(lossPercent: number): PacketLossColorScheme {
   if (lossPercent === 0) {
     return {
-      hex: '#00FF00',
-      oklch: 'oklch(0.85 0.25 145)',
+      hex: '#22c55e',
+      oklch: 'oklch(0.65 0.15 145)',
       label: 'Perfect',
       description: 'No packet loss',
     };
   }
   if (lossPercent <= 10) {
     return {
-      hex: '#00FFFF',
-      oklch: 'oklch(0.85 0.20 195)',
+      hex: '#06b6d4',
+      oklch: 'oklch(0.65 0.15 195)',
       label: 'Minor Loss',
       description: '1-2 packets dropped',
     };
   }
   if (lossPercent <= 50) {
     return {
-      hex: '#FF00FF',
-      oklch: 'oklch(0.65 0.28 320)',
+      hex: '#d946ef',
+      oklch: 'oklch(0.65 0.20 320)',
       label: 'Moderate-Severe',
       description: 'Significant packet loss',
     };
   }
   return {
-    hex: '#FF0000',
-    oklch: 'oklch(0.60 0.25 25)',
+    hex: '#dc2626',
+    oklch: 'oklch(0.60 0.20 25)',
     label: 'High Loss/Failure',
     description: 'Path failure or high packet loss',
   };
@@ -105,12 +105,12 @@ export function getPacketLossBgClass(lossPercent: number): string {
  * @returns Color in hex format
  */
 export function getLatencyColor(latencyMs: number): string {
-  if (latencyMs <= 10) return '#00FF00'; // Bright green - excellent
-  if (latencyMs <= 30) return '#80FF80'; // Light green - very good
-  if (latencyMs <= 50) return '#00FFFF'; // Cyan - good
-  if (latencyMs <= 75) return '#4080FF'; // Light blue - acceptable
-  if (latencyMs <= 100) return '#0040FF'; // Blue - fair
-  if (latencyMs <= 150) return '#FF00FF'; // Magenta - degraded
-  if (latencyMs <= 200) return '#FF8800'; // Orange - poor
-  return '#FF0000'; // Red - critical
+  if (latencyMs <= 10) return '#22c55e'; // Muted green - excellent (matches packet loss perfect)
+  if (latencyMs <= 30) return '#4ade80'; // Light green - very good
+  if (latencyMs <= 50) return '#06b6d4'; // Muted cyan - good (matches packet loss minor)
+  if (latencyMs <= 75) return '#60a5fa'; // Light blue - acceptable
+  if (latencyMs <= 100) return '#3b82f6'; // Blue - fair
+  if (latencyMs <= 150) return '#d946ef'; // Muted magenta - degraded (matches packet loss moderate)
+  if (latencyMs <= 200) return '#f97316'; // Orange - poor
+  return '#dc2626'; // Muted red - critical (matches packet loss high)
 }

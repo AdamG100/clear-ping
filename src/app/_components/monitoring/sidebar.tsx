@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import { getPacketLossBgClass } from '@/lib/packet-loss-colors'
+import { getPacketLossBgClass, getPacketLossColor } from '@/lib/packet-loss-colors'
 
 interface SidebarProps {
   targets: Target[]
@@ -35,22 +35,18 @@ interface SidebarProps {
 
 function StatusIndicator({ isOnline, packetLoss = 0 }: { isOnline: boolean; packetLoss?: number }) {
   // Determine status based on online status and packet loss
-  let statusColor = 'bg-destructive' // Default: offline/error (red)
-  let shadowColor = 'shadow-[0_0_8px_var(--destructive)]'
+  let statusColor = '#dc2626' // Default: offline/error (muted red)
+  let shadowColor = 'shadow-[0_0_8px_#dc2626]'
 
   if (isOnline) {
     // Use packet loss colors for online targets
-    statusColor = getPacketLossBgClass(packetLoss)
+    statusColor = getPacketLossColor(packetLoss)
     // Create shadow color based on the packet loss color
     const shadowMap: Record<string, string> = {
-      'bg-green-500': 'shadow-[0_0_8px_#22c55e]',
-      'bg-green-400': 'shadow-[0_0_8px_#4ade80]',
-      'bg-cyan-400': 'shadow-[0_0_8px_#22d3ee]',
-      'bg-blue-400': 'shadow-[0_0_8px_#60a5fa]',
-      'bg-blue-600': 'shadow-[0_0_8px_#2563eb]',
-      'bg-fuchsia-500': 'shadow-[0_0_8px_#d946ef]',
-      'bg-orange-500': 'shadow-[0_0_8px_#f97316]',
-      'bg-red-600': 'shadow-[0_0_8px_#dc2626]',
+      '#22c55e': 'shadow-[0_0_8px_#22c55e]', // green
+      '#06b6d4': 'shadow-[0_0_8px_#06b6d4]', // cyan
+      '#d946ef': 'shadow-[0_0_8px_#d946ef]', // magenta
+      '#dc2626': 'shadow-[0_0_8px_#dc2626]', // red
     }
     shadowColor = shadowMap[statusColor] || shadowColor
   }
@@ -68,18 +64,13 @@ function StatusIndicator({ isOnline, packetLoss = 0 }: { isOnline: boolean; pack
     >
       {/* Pulsing background ring */}
       <span
-        className={cn(
-          'absolute inline-flex h-2.5 w-2.5 rounded-full custom-ping',
-          statusColor
-        )}
+        className="absolute inline-flex h-2.5 w-2.5 rounded-full custom-ping"
+        style={{ backgroundColor: statusColor }}
       />
       {/* Fixed center circle */}
       <span
-        className={cn(
-          'relative inline-block h-2.5 w-2.5 rounded-full',
-          statusColor,
-          shadowColor
-        )}
+        className="relative inline-block h-2.5 w-2.5 rounded-full"
+        style={{ backgroundColor: statusColor }}
       />
     </span>
   )

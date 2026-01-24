@@ -36,14 +36,13 @@ function useTargets() {
     loadTargets()
   }, [loadTargets])
 
-  // Auto-refresh targets every 30 seconds to show status changes quickly
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadTargets()
-    }, 30000) // 30 seconds
-
-    return () => clearInterval(interval)
-  }, [loadTargets])
+  // Remove auto-refresh from useTargets - will be handled centrally
+  // useEffect(() => {
+  //   const interval = setInterval(() => {
+  //     loadTargets()
+  //   }, 30000) // 30 seconds
+  //   return () => clearInterval(interval)
+  // }, [loadTargets])
 
   const addTarget = useCallback(async (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => {
     try {
@@ -100,7 +99,7 @@ function useTargets() {
   return { targets, packetLossData, addTarget, updateTarget, deleteTarget, isLoaded, reloadTargets: loadTargets }
 }
 
-function useTargetMeasurements(targetId: string | null, timeRange: TimeRange) {
+function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, target: Target | null) {
   const [measurements, setMeasurements] = useState<DataPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [initialLoad, setInitialLoad] = useState(true)
@@ -133,45 +132,33 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange) {
           // API returns { measurements, statistics }, we need just measurements
           const data = result.measurements || result
           
-          // Create a full time series for the selected range with appropriate intervals
+          // Create a full time series aligned with probe intervals
           const now = new Date()
           const startTime = new Date(now.getTime() - hours * 60 * 60 * 1000)
           
-          // Dynamic intervals based on time range for optimal visualization
-          let intervalMinutes: number
-          let maxPoints: number
-          if (hours <= 1) {
-            intervalMinutes = 1      // 1h: 1-minute intervals
-            maxPoints = 60
-          } else if (hours <= 3) {
-            intervalMinutes = 3      // 3h: 3-minute intervals  
-            maxPoints = 60
-          } else if (hours <= 24) {
-            intervalMinutes = 5      // 5h, 24h: 5-minute intervals
-            maxPoints = hours <= 5 ? 60 : 288
-          } else if (hours <= 168) {
-            intervalMinutes = 15     // 7d: 15-minute intervals
-            maxPoints = 672
-          } else if (hours <= 720) {
-            intervalMinutes = 60     // 30d: 1-hour intervals
-            maxPoints = 720
-          } else {
-            intervalMinutes = 240    // 360d: 4-hour intervals
-            maxPoints = 2160
-          }
+          // Use target probe interval for x-axis alignment (in minutes)
+          const probeIntervalMinutes = target ? Math.max(1, Math.round(target.interval / 60)) : 5
           
-          // Create time series with actual measurements filled in
+          // Calculate max points based on time range and probe interval
+          const totalMinutes = hours * 60
+          const maxPoints = Math.min(288, Math.floor(totalMinutes / probeIntervalMinutes)) // Cap at 288 points
+          
+          // Create time series aligned with probe schedule
           const dataPoints: DataPoint[] = []
           const measurements = Array.isArray(data) ? data : []
           
           for (let i = 0; i < maxPoints; i++) {
-            const timestamp = new Date(startTime.getTime() + (i * intervalMinutes * 60 * 1000))
+            // Calculate timestamp aligned with probe intervals
+            const minutesFromStart = i * probeIntervalMinutes
+            const timestamp = new Date(startTime.getTime() + (minutesFromStart * 60 * 1000))
             
-            // Find actual measurement within this interval (within half interval)
+            // Find actual measurement within this probe interval window
             const actualData = measurements.find((m: ProbeMeasurement) => {
               const dataTime = new Date(m.timestamp).getTime()
               const pointTime = timestamp.getTime()
-              return Math.abs(dataTime - pointTime) < (intervalMinutes * 60 * 1000 / 2)
+              // Allow measurements within half the probe interval of the expected time
+              const tolerance = (probeIntervalMinutes * 60 * 1000) / 2
+              return Math.abs(dataTime - pointTime) < tolerance
             })
             
             if (actualData) {
@@ -183,7 +170,7 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange) {
                 isOnline: actualData.success
               })
             } else {
-              // Use null data for missing periods
+              // Use null data for missing probe intervals
               dataPoints.push({
                 timestamp,
                 latency: null,
@@ -192,6 +179,9 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange) {
               })
             }
           }
+          
+          // Sort by timestamp (most recent first for stats calculation)
+          dataPoints.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
           
           setMeasurements(dataPoints)
           setInitialLoad(false)
@@ -217,15 +207,16 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange) {
   }, [targetId, timeRange])
 
   // Auto-refresh data every 30 seconds to show probe results quickly
-  useEffect(() => {
-    if (!targetId) return
+  // Remove this - will be handled centrally
+  // useEffect(() => {
+  //   if (!targetId) return
 
-    const interval = setInterval(() => {
-      loadMeasurementsRef.current()
-    }, 30000) // 30 seconds
+  //   const interval = setInterval(() => {
+  //     loadMeasurementsRef.current()
+  //   }, 30000) // 30 seconds
 
-    return () => clearInterval(interval)
-  }, [targetId]) // Remove loadMeasurements from dependencies to prevent interval restart
+  //   return () => clearInterval(interval)
+  // }, [targetId, timeRange]) // Restart interval when target or time range changes
 
   return { 
     measurements, 
@@ -264,9 +255,12 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
   const maxLatency = validLatencies.length > 0 ? Math.max(...validLatencies) : 0
   
   // Calculate packet loss using time-weighted average (more recent = higher weight)
+  // Use packetLoss field directly, defaulting to 100% for offline measurements
   const packetLossData = data
-    .filter(d => d.packetLoss !== null)
-    .map(d => ({ packetLoss: d.packetLoss as number, timestamp: d.timestamp }))
+    .map(d => ({ 
+      packetLoss: d.packetLoss ?? (d.isOnline === false ? 100 : 0), 
+      timestamp: d.timestamp 
+    }))
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()) // Most recent first
 
   let packetLoss = 0
@@ -275,16 +269,33 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
     let totalWeight = 0
     let weightedSum = 0
 
-    // Use exponential decay: more recent measurements have exponentially higher weight
+    // Use stronger exponential decay: recent measurements get exponentially higher weight
+    // Very recent measurements (within minutes) get dramatically higher weight
     packetLossData.forEach((data) => {
-      const ageHours = (now - data.timestamp.getTime()) / (1000 * 60 * 60)
-      // Exponential decay factor: recent measurements get ~10x weight of hour-old measurements
-      const weight = Math.exp(-ageHours * 2.3) // ln(10) ≈ 2.3 for 10x decay per hour
+      const ageMinutes = (now - data.timestamp.getTime()) / (1000 * 60)
+      // Exponential decay factor: measurements from 10 minutes ago get ~100x less weight
+      // This makes recent failures much more prominent in the average
+      const weight = Math.exp(-ageMinutes * 0.23) // ln(100) ≈ 4.6, so 4.6/20min ≈ 0.23
       weightedSum += data.packetLoss * weight
       totalWeight += weight
     })
 
     packetLoss = totalWeight > 0 ? weightedSum / totalWeight : 0
+
+    // Apply recency bias: if recent measurements show significant loss, boost the overall percentage
+    const veryRecentData = packetLossData.filter(d => {
+      const ageMinutes = (now - d.timestamp.getTime()) / (1000 * 60)
+      return ageMinutes <= 5 // Last 5 minutes
+    })
+    
+    if (veryRecentData.length > 0) {
+      const recentAvgLoss = veryRecentData.reduce((sum, d) => sum + d.packetLoss, 0) / veryRecentData.length
+      // If recent measurements show >20% loss, bias toward that value
+      if (recentAvgLoss > 20) {
+        const biasFactor = Math.min(0.9, recentAvgLoss / 100) // Scale bias with loss severity
+        packetLoss = Math.max(packetLoss, recentAvgLoss * biasFactor)
+      }
+    }
   }
   
   const uptime = data.length > 0 ? (onlineCount / data.length) * 100 : 0
@@ -300,7 +311,7 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
   const sortedData = [...data].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
   const latestData = sortedData[0]
   const currentLatency = latestData?.latency ?? 0
-  const currentPacketLoss = latestData?.packetLoss ?? 0
+  const currentPacketLoss = latestData?.isOnline === false ? 100 : (latestData?.packetLoss ?? 0)
   
   // Determine current online status: check if there have been any successful measurements in the last hour
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
@@ -374,7 +385,7 @@ export function Dashboard() {
     return targets.find(t => t.id === selectedTargetId) || null
   }, [targets, selectedTargetId])
 
-  const { measurements, loading, reload, manualReload, initialLoad } = useTargetMeasurements(selectedTargetId, timeRange)
+  const { measurements, loading, reload, manualReload, initialLoad } = useTargetMeasurements(selectedTargetId, timeRange, selectedTarget)
 
   // Refresh measurements when targets data updates (indicating new probe results)
   const prevPacketLossRef = useRef(packetLossData)
@@ -390,11 +401,28 @@ export function Dashboard() {
     prevPacketLossRef.current = packetLossData
   }, [packetLossData, selectedTargetId, reload])
 
+  // Centralized polling system - sync all components every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      // Update targets/sidebar data
+      await reloadTargets()
+      
+      // Update measurements/charts/stats for selected target
+      if (selectedTargetId) {
+        await reload()
+      }
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(interval)
+  }, [reloadTargets, reload, selectedTargetId])
+
   const handleRefresh = useCallback(async () => {
+    // Sync refresh: update both targets and measurements
+    await reloadTargets() // Update sidebar indicators
     if (selectedTargetId) {
-      await manualReload()
+      await manualReload() // Update charts and stats
     }
-  }, [selectedTargetId, manualReload])
+  }, [reloadTargets, selectedTargetId, manualReload])
 
   const handleRefreshTargets = useCallback(async () => {
     await reloadTargets()
@@ -427,6 +455,13 @@ export function Dashboard() {
   const stats = useMemo(() => {
     if (measurements.length === 0) return null
     return calculateStats(measurements)
+  }, [measurements])
+
+  // Get the latest measurement timestamp for last updated display
+  const lastUpdated = useMemo(() => {
+    if (measurements.length === 0) return undefined
+    const sortedMeasurements = [...measurements].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    return sortedMeasurements[0]?.timestamp
   }, [measurements])
 
   // Transform targets to match the expected format
@@ -531,7 +566,7 @@ export function Dashboard() {
                   packetLoss={stats.packetLoss}
                   currentLatency={stats.currentLatency}
                   currentPacketLoss={stats.currentPacketLoss}
-                  currentIsOnline={stats.currentIsOnline}
+                  lastUpdated={lastUpdated}
                 />
               </div>
 

@@ -1,10 +1,59 @@
 "use client"
 
-import React from "react"
+import React, { useState, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { getLatencyColor, getPacketLossColor } from "@/lib/packet-loss-colors"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowDown, ArrowUp, Gauge, TrendingUp, FileX } from "lucide-react"
+import { ArrowDown, ArrowUp, Gauge, TrendingUp, FileX, Clock } from "lucide-react"
+
+function RelativeTime({ timestamp }: { timestamp: Date }) {
+  const [relativeTime, setRelativeTime] = useState("")
+
+  useEffect(() => {
+    const updateRelativeTime = () => {
+      const now = new Date()
+      const diffMs = now.getTime() - timestamp.getTime()
+      const diffSeconds = Math.floor(diffMs / 1000)
+      const diffMinutes = Math.floor(diffSeconds / 60)
+      const diffHours = Math.floor(diffMinutes / 60)
+      const diffDays = Math.floor(diffHours / 24)
+
+      let newRelativeTime = ""
+      if (diffSeconds < 60) {
+        newRelativeTime = "now"
+      } else if (diffMinutes < 60) {
+        newRelativeTime = `${diffMinutes}m ago`
+      } else if (diffHours < 24) {
+        newRelativeTime = `${diffHours}h ago`
+      } else {
+        newRelativeTime = `${diffDays}d ago`
+      }
+
+      setRelativeTime(newRelativeTime)
+    }
+
+    updateRelativeTime()
+    const interval = setInterval(updateRelativeTime, 60000) // Update every minute
+
+    return () => clearInterval(interval)
+  }, [timestamp])
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={relativeTime}
+        className="flex items-center gap-1.5 text-sm text-muted-foreground bg-muted/30 px-2 py-1 rounded-md border border-border/20"
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.8 }}
+        transition={{ duration: 0.3, ease: "easeOut" }}
+      >
+        <Clock className="h-4 w-4" />
+        <span className="font-medium">{relativeTime}</span>
+      </motion.div>
+    </AnimatePresence>
+  )
+}
 
 interface StatItemProps {
   label: string
@@ -16,7 +65,7 @@ interface StatItemProps {
 function StatItem({ label, value, highlight = false, variant = "default" }: StatItemProps) {
   const variantClasses = {
     default: "text-muted-foreground",
-    success: "text-emerald-400",
+    success: "text-green-600",
     warning: "text-amber-400",
     danger: "text-rose-400",
   }
@@ -58,6 +107,7 @@ interface StatCardProps {
   trend?: "up" | "down" | "stable"
   trendValue?: string
   accentColor?: string
+  lastUpdated?: Date
 }
 
 function StatCard({
@@ -69,6 +119,7 @@ function StatCard({
   trend,
   trendValue,
   accentColor = "#4fd1c5",
+  lastUpdated,
 }: StatCardProps) {
   return (
     <div className="group relative overflow-hidden rounded-xl border border-border/50 bg-card p-6 transition-all duration-300 hover:border-border hover:shadow-lg hover:shadow-primary/5">
@@ -81,11 +132,19 @@ function StatCard({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div
-            className="flex h-10 w-10 items-center justify-center rounded-lg"
-            style={{ backgroundColor: `${accentColor}15` }}
-          >
-            <span style={{ color: accentColor }}>{icon}</span>
+          <div className="relative flex h-10 w-10 items-center justify-center rounded-lg">
+            {/* Pulsing background ring */}
+            <div
+              className="absolute h-10 w-10 rounded-lg custom-ping opacity-75"
+              style={{ backgroundColor: `${accentColor}15` }}
+            />
+            {/* Fixed center icon container */}
+            <div
+              className="relative flex h-10 w-10 items-center justify-center rounded-lg"
+              style={{ backgroundColor: `${accentColor}15` }}
+            >
+              <span style={{ color: accentColor }}>{icon}</span>
+            </div>
           </div>
           <h3 className="text-sm font-medium text-foreground">{title}</h3>
         </div>
@@ -107,18 +166,21 @@ function StatCard({
 
       {/* Main Value */}
       <div className="mt-6">
-        <AnimatePresence mode="wait">
-          <motion.p
-            key={mainValue}
-            className="text-3xl font-bold tracking-tight text-foreground"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
-          >
-            {mainValue}
-          </motion.p>
-        </AnimatePresence>
+        <div className="flex items-center justify-between">
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={mainValue}
+              className="text-3xl font-bold tracking-tight text-foreground"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              {mainValue}
+            </motion.p>
+          </AnimatePresence>
+          {lastUpdated && <RelativeTime timestamp={lastUpdated} />}
+        </div>
         <p className="mt-1 text-xs text-muted-foreground">{mainLabel}</p>
       </div>
 
@@ -139,7 +201,7 @@ export default function StatsCards({
   packetLoss,
   currentLatency,
   currentPacketLoss,
-  currentIsOnline = true
+  lastUpdated,
 }: Readonly<{
   avgLatency: number
   minLatency: number
@@ -147,13 +209,14 @@ export default function StatsCards({
   packetLoss: number
   currentLatency: number
   currentPacketLoss: number
-  currentIsOnline?: boolean
+  lastUpdated?: Date
 }>) {
   // Calculate median (simple approximation)
   const medianLatency = (minLatency + maxLatency) / 2
 
-  // Determine latency trend matching getLatencyColor thresholds
-  const latencyTrend = !currentIsOnline ? "down" : 
+  // Determine latency trend - show offline when current measurement shows complete failure
+  const isCurrentlyOffline = currentPacketLoss === 100
+  const latencyTrend = isCurrentlyOffline ? "down" : 
     avgLatency <= 10 ? "up" : 
     avgLatency <= 30 ? "up" : 
     avgLatency <= 50 ? "up" : 
@@ -162,7 +225,7 @@ export default function StatsCards({
     avgLatency <= 150 ? "down" : 
     avgLatency <= 200 ? "down" : "down"
   
-  const latencyTrendValue = !currentIsOnline ? "Offline" : 
+  const latencyTrendValue = isCurrentlyOffline ? "Offline" : 
     avgLatency <= 10 ? "Excellent" : 
     avgLatency <= 30 ? "Very Good" : 
     avgLatency <= 50 ? "Good" : 
@@ -181,7 +244,7 @@ export default function StatsCards({
     packetLoss <= 50 ? "Moderate-Severe" : "High Loss/Failure"
 
   // Get dynamic accent colors based on current values
-  const latencyAccentColor = currentIsOnline ? getLatencyColor(avgLatency) : '#ef4444' // Red when offline
+  const latencyAccentColor = isCurrentlyOffline ? '#ef4444' : getLatencyColor(avgLatency) // Red when offline
   const packetLossAccentColor = getPacketLossColor(packetLoss)
 
   return (
@@ -195,6 +258,7 @@ export default function StatsCards({
         accentColor={latencyAccentColor}
         trend={latencyTrend}
         trendValue={latencyTrendValue}
+        lastUpdated={lastUpdated}
         stats={[
           { label: "Avg", value: `${avgLatency.toFixed(1)} ms`, variant: "default" },
           { label: "Max", value: `${maxLatency.toFixed(1)} ms`, variant: avgLatency > 100 ? "warning" : "default" },
