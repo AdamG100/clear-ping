@@ -1,8 +1,8 @@
-# ClearPing Automatic Probe Scheduler
+# ClearICMP Automatic Probe Scheduler
 
 ## Overview
 
-ClearPing now includes an automatic probe scheduler that works similarly to **Smokeping**. The scheduler automatically probes all active targets at their configured intervals, capturing measurements and storing them for visualization on the graphs.
+ClearICMP now includes an automatic probe scheduler that works similarly to **SmokeICMP**. The scheduler automatically probes all active targets at their configured intervals, capturing measurements and storing them for visualization on the graphs.
 
 ## How It Works
 

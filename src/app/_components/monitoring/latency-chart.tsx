@@ -48,8 +48,8 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = (payload[0] as any).payload
-  const latency = Number(data.avg).toFixed(1)
-  const jitter = Math.abs((data.max || 0) - (data.min || 0)).toFixed(1)
+  const latency = Number(data.latency).toFixed(1)
+  const packetLoss = Number(data.packetLoss || 0).toFixed(2)
 
   return (
     <motion.div
@@ -82,22 +82,25 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.2 }}
             >
-              {latency}ms (avg)
+              {latency}ms
             </motion.span>
           </AnimatePresence>
         </div>
         <AnimatePresence mode="wait">
           <motion.div
-            key={jitter}
+            key={packetLoss}
             className="text-xs text-muted-foreground"
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 10 }}
             transition={{ duration: 0.2, delay: 0.05 }}
           >
-            Jitter: {jitter}ms
+            Packet Loss: {packetLoss}%
           </motion.div>
         </AnimatePresence>
+        <div className="text-xs text-muted-foreground">
+          Status: {data.isOnline ? 'Online' : 'Offline'}
+        </div>
       </div>
     </motion.div>
   )
@@ -105,45 +108,22 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
 
 export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartProps) {
   const chartData = useMemo(() => {
-    // Calculate rolling statistics for smoke effect - optimized for performance
-    const windowSize = Math.min(10, Math.max(3, Math.floor(data.length / 50))) // Smaller window for faster updates
-    const chartData = data.map((point, index) => {
-      const start = Math.max(0, index - windowSize)
-      const end = Math.min(data.length, index + windowSize + 1)
-      const window = data.slice(start, end)
-      
-      const windowLatencies = window.filter(d => d.latency !== null).map(d => d.latency as number)
-      const windowMax = windowLatencies.length > 0 ? Math.max(...windowLatencies) : 0
-      const windowMin = windowLatencies.length > 0 ? Math.min(...windowLatencies) : 0
-      const windowAvg = windowLatencies.length > 0 
-        ? windowLatencies.reduce((a, b) => a + b, 0) / windowLatencies.length 
-        : 0
+    // Show actual measurement data points, not rolling averages
+    return data
+      .filter(point => point.latency !== null) // Only show points with actual measurements
+      .map((point) => {
+        const color = point.isOnline 
+          ? getPacketLossColor(point.packetLoss || 0)
+          : '#ef4444' // Red for offline
 
-      // Calculate packet loss for this window - use actual packet loss data
-      const windowPacketLosses = window.filter(d => d.packetLoss !== null).map(d => d.packetLoss as number)
-      const windowLossPercent = windowPacketLosses.length > 0 
-        ? windowPacketLosses.reduce((a, b) => a + b, 0) / windowPacketLosses.length 
-        : 0
-      const color = getPacketLossColor(windowLossPercent)
-
-      return {
-        time: point.timestamp.getTime(),
-        latency: point.latency,
-        max: windowMax,
-        min: windowMin,
-        avg: windowAvg,
-        isOnline: point.isOnline,
-        packetLossPercent: windowLossPercent,
-        color,
-        // Create separate data points for each loss level (simplified)
-        perfect: windowLossPercent === 0 ? windowAvg : null,
-        minor: windowLossPercent > 0 && windowLossPercent <= 10 ? windowAvg : null,
-        moderate: windowLossPercent > 10 && windowLossPercent <= 50 ? windowAvg : null,
-        severe: windowLossPercent > 50 ? windowAvg : null,
-      }
-    })
-
-    return chartData
+        return {
+          time: point.timestamp.getTime(),
+          latency: point.latency,
+          packetLoss: point.packetLoss,
+          isOnline: point.isOnline,
+          color,
+        }
+      })
   }, [data])
 
   return (
@@ -161,8 +141,8 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
         >
           <ChartContainer
             config={{
-              avg: {
-                label: 'Average Latency',
+              latency: {
+                label: 'Latency',
                 color: 'hsl(var(--chart-1))',
               },
             }}
@@ -188,7 +168,7 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
                 cursor={false}
                 content={<AnimatedTooltip />}
               />
-              <Bar dataKey="avg" radius={[4, 4, 0, 0]} animationDuration={500}>
+              <Bar dataKey="latency" radius={[4, 4, 0, 0]} animationDuration={500}>
                 {chartData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color || '#00FF00'} />
                 ))}

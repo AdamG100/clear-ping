@@ -18,7 +18,7 @@ export function AddTargetModal({ isOpen, onClose, onAdd }: AddTargetModalProps) 
   const [name, setName] = useState('');
   const [host, setHost] = useState('');
   const [probeType, setProbeType] = useState<ProbeType>('ping');
-  const [interval, setInterval] = useState(300); // Default to 5 minutes like Smokeping
+  const [interval, setInterval] = useState(300); // Default to 5 minutes like SmokeICMP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -106,7 +106,7 @@ export function AddTargetModal({ isOpen, onClose, onAdd }: AddTargetModalProps) 
               onChange={(e) => setProbeType(e.target.value as ProbeType)}
               className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="ping">ICMP Ping</option>
+              <option value="ping">ICMP</option>
               <option value="dns">DNS Query</option>
             </select>
           </div>

@@ -221,7 +221,7 @@ export function Sidebar({
             </svg>
           </div>
           <div>
-            <h1 className="font-semibold text-sidebar-foreground">Clearping</h1>
+            <h1 className="font-semibold text-sidebar-foreground">ClearICMP</h1>
             <p className="text-xs text-muted-foreground">Network Monitor</p>
           </div>
         </div>
@@ -503,7 +503,7 @@ export function Sidebar({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-popover border-border">
-                    <SelectItem value="ping">ICMP Ping</SelectItem>
+                    <SelectItem value="ping">ICMP</SelectItem>
                     <SelectItem value="dns">DNS Query</SelectItem>
                   </SelectContent>
                 </Select>
@@ -616,7 +616,7 @@ export function Sidebar({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-popover border-border">
-                      <SelectItem value="ping">ICMP Ping</SelectItem>
+                      <SelectItem value="ping">ICMP</SelectItem>
                       <SelectItem value="dns">DNS Query</SelectItem>
                     </SelectContent>
                   </Select>

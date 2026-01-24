@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ClearPing - Modern Network Monitoring",
-  description: "SmokePing-style network latency monitoring with modern UI",
+  title: "ClearICMP - Modern Network Monitoring",
+  description: "SmokeICMP-style network latency monitoring with modern UI",
 };
 
 export default function RootLayout({

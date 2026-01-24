@@ -28,7 +28,7 @@ export function TargetCard({
   };
 
   const getProbeTypeLabel = () => {
-    return target.probeType === 'ping' ? 'ICMP Ping' : 'DNS Query';
+    return target.probeType === 'ping' ? 'ICMP' : 'DNS Query';
   };
 
   return (

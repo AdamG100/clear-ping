@@ -251,12 +251,9 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
     }
   }
 
-  // Calculate stats using only recent measurements (last 1 hour) for current status
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
-  const recentData = data.filter(d => d.timestamp >= oneHourAgo)
-  
-  const validLatencies = recentData.filter(d => d.latency !== null).map(d => d.latency as number)
-  const validOnlineData = recentData.filter(d => d.isOnline !== null)
+  // Use all data for the selected time range for statistics
+  const validLatencies = data.filter(d => d.latency !== null).map(d => d.latency as number)
+  const validOnlineData = data.filter(d => d.isOnline !== null)
   const onlineCount = validOnlineData.filter(d => d.isOnline).length
   
   const avgLatency = validLatencies.length > 0
@@ -267,19 +264,19 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
   const maxLatency = validLatencies.length > 0 ? Math.max(...validLatencies) : 0
   
   // Calculate packet loss using time-weighted average (more recent = higher weight)
-  const recentPacketLossData = recentData
+  const packetLossData = data
     .filter(d => d.packetLoss !== null)
     .map(d => ({ packetLoss: d.packetLoss as number, timestamp: d.timestamp }))
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()) // Most recent first
 
   let packetLoss = 0
-  if (recentPacketLossData.length > 0) {
+  if (packetLossData.length > 0) {
     const now = Date.now()
     let totalWeight = 0
     let weightedSum = 0
 
     // Use exponential decay: more recent measurements have exponentially higher weight
-    recentPacketLossData.forEach((data) => {
+    packetLossData.forEach((data) => {
       const ageHours = (now - data.timestamp.getTime()) / (1000 * 60 * 60)
       // Exponential decay factor: recent measurements get ~10x weight of hour-old measurements
       const weight = Math.exp(-ageHours * 2.3) // ln(10) ≈ 2.3 for 10x decay per hour
@@ -290,7 +287,7 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
     packetLoss = totalWeight > 0 ? weightedSum / totalWeight : 0
   }
   
-  const uptime = recentData.length > 0 ? (onlineCount / recentData.length) * 100 : 0
+  const uptime = data.length > 0 ? (onlineCount / data.length) * 100 : 0
   
   // Calculate jitter (variation in latency)
   let jitter = 0
@@ -304,7 +301,12 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
   const latestData = sortedData[0]
   const currentLatency = latestData?.latency ?? 0
   const currentPacketLoss = latestData?.packetLoss ?? 0
-  const currentIsOnline = latestData?.isOnline ?? false
+  
+  // Determine current online status: check if there have been any successful measurements in the last hour
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+  const recentMeasurements = data.filter(d => d.timestamp >= oneHourAgo)
+  const hasRecentSuccessfulMeasurements = recentMeasurements.some(d => d.isOnline === true)
+  const currentIsOnline = hasRecentSuccessfulMeasurements
 
   return {
     avgLatency,
@@ -321,16 +323,27 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
 
 export function Dashboard() {
   const { targets, packetLossData, addTarget, updateTarget, deleteTarget, isLoaded, reloadTargets } = useTargets()
-  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(() => {
-    // Initialize from localStorage if available
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('selectedTargetId')
-    }
-    return null
-  })
+  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<TimeRange>('5h')
   const [probing, setProbing] = useState(false)
   const [initialAppLoad, setInitialAppLoad] = useState(true)
+
+  // Initialize selectedTargetId from localStorage after mount
+  useEffect(() => {
+    const saved = localStorage.getItem('selectedTargetId')
+    if (saved) {
+      setSelectedTargetId(saved)
+    }
+  }, [])
+
+  // Save selectedTargetId to localStorage when it changes
+  useEffect(() => {
+    if (selectedTargetId) {
+      localStorage.setItem('selectedTargetId', selectedTargetId)
+    } else {
+      localStorage.removeItem('selectedTargetId')
+    }
+  }, [selectedTargetId])
 
   // Show initial loading for 2 seconds on app start if we have a saved target
   useEffect(() => {
@@ -493,7 +506,7 @@ export function Dashboard() {
                     </div>
                     <p className="text-muted-foreground mt-1">
                       {selectedTarget.host} <span className="text-muted-foreground/50">|</span>{' '}
-                      <span className="uppercase text-xs">{selectedTarget.probeType}</span>
+                      <span className="uppercase text-xs">{selectedTarget.probeType === 'ping' ? 'ICMP' : selectedTarget.probeType}</span>
                     </p>
                   </div>
                   <div className="flex items-center gap-3">

@@ -1,6 +1,6 @@
-# ClearPing
+# ClearICMP
 
-A modern network monitoring tool inspired by Smokeping, built with Next.js, React, and TypeScript.
+A modern network monitoring tool inspired by SmokeICMP, built with Next.js, React, and TypeScript.
 
 ## Features
 
@@ -11,7 +11,7 @@ A modern network monitoring tool inspired by Smokeping, built with Next.js, Reac
 - **Real-time Updates** - Live graphs and statistics
 
 ### 📊 Visualization
-- **Smokeping-style Graphs** - Beautiful gradient visualizations showing min/avg/max latency
+- **SmokeICMP-style Graphs** - Beautiful gradient visualizations showing min/avg/max latency
 - **Latency Charts** - Track response times over multiple time ranges (5h, 24h, 7d, 30d, 360d)
 - **Packet Loss Charts** - Color-coded visualization from green (0%) to red (>50%)
 - **Statistics Cards** - Average latency, jitter, uptime, and packet loss metrics
@@ -41,8 +41,8 @@ A modern network monitoring tool inspired by Smokeping, built with Next.js, Reac
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/clearping.git
-cd clearping
+git clone https://github.com/yourusername/clearicmp.git
+cd clearicmp
 ```
 
 2. Install dependencies:
@@ -98,7 +98,7 @@ Select a target from the sidebar to view:
 ## Project Structure
 
 ```
-clearping/
+clearicmp/
 ├── src/
 │   ├── app/                    # Next.js app router
 │   │   ├── _components/        # React components
@@ -143,7 +143,7 @@ clearping/
 
 Default intervals (in seconds):
 - Frequent: `60` (1 minute)
-- Default: `300` (5 minutes, like Smokeping)
+- Default: `300` (5 minutes, like SmokeICMP)
 - Moderate: `600` (10 minutes)
 - Hourly: `3600` (1 hour)
 

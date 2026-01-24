@@ -152,13 +152,33 @@ export default function StatsCards({
   // Calculate median (simple approximation)
   const medianLatency = (minLatency + maxLatency) / 2
 
-  // Determine latency trend
-  const latencyTrend = !currentIsOnline ? "down" : avgLatency < 50 ? "up" : avgLatency < 100 ? "stable" : "down"
-  const latencyTrendValue = !currentIsOnline ? "Offline" : avgLatency < 50 ? "Normal" : avgLatency < 100 ? "Fair" : "High"
+  // Determine latency trend matching getLatencyColor thresholds
+  const latencyTrend = !currentIsOnline ? "down" : 
+    avgLatency <= 10 ? "up" : 
+    avgLatency <= 30 ? "up" : 
+    avgLatency <= 50 ? "up" : 
+    avgLatency <= 75 ? "stable" : 
+    avgLatency <= 100 ? "stable" : 
+    avgLatency <= 150 ? "down" : 
+    avgLatency <= 200 ? "down" : "down"
+  
+  const latencyTrendValue = !currentIsOnline ? "Offline" : 
+    avgLatency <= 10 ? "Excellent" : 
+    avgLatency <= 30 ? "Very Good" : 
+    avgLatency <= 50 ? "Good" : 
+    avgLatency <= 75 ? "Acceptable" : 
+    avgLatency <= 100 ? "Fair" : 
+    avgLatency <= 150 ? "Degraded" : 
+    avgLatency <= 200 ? "Poor" : "Critical"
 
-  // Determine packet loss trend
-  const lossTrend = packetLoss === 0 ? "up" : packetLoss <= 10 ? "stable" : packetLoss <= 50 ? "down" : "down"
-  const lossTrendValue = packetLoss === 0 ? "Perfect" : packetLoss <= 10 ? "Minor loss" : packetLoss <= 50 ? "Moderate-severe loss" : "High loss/failure"
+  // Determine packet loss trend matching packet-loss-colors.ts thresholds
+  const lossTrend = packetLoss === 0 ? "up" : 
+    packetLoss <= 10 ? "stable" : 
+    packetLoss <= 50 ? "down" : "down"
+  
+  const lossTrendValue = packetLoss === 0 ? "Perfect" : 
+    packetLoss <= 10 ? "Minor Loss" : 
+    packetLoss <= 50 ? "Moderate-Severe" : "High Loss/Failure"
 
   // Get dynamic accent colors based on current values
   const latencyAccentColor = currentIsOnline ? getLatencyColor(avgLatency) : '#ef4444' // Red when offline
