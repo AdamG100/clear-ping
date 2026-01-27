@@ -1,18 +1,27 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { getLatencyColor, getPacketLossColor } from "@/lib/packet-loss-colors"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowDown, ArrowUp, Gauge, TrendingUp, FileX, Clock } from "lucide-react"
+import { ArrowDown, ArrowUp, Gauge, TrendingUp, FileX, Clock, Zap } from "lucide-react"
 
 function RelativeTime({ timestamp }: { timestamp: Date }) {
   const [relativeTime, setRelativeTime] = useState("")
+
+  const time = useMemo(() => timestamp.getTime(), [timestamp])
 
   useEffect(() => {
     const updateRelativeTime = () => {
       const now = new Date()
       const diffMs = now.getTime() - timestamp.getTime()
+      
+      // Handle future timestamps (shouldn't happen, but be safe)
+      if (diffMs < 0) {
+        setRelativeTime("now")
+        return
+      }
+      
       const diffSeconds = Math.floor(diffMs / 1000)
       const diffMinutes = Math.floor(diffSeconds / 60)
       const diffHours = Math.floor(diffMinutes / 60)
@@ -32,26 +41,26 @@ function RelativeTime({ timestamp }: { timestamp: Date }) {
       setRelativeTime(newRelativeTime)
     }
 
+    // Update immediately
     updateRelativeTime()
-    const interval = setInterval(updateRelativeTime, 60000) // Update every minute
+    
+    // Update every 10 seconds for very responsive display
+    const interval = setInterval(updateRelativeTime, 10000)
 
     return () => clearInterval(interval)
-  }, [timestamp])
+  }, [time, timestamp]) // Use memoized time to ensure dependency triggers on timestamp changes
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={relativeTime}
-        className="flex items-center gap-1.5 text-sm text-muted-foreground bg-muted/30 px-2 py-1 rounded-md border border-border/20"
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.8 }}
-        transition={{ duration: 0.3, ease: "easeOut" }}
-      >
-        <Clock className="h-4 w-4" />
-        <span className="font-medium">{relativeTime}</span>
-      </motion.div>
-    </AnimatePresence>
+    <motion.div
+      key={relativeTime}
+      className="flex items-center gap-1.5 text-sm text-muted-foreground bg-muted/30 px-2 py-1 rounded-md border border-border/20"
+      initial={{ opacity: 0.7 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.1 }}
+    >
+      <Clock className="h-4 w-4" />
+      <span className="font-medium">{relativeTime}</span>
+    </motion.div>
   )
 }
 
@@ -76,19 +85,30 @@ function StatItem({ label, value, highlight = false, variant = "default" }: Stat
         {label}
       </span>
       <AnimatePresence mode="wait">
-        <motion.span
-          key={value}
-          className={cn(
-            "text-sm font-mono tabular-nums",
-            highlight ? "text-foreground font-semibold" : variantClasses[variant]
-          )}
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-        >
-          {value}
-        </motion.span>
+        {value === "N/A" ? (
+          <motion.div
+            key="loading-stat"
+            className="h-5 bg-muted/50 rounded animate-pulse"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+          />
+        ) : (
+          <motion.span
+            key={value}
+            className={cn(
+              "text-sm font-mono tabular-nums",
+              highlight ? "text-foreground font-semibold" : variantClasses[variant]
+            )}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+          >
+            {value}
+          </motion.span>
+        )}
       </AnimatePresence>
     </div>
   )
@@ -108,6 +128,8 @@ interface StatCardProps {
   trendValue?: string
   accentColor?: string
   lastUpdated?: Date
+  isPolling?: boolean
+  isLoading?: boolean
 }
 
 function StatCard({
@@ -120,13 +142,21 @@ function StatCard({
   trendValue,
   accentColor = "#4fd1c5",
   lastUpdated,
-}: StatCardProps) {
+  isPolling = false,
+  isLoading = false,
+}: StatCardProps & { isPolling?: boolean; isLoading?: boolean }) {
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-border/50 bg-card p-6 transition-all duration-300 hover:border-border hover:shadow-lg hover:shadow-primary/5">
+    <div className={cn(
+      "group relative overflow-hidden rounded-xl border border-border/50 bg-card p-6 transition-all duration-300 hover:border-border hover:shadow-lg hover:shadow-primary/5",
+      isPolling && "animate-pulse border-orange-500/50 shadow-lg shadow-orange-500/20"
+    )}>
       {/* Subtle glow effect */}
       <div
-        className="absolute -right-20 -top-20 h-65 w-65 rounded-full opacity-10 blur-3xl transition-opacity duration-500 group-hover:opacity-20"
-        style={{ backgroundColor: accentColor }}
+        className={cn(
+          "absolute -right-20 -top-20 h-65 w-65 rounded-full opacity-10 blur-3xl transition-opacity duration-500 group-hover:opacity-20",
+          isPolling && "opacity-30 animate-pulse"
+        )}
+        style={{ backgroundColor: isPolling ? "#f97316" : accentColor }}
       />
 
       {/* Header */}
@@ -185,16 +215,27 @@ function StatCard({
       <div className="mt-6">
         <div className="flex items-center justify-between">
           <AnimatePresence mode="wait">
-            <motion.p
-              key={mainValue}
-              className="text-3xl font-bold tracking-tight text-foreground"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-            >
-              {mainValue}
-            </motion.p>
+            {isLoading ? (
+              <motion.div
+                key="loading"
+                className="h-9 bg-muted/50 rounded animate-pulse"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+              />
+            ) : (
+              <motion.p
+                key={mainValue}
+                className="text-3xl font-bold tracking-tight text-foreground"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+              >
+                {mainValue}
+              </motion.p>
+            )}
           </AnimatePresence>
           {lastUpdated && <RelativeTime timestamp={lastUpdated} />}
         </div>
@@ -218,7 +259,12 @@ export default function StatsCards({
   packetLoss,
   currentLatency,
   currentPacketLoss,
+  jitter,
+  minJitter,
+  maxJitter,
+  currentJitter,
   lastUpdated,
+  isPolling = false,
 }: Readonly<{
   avgLatency: number
   minLatency: number
@@ -226,61 +272,90 @@ export default function StatsCards({
   packetLoss: number
   currentLatency: number
   currentPacketLoss: number
+  jitter: number | null
+  minJitter: number | null
+  maxJitter: number | null
+  currentJitter: number | null
   lastUpdated?: Date
+  isPolling?: boolean
 }>) {
   // Calculate median (simple approximation)
   const medianLatency = (minLatency + maxLatency) / 2
 
+  // Check if we have data (don't require jitter to be available)
+  const hasData = !(avgLatency === 0 && packetLoss === 0)
+
   // Determine latency trend - show offline when current measurement shows complete failure
   const isCurrentlyOffline = currentPacketLoss === 100
-  const latencyTrend = isCurrentlyOffline ? "down" : 
+  const latencyTrend = !hasData ? "stable" : (isCurrentlyOffline ? "down" : 
     avgLatency <= 10 ? "up" : 
     avgLatency <= 30 ? "up" : 
     avgLatency <= 50 ? "up" : 
     avgLatency <= 75 ? "stable" : 
     avgLatency <= 100 ? "stable" : 
     avgLatency <= 150 ? "down" : 
-    avgLatency <= 200 ? "down" : "down"
+    avgLatency <= 200 ? "down" : "down")
   
-  const latencyTrendValue = isCurrentlyOffline ? "Offline" : 
+  const latencyTrendValue = !hasData ? "Calculating..." : (isCurrentlyOffline ? "Offline" : 
     avgLatency <= 10 ? "Excellent" : 
     avgLatency <= 30 ? "Very Good" : 
     avgLatency <= 50 ? "Good" : 
     avgLatency <= 75 ? "Acceptable" : 
     avgLatency <= 100 ? "Fair" : 
     avgLatency <= 150 ? "Degraded" : 
-    avgLatency <= 200 ? "Poor" : "Critical"
+    avgLatency <= 200 ? "Poor" : "Critical")
 
   // Determine packet loss trend matching packet-loss-colors.ts thresholds
-  const lossTrend = packetLoss === 0 ? "up" : 
+  const lossTrend = !hasData ? "stable" : (packetLoss === 0 ? "up" : 
     packetLoss <= 10 ? "stable" : 
-    packetLoss <= 50 ? "down" : "down"
+    packetLoss <= 50 ? "down" : "down")
   
-  const lossTrendValue = packetLoss === 0 ? "Perfect" : 
+  const lossTrendValue = !hasData ? "Calculating..." : (packetLoss === 0 ? "Perfect" : 
     packetLoss <= 10 ? "Minor Loss" : 
-    packetLoss <= 50 ? "Moderate-Severe" : "High Loss/Failure"
+    packetLoss <= 50 ? "Moderate-Severe" : "High Loss/Failure")
+
+  // Determine jitter trend using same thresholds as latency
+  const jitterTrend = jitter === null ? "stable" :
+    jitter <= 10 ? "up" : 
+    jitter <= 30 ? "up" : 
+    jitter <= 50 ? "up" : 
+    jitter <= 75 ? "stable" : 
+    jitter <= 100 ? "stable" : 
+    jitter <= 150 ? "down" : 
+    jitter <= 200 ? "down" : "down"
+  
+  const jitterTrendValue = jitter === null ? "Calculating..." :
+    jitter <= 10 ? "Excellent" : 
+    jitter <= 30 ? "Very Good" : 
+    jitter <= 50 ? "Good" : 
+    jitter <= 75 ? "Acceptable" : 
+    jitter <= 100 ? "Fair" : 
+    jitter <= 150 ? "Degraded" : 
+    jitter <= 200 ? "Poor" : "Critical"
 
   // Get dynamic accent colors based on current values
-  const latencyAccentColor = isCurrentlyOffline ? '#ef4444' : getLatencyColor(avgLatency) // Red when offline
-  const packetLossAccentColor = getPacketLossColor(packetLoss)
+  const latencyAccentColor = !hasData ? '#6b7280' : (isCurrentlyOffline ? '#ef4444' : getLatencyColor(avgLatency)) // Red when offline
+  const packetLossAccentColor = !hasData ? '#6b7280' : getPacketLossColor(packetLoss)
+  const jitterAccentColor = jitter === null ? '#6b7280' : getLatencyColor(jitter)
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid gap-6 lg:grid-cols-3">
       {/* RTT Card */}
       <StatCard
         title="Median RTT"
         icon={<Gauge className="h-5 w-5" />}
-        mainValue={`${medianLatency.toFixed(1)} ms`}
+        mainValue={!hasData ? "" : `${medianLatency.toFixed(1)} ms`}
         mainLabel="Average Round Trip Time"
         accentColor={latencyAccentColor}
         trend={latencyTrend}
         trendValue={latencyTrendValue}
         lastUpdated={lastUpdated}
+        isPolling={isPolling}
         stats={[
-          { label: "Avg", value: `${avgLatency.toFixed(1)} ms`, variant: "default" },
-          { label: "Max", value: `${maxLatency.toFixed(1)} ms`, variant: avgLatency > 100 ? "warning" : "default" },
-          { label: "Min", value: `${minLatency.toFixed(1)} ms`, variant: "success" },
-          { label: "Now", value: `${currentLatency.toFixed(1)} ms`, variant: "default" },
+          { label: "Avg", value: !hasData ? "N/A" : `${avgLatency.toFixed(1)} ms`, variant: "default" },
+          { label: "Max", value: !hasData ? "N/A" : `${maxLatency.toFixed(1)} ms`, variant: avgLatency > 100 ? "warning" : "default" },
+          { label: "Min", value: !hasData ? "N/A" : `${minLatency.toFixed(1)} ms`, variant: "success" },
+          { label: "Now", value: !hasData ? "N/A" : `${currentLatency.toFixed(1)} ms`, variant: "default" },
         ]}
       />
 
@@ -288,16 +363,37 @@ export default function StatsCards({
       <StatCard
         title="Packet Loss"
         icon={<FileX className="h-5 w-5" />}
-        mainValue={`${packetLoss.toFixed(2)}%`}
+        mainValue={!hasData ? "" : `${packetLoss.toFixed(2)}%`}
         mainLabel="Average Packet Loss"
         accentColor={packetLossAccentColor}
         trend={lossTrend}
         trendValue={lossTrendValue}
+        lastUpdated={lastUpdated}
+        isPolling={isPolling}
         stats={[
-          { label: "Avg", value: `${packetLoss.toFixed(2)}%`, variant: "default" },
-          { label: "Max", value: `${packetLoss.toFixed(2)}%`, variant: packetLoss > 10 ? "danger" : packetLoss > 0 ? "warning" : "success" },
-          { label: "Min", value: "0.00%", variant: "success" },
-          { label: "Now", value: `${currentPacketLoss.toFixed(2)}%`, variant: currentPacketLoss === 0 ? "success" : currentPacketLoss <= 10 ? "warning" : "danger" },
+          { label: "Avg", value: !hasData ? "N/A" : `${packetLoss.toFixed(2)}%`, variant: "default" },
+          { label: "Max", value: !hasData ? "N/A" : `${packetLoss.toFixed(2)}%`, variant: packetLoss > 10 ? "danger" : packetLoss > 0 ? "warning" : "success" },
+          { label: "Min", value: !hasData ? "N/A" : "0.00%", variant: "success" },
+          { label: "Now", value: !hasData ? "N/A" : `${currentPacketLoss.toFixed(2)}%`, variant: currentPacketLoss === 0 ? "success" : currentPacketLoss <= 10 ? "warning" : "danger" },
+        ]}
+      />
+
+      {/* Jitter Card */}
+      <StatCard
+        title="Jitter"
+        icon={<Zap className="h-5 w-5" />}
+        mainValue={!hasData ? "" : (jitter === null ? "N/A" : `${jitter.toFixed(1)} ms`)}
+        mainLabel="Average Latency Variation"
+        accentColor={jitterAccentColor}
+        trend={jitterTrend}
+        trendValue={jitterTrendValue}
+        lastUpdated={lastUpdated}
+        isPolling={isPolling}
+        stats={[
+          { label: "Avg", value: !hasData ? "N/A" : (jitter === null ? "N/A" : `${jitter.toFixed(1)} ms`), variant: "default" },
+          { label: "Max", value: !hasData ? "N/A" : (maxJitter === null ? "N/A" : `${maxJitter.toFixed(1)} ms`), variant: jitter !== null && jitter > 100 ? "warning" : "default" },
+          { label: "Min", value: !hasData ? "N/A" : (minJitter === null ? "N/A" : `${minJitter.toFixed(1)} ms`), variant: "success" },
+          { label: "Now", value: !hasData ? "N/A" : (currentJitter === null ? "N/A" : `${currentJitter.toFixed(1)} ms`), variant: currentJitter === null ? "default" : currentJitter <= 50 ? "success" : currentJitter <= 100 ? "warning" : "danger" },
         ]}
       />
     </div>

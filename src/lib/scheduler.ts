@@ -80,14 +80,15 @@ class ProbeScheduler {
       
       for (const target of activeTargets) {
         // Query last_probe_at from database
-        const result = db.exec(
-          'SELECT last_probe_at FROM targets WHERE id = ?',
-          [target.id]
-        );
-        
-        const lastProbeAt = result.length > 0 && result[0].values.length > 0
-          ? (result[0].values[0][0] as number) || 0
-          : 0;
+        const lastProbeAt = await new Promise<number>((resolve, reject) => {
+          db.get('SELECT last_probe_at FROM targets WHERE id = ?', [target.id], (err, row) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve((row as any)?.last_probe_at || 0);
+          });
+        });
 
         const existing = this.scheduledTargets.get(target.id);
         
@@ -140,7 +141,7 @@ class ProbeScheduler {
       }
     }
 
-    // If we have multiple ping targets, probe them in parallel (fping-style)
+    // If we have multiple ping targets, probe them in parallel
     if (targetsToProbe.length > 1) {
       const pingTargets = targetsToProbe.filter(t => t.probeType === 'ping');
       if (pingTargets.length > 1) {
@@ -162,7 +163,7 @@ class ProbeScheduler {
   }
 
   /**
-   * Probe multiple ping targets in parallel (fping-inspired)
+   * Probe multiple ping targets in parallel
    */
   private async probeTargetsParallel(targets: ScheduledTarget[]): Promise<void> {
     // Mark all targets as probing
@@ -172,13 +173,16 @@ class ProbeScheduler {
     });
 
     try {
+      // Get database instance
+      const db = await getDatabase();
+
       // Prepare target data for parallel pinging
       const targetData = targets.map(target => ({
         id: target.id,
         host: target.host,
       }));
 
-      // Execute parallel pings (fping's key advantage)
+      // Execute parallel pings for better performance
       const results = await pingMultipleTargets(targetData);
 
       // Process and store results
@@ -200,11 +204,19 @@ class ProbeScheduler {
         await storeMeasurement(measurement);
 
         // Update last probe timestamp in database
-        const db = await getDatabase();
-        db.run(
-          'UPDATE targets SET updated_at = ?, last_probe_at = ? WHERE id = ?',
-          [Date.now(), target.lastProbeTime, target.id]
-        );
+        await new Promise<void>((resolve, reject) => {
+          db.run(
+            'UPDATE targets SET updated_at = ?, last_probe_at = ? WHERE id = ?',
+            [Date.now(), target.lastProbeTime, target.id],
+            function(err) {
+              if (err) {
+                reject(err);
+                return;
+              }
+              resolve();
+            }
+          );
+        });
 
         console.log(
           `[Scheduler] Parallel probe complete for ${target.name}: ` +
@@ -258,6 +270,7 @@ class ProbeScheduler {
         timestamp: result.timestamp,
         latency: result.latency,
         packetLoss: result.packetLoss || 0,
+        jitter: result.jitter || null,
         success: result.success,
         errorMessage: result.errorMessage,
       };
@@ -266,11 +279,20 @@ class ProbeScheduler {
 
       // Update last probe timestamp in database
       const db = await getDatabase();
-      db.run(
-        'UPDATE targets SET updated_at = ?, last_probe_at = ? WHERE id = ?',
-        [Date.now(), target.lastProbeTime, target.id]
-      );
-      saveDatabaseToDisk();
+      await new Promise<void>((resolve, reject) => {
+        db.run(
+          'UPDATE targets SET updated_at = ?, last_probe_at = ? WHERE id = ?',
+          [Date.now(), target.lastProbeTime, target.id],
+          function(err) {
+            if (err) {
+              reject(err);
+              return;
+            }
+            saveDatabaseToDisk();
+            resolve();
+          }
+        );
+      });
 
       console.log(
         `[Scheduler] Probe complete for ${target.name}: ` +

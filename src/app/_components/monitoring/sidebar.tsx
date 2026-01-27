@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import type { Target, TargetType } from '@/types/probe'
 import { Button } from '@/components/ui/button'
@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import { getPacketLossBgClass, getPacketLossColor } from '@/lib/packet-loss-colors'
+import { getPacketLossColor } from '@/lib/packet-loss-colors'
 
 interface SidebarProps {
   targets: Target[]
@@ -33,28 +33,37 @@ interface SidebarProps {
   onRefresh?: () => void
 }
 
-function StatusIndicator({ isOnline, packetLoss = 0 }: { isOnline: boolean; packetLoss?: number }) {
+function StatusIndicator({ isOnline, packetLoss = 0, createdAt }: { isOnline: boolean; packetLoss?: number; createdAt?: Date | string }) {
+  const [isVeryNew, setIsVeryNew] = useState(false)
+
+  useEffect(() => {
+    const updateIsVeryNew = () => {
+      const veryNew = createdAt && (Date.now() - new Date(createdAt).getTime()) < 60000 // 60 seconds
+      setIsVeryNew(!!veryNew)
+    }
+
+    updateIsVeryNew()
+    const interval = setInterval(updateIsVeryNew, 5000) // Update every 5 seconds
+
+    return () => clearInterval(interval)
+  }, [createdAt])
+
   // Determine status based on online status and packet loss
   let statusColor = '#dc2626' // Default: offline/error (muted red)
-  let shadowColor = 'shadow-[0_0_8px_#dc2626]'
 
-  if (isOnline) {
+  if (isVeryNew) {
+    // New targets show grey until they have data
+    statusColor = '#6b7280' // Grey for new/unprobed targets
+  } else if (isOnline) {
     // Use packet loss colors for online targets
     statusColor = getPacketLossColor(packetLoss)
-    // Create shadow color based on the packet loss color
-    const shadowMap: Record<string, string> = {
-      '#22c55e': 'shadow-[0_0_8px_#22c55e]', // green
-      '#06b6d4': 'shadow-[0_0_8px_#06b6d4]', // cyan
-      '#d946ef': 'shadow-[0_0_8px_#d946ef]', // magenta
-      '#dc2626': 'shadow-[0_0_8px_#dc2626]', // red
-    }
-    shadowColor = shadowMap[statusColor] || shadowColor
   }
 
   return (
     <span
       className="relative inline-flex shrink-0"
       aria-label={
+        isVeryNew ? 'New target - waiting for data...' :
         isOnline
           ? packetLoss === 0
             ? 'Online'
@@ -254,7 +263,7 @@ export function Sidebar({
                         )}
                       >
                         <div className="flex items-center gap-2.5">
-                          <StatusIndicator isOnline={target.isOnline || false} packetLoss={target.packetLoss || 0} />
+                          <StatusIndicator isOnline={target.isOnline || false} packetLoss={target.packetLoss || 0} createdAt={target.createdAt} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-sm text-sidebar-foreground truncate">
@@ -373,7 +382,7 @@ export function Sidebar({
               Create Group
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-card border-border">
+          <DialogContent className="bg-card border-border" suppressHydrationWarning>
             <DialogHeader>
               <DialogTitle className="text-card-foreground">Create New Group</DialogTitle>
             </DialogHeader>
@@ -415,7 +424,7 @@ export function Sidebar({
               Add Target
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-card border-border">
+          <DialogContent className="bg-card border-border" suppressHydrationWarning>
             <DialogHeader>
               <DialogTitle className="text-card-foreground">Add New Target</DialogTitle>
             </DialogHeader>
@@ -530,7 +539,7 @@ export function Sidebar({
         </Dialog>
 
         <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-          <DialogContent className="bg-card border-border">
+          <DialogContent className="bg-card border-border" suppressHydrationWarning>
             <DialogHeader>
               <DialogTitle className="text-card-foreground">Edit Target</DialogTitle>
             </DialogHeader>

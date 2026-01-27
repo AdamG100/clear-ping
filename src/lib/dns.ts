@@ -17,6 +17,76 @@ export async function executeDnsProbe(
 ): Promise<ProbeResult> {
   const { recordType = 'A', timeout = 5000 } = options;
   const timestamp = new Date();
+  const latencies: number[] = [];
+
+  // Perform multiple DNS queries to calculate jitter
+  const queryCount = 5;
+
+  for (let i = 0; i < queryCount; i++) {
+    const startTime = Date.now();
+
+    try {
+      // Create a timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('DNS query timed out')), timeout);
+      });
+
+      // Execute DNS lookup
+      const lookupPromise = dns.resolve(host, recordType);
+
+      // Race between lookup and timeout
+      await Promise.race([lookupPromise, timeoutPromise]);
+
+      const endTime = Date.now();
+      const latency = endTime - startTime;
+      latencies.push(latency);
+
+    } catch (error) {
+      // For failed queries, we still record the latency if the operation completed
+      const endTime = Date.now();
+      const latency = endTime - startTime;
+      latencies.push(latency);
+    }
+
+    // Small delay between queries to avoid overwhelming DNS servers
+    if (i < queryCount - 1) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+
+  // Calculate average latency
+  const avgLatency = latencies.length > 0 ? latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length : null;
+
+  // Calculate jitter as Mean Absolute Deviation
+  let jitter: number | null = null;
+  if (latencies.length > 1) {
+    const mean = latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length;
+    const absoluteDeviations = latencies.map(lat => Math.abs(lat - mean));
+    jitter = Math.round(absoluteDeviations.reduce((sum, dev) => sum + dev, 0) / absoluteDeviations.length);
+  }
+
+  const success = latencies.length > 0;
+
+  return {
+    targetId,
+    timestamp,
+    latency: avgLatency,
+    jitter,
+    success,
+  };
+}
+
+/**
+ * Execute a single DNS probe to resolve a hostname
+ * Returns the DNS resolution latency in milliseconds
+ */
+async function executeSingleDnsProbe(
+  targetId: string,
+  host: string,
+  options: DnsOptions = {}
+): Promise<ProbeResult> {
+  const { recordType = 'A', timeout = 5000 } = options;
+  const timestamp = new Date();
   const startTime = Date.now();
 
   try {
@@ -47,7 +117,7 @@ export async function executeDnsProbe(
 
     // Still return latency if query failed but completed
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    
+
     return {
       targetId,
       timestamp,
@@ -57,11 +127,6 @@ export async function executeDnsProbe(
     };
   }
 }
-
-/**
- * Execute multiple DNS probes in sequence
- * Useful for getting distribution data for smoke graph
- */
 export async function executeMultipleDnsProbes(
   targetId: string,
   host: string,
@@ -71,7 +136,7 @@ export async function executeMultipleDnsProbes(
   const results: ProbeResult[] = [];
 
   for (let i = 0; i < count; i++) {
-    const result = await executeDnsProbe(targetId, host, options);
+    const result = await executeSingleDnsProbe(targetId, host, options);
     results.push(result);
     
     // Small delay between probes to avoid overwhelming DNS servers

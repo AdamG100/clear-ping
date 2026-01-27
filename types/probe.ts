@@ -2,7 +2,7 @@ export type ProbeType = 'ping' | 'dns';
 
 export type ProbeStatus = 'active' | 'paused' | 'error';
 
-export type TimeRange = '1h' | '3h' | '5h' | '24h' | '7d' | '30d' | '360d';
+export type TimeRange = '1h' | '3h' | '6h' | '24h' | '7d' | '30d';
 
 export type TargetType = 'ip' | 'domain' | 'dns';
 
@@ -23,6 +23,7 @@ export interface Target {
   lastCheck?: Date;
   avgLatency?: number;
   packetLoss?: number;
+  isNew?: boolean;
 }
 
 export interface ProbeMeasurement {
@@ -31,6 +32,7 @@ export interface ProbeMeasurement {
   timestamp: Date;
   latency: number | null; // milliseconds, null if failed
   packetLoss: number; // percentage of packet loss
+  jitter: number | null; // milliseconds, variation in latency
   success: boolean;
   errorMessage?: string;
 }
@@ -39,6 +41,7 @@ export interface DataPoint {
   timestamp: Date;
   latency: number | null;
   packetLoss: number | null;
+  jitter: number | null;
   isOnline: boolean | null;
 }
 
@@ -53,6 +56,7 @@ export interface ProbeResult {
   timestamp: Date;
   latency: number | null;
   packetLoss?: number; // percentage (0-100)
+  jitter?: number | null; // milliseconds, variation in latency
   success: boolean;
   errorMessage?: string;
 }
@@ -77,11 +81,10 @@ export interface TargetStatistics {
 }
 
 export const TIME_RANGE_CONFIG: Record<TimeRange, { label: string; points: number; interval: number }> = {
-  '1h': { label: '1 Hour', points: 60, interval: 1 * 60 * 1000 },
+  '1h': { label: 'Recent', points: 60, interval: 1 * 60 * 1000 },
   '3h': { label: '3 Hours', points: 60, interval: 3 * 60 * 1000 },
-  '5h': { label: '5 Hours', points: 60, interval: 5 * 60 * 1000 },
+  '6h': { label: '6 Hours', points: 60, interval: 6 * 60 * 1000 },
   '24h': { label: '24 Hours', points: 96, interval: 15 * 60 * 1000 },
-  '7d': { label: '7 Days', points: 168, interval: 60 * 60 * 1000 },
+  '7d': { label: '1 Week', points: 168, interval: 60 * 60 * 1000 },
   '30d': { label: '30 Days', points: 180, interval: 4 * 60 * 60 * 1000 },
-  '360d': { label: '360 Days', points: 365, interval: 24 * 60 * 60 * 1000 },
 };

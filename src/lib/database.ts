@@ -1,15 +1,52 @@
-import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import path from 'path';
 import fs from 'fs';
+import sqlite3 from 'sqlite3';
 import { Target, ProbeMeasurement, TargetStatistics } from '@/types/probe';
 
-let db: SqlJsDatabase | null = null;
-let dbInitPromise: Promise<SqlJsDatabase> | null = null;
+// Use sqlite3.Database type
+type Database = sqlite3.Database;
+
+// Database row types
+interface TargetRow {
+  id: string;
+  name: string;
+  host: string;
+  probe_type: 'ping' | 'dns';
+  interval: number;
+  status: 'active' | 'paused' | 'error';
+  group_name?: string;
+  created_at: number;
+  updated_at: number;
+}
+
+interface MeasurementRow {
+  id: string;
+  target_id: string;
+  timestamp: number;
+  latency: number | null;
+  packet_loss: number;
+  jitter: number | null;
+  success: number;
+  error_message: string | null;
+}
+
+interface StatisticsRow {
+  total: number;
+  avg_latency: number | null;
+  min_latency: number | null;
+  max_latency: number | null;
+  avg_jitter: number | null;
+  failures: number;
+  last_probe: number;
+}
+
+let db: Database | null = null;
+let dbInitPromise: Promise<Database> | null = null;
 
 /**
  * Initialize the SQLite database and create tables
  */
-export async function initDatabase(): Promise<SqlJsDatabase> {
+export async function initDatabase(): Promise<Database> {
   if (db) return db;
   
   // Return existing promise if initialization is in progress
@@ -24,92 +61,105 @@ export async function initDatabase(): Promise<SqlJsDatabase> {
 
     const dbPath = path.join(dataDir, 'clearping.db');
     
-    // Initialize SQL.js with WASM file from public directory
-    const wasmPath = path.join(process.cwd(), 'public', 'sql-wasm.wasm');
-    const SQL = await initSqlJs({
-      wasmBinary: fs.readFileSync(wasmPath) as unknown as ArrayBuffer
+    // Initialize sqlite3 database
+    const sqlite = sqlite3.verbose();
+    db = new sqlite.Database(dbPath);
+
+    // Create targets table
+    await new Promise<void>((resolve, reject) => {
+      db!.run(`
+        CREATE TABLE IF NOT EXISTS targets (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          host TEXT NOT NULL,
+          probe_type TEXT NOT NULL CHECK(probe_type IN ('ping', 'dns')),
+          interval INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'error')),
+          group_name TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          last_probe_at INTEGER DEFAULT 0
+        )
+      `, function(err) {
+        if (err) {
+          console.error('Database: Error creating targets table:', err);
+          reject(err);
+        } else {
+          console.log('Database: Ensured targets table exists');
+          resolve();
+        }
+      });
     });
-    
-    // Load existing database or create new one
-    if (fs.existsSync(dbPath)) {
-      const buffer = fs.readFileSync(dbPath);
-      db = new SQL.Database(buffer);
-    } else {
-      db = new SQL.Database();
-    }
 
-    // Create tables
-    db.run(`
-      CREATE TABLE IF NOT EXISTS targets (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        host TEXT NOT NULL,
-        probe_type TEXT NOT NULL CHECK(probe_type IN ('ping', 'dns')),
-        interval INTEGER NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'error')),
-        group_name TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        last_probe_at INTEGER DEFAULT 0
-      )
-    `);
+    // Create measurements table
+    await new Promise<void>((resolve, reject) => {
+      db!.run(`
+        CREATE TABLE IF NOT EXISTS measurements (
+          id TEXT PRIMARY KEY,
+          target_id TEXT NOT NULL,
+          timestamp INTEGER NOT NULL,
+          latency REAL,
+          packet_loss REAL DEFAULT 0,
+          jitter REAL,
+          success INTEGER NOT NULL,
+          error_message TEXT,
+          FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
+        )
+      `, function(err) {
+        if (err) {
+          console.error('Database: Error creating measurements table:', err);
+          reject(err);
+        } else {
+          console.log('Database: Ensured measurements table exists');
+          resolve();
+        }
+      });
+    });
 
-    // Add last_probe_at column if it doesn't exist (for existing databases)
-    try {
-      db.run(`ALTER TABLE targets ADD COLUMN last_probe_at INTEGER DEFAULT 0`);
-    } catch (error) {
-      // Column already exists, ignore error
-    }
+    // Add jitter column if it doesn't exist (for existing databases)
+    await new Promise<void>((resolve, reject) => {
+      db!.run(`ALTER TABLE measurements ADD COLUMN jitter REAL`, function(err) {
+        // Ignore error if column already exists
+        if (err && !err.message.includes('duplicate column name')) {
+          console.error('Database: Error adding jitter column:', err);
+          reject(err);
+        } else {
+          console.log('Database: Ensured jitter column exists');
+          resolve();
+        }
+      });
+    });
 
-    // Add group_name column if it doesn't exist (for existing databases)
-    try {
-      db.run(`ALTER TABLE targets ADD COLUMN group_name TEXT`);
-    } catch (error) {
-      // Column already exists, ignore error
-    }
+    // Create indexes
+    await new Promise<void>((resolve, reject) => {
+      db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_target_timestamp 
+              ON measurements(target_id, timestamp DESC)`, function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
 
-    // Add packet_loss column to measurements if it doesn't exist (for existing databases)
-    try {
-      db.run(`ALTER TABLE measurements ADD COLUMN packet_loss REAL DEFAULT 0`);
-    } catch (error) {
-      // Column already exists, ignore error
-    }
+    await new Promise<void>((resolve, reject) => {
+      db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_timestamp 
+              ON measurements(timestamp DESC)`, function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
 
-    db.run(`
-      CREATE TABLE IF NOT EXISTS measurements (
-        id TEXT PRIMARY KEY,
-        target_id TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        latency REAL,
-        packet_loss REAL DEFAULT 0,
-        success INTEGER NOT NULL,
-        error_message TEXT,
-        FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
-      )
-    `);
+    console.log('Database: Tables and indexes created successfully');
 
-    db.run(`CREATE INDEX IF NOT EXISTS idx_measurements_target_timestamp 
-            ON measurements(target_id, timestamp DESC)`);
-
-    db.run(`CREATE INDEX IF NOT EXISTS idx_measurements_timestamp 
-            ON measurements(timestamp DESC)`);
-
-    return db;
+    return db!;
   })();
 
   return dbInitPromise;
 }
 
 /**
- * Save database to disk
+ * Save database to disk (no-op for sqlite3 as it auto-saves)
  */
 function saveDatabase() {
-  if (!db) return;
-  
-  const dataDir = path.join(process.cwd(), 'data');
-  const dbPath = path.join(dataDir, 'clearping.db');
-  const data = db.export();
-  fs.writeFileSync(dbPath, data);
+  // sqlite3 automatically saves to disk
 }
 
 /**
@@ -122,7 +172,7 @@ export function saveDatabaseToDisk(): void {
 /**
  * Get database instance
  */
-export async function getDatabase(): Promise<SqlJsDatabase> {
+export async function getDatabase(): Promise<Database> {
   if (!db) {
     return await initDatabase();
   }
@@ -136,18 +186,23 @@ export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt
   const database = await getDatabase();
   const now = Date.now();
 
-  database.run(`
-    INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, target.group || '', now, now]);
-
-  saveDatabase();
-
-  return {
-    ...target,
-    createdAt: new Date(now),
-    updatedAt: new Date(now),
-  };
+  return new Promise<Target>((resolve, reject) => {
+    database.run(`
+      INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, target.group || '', now, now], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      saveDatabase();
+      resolve({
+        ...target,
+        createdAt: new Date(now),
+        updatedAt: new Date(now),
+      });
+    });
+  });
 }
 
 /**
@@ -155,28 +210,36 @@ export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt
  */
 export async function getAllTargets(): Promise<Target[]> {
   const database = await getDatabase();
-  const result = database.exec('SELECT * FROM targets ORDER BY name');
   
-  if (!result.length || !result[0].values.length) return [];
+  return new Promise((resolve, reject) => {
+    database.all('SELECT * FROM targets ORDER BY name', [], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      if (!rows || rows.length === 0) {
+        resolve([]);
+        return;
+      }
 
-  const columns = result[0].columns;
-  return result[0].values.map(row => {
-    const obj: Record<string, unknown> = {};
-    columns.forEach((col, idx) => {
-      obj[col] = row[idx];
+      const targets: Target[] = rows.map((row) => {
+        const r = row as TargetRow;
+        return {
+          id: r.id,
+          name: r.name,
+          host: r.host,
+          probeType: r.probe_type,
+          interval: r.interval,
+          status: r.status,
+          group: r.group_name,
+          createdAt: new Date(r.created_at),
+          updatedAt: new Date(r.updated_at),
+        };
+      });
+      
+      resolve(targets);
     });
-    
-    return {
-      id: obj.id as string,
-      name: obj.name as string,
-      host: obj.host as string,
-      probeType: obj.probe_type as 'ping' | 'dns',
-      interval: obj.interval as number,
-      status: obj.status as 'active' | 'paused' | 'error',
-      group: obj.group_name as string | undefined,
-      createdAt: new Date(obj.created_at as number),
-      updatedAt: new Date(obj.updated_at as number),
-    };
   });
 }
 
@@ -185,28 +248,33 @@ export async function getAllTargets(): Promise<Target[]> {
  */
 export async function getTargetById(id: string): Promise<Target | null> {
   const database = await getDatabase();
-  const result = database.exec('SELECT * FROM targets WHERE id = ?', [id]);
+  
+  return new Promise((resolve, reject) => {
+    database.get('SELECT * FROM targets WHERE id = ?', [id], (err, row) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      if (!row) {
+        resolve(null);
+        return;
+      }
 
-  if (!result.length || !result[0].values.length) return null;
-
-  const columns = result[0].columns;
-  const row = result[0].values[0];
-  const obj: Record<string, unknown> = {};
-  columns.forEach((col, idx) => {
-    obj[col] = row[idx];
+      const r = row as TargetRow;
+      resolve({
+        id: r.id,
+        name: r.name,
+        host: r.host,
+        probeType: r.probe_type,
+        interval: r.interval,
+        status: r.status,
+        group: r.group_name,
+        createdAt: new Date(r.created_at),
+        updatedAt: new Date(r.updated_at),
+      });
+    });
   });
-
-  return {
-    id: obj.id as string,
-    name: obj.name as string,
-    host: obj.host as string,
-    probeType: obj.probe_type as 'ping' | 'dns',
-    interval: obj.interval as number,
-    status: obj.status as 'active' | 'paused' | 'error',
-    group: obj.group_name as string | undefined,
-    createdAt: new Date(obj.created_at as number),
-    updatedAt: new Date(obj.updated_at as number),
-  };
 }
 
 /**
@@ -250,10 +318,16 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
   values.push(now);
   values.push(id);
 
-  database.run(`UPDATE targets SET ${fields.join(', ')} WHERE id = ?`, values);
-  saveDatabase();
-
-  return true;
+  return new Promise<boolean>((resolve, reject) => {
+    database.run(`UPDATE targets SET ${fields.join(', ')} WHERE id = ?`, values, function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      saveDatabase();
+      resolve(true);
+    });
+  });
 }
 
 /**
@@ -261,28 +335,44 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
  */
 export async function deleteTarget(id: string): Promise<boolean> {
   const database = await getDatabase();
-  database.run('DELETE FROM targets WHERE id = ?', [id]);
-  saveDatabase();
-  return true;
+  
+  return new Promise<boolean>((resolve, reject) => {
+    database.run('DELETE FROM targets WHERE id = ?', [id], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      saveDatabase();
+      resolve(true);
+    });
+  });
 }
 
 export async function storeMeasurement(measurement: ProbeMeasurement & { packetLoss?: number }): Promise<void> {
   const database = await getDatabase();
   
-  database.run(`
-    INSERT INTO measurements (id, target_id, timestamp, latency, packet_loss, success, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `, [
-    measurement.id,
-    measurement.targetId,
-    measurement.timestamp.getTime(),
-    measurement.latency,
-    measurement.packetLoss || 0,
-    measurement.success ? 1 : 0,
-    measurement.errorMessage || null
-  ]);
-
-  saveDatabase();
+  return new Promise<void>((resolve, reject) => {
+    database.run(`
+      INSERT INTO measurements (id, target_id, timestamp, latency, packet_loss, jitter, success, error_message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      measurement.id,
+      measurement.targetId,
+      measurement.timestamp.getTime(),
+      measurement.latency,
+      measurement.packetLoss || 0,
+      measurement.jitter,
+      measurement.success ? 1 : 0,
+      measurement.errorMessage || null
+    ], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      saveDatabase();
+      resolve();
+    });
+  });
 }
 
 /**
@@ -291,21 +381,31 @@ export async function storeMeasurement(measurement: ProbeMeasurement & { packetL
 export async function storeMeasurements(measurements: ProbeMeasurement[]): Promise<void> {
   const database = await getDatabase();
   
-  for (const item of measurements) {
-    database.run(`
-      INSERT INTO measurements (id, target_id, timestamp, latency, packet_loss, success, error_message)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [
-      item.id,
-      item.targetId,
-      item.timestamp.getTime(),
-      item.latency,
-      item.packetLoss || 0,
-      item.success ? 1 : 0,
-      item.errorMessage || null
-    ]);
-  }
-
+  const promises = measurements.map(item => 
+    new Promise<void>((resolve, reject) => {
+      database.run(`
+        INSERT INTO measurements (id, target_id, timestamp, latency, packet_loss, jitter, success, error_message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        item.id,
+        item.targetId,
+        item.timestamp.getTime(),
+        item.latency,
+        item.packetLoss || 0,
+        item.jitter,
+        item.success ? 1 : 0,
+        item.errorMessage || null
+      ], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    })
+  );
+  
+  await Promise.all(promises);
   saveDatabase();
 }
 
@@ -319,30 +419,38 @@ export async function getMeasurements(
 ): Promise<ProbeMeasurement[]> {
   const database = await getDatabase();
   
-  const result = database.exec(`
-    SELECT * FROM measurements
-    WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
-    ORDER BY timestamp ASC
-  `, [targetId, startTime.getTime(), endTime.getTime()]);
+  return new Promise((resolve, reject) => {
+    database.all(`
+      SELECT * FROM measurements
+      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
+      ORDER BY timestamp ASC
+    `, [targetId, startTime.getTime(), endTime.getTime()], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      if (!rows || rows.length === 0) {
+        resolve([]);
+        return;
+      }
 
-  if (!result.length || !result[0].values.length) return [];
-
-  const columns = result[0].columns;
-  return result[0].values.map(row => {
-    const obj: Record<string, unknown> = {};
-    columns.forEach((col, idx) => {
-      obj[col] = row[idx];
+      const measurements: ProbeMeasurement[] = rows.map((row) => {
+        const r = row as MeasurementRow;
+        return {
+          id: r.id,
+          targetId: r.target_id,
+          timestamp: new Date(r.timestamp),
+          latency: r.latency,
+          packetLoss: r.packet_loss,
+          jitter: r.jitter,
+          success: r.success === 1,
+          errorMessage: r.error_message || undefined,
+        };
+      });
+      
+      resolve(measurements);
     });
-    
-    return {
-      id: obj.id as string,
-      targetId: obj.target_id as string,
-      timestamp: new Date(obj.timestamp as number),
-      latency: obj.latency as number | null,
-      packetLoss: obj.packet_loss as number || 0,
-      success: obj.success === 1,
-      errorMessage: obj.error_message as string | undefined,
-    };
   });
 }
 
@@ -356,43 +464,59 @@ export async function getTargetStatistics(
 ): Promise<TargetStatistics | null> {
   const database = await getDatabase();
 
-  const result = database.exec(`
-    SELECT 
-      COUNT(*) as total,
-      AVG(latency) as avg_latency,
-      MIN(latency) as min_latency,
-      MAX(latency) as max_latency,
-      SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures,
-      MAX(timestamp) as last_probe
-    FROM measurements
-    WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
-  `, [targetId, startTime.getTime(), endTime.getTime()]);
+  return new Promise((resolve, reject) => {
+    database.get(`
+      SELECT 
+        COUNT(*) as total,
+        AVG(latency) as avg_latency,
+        MIN(latency) as min_latency,
+        MAX(latency) as max_latency,
+        AVG(jitter) as avg_jitter,
+        SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures,
+        MAX(timestamp) as last_probe
+      FROM measurements
+      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
+    `, [targetId, startTime.getTime(), endTime.getTime()], (err, row) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      if (!row) {
+        resolve(null);
+        return;
+      }
 
-  if (!result.length || !result[0].values.length) return null;
+      const r = row as StatisticsRow;
+      const total = r.total;
+      
+      if (total === 0) {
+        resolve(null);
+        return;
+      }
 
-  const row = result[0].values[0];
-  const total = row[0] as number;
-  
-  if (total === 0) return null;
+      const avgLatency = r.avg_latency || 0;
+      const minLatency = r.min_latency || 0;
+      const maxLatency = r.max_latency || 0;
+      const avgJitter = r.avg_jitter || 0;
+      const failures = r.failures;
+      const lastProbe = r.last_probe;
 
-  const avgLatency = row[1] as number || 0;
-  const minLatency = row[2] as number || 0;
-  const maxLatency = row[3] as number || 0;
-  const failures = row[4] as number;
-  const lastProbe = row[5] as number;
+      const packetLoss = (failures / total) * 100;
+      const uptime = 100 - packetLoss;
 
-  const packetLoss = (failures / total) * 100;
-  const uptime = 100 - packetLoss;
-
-  return {
-    targetId,
-    avgLatency,
-    minLatency,
-    maxLatency,
-    packetLoss,
-    uptime,
-    lastProbe: new Date(lastProbe),
-  };
+      resolve({
+        targetId,
+        avgLatency,
+        minLatency,
+        maxLatency,
+        packetLoss,
+        uptime,
+        lastProbe: new Date(lastProbe),
+        jitter: avgJitter,
+      });
+    });
+  });
 }
 
 /**
@@ -400,35 +524,53 @@ export async function getTargetStatistics(
  */
 export async function getLatestPacketLossForAllTargets(): Promise<Record<string, number>> {
   const database = await getDatabase();
-  const result = database.exec(`
-    SELECT target_id, packet_loss
-    FROM measurements
-    WHERE (target_id, timestamp) IN (
-      SELECT target_id, MAX(timestamp)
+  
+  return new Promise((resolve, reject) => {
+    database.all(`
+      SELECT target_id, packet_loss
       FROM measurements
-      GROUP BY target_id
-    )
-  `);
+      WHERE (target_id, timestamp) IN (
+        SELECT target_id, MAX(timestamp)
+        FROM measurements
+        GROUP BY target_id
+      )
+    `, [], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      if (!rows || rows.length === 0) {
+        resolve({});
+        return;
+      }
 
-  if (!result.length || !result[0].values.length) return {};
+      const packetLossMap: Record<string, number> = {};
+      rows.forEach((row) => {
+        const r = row as { target_id: string; packet_loss: number };
+        packetLossMap[r.target_id] = r.packet_loss;
+      });
 
-  const packetLossMap: Record<string, number> = {};
-  result[0].values.forEach(row => {
-    packetLossMap[row[0] as string] = row[1] as number;
+      resolve(packetLossMap);
+    });
   });
-
-  return packetLossMap;
 }
 
 /**
  * Clean up old measurements (data retention)
  */
-export async function cleanOldMeasurements(daysToKeep: number = 30): Promise<number> {
+export async function cleanOldMeasurements(daysToKeep: number = 30): Promise<void> {
   const database = await getDatabase();
   const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
 
-  database.run('DELETE FROM measurements WHERE timestamp < ?', [cutoffTime]);
-  saveDatabase();
-  
-  return database.getRowsModified();
+  return new Promise<void>((resolve, reject) => {
+    database.run('DELETE FROM measurements WHERE timestamp < ?', [cutoffTime], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      saveDatabase();
+      resolve();
+    });
+  });
 }

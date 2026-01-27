@@ -19,8 +19,10 @@ interface LatencyChartProps {
     timestamp: Date
     latency: number | null
     packetLoss: number | null
+    jitter: number | null
     isOnline: boolean | null
   }>
+  isPolling?: boolean
 }
 
 const formatXAxis = (tickValue: string | number) => {
@@ -50,6 +52,8 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
   const data = (payload[0] as any).payload
   const latency = data.isOnline ? Number(data.originalLatency).toFixed(1) : 'Offline'
   const packetLoss = Number(data.packetLoss || 0).toFixed(2)
+  const hasJitter = data.isOnline && data.originalJitter !== null && data.originalJitter !== undefined
+  const jitter = hasJitter ? Number(data.originalJitter).toFixed(1) : null
 
   return (
     <motion.div
@@ -82,10 +86,24 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.2 }}
             >
-              {latency}
+              Latency: {latency}ms
             </motion.span>
           </AnimatePresence>
         </div>
+        {hasJitter && (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={jitter}
+              className="text-xs text-muted-foreground"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              transition={{ duration: 0.2, delay: 0.05 }}
+            >
+              Jitter: {jitter}ms
+            </motion.div>
+          </AnimatePresence>
+        )}
         <AnimatePresence mode="wait">
           <motion.div
             key={packetLoss}
@@ -93,7 +111,7 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 10 }}
-            transition={{ duration: 0.2, delay: 0.05 }}
+            transition={{ duration: 0.2, delay: 0.1 }}
           >
             Packet Loss: {packetLoss}%
           </motion.div>
@@ -106,7 +124,7 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
   )
 }
 
-export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartProps) {
+export const LatencyChart = memo(function LatencyChart({ data, isPolling = false }: LatencyChartProps) {
   const chartData = useMemo(() => {
     // Show all measurement data points, including offline ones
     return data
@@ -116,25 +134,28 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
           ? getPacketLossColor(packetLoss)
           : '#ef4444' // Red for offline
         
-        // For offline points, show a small bar to indicate the measurement occurred
-        const displayLatency = point.isOnline === false ? 1 : point.latency
+        // For stacked area chart, we need latency as base and jitter stacked on top
+        const latency = point.isOnline === false ? 0 : (point.latency || 0)
+        const jitter = point.isOnline === false ? 0 : (point.jitter && point.jitter > 0 ? point.jitter : 0)
 
         return {
           time: point.timestamp.getTime(),
-          latency: displayLatency,
+          latency: latency,
+          jitter: jitter,
           packetLoss: packetLoss,
           isOnline: point.isOnline,
           color,
           originalLatency: point.latency, // Keep original for tooltip
+          originalJitter: point.jitter, // Keep original for tooltip
         }
       })
   }, [data])
 
   return (
-    <Card className="border rounded-lg">
+    <Card className={`border rounded-lg ${isPolling ? 'animate-pulse border-orange-500/50 shadow-lg shadow-orange-500/20' : ''}`}>
       <CardHeader className="border-b pb-4">
         <div className="space-y-3">
-          <CardTitle>Network Data</CardTitle>
+          <CardTitle>Latency</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="px-2 pt-0 sm:px-6">
@@ -149,11 +170,37 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
                 label: 'Latency',
                 color: 'hsl(var(--chart-1))',
               },
+              jitter: {
+                label: 'Jitter',
+                color: '#374151', // Dark gray smoky color
+              },
             }}
             className="aspect-auto h-100 w-full"
           >
-            <BarChart data={chartData}>
+            <BarChart 
+              data={chartData}
+              margin={{ top: 20, right: 30, left: 60, bottom: 20 }}
+            >
               <CartesianGrid vertical={false} />
+              <Tooltip
+                cursor={false}
+                content={<AnimatedTooltip />}
+              />
+              <Bar
+                dataKey="latency"
+                stackId="1"
+                animationDuration={500}
+              >
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Bar>
+              <Bar
+                dataKey="jitter"
+                stackId="1"
+                fill="#374151"
+                animationDuration={500}
+              />
               <XAxis
                 dataKey="time"
                 tickLine={false}
@@ -171,15 +218,6 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
                 tickMargin={8}
                 tickFormatter={(value) => `${value}ms`}
               />
-              <Tooltip
-                cursor={false}
-                content={<AnimatedTooltip />}
-              />
-              <Bar dataKey="latency" radius={[4, 4, 0, 0]} animationDuration={500}>
-                {chartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color || '#22c55e'} />
-                ))}
-              </Bar>
             </BarChart>
           </ChartContainer>
         </motion.div>
@@ -187,19 +225,19 @@ export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartPro
         <div className="flex items-center justify-center gap-6 mt-4 text-xs pb-2">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#22c55e' }} />
-            <span className="text-muted-foreground">Perfect (0% loss)</span>
+            <span className="text-muted-foreground">Perfect (0%)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#06b6d4' }} />
-            <span className="text-muted-foreground">Minor loss (1-2 packets)</span>
+            <span className="text-muted-foreground">Minor (≤10%)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#d946ef' }} />
-            <span className="text-muted-foreground">Moderate-severe loss</span>
+            <span className="text-muted-foreground">Moderate (≤50%)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#dc2626' }} />
-            <span className="text-muted-foreground">High loss/failure</span>
+            <span className="text-muted-foreground">High ({'>'}50%)</span>
           </div>
         </div>
       </CardContent>

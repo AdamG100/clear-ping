@@ -5,9 +5,9 @@ import { ProbeResult } from '@/types/probe';
 const execAsync = promisify(exec);
 
 /**
- * Enhanced Ping Library with fping-inspired features
+ * Enhanced Ping Library with precise timing control
  *
- * Implements key fping capabilities:
+ * Implements key ping capabilities:
  * - Parallel pinging of multiple targets
  * - Backoff factor for retries with increasing timeouts
  * - Precise timing control between packets
@@ -24,12 +24,12 @@ interface PingOptions {
   count?: number;
   timeout?: number; // milliseconds
   interval?: number; // milliseconds between packets to same host
-  backoff?: number; // backoff factor for retries (fping style)
+  backoff?: number; // backoff factor for retries
   retries?: number; // number of retries
 }
 
-// fping-inspired timing options
-interface FpingTimingOptions {
+// Timing options for enhanced ping
+interface PingTimingOptions {
   count: number;
   timeout: number;
   interval: number;
@@ -37,31 +37,8 @@ interface FpingTimingOptions {
   retries: number;
 }
 
-// Cache fping availability to avoid checking on every ping
-let fpingAvailable: boolean | null = null;
-
 /**
- * Check if fping is available on the system (cached)
- */
-async function isFpingAvailable(): Promise<boolean> {
-  if (fpingAvailable !== null) {
-    return fpingAvailable;
-  }
-
-  try {
-    await execAsync('fping --version', { timeout: 2000 });
-    fpingAvailable = true;
-    console.log('[Ping] fping detected and available');
-  } catch {
-    fpingAvailable = false;
-    console.log('[Ping] fping not available, using system ping');
-  }
-
-  return fpingAvailable;
-}
-
-/**
- * Execute ping using fping (if available) or fallback to system ping
+ * Execute ping using enhanced system ping with precise timing control
  */
 export async function executePing(
   targetId: string,
@@ -71,112 +48,23 @@ export async function executePing(
   const {
     count = 20,
     timeout = 1000,
-    interval = 10, // fping default: 10ms between packets
-    backoff = 1.5, // fping default: 1.5x backoff factor
-    retries = 3 // fping default: 3 retries
+    interval = 10, // 10ms between packets
+    backoff = 1.5, // 1.5x backoff factor
+    retries = 3 // 3 retries
   } = options;
   const timestamp = new Date();
 
-  // Try fping first if available
-  if (await isFpingAvailable()) {
-    return executeFping(targetId, host, { count, timeout, interval, backoff, retries }, timestamp);
-  }
-
-  // Fallback to enhanced system ping with fping-like features
+  // Use enhanced system ping with precise timing control
   return executeEnhancedSystemPing(targetId, host, { count, timeout, interval, backoff, retries }, timestamp);
 }
 
 /**
- * Execute ping using fping
- */
-async function executeFping(
-  targetId: string,
-  host: string,
-  options: FpingTimingOptions,
-  timestamp: Date
-): Promise<ProbeResult> {
-  const { count = 20, timeout = 1000, interval = 10, backoff = 1.5, retries = 3 } = options;
-
-  try {
-    // fping command with enhanced timing options (fping style)
-    // -c count -t timeout(ms) -i interval(ms) -B backoff -r retries -q quiet
-    const command = `fping -c ${count} -t ${timeout} -i ${interval} -B ${backoff} -r ${retries} -q ${host}`;
-
-    const { stdout } = await execAsync(command, {
-      timeout: (timeout * count * (retries + 1)) + 5000, // Account for retries and backoff
-    });
-
-    // fping output format:
-    // host : x/y/z, min/avg/max = min/avg/max
-    // where x = sent, y = received, z = lost
-    // Example: "8.8.8.8 : 20/20/0, min/avg/max = 12.3/15.7/23.1"
-
-    const lines = stdout.trim().split('\n');
-    const resultLine = lines.find(line => line.includes(host));
-
-    if (!resultLine) {
-      return {
-        targetId,
-        timestamp,
-        latency: null,
-        packetLoss: 100,
-        success: false,
-        errorMessage: 'No response from fping',
-      };
-    }
-
-    // Parse packet statistics: "host : sent/received/lost"
-    const packetMatch = resultLine.match(/:\s*(\d+)\/(\d+)\/(\d+)/);
-    if (!packetMatch) {
-      return {
-        targetId,
-        timestamp,
-        latency: null,
-        packetLoss: 100,
-        success: false,
-        errorMessage: 'Unable to parse fping packet statistics',
-      };
-    }
-
-    const sent = parseInt(packetMatch[1], 10);
-    const received = parseInt(packetMatch[2], 10);
-    const lost = parseInt(packetMatch[3], 10);
-    const packetLoss = sent > 0 ? Math.round((lost / sent) * 100) : 100;
-
-    console.log(`[Ping] fping stats: sent=${sent}, received=${received}, lost=${lost}, loss=${packetLoss}%`);
-
-    // Parse latency: "min/avg/max = min/avg/max"
-    const latencyMatch = resultLine.match(/=\s*[\d.]+\/([\d.]+)\/[\d.]+/);
-    const latency = latencyMatch ? parseFloat(latencyMatch[1]) : null;
-
-    return {
-      targetId,
-      timestamp,
-      latency,
-      packetLoss,
-      success: received > 0,
-    };
-
-  } catch (error) {
-    // If fping fails, return error
-    return {
-      targetId,
-      timestamp,
-      latency: null,
-      packetLoss: 100,
-      success: false,
-      errorMessage: error instanceof Error ? error.message : 'fping error',
-    };
-  }
-}
-
-/**
- * Execute ping using enhanced system ping with fping-like features
+ * Execute ping using enhanced system ping with precise timing control
  */
 async function executeEnhancedSystemPing(
   targetId: string,
   host: string,
-  options: FpingTimingOptions,
+  options: PingTimingOptions,
   timestamp: Date
 ): Promise<ProbeResult> {
   const { count = 20, timeout = 1000, interval = 10, backoff = 1.5, retries = 3 } = options;
@@ -186,9 +74,10 @@ async function executeEnhancedSystemPing(
   let totalSent = 0;
   let totalReceived = 0;
   let totalLatency = 0;
+  const latencies: number[] = []; // Store individual latencies for jitter calculation
   let currentTimeout = timeout;
 
-  // Implement fping-style retry logic with backoff
+  // Implement retry logic with backoff
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       // Calculate packets for this attempt (distribute across retries)
@@ -200,7 +89,7 @@ async function executeEnhancedSystemPing(
 
       console.log(`[Ping] Attempt ${attempt + 1}/${retries + 1}: sending ${packetsToSend} packets with ${currentTimeout}ms timeout`);
 
-      // Use individual ping commands with timing control (fping approach)
+      // Use individual ping commands with timing control
       const results = await executeIndividualPings(host, packetsToSend, currentTimeout, interval);
 
       const receivedInAttempt = results.filter(r => r.success).length;
@@ -210,12 +99,10 @@ async function executeEnhancedSystemPing(
       totalReceived += receivedInAttempt;
       totalLatency += latencySum;
 
-      console.log(`[Ping] Attempt ${attempt + 1} results: sent=${packetsToSend}, received=${receivedInAttempt}, total_received=${totalReceived}/${totalSent}`);
+      // Collect individual latencies for jitter calculation
+      results.filter(r => r.success && r.latency !== null).forEach(r => latencies.push(r.latency!));
 
-      // If we got responses, we can stop early (fping behavior)
-      if (receivedInAttempt > 0) {
-        break;
-      }
+      console.log(`[Ping] Attempt ${attempt + 1} results: sent=${packetsToSend}, received=${receivedInAttempt}, total_received=${totalReceived}/${totalSent}`);
 
       // Increase timeout for next attempt (backoff)
       currentTimeout = Math.floor(currentTimeout * backoff);
@@ -229,19 +116,28 @@ async function executeEnhancedSystemPing(
   const packetLoss = totalSent > 0 ? Math.round(((totalSent - totalReceived) / totalSent) * 100) : 100;
   const avgLatency = totalReceived > 0 ? Math.round(totalLatency / totalReceived) : null;
 
-  console.log(`[Ping] Final result for ${host}: sent=${totalSent}, received=${totalReceived}, loss=${packetLoss}%, avg_latency=${avgLatency}ms`);
+  // Calculate jitter as Mean Absolute Deviation (MAD) from mean latency
+  let jitter: number | null = null;
+  if (latencies.length > 1) {
+    const mean = latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length;
+    const absoluteDeviations = latencies.map(lat => Math.abs(lat - mean));
+    jitter = Math.round(absoluteDeviations.reduce((sum, dev) => sum + dev, 0) / absoluteDeviations.length);
+  }
+
+  console.log(`[Ping] Final result for ${host}: sent=${totalSent}, received=${totalReceived}, loss=${packetLoss}%, avg_latency=${avgLatency}ms, jitter=${jitter}ms`);
 
   return {
     targetId,
     timestamp,
     latency: avgLatency,
     packetLoss,
+    jitter,
     success: totalReceived > 0,
   };
 }
 
 /**
- * Execute individual ping packets with precise timing control (fping-style)
+ * Execute individual ping packets with precise timing control
  */
 async function executeIndividualPings(
   host: string,
@@ -272,7 +168,7 @@ async function executeIndividualPings(
       results.push({ success: false, latency: null });
     }
 
-    // Wait for the specified interval before next packet (fping behavior)
+    // Wait for the specified interval before next packet
     if (i < count - 1 && interval > 0) {
       await new Promise(resolve => setTimeout(resolve, interval));
     }
@@ -339,7 +235,7 @@ export async function executeMultiplePings(
 }
 
 /**
- * Ping multiple targets in parallel (fping's key feature)
+ * Ping multiple targets in parallel
  * Returns results as they complete, much faster than sequential pinging
  */
 export async function pingMultipleTargets(
@@ -348,7 +244,7 @@ export async function pingMultipleTargets(
 ): Promise<ProbeResult[]> {
   console.log(`[Ping] Pinging ${targets.length} targets in parallel`);
 
-  // Execute all pings in parallel (fping's main advantage)
+  // Execute all pings in parallel for better performance
   const pingPromises = targets.map(target =>
     executePing(target.id, target.host, options)
   );
@@ -362,7 +258,7 @@ export async function pingMultipleTargets(
 }
 
 /**
- * Ping multiple targets with fping-style round-robin execution
+ * Ping multiple targets with round-robin execution
  * More efficient than parallel for large numbers of targets
  */
 export async function pingTargetsRoundRobin(
@@ -374,14 +270,14 @@ export async function pingTargetsRoundRobin(
 
   console.log(`[Ping] Pinging ${targets.length} targets in round-robin fashion`);
 
-  // Send one ping to each target in sequence, then repeat (fping approach)
+  // Send one ping to each target in sequence, then repeat
   for (let packetNum = 0; packetNum < count; packetNum++) {
     for (const target of targets) {
       try {
         const result = await executePing(target.id, target.host, { ...options, count: 1 });
         results.push(result);
 
-        // Small delay between targets (fping's -i option)
+        // Small delay between targets
         if (interval > 0) {
           await new Promise(resolve => setTimeout(resolve, interval));
         }
@@ -417,11 +313,23 @@ export async function pingTargetsRoundRobin(
       ? Math.round(successfulPings.reduce((sum, r) => sum + (r.latency || 0), 0) / successfulPings.length)
       : null;
 
+    // Calculate jitter as Mean Absolute Deviation (MAD) from mean latency
+    let jitter: number | null = null;
+    if (successfulPings.length > 1) {
+      const latencies = successfulPings.map(r => r.latency!).filter(lat => lat !== null);
+      if (latencies.length > 1) {
+        const mean = latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length;
+        const absoluteDeviations = latencies.map(lat => Math.abs(lat - mean));
+        jitter = Math.round(absoluteDeviations.reduce((sum, dev) => sum + dev, 0) / absoluteDeviations.length);
+      }
+    }
+
     finalResults.push({
       targetId,
       timestamp: new Date(),
       latency: avgLatency,
       packetLoss,
+      jitter,
       success: successfulPings.length > 0,
     });
   }

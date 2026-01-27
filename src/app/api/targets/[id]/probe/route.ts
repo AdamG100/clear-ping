@@ -39,6 +39,7 @@ export async function POST(
       timestamp: result.timestamp,
       latency: result.latency,
       packetLoss: result.packetLoss || 0,
+      jitter: result.jitter || null,
       success: result.success,
       errorMessage: result.errorMessage,
     };

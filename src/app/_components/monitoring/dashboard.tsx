@@ -118,11 +118,10 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, ta
     try {        const hoursMap: Record<TimeRange, number> = {
           '1h': 1,
           '3h': 3,
-          '5h': 5,
+          '6h': 6,
           '24h': 24,
           '7d': 168,
-          '30d': 720,
-          '360d': 8640
+          '30d': 720
         }
         const hours = hoursMap[timeRange]
 
@@ -136,37 +135,46 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, ta
           const now = new Date()
           const startTime = new Date(now.getTime() - hours * 60 * 60 * 1000)
           
-          // Use target probe interval for x-axis alignment (in minutes)
-          const probeIntervalMinutes = target ? Math.max(1, Math.round(target.interval / 60)) : 5
+          // Use consistent chart intervals for display (not target probe intervals)
+          const chartIntervals: Record<TimeRange, number> = {
+            '1h': 5,   // 5-minute bars for 1 hour (12 bars)
+            '3h': 5,   // 5-minute bars for 3 hours (36 bars)
+            '6h': 10,  // 10-minute bars for 6 hours (36 bars)
+            '24h': 30, // 30-minute bars for 24 hours (48 bars)
+            '7d': 120, // 2-hour bars for 7 days (84 bars)
+            '30d': 360 // 6-hour bars for 30 days (120 bars)
+          }
+          const chartIntervalMinutes = chartIntervals[timeRange]
           
-          // Calculate max points based on time range and probe interval
+          // Calculate max points based on time range and chart interval
           const totalMinutes = hours * 60
-          const maxPoints = Math.min(288, Math.floor(totalMinutes / probeIntervalMinutes)) // Cap at 288 points
+          const maxPoints = Math.min(288, Math.floor(totalMinutes / chartIntervalMinutes)) // Cap at 288 points
           
-          // Create time series aligned with probe schedule
+          // Create time series aligned with chart intervals
           const dataPoints: DataPoint[] = []
           const measurements = Array.isArray(data) ? data : []
           
           for (let i = 0; i < maxPoints; i++) {
-            // Calculate timestamp aligned with probe intervals
-            const minutesFromStart = i * probeIntervalMinutes
+            // Calculate timestamp aligned with chart intervals
+            const minutesFromStart = i * chartIntervalMinutes
             const timestamp = new Date(startTime.getTime() + (minutesFromStart * 60 * 1000))
             
-            // Find actual measurement within this probe interval window
+            // Find actual measurement within this chart interval window
             const actualData = measurements.find((m: ProbeMeasurement) => {
               const dataTime = new Date(m.timestamp).getTime()
               const pointTime = timestamp.getTime()
-              // Allow measurements within half the probe interval of the expected time
-              const tolerance = (probeIntervalMinutes * 60 * 1000) / 2
+              // Allow measurements within half the chart interval of the expected time
+              const tolerance = (chartIntervalMinutes * 60 * 1000) / 2
               return Math.abs(dataTime - pointTime) < tolerance
             })
             
             if (actualData) {
               // Use actual measurement data
               dataPoints.push({
-                timestamp,
+                timestamp: new Date(actualData.timestamp), // Use actual measurement timestamp
                 latency: actualData.latency,
                 packetLoss: actualData.packetLoss,
+                jitter: actualData.jitter,
                 isOnline: actualData.success
               })
             } else {
@@ -175,6 +183,7 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, ta
                 timestamp,
                 latency: null,
                 packetLoss: null,
+                jitter: null,
                 isOnline: null
               })
             }
@@ -227,7 +236,7 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, ta
   }
 }
 
-function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 'lastProbe'> & { jitter: number; currentLatency: number; currentPacketLoss: number; currentIsOnline: boolean } {
+function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 'lastProbe'> & { jitter: number | null; currentLatency: number; currentPacketLoss: number; currentJitter: number | null; currentIsOnline: boolean } {
   if (data.length === 0) {
     return {
       avgLatency: 0,
@@ -235,15 +244,17 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
       maxLatency: 0,
       packetLoss: 0,
       uptime: 0,
-      jitter: 0,
+      jitter: null,
       currentLatency: 0,
       currentPacketLoss: 0,
+      currentJitter: null,
       currentIsOnline: false
     }
   }
 
   // Use all data for the selected time range for statistics
   const validLatencies = data.filter(d => d.latency !== null).map(d => d.latency as number)
+  const validJitters = data.filter(d => d.jitter !== null).map(d => d.jitter as number)
   const validOnlineData = data.filter(d => d.isOnline !== null)
   const onlineCount = validOnlineData.filter(d => d.isOnline).length
   
@@ -253,6 +264,13 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
   
   const minLatency = validLatencies.length > 0 ? Math.min(...validLatencies) : 0
   const maxLatency = validLatencies.length > 0 ? Math.max(...validLatencies) : 0
+
+  const avgJitter = validJitters.length > 0
+    ? validJitters.reduce((a, b) => a + b, 0) / validJitters.length
+    : null
+
+  const minJitter = validJitters.length > 0 ? Math.min(...validJitters) : null
+  const maxJitter = validJitters.length > 0 ? Math.max(...validJitters) : null
   
   // Calculate packet loss using time-weighted average (more recent = higher weight)
   // Use packetLoss field directly, defaulting to 100% for offline measurements
@@ -299,19 +317,13 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
   }
   
   const uptime = data.length > 0 ? (onlineCount / data.length) * 100 : 0
-  
-  // Calculate jitter (variation in latency)
-  let jitter = 0
-  if (validLatencies.length > 1) {
-    const diffs = validLatencies.slice(1).map((lat, i) => Math.abs(lat - validLatencies[i]))
-    jitter = diffs.reduce((a, b) => a + b, 0) / diffs.length
-  }
 
   // Get the most recent measurement values
   const sortedData = [...data].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
   const latestData = sortedData[0]
   const currentLatency = latestData?.latency ?? 0
   const currentPacketLoss = latestData?.isOnline === false ? 100 : (latestData?.packetLoss ?? 0)
+  const currentJitter = latestData?.jitter ?? null
   
   // Determine current online status: check if there have been any successful measurements in the last hour
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
@@ -325,9 +337,12 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
     maxLatency,
     packetLoss,
     uptime,
-    jitter,
+    jitter: avgJitter,
+    minJitter,
+    maxJitter,
     currentLatency,
     currentPacketLoss,
+    currentJitter,
     currentIsOnline
   }
 }
@@ -335,9 +350,11 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
 export function Dashboard() {
   const { targets, packetLossData, addTarget, updateTarget, deleteTarget, isLoaded, reloadTargets } = useTargets()
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null)
-  const [timeRange, setTimeRange] = useState<TimeRange>('5h')
+  const [timeRange, setTimeRange] = useState<TimeRange>('1h')
   const [probing, setProbing] = useState(false)
   const [initialAppLoad, setInitialAppLoad] = useState(true)
+  const [newTargetIds, setNewTargetIds] = useState<Map<string, number>>(new Map())
+  const [isPollingNewTarget, setIsPollingNewTarget] = useState(false)
 
   // Initialize selectedTargetId from localStorage after mount
   useEffect(() => {
@@ -381,9 +398,48 @@ export function Dashboard() {
     }
   }, [isLoaded, targets, selectedTargetId])
 
+  const handleAddTarget = useCallback(async (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => {
+    const result = await addTarget(target)
+    if (result) {
+      // Track this as a new target
+      setNewTargetIds(prev => {
+        const currentMap = prev instanceof Map ? prev : new Map()
+        return new Map(currentMap).set(result.id, Date.now())
+      })
+    }
+    return result
+  }, [addTarget])
+
+  // Clear new target status when they get probed (have packet loss data) and have been new for at least 5 seconds
+  useEffect(() => {
+    const now = Date.now()
+    setNewTargetIds(prev => {
+      // Handle migration from Set to Map
+      const currentMap = prev instanceof Map ? prev : new Map()
+      const updated = new Map(currentMap)
+      Object.keys(packetLossData).forEach(targetId => {
+        const addedTime = updated.get(targetId)
+        if (addedTime && now - addedTime > 5000) { // 5 seconds
+          updated.delete(targetId)
+        }
+      })
+      return updated
+    })
+  }, [packetLossData])
+
   const selectedTarget = useMemo(() => {
     return targets.find(t => t.id === selectedTargetId) || null
   }, [targets, selectedTargetId])
+
+  // Track when a new target is selected for polling animation
+  useEffect(() => {
+    if (selectedTargetId && (newTargetIds instanceof Map ? newTargetIds.has(selectedTargetId) : newTargetIds.has(selectedTargetId))) {
+      setIsPollingNewTarget(true)
+      // Clear the polling state after a delay
+      const timer = setTimeout(() => setIsPollingNewTarget(false), 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [selectedTargetId, newTargetIds])
 
   const { measurements, loading, reload, manualReload, initialLoad } = useTargetMeasurements(selectedTargetId, timeRange, selectedTarget)
 
@@ -473,9 +529,10 @@ export function Dashboard() {
       isOnline: t.status !== 'error',
       lastCheck: t.updatedAt,
       avgLatency: 0,
-      packetLoss: packetLossData[t.id] || (t.status === 'error' ? 100 : 0)
+      packetLoss: packetLossData[t.id] || (t.status === 'error' ? 100 : 0),
+      isNew: newTargetIds instanceof Map ? newTargetIds.has(t.id) : newTargetIds.has(t.id)
     }))
-  }, [targets, packetLossData])
+  }, [targets, packetLossData, newTargetIds])
 
   return (
     <div className="flex h-screen bg-background">
@@ -483,7 +540,7 @@ export function Dashboard() {
         targets={transformedTargets}
         selectedTargetId={selectedTargetId}
         onSelectTarget={setSelectedTargetId}
-        onAddTarget={addTarget}
+        onAddTarget={handleAddTarget}
         onUpdateTarget={updateTarget}
         onDeleteTarget={deleteTarget}
         onRefresh={handleRefreshTargets}
@@ -531,7 +588,7 @@ export function Dashboard() {
               <span className="text-muted-foreground">Loading measurements...</span>
             </div>
           </div>
-        ) : measurements.length > 0 && stats ? (
+        ) : (
             <>
               <div className="p-6 pb-0">
                 <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -560,58 +617,27 @@ export function Dashboard() {
                 </header>
 
                 <StatsCards
-                  avgLatency={stats.avgLatency}
-                  minLatency={stats.minLatency}
-                  maxLatency={stats.maxLatency}
-                  packetLoss={stats.packetLoss}
-                  currentLatency={stats.currentLatency}
-                  currentPacketLoss={stats.currentPacketLoss}
+                  avgLatency={stats?.avgLatency ?? 0}
+                  minLatency={stats?.minLatency ?? 0}
+                  maxLatency={stats?.maxLatency ?? 0}
+                  packetLoss={stats?.packetLoss ?? 0}
+                  currentLatency={stats?.currentLatency ?? 0}
+                  currentPacketLoss={stats?.currentPacketLoss ?? 0}
+                  jitter={stats?.jitter ?? null}
+                  minJitter={stats?.minJitter ?? null}
+                  maxJitter={stats?.maxJitter ?? null}
+                  currentJitter={stats?.currentJitter ?? null}
                   lastUpdated={lastUpdated}
+                  isPolling={isPollingNewTarget}
                 />
               </div>
 
-              <div className="p-6">
-                <LatencyChart data={measurements} />
-              </div>
-            </>
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                  <svg
-                    className="h-8 w-8 text-muted-foreground"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                    />
-                  </svg>
+              {measurements.length > 0 && (
+                <div className="p-6">
+                  <LatencyChart data={measurements} isPolling={isPollingNewTarget} />
                 </div>
-                <h2 className="text-lg font-semibold text-foreground mb-2">No Data Available</h2>
-                <p className="text-muted-foreground mb-4">
-                  This target has no measurement data yet. Click the probe button to collect data.
-                </p>
-                <Button onClick={handleProbe} disabled={probing}>
-                  {probing ? (
-                    <>
-                      <Activity className="w-4 h-4 mr-2 animate-spin" />
-                      Probing...
-                    </>
-                  ) : (
-                    <>
-                      <Activity className="w-4 h-4 mr-2" />
-                      Probe Now
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
+              )}
+            </>
           )}
       </main>
     </div>

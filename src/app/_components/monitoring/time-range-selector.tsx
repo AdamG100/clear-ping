@@ -11,7 +11,7 @@ interface TimeRangeSelectorProps {
 }
 
 export function TimeRangeSelector({ value, onChange }: TimeRangeSelectorProps) {
-  const ranges: TimeRange[] = ['1h', '3h', '5h', '24h', '7d', '30d', '360d']
+  const ranges: TimeRange[] = ['1h', '3h', '6h', '24h', '7d']
 
   return (
     <div className="flex items-center gap-1 bg-secondary rounded-lg p-1 " role="tablist" aria-label="Time range">
