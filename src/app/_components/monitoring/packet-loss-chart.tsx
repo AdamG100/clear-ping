@@ -53,7 +53,7 @@ export const PacketLossChart = memo(function PacketLossChart({ data, timeRange }
 
   const formatXAxis = (timestamp: number) => {
     const date = new Date(timestamp)
-    if (timeRange === '1h' || timeRange === '3h' || timeRange === '5h' || timeRange === '24h') {
+    if (timeRange === '1h' || timeRange === '3h' || timeRange === '6h' || timeRange === '24h') {
       return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
     }
     if (timeRange === '7d') {

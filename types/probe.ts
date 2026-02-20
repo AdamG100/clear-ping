@@ -78,6 +78,8 @@ export interface TargetStatistics {
   uptime: number; // percentage
   lastProbe: Date;
   jitter?: number;
+  minJitter?: number;
+  maxJitter?: number;
 }
 
 export const TIME_RANGE_CONFIG: Record<TimeRange, { label: string; points: number; interval: number }> = {

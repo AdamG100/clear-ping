@@ -44,7 +44,7 @@ function useTargets() {
   //   return () => clearInterval(interval)
   // }, [loadTargets])
 
-  const addTarget = useCallback(async (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => {
+  const addTarget = useCallback(async (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>): Promise<Target | null> => {
     try {
       const response = await fetch('/api/targets', {
         method: 'POST',
@@ -59,11 +59,14 @@ function useTargets() {
         }),
       })
       if (response.ok) {
+        const created = await response.json()
         await loadTargets()
+        return created as Target
       }
     } catch (error) {
       console.error('Failed to add target:', error)
     }
+    return null
   }, [loadTargets])
 
   const updateTarget = useCallback(async (id: string, updates: Partial<Target>) => {
@@ -236,7 +239,7 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, ta
   }
 }
 
-function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 'lastProbe'> & { jitter: number; currentLatency: number; currentPacketLoss: number; currentJitter: number; currentIsOnline: boolean } {
+function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 'lastProbe'> & { jitter: number; minJitter: number; maxJitter: number; currentLatency: number; currentPacketLoss: number; currentJitter: number; currentIsOnline: boolean } {
   if (data.length === 0) {
     return {
       avgLatency: 0,
@@ -245,6 +248,8 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
       packetLoss: 0,
       uptime: 0,
       jitter: 0,
+      minJitter: 0,
+      maxJitter: 0,
       currentLatency: 0,
       currentPacketLoss: 0,
       currentJitter: 0,
@@ -435,7 +440,7 @@ export function Dashboard() {
 
   // Track when a new target is selected for polling animation
   useEffect(() => {
-    if (selectedTargetId && (newTargetIds instanceof Map ? newTargetIds.has(selectedTargetId) : newTargetIds.has(selectedTargetId))) {
+    if (selectedTargetId && newTargetIds.has(selectedTargetId)) {
       setIsPollingNewTarget(true)
       // Clear the polling state after a delay
       const timer = setTimeout(() => setIsPollingNewTarget(false), 3000)
@@ -532,7 +537,7 @@ export function Dashboard() {
       lastCheck: t.updatedAt,
       avgLatency: 0,
       packetLoss: packetLossData[t.id] || (t.status === 'error' ? 100 : 0),
-      isNew: newTargetIds instanceof Map ? newTargetIds.has(t.id) : newTargetIds.has(t.id)
+      isNew: newTargetIds.has(t.id)
     }))
   }, [targets, packetLossData, newTargetIds])
 

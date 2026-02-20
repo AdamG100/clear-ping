@@ -52,7 +52,7 @@ export const UptimeChart = memo(function UptimeChart({ data, timeRange }: Uptime
   }
 
   const formatDate = (date: Date) => {
-    if (timeRange === '1h' || timeRange === '3h' || timeRange === '5h' || timeRange === '24h') {
+    if (timeRange === '1h' || timeRange === '3h' || timeRange === '6h' || timeRange === '24h') {
       return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
     }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
