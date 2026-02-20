@@ -50,10 +50,15 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = (payload[0] as any).payload
-  const latency = data.isOnline === false ? 'Offline' : data.isOnline === null ? 'No Data' : Number(data.originalLatency).toFixed(1)
+  // Build friendly labels: avoid appending 'ms' to 'Offline' / 'No Data'
+  let latencyLabel: string
+  if (data.isOnline === false) latencyLabel = 'Offline'
+  else if (data.isOnline === null) latencyLabel = 'No Data'
+  else latencyLabel = data.originalLatency !== null && data.originalLatency !== undefined ? `${Number(data.originalLatency).toFixed(1)}ms` : 'No Data'
+
   const packetLoss = Number(data.packetLoss || 0).toFixed(2)
   const hasJitter = data.isOnline === true && data.originalJitter !== null && data.originalJitter !== undefined
-  const jitter = hasJitter ? Number(data.originalJitter).toFixed(1) : null
+  const jitter = hasJitter ? `${Number(data.originalJitter).toFixed(1)}ms` : null
 
   return (
     <motion.div
@@ -79,14 +84,14 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
           />
           <AnimatePresence mode="wait">
             <motion.span
-              key={latency}
+              key={latencyLabel}
               className="font-medium"
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.2 }}
             >
-              Latency: {latency}ms
+              Latency: {latencyLabel}
             </motion.span>
           </AnimatePresence>
         </div>
@@ -100,7 +105,7 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.2, delay: 0.05 }}
             >
-              Jitter: {jitter}ms
+              Jitter: {jitter}
             </motion.div>
           </AnimatePresence>
         )}
@@ -126,31 +131,60 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
 
 export const LatencyChart = memo(function LatencyChart({ data, isPolling = false }: LatencyChartProps) {
   const chartData = useMemo(() => {
-    // Show all measurement data points, including offline ones
-    return data
-      .map((point) => {
-        const packetLoss = point.isOnline === false ? 100 : (point.packetLoss || 0)
-        const color = point.isOnline === false
-          ? '#ef4444' // Red for offline
-          : point.isOnline === null
-          ? '#9ca3af' // Gray for missing data
-          : getPacketLossColor(packetLoss)
-        
-        // For stacked area chart, we need latency as base and jitter stacked on top
-        const latency = point.isOnline === false ? 0 : (point.latency || 0)
-        const jitter = point.isOnline === false ? 0 : (point.jitter && point.jitter > 0 ? point.jitter : 0)
+    // Show all measurement data points, including offline ones.
+    // Use last-known latency for offline points so the red bar reflects prior RTT.
+    const maxLatency = Math.max(...data.map(p => (p.latency || 0)), 100)
+    const sorted = [...data].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+    let lastKnownLatency: number | null = null
 
-        return {
-          time: point.timestamp.getTime(),
-          latency: latency,
-          jitter: jitter,
-          packetLoss: packetLoss,
-          isOnline: point.isOnline,
-          color,
-          originalLatency: point.latency, // Keep original for tooltip
-          originalJitter: point.jitter, // Keep original for tooltip
-        }
-      })
+    return sorted.map((point) => {
+      const packetLoss = point.isOnline === false ? 100 : (point.packetLoss || 0)
+      // Force red color for full loss or explicit offline, otherwise map via packet-loss utility
+      const color = (point.isOnline === false || packetLoss >= 99)
+        ? '#ef4444' // Red for offline / total loss
+        : point.isOnline === null
+        ? '#9ca3af' // Gray for missing data
+        : getPacketLossColor(packetLoss)
+
+      // For stacked chart, provide latency baseline and jitter stacked on top
+      // Rules:
+      // - If sample is explicitly missing (`isOnline === null`) -> No Data (latency = null)
+      // - If packetLoss >= 100 or explicit offline -> No Data (latency = null)
+      // - Otherwise use real latency and update lastKnownLatency
+      let latency: number | null
+      if (point.isOnline === null) {
+        latency = null
+      } else if (point.packetLoss !== undefined && point.packetLoss >= 100) {
+        // Treat full loss as No Data (blank gap)
+        latency = null
+      } else if (point.latency !== null && point.latency !== undefined) {
+        latency = point.latency
+        lastKnownLatency = point.latency
+      } else if (point.isOnline === false) {
+        // If offline but we have a last-known latency, use it for visuals of partial loss;
+        // otherwise treat as No Data
+        latency = lastKnownLatency ?? null
+      } else {
+        latency = null
+      }
+
+      const jitter = point.isOnline === false ? 0 : (point.jitter && point.jitter > 0 ? point.jitter : 0)
+
+      // lossMarker is a small visual indicator for partial packet loss (0<loss<100)
+      const lossMarker = packetLoss > 0 && packetLoss < 100 ? maxLatency * (packetLoss / 100) : null
+
+      return {
+        time: point.timestamp.getTime(),
+        latency: latency,
+        jitter: jitter,
+        packetLoss: packetLoss,
+        isOnline: point.isOnline,
+        color,
+        lossMarker,
+        originalLatency: point.latency, // Keep original for tooltip
+        originalJitter: point.jitter, // Keep original for tooltip
+      }
+    })
   }, [data])
 
   return (
@@ -195,6 +229,19 @@ export const LatencyChart = memo(function LatencyChart({ data, isPolling = false
               >
                 {chartData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Bar>
+              <Bar
+                dataKey="lossMarker"
+                stackId="1"
+                barSize={6}
+                animationDuration={200}
+              >
+                {chartData.map((entry, index) => (
+                  <Cell
+                    key={`loss-${index}`}
+                    fill={entry.lossMarker ? entry.color : 'transparent'}
+                  />
                 ))}
               </Bar>
               <Bar

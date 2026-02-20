@@ -14,6 +14,7 @@ export interface Target {
   interval: number; // seconds
   status: ProbeStatus;
   group?: string; // Optional group for organization
+  sortOrder?: number; // Order within group
   createdAt: Date;
   updatedAt: Date;
   // Extended fields for UI compatibility
@@ -24,6 +25,11 @@ export interface Target {
   avgLatency?: number;
   packetLoss?: number;
   isNew?: boolean;
+}
+
+export interface GroupOrder {
+  groupName: string;
+  sortOrder: number;
 }
 
 export interface ProbeMeasurement {

@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import sqlite3 from 'sqlite3';
-import { Target, ProbeMeasurement, TargetStatistics } from '@/types/probe';
+import { Target, ProbeMeasurement, TargetStatistics, GroupOrder } from '@/types/probe';
 
 // Use sqlite3.Database type
 type Database = sqlite3.Database;
@@ -15,8 +15,14 @@ interface TargetRow {
   interval: number;
   status: 'active' | 'paused' | 'error';
   group_name?: string;
+  sort_order: number;
   created_at: number;
   updated_at: number;
+}
+
+interface GroupOrderRow {
+  group_name: string;
+  sort_order: number;
 }
 
 interface MeasurementRow {
@@ -147,6 +153,35 @@ export async function initDatabase(): Promise<Database> {
       });
     });
 
+    // Add sort_order column to targets if missing
+    await new Promise<void>((resolve, reject) => {
+      db!.run(`ALTER TABLE targets ADD COLUMN sort_order INTEGER DEFAULT 0`, function(err) {
+        if (err && !err.message.includes('duplicate column name')) {
+          console.error('Database: Error adding sort_order column:', err);
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    // Create group_orders table
+    await new Promise<void>((resolve, reject) => {
+      db!.run(`
+        CREATE TABLE IF NOT EXISTS group_orders (
+          group_name TEXT PRIMARY KEY,
+          sort_order INTEGER NOT NULL DEFAULT 0
+        )
+      `, function(err) {
+        if (err) {
+          console.error('Database: Error creating group_orders table:', err);
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
     console.log('Database: Tables and indexes created successfully');
 
     return db!;
@@ -188,9 +223,9 @@ export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt
 
   return new Promise<Target>((resolve, reject) => {
     database.run(`
-      INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, target.group || '', now, now], function(err) {
+      INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, target.group || '', target.sortOrder ?? 0, now, now], function(err) {
       if (err) {
         reject(err);
         return;
@@ -212,7 +247,7 @@ export async function getAllTargets(): Promise<Target[]> {
   const database = await getDatabase();
   
   return new Promise((resolve, reject) => {
-    database.all('SELECT * FROM targets ORDER BY name', [], (err, rows) => {
+    database.all('SELECT * FROM targets ORDER BY sort_order ASC, name ASC', [], (err, rows) => {
       if (err) {
         reject(err);
         return;
@@ -233,6 +268,7 @@ export async function getAllTargets(): Promise<Target[]> {
           interval: r.interval,
           status: r.status,
           group: r.group_name,
+          sortOrder: r.sort_order ?? 0,
           createdAt: new Date(r.created_at),
           updatedAt: new Date(r.updated_at),
         };
@@ -310,6 +346,10 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
   if (updates.group !== undefined) {
     fields.push('group_name = ?');
     values.push(updates.group || '');
+  }
+  if (updates.sortOrder !== undefined) {
+    fields.push('sort_order = ?');
+    values.push(updates.sortOrder);
   }
 
   if (fields.length === 0) return false;
@@ -573,4 +613,89 @@ export async function cleanOldMeasurements(daysToKeep: number = 30): Promise<voi
       resolve();
     });
   });
+}
+
+/**
+ * Get group ordering
+ */
+export async function getGroupOrders(): Promise<GroupOrder[]> {
+  const database = await getDatabase();
+
+  return new Promise((resolve, reject) => {
+    database.all('SELECT * FROM group_orders ORDER BY sort_order ASC', [], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      if (!rows || rows.length === 0) {
+        resolve([]);
+        return;
+      }
+
+      const orders: GroupOrder[] = rows.map((row) => {
+        const r = row as GroupOrderRow;
+        return {
+          groupName: r.group_name,
+          sortOrder: r.sort_order,
+        };
+      });
+
+      resolve(orders);
+    });
+  });
+}
+
+/**
+ * Save group ordering (upsert all at once)
+ */
+export async function saveGroupOrders(orders: GroupOrder[]): Promise<void> {
+  const database = await getDatabase();
+
+  // Use INSERT OR REPLACE for upsert
+  const promises = orders.map((order) =>
+    new Promise<void>((resolve, reject) => {
+      database.run(
+        `INSERT OR REPLACE INTO group_orders (group_name, sort_order) VALUES (?, ?)`,
+        [order.groupName, order.sortOrder],
+        function (err) {
+          if (err) reject(err);
+          else resolve();
+        }
+      );
+    })
+  );
+
+  await Promise.all(promises);
+  saveDatabase();
+}
+
+/**
+ * Update sort_order for multiple targets in a batch
+ */
+export async function updateTargetSortOrders(updates: { id: string; sortOrder: number; group?: string }[]): Promise<void> {
+  const database = await getDatabase();
+
+  const promises = updates.map((update) =>
+    new Promise<void>((resolve, reject) => {
+      const fields = ['sort_order = ?'];
+      const values: (string | number)[] = [update.sortOrder];
+      if (update.group !== undefined) {
+        fields.push('group_name = ?');
+        values.push(update.group || '');
+      }
+      values.push(update.id);
+      database.run(
+        `UPDATE targets SET ${fields.join(', ')} WHERE id = ?`,
+        values,
+        function (err) {
+          if (err) reject(err);
+          else resolve();
+        }
+      );
+    })
+  );
+
+  await Promise.all(promises);
+  saveDatabase();
 }

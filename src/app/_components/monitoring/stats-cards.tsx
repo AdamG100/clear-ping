@@ -288,22 +288,15 @@ export default function StatsCards({
   // Determine latency trend - show offline when current measurement shows complete failure
   const isCurrentlyOffline = currentPacketLoss === 100
   const latencyTrend = !hasData ? "stable" : (isCurrentlyOffline ? "down" : 
-    avgLatency <= 10 ? "up" : 
-    avgLatency <= 30 ? "up" : 
-    avgLatency <= 50 ? "up" : 
-    avgLatency <= 75 ? "stable" : 
-    avgLatency <= 100 ? "stable" : 
-    avgLatency <= 150 ? "down" : 
-    avgLatency <= 200 ? "down" : "down")
+    avgLatency <= 100 ? "up" : 
+    avgLatency <= 200 ? "stable" : "down")
   
   const latencyTrendValue = !hasData ? "Calculating..." : (isCurrentlyOffline ? "Offline" : 
-    avgLatency <= 10 ? "Excellent" : 
-    avgLatency <= 30 ? "Very Good" : 
-    avgLatency <= 50 ? "Good" : 
-    avgLatency <= 75 ? "Acceptable" : 
-    avgLatency <= 100 ? "Fair" : 
-    avgLatency <= 150 ? "Degraded" : 
-    avgLatency <= 200 ? "Poor" : "Critical")
+    avgLatency <= 50 ? "Excellent" : 
+    avgLatency <= 100 ? "Good" : 
+    avgLatency <= 200 ? "Fair" : 
+    avgLatency <= 400 ? "Poor" : 
+    avgLatency <= 800 ? "Very Poor" : "Critical")
 
   // Determine packet loss trend matching packet-loss-colors.ts thresholds
   const lossTrend = !hasData ? "stable" : (packetLoss === 0 ? "up" : 
@@ -316,23 +309,15 @@ export default function StatsCards({
 
   // Determine jitter trend using same thresholds as latency
   const jitterValue = jitter === null ? 0 : jitter; // Treat null jitter as 0ms
-  const jitterTrend = !hasData ? "stable" :
-    jitterValue <= 10 ? "up" : 
-    jitterValue <= 30 ? "up" : 
-    jitterValue <= 50 ? "up" : 
-    jitterValue <= 75 ? "stable" : 
-    jitterValue <= 100 ? "stable" : 
-    jitterValue <= 150 ? "down" : 
-    jitterValue <= 200 ? "down" : "down"
-  
-  const jitterTrendValue = !hasData ? "Calculating..." :
-    jitterValue <= 10 ? "Excellent" : 
-    jitterValue <= 30 ? "Very Good" : 
-    jitterValue <= 50 ? "Good" : 
-    jitterValue <= 75 ? "Acceptable" : 
-    jitterValue <= 100 ? "Fair" : 
-    jitterValue <= 150 ? "Degraded" : 
-    jitterValue <= 200 ? "Poor" : "Critical"
+  const jitterTrend = !hasData ? "stable" : (
+    jitterValue <= 100 ? "up" : "down"
+  )
+
+  const jitterTrendValue = !hasData ? "Calculating..." : (
+    jitterValue <= 50 ? "Excellent" : 
+    jitterValue <= 100 ? "Good" : 
+    jitterValue <= 200 ? "Fair" : "Poor"
+  )
 
   // Get dynamic accent colors based on current values
   const latencyAccentColor = !hasData ? '#6b7280' : (isCurrentlyOffline ? '#ef4444' : getLatencyColor(avgLatency)) // Red when offline

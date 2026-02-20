@@ -105,12 +105,17 @@ export function getPacketLossBgClass(lossPercent: number): string {
  * @returns Color in hex format
  */
 export function getLatencyColor(latencyMs: number): string {
-  if (latencyMs <= 10) return '#22c55e'; // Muted green - excellent (matches packet loss perfect)
-  if (latencyMs <= 30) return '#4ade80'; // Light green - very good
-  if (latencyMs <= 50) return '#06b6d4'; // Muted cyan - good (matches packet loss minor)
-  if (latencyMs <= 75) return '#60a5fa'; // Light blue - acceptable
-  if (latencyMs <= 100) return '#3b82f6'; // Blue - fair
-  if (latencyMs <= 150) return '#d946ef'; // Muted magenta - degraded (matches packet loss moderate)
-  if (latencyMs <= 200) return '#f97316'; // Orange - poor
-  return '#dc2626'; // Muted red - critical (matches packet loss high)
+  // ICMP-friendly latency buckets (milliseconds)
+  // - <= 50ms : Excellent
+  // - 51-100ms: Good
+  // - 101-200ms: Fair
+  // - 201-400ms: Poor
+  // - 401-800ms: Very Poor
+  // - >800ms: Critical
+  if (latencyMs <= 50) return '#22c55e' // Muted green - excellent
+  if (latencyMs <= 100) return '#4ade80' // Light green - good
+  if (latencyMs <= 200) return '#06b6d4' // Muted cyan - fair
+  if (latencyMs <= 400) return '#60a5fa' // Light blue - poor
+  if (latencyMs <= 800) return '#f97316' // Orange - very poor
+  return '#dc2626' // Muted red - critical
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import type { Target, TimeRange, DataPoint, TargetStatistics, ProbeMeasurement } from '@/types/probe'
+import type { Target, TimeRange, DataPoint, TargetStatistics, ProbeMeasurement, GroupOrder } from '@/types/probe'
 import { Sidebar } from './sidebar'
 import StatsCards from './stats-cards'
 import { TimeRangeSelector } from './time-range-selector'
@@ -12,6 +12,7 @@ import { Activity, RefreshCw } from 'lucide-react'
 function useTargets() {
   const [targets, setTargets] = useState<Target[]>([])
   const [packetLossData, setPacketLossData] = useState<Record<string, number>>({})
+  const [groupOrders, setGroupOrders] = useState<GroupOrder[]>([])
   const [isLoaded, setIsLoaded] = useState(false)
 
   const loadTargets = useCallback(async () => {
@@ -24,6 +25,11 @@ function useTargets() {
         // Load packet loss data from API response
         const packetLossMap = data.packetLoss || {}
         setPacketLossData(packetLossMap)
+
+        // Load group ordering
+        if (data.groupOrders) {
+          setGroupOrders(data.groupOrders)
+        }
       }
     } catch (error) {
       console.error('Failed to load targets:', error)
@@ -99,7 +105,39 @@ function useTargets() {
     }
   }, [loadTargets])
 
-  return { targets, packetLossData, addTarget, updateTarget, deleteTarget, isLoaded, reloadTargets: loadTargets }
+  const reorderGroups = useCallback(async (orders: GroupOrder[]) => {
+    // Optimistic update
+    setGroupOrders(orders)
+    try {
+      await fetch('/api/targets/reorder', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groups: orders }),
+      })
+    } catch (error) {
+      console.error('Failed to save group order:', error)
+    }
+  }, [])
+
+  const reorderTargets = useCallback(async (updates: { id: string; sortOrder: number; group?: string }[]) => {
+    const updateMap = new Map(updates.map(u => [u.id, u]))
+    setTargets(prev => prev.map(t => {
+      const u = updateMap.get(t.id)
+      if (!u) return t
+      return { ...t, sortOrder: u.sortOrder, group: u.group === undefined ? t.group : (u.group || undefined) }
+    }))
+    try {
+      await fetch('/api/targets/reorder', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets: updates }),
+      })
+    } catch (error) {
+      console.error('Failed to save target order:', error)
+    }
+  }, [])
+
+  return { targets, packetLossData, groupOrders, addTarget, updateTarget, deleteTarget, reorderGroups, reorderTargets, isLoaded, reloadTargets: loadTargets }
 }
 
 function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, target: Target | null) {
@@ -355,7 +393,7 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
 }
 
 export function Dashboard() {
-  const { targets, packetLossData, addTarget, updateTarget, deleteTarget, isLoaded, reloadTargets } = useTargets()
+  const { targets, packetLossData, groupOrders, addTarget, updateTarget, deleteTarget, reorderGroups, reorderTargets, isLoaded, reloadTargets } = useTargets()
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<TimeRange>('1h')
   const [probing, setProbing] = useState(false)
@@ -550,7 +588,9 @@ export function Dashboard() {
         onAddTarget={handleAddTarget}
         onUpdateTarget={updateTarget}
         onDeleteTarget={deleteTarget}
-        onRefresh={handleRefreshTargets}
+        groupOrders={groupOrders}
+        onReorderGroups={reorderGroups}
+        onReorderTargets={reorderTargets}
       />
 
       <main className="flex-1 overflow-auto">

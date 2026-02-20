@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTargets, createTarget, getLatestPacketLossForAllTargets } from '@/lib/database';
+import { getAllTargets, createTarget, getLatestPacketLossForAllTargets, getGroupOrders } from '@/lib/database';
 import { randomUUID } from 'crypto';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
@@ -16,9 +16,11 @@ export async function GET(request: NextRequest) {
     
     if (includePacketLoss) {
       const packetLossMap = await getLatestPacketLossForAllTargets();
+      const groupOrders = await getGroupOrders();
       return NextResponse.json({
         targets,
-        packetLoss: packetLossMap
+        packetLoss: packetLossMap,
+        groupOrders,
       });
     }
     
