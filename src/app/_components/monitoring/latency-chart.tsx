@@ -50,9 +50,9 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = (payload[0] as any).payload
-  const latency = data.isOnline ? Number(data.originalLatency).toFixed(1) : 'Offline'
+  const latency = data.isOnline === false ? 'Offline' : data.isOnline === null ? 'No Data' : Number(data.originalLatency).toFixed(1)
   const packetLoss = Number(data.packetLoss || 0).toFixed(2)
-  const hasJitter = data.isOnline && data.originalJitter !== null && data.originalJitter !== undefined
+  const hasJitter = data.isOnline === true && data.originalJitter !== null && data.originalJitter !== undefined
   const jitter = hasJitter ? Number(data.originalJitter).toFixed(1) : null
 
   return (
@@ -117,7 +117,7 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: unkn
           </motion.div>
         </AnimatePresence>
         <div className="text-xs text-muted-foreground">
-          Status: {data.isOnline ? 'Online' : 'Offline'}
+          Status: {data.isOnline === true ? 'Online' : data.isOnline === false ? 'Offline' : 'No Data'}
         </div>
       </div>
     </motion.div>
@@ -130,9 +130,11 @@ export const LatencyChart = memo(function LatencyChart({ data, isPolling = false
     return data
       .map((point) => {
         const packetLoss = point.isOnline === false ? 100 : (point.packetLoss || 0)
-        const color = point.isOnline 
-          ? getPacketLossColor(packetLoss)
-          : '#ef4444' // Red for offline
+        const color = point.isOnline === false
+          ? '#ef4444' // Red for offline
+          : point.isOnline === null
+          ? '#9ca3af' // Gray for missing data
+          : getPacketLossColor(packetLoss)
         
         // For stacked area chart, we need latency as base and jitter stacked on top
         const latency = point.isOnline === false ? 0 : (point.latency || 0)
@@ -238,6 +240,10 @@ export const LatencyChart = memo(function LatencyChart({ data, isPolling = false
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#dc2626' }} />
             <span className="text-muted-foreground">High ({'>'}50%)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#9ca3af' }} />
+            <span className="text-muted-foreground">No Data</span>
           </div>
         </div>
       </CardContent>

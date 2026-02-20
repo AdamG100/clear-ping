@@ -272,10 +272,10 @@ export default function StatsCards({
   packetLoss: number
   currentLatency: number
   currentPacketLoss: number
-  jitter: number | null
-  minJitter: number | null
-  maxJitter: number | null
-  currentJitter: number | null
+  jitter: number
+  minJitter: number
+  maxJitter: number
+  currentJitter: number
   lastUpdated?: Date
   isPolling?: boolean
 }>) {
@@ -315,28 +315,29 @@ export default function StatsCards({
     packetLoss <= 50 ? "Moderate-Severe" : "High Loss/Failure")
 
   // Determine jitter trend using same thresholds as latency
-  const jitterTrend = jitter === null ? "stable" :
-    jitter <= 10 ? "up" : 
-    jitter <= 30 ? "up" : 
-    jitter <= 50 ? "up" : 
-    jitter <= 75 ? "stable" : 
-    jitter <= 100 ? "stable" : 
-    jitter <= 150 ? "down" : 
-    jitter <= 200 ? "down" : "down"
+  const jitterValue = jitter === null ? 0 : jitter; // Treat null jitter as 0ms
+  const jitterTrend = !hasData ? "stable" :
+    jitterValue <= 10 ? "up" : 
+    jitterValue <= 30 ? "up" : 
+    jitterValue <= 50 ? "up" : 
+    jitterValue <= 75 ? "stable" : 
+    jitterValue <= 100 ? "stable" : 
+    jitterValue <= 150 ? "down" : 
+    jitterValue <= 200 ? "down" : "down"
   
-  const jitterTrendValue = jitter === null ? "Calculating..." :
-    jitter <= 10 ? "Excellent" : 
-    jitter <= 30 ? "Very Good" : 
-    jitter <= 50 ? "Good" : 
-    jitter <= 75 ? "Acceptable" : 
-    jitter <= 100 ? "Fair" : 
-    jitter <= 150 ? "Degraded" : 
-    jitter <= 200 ? "Poor" : "Critical"
+  const jitterTrendValue = !hasData ? "Calculating..." :
+    jitterValue <= 10 ? "Excellent" : 
+    jitterValue <= 30 ? "Very Good" : 
+    jitterValue <= 50 ? "Good" : 
+    jitterValue <= 75 ? "Acceptable" : 
+    jitterValue <= 100 ? "Fair" : 
+    jitterValue <= 150 ? "Degraded" : 
+    jitterValue <= 200 ? "Poor" : "Critical"
 
   // Get dynamic accent colors based on current values
   const latencyAccentColor = !hasData ? '#6b7280' : (isCurrentlyOffline ? '#ef4444' : getLatencyColor(avgLatency)) // Red when offline
   const packetLossAccentColor = !hasData ? '#6b7280' : getPacketLossColor(packetLoss)
-  const jitterAccentColor = jitter === null ? '#6b7280' : getLatencyColor(jitter)
+  const jitterAccentColor = !hasData ? '#6b7280' : getLatencyColor(jitter === null ? 0 : jitter)
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
@@ -382,7 +383,7 @@ export default function StatsCards({
       <StatCard
         title="Jitter"
         icon={<Zap className="h-5 w-5" />}
-        mainValue={!hasData ? "" : (jitter === null ? "N/A" : `${jitter.toFixed(1)} ms`)}
+        mainValue={!hasData ? "" : (jitter === null ? "0ms" : `${jitter.toFixed(1)} ms`)}
         mainLabel="Average Latency Variation"
         accentColor={jitterAccentColor}
         trend={jitterTrend}
@@ -390,10 +391,10 @@ export default function StatsCards({
         lastUpdated={lastUpdated}
         isPolling={isPolling}
         stats={[
-          { label: "Avg", value: !hasData ? "N/A" : (jitter === null ? "N/A" : `${jitter.toFixed(1)} ms`), variant: "default" },
-          { label: "Max", value: !hasData ? "N/A" : (maxJitter === null ? "N/A" : `${maxJitter.toFixed(1)} ms`), variant: jitter !== null && jitter > 100 ? "warning" : "default" },
-          { label: "Min", value: !hasData ? "N/A" : (minJitter === null ? "N/A" : `${minJitter.toFixed(1)} ms`), variant: "success" },
-          { label: "Now", value: !hasData ? "N/A" : (currentJitter === null ? "N/A" : `${currentJitter.toFixed(1)} ms`), variant: currentJitter === null ? "default" : currentJitter <= 50 ? "success" : currentJitter <= 100 ? "warning" : "danger" },
+          { label: "Avg", value: !hasData ? "N/A" : (jitter === null ? "0ms" : `${jitter.toFixed(1)} ms`), variant: "default" },
+          { label: "Max", value: !hasData ? "N/A" : (maxJitter === null ? "0ms" : `${maxJitter.toFixed(1)} ms`), variant: jitter !== null && jitter > 100 ? "warning" : "default" },
+          { label: "Min", value: !hasData ? "N/A" : (minJitter === null ? "0ms" : `${minJitter.toFixed(1)} ms`), variant: "success" },
+          { label: "Now", value: !hasData ? "N/A" : (currentJitter === null ? "0ms" : `${currentJitter.toFixed(1)} ms`), variant: currentJitter === null || currentJitter <= 50 ? "success" : currentJitter <= 100 ? "warning" : "danger" },
         ]}
       />
     </div>

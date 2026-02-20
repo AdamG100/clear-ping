@@ -169,16 +169,16 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, ta
             })
             
             if (actualData) {
-              // Use actual measurement data
+              // Use actual measurement data but with calculated timestamp for consistent spacing
               dataPoints.push({
-                timestamp: new Date(actualData.timestamp), // Use actual measurement timestamp
+                timestamp: timestamp, // Use calculated timestamp for consistent chart spacing
                 latency: actualData.latency,
                 packetLoss: actualData.packetLoss,
                 jitter: actualData.jitter,
                 isOnline: actualData.success
               })
             } else {
-              // Use null data for missing probe intervals
+              // Use null data for missing chart intervals
               dataPoints.push({
                 timestamp,
                 latency: null,
@@ -236,7 +236,7 @@ function useTargetMeasurements(targetId: string | null, timeRange: TimeRange, ta
   }
 }
 
-function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 'lastProbe'> & { jitter: number | null; currentLatency: number; currentPacketLoss: number; currentJitter: number | null; currentIsOnline: boolean } {
+function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 'lastProbe'> & { jitter: number; currentLatency: number; currentPacketLoss: number; currentJitter: number; currentIsOnline: boolean } {
   if (data.length === 0) {
     return {
       avgLatency: 0,
@@ -244,10 +244,10 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
       maxLatency: 0,
       packetLoss: 0,
       uptime: 0,
-      jitter: null,
+      jitter: 0,
       currentLatency: 0,
       currentPacketLoss: 0,
-      currentJitter: null,
+      currentJitter: 0,
       currentIsOnline: false
     }
   }
@@ -255,6 +255,8 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
   // Use all data for the selected time range for statistics
   const validLatencies = data.filter(d => d.latency !== null).map(d => d.latency as number)
   const validJitters = data.filter(d => d.jitter !== null).map(d => d.jitter as number)
+  // For jitter statistics, treat null values as 0 (no variation)
+  const allJitters = data.map(d => d.jitter ?? 0)
   const validOnlineData = data.filter(d => d.isOnline !== null)
   const onlineCount = validOnlineData.filter(d => d.isOnline).length
   
@@ -265,12 +267,12 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
   const minLatency = validLatencies.length > 0 ? Math.min(...validLatencies) : 0
   const maxLatency = validLatencies.length > 0 ? Math.max(...validLatencies) : 0
 
-  const avgJitter = validJitters.length > 0
-    ? validJitters.reduce((a, b) => a + b, 0) / validJitters.length
-    : null
+  const avgJitter = allJitters.length > 0
+    ? allJitters.reduce((a, b) => a + b, 0) / allJitters.length
+    : 0
 
-  const minJitter = validJitters.length > 0 ? Math.min(...validJitters) : null
-  const maxJitter = validJitters.length > 0 ? Math.max(...validJitters) : null
+  const minJitter = validJitters.length > 0 ? Math.min(...validJitters) : 0
+  const maxJitter = validJitters.length > 0 ? Math.max(...validJitters) : 0
   
   // Calculate packet loss using time-weighted average (more recent = higher weight)
   // Use packetLoss field directly, defaulting to 100% for offline measurements
@@ -342,7 +344,7 @@ function calculateStats(data: DataPoint[]): Omit<TargetStatistics, 'targetId' | 
     maxJitter,
     currentLatency,
     currentPacketLoss,
-    currentJitter,
+    currentJitter: latestData?.jitter ?? 0,
     currentIsOnline
   }
 }
@@ -623,10 +625,10 @@ export function Dashboard() {
                   packetLoss={stats?.packetLoss ?? 0}
                   currentLatency={stats?.currentLatency ?? 0}
                   currentPacketLoss={stats?.currentPacketLoss ?? 0}
-                  jitter={stats?.jitter ?? null}
-                  minJitter={stats?.minJitter ?? null}
-                  maxJitter={stats?.maxJitter ?? null}
-                  currentJitter={stats?.currentJitter ?? null}
+                  jitter={stats?.jitter ?? 0}
+                  minJitter={stats?.minJitter ?? 0}
+                  maxJitter={stats?.maxJitter ?? 0}
+                  currentJitter={stats?.currentJitter ?? 0}
                   lastUpdated={lastUpdated}
                   isPolling={isPollingNewTarget}
                 />

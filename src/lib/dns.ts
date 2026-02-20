@@ -21,6 +21,7 @@ export async function executeDnsProbe(
 
   // Perform multiple DNS queries to calculate jitter
   const queryCount = 5;
+  let successCount = 0;
 
   for (let i = 0; i < queryCount; i++) {
     const startTime = Date.now();
@@ -40,12 +41,11 @@ export async function executeDnsProbe(
       const endTime = Date.now();
       const latency = endTime - startTime;
       latencies.push(latency);
+      successCount++;
 
     } catch (error) {
-      // For failed queries, we still record the latency if the operation completed
-      const endTime = Date.now();
-      const latency = endTime - startTime;
-      latencies.push(latency);
+      // DNS query failed - don't record latency for failed queries
+      // This ensures jitter is only calculated from successful measurements
     }
 
     // Small delay between queries to avoid overwhelming DNS servers
@@ -54,18 +54,18 @@ export async function executeDnsProbe(
     }
   }
 
-  // Calculate average latency
-  const avgLatency = latencies.length > 0 ? latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length : null;
+  // Calculate average latency only from successful queries
+  const avgLatency = successCount > 0 ? latencies.reduce((sum, lat) => sum + lat, 0) / successCount : null;
 
-  // Calculate jitter as Mean Absolute Deviation
+  // Calculate jitter as Mean Absolute Deviation from successful queries only
   let jitter: number | null = null;
-  if (latencies.length > 1) {
-    const mean = latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length;
+  if (successCount > 1) {
+    const mean = latencies.reduce((sum, lat) => sum + lat, 0) / successCount;
     const absoluteDeviations = latencies.map(lat => Math.abs(lat - mean));
     jitter = Math.round(absoluteDeviations.reduce((sum, dev) => sum + dev, 0) / absoluteDeviations.length);
   }
 
-  const success = latencies.length > 0;
+  const success = successCount > 0;
 
   return {
     targetId,
