@@ -2,7 +2,7 @@
 
 import { useMemo, memo } from 'react'
 import type { ReactElement } from 'react'
-import { Line, Area, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Scatter } from 'recharts'
+import { Line, Area, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Scatter, Customized } from 'recharts'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChartContainer } from '@/components/ui/chart'
 import { getPacketLossColor } from '@/lib/packet-loss-colors'
@@ -65,6 +65,11 @@ interface ChartDataRow extends ChartPoint {
   bucket_poor?: number | null
   bucket_veryPoor?: number | null
   bucket_critical?: number | null
+  // legacy per-loss buckets used by multi-line rendering
+  bucket_loss_perfect?: number | null
+  bucket_loss_minor?: number | null
+  bucket_loss_moderate?: number | null
+  bucket_loss_critical?: number | null
   originalLatency?: number | null
   originalJitter?: number | null
   time: number
@@ -152,7 +157,7 @@ const AnimatedTooltip = ({ active, payload }: { active?: boolean; payload?: Arra
   )
 }
 
-export const LatencyChart = memo(function LatencyChart({ data, isPolling = false }: LatencyChartProps) {
+export const LatencyChart = memo(function LatencyChart({ data }: LatencyChartProps) {
   const chartData = useMemo(() => {
     // Use last-known latency for offline points; treat full loss as No Data (gap)
     const maxLatency = Math.max(...data.map(p => (p.latency || 0)), 100)
@@ -171,18 +176,27 @@ export const LatencyChart = memo(function LatencyChart({ data, isPolling = false
         if (point.isOnline === null) {
           latency = null
         } else if (point.packetLoss !== null && point.packetLoss !== undefined && point.packetLoss >= 100) {
+          // Full loss -> no latency value (gap)
           latency = null
         } else if (point.latency !== null && point.latency !== undefined) {
+          // Measured latency
           latency = point.latency
           acc.lastKnownLatency = point.latency
+        } else if (packetLoss > 0) {
+          // Partial loss but no explicit latency: fall back to last-known latency so the
+          // line remains visible and the loss marker can be positioned relative to it.
+          latency = acc.lastKnownLatency ?? null
         } else if (point.isOnline === false) {
+          // Offline points use last-known latency for context
           latency = acc.lastKnownLatency ?? null
         } else {
           latency = null
         }
 
         const jitter = point.isOnline === true && point.jitter && point.jitter > 0 ? point.jitter : null
-        const lossMarker = packetLoss > 0 && packetLoss < 100 ? maxLatency * (packetLoss / 100) : null
+        const lossMarker = packetLoss > 0 && packetLoss < 100
+          ? (latency !== null ? latency * (packetLoss / 100) : maxLatency * (packetLoss / 100))
+          : null
 
         // Compute jitter band as a baseline (latency_lower) and range (jitter_range) so we can
         // render a shaded area between latency_lower and latency_lower + jitter_range using stacked Areas.
@@ -229,6 +243,18 @@ export const LatencyChart = memo(function LatencyChart({ data, isPolling = false
     return reduced.result
   }, [data])
 
+  // Y-axis domain with breathing room so low-latency lines don't sit on the axis
+  const yDomain = useMemo((): [number, number] => {
+    const vals = chartData
+      .flatMap(d => [d.latency, d.originalLatency])
+      .filter((v): v is number => v != null && v > 0)
+    if (!vals.length) return [0, 100]
+    const dataMin = Math.min(...vals)
+    const dataMax = Math.max(...vals)
+    const pad = Math.max(dataMax * 0.2, 8)
+    return [Math.max(0, Math.floor(dataMin - pad)), Math.ceil(dataMax + pad * 0.5)]
+  }, [chartData])
+
   // Typed shape renderer for loss markers to avoid `any` and JSX casting issues
   const LossMarkerShape = (props: unknown): ReactElement => {
     const p = props as { cx?: number; cy?: number; payload?: { lossMarker?: number | null; color?: string } }
@@ -269,11 +295,140 @@ export const LatencyChart = memo(function LatencyChart({ data, isPolling = false
               <Area type="monotone" dataKey="latency_lower" stroke="none" fillOpacity={0} stackId="jitter" isAnimationActive={false} />
               <Area type="monotone" dataKey="jitter_range" stroke="none" fill="#374151" fillOpacity={0.18} stackId="jitter" isAnimationActive={false} />
 
-              {/* Multi-colored line split by packet-loss buckets; nulls create gaps */}
-              <Line type="monotone" dataKey="bucket_loss_perfect" stroke={getPacketLossColor(0)} dot={false} strokeWidth={2} connectNulls={false} isAnimationActive={false} />
-              <Line type="monotone" dataKey="bucket_loss_minor" stroke={getPacketLossColor(5)} dot={false} strokeWidth={2} connectNulls={false} isAnimationActive={false} />
-              <Line type="monotone" dataKey="bucket_loss_moderate" stroke={getPacketLossColor(30)} dot={false} strokeWidth={2} connectNulls={false} isAnimationActive={false} />
-              <Line type="monotone" dataKey="bucket_loss_critical" stroke={getPacketLossColor(75)} dot={false} strokeWidth={2} connectNulls={false} isAnimationActive={false} />
+              {/* Base latency line (faint) so single-point buckets still sit on a visible line */}
+              <Line type="monotone" dataKey="latency" stroke="rgba(156,163,175,0.6)" dot={false} strokeWidth={1} connectNulls={false} isAnimationActive={false} />
+
+              {/* Multi-colored single-path line split by packet-loss severity */}
+              <Customized
+                component={(chartProps: Record<string, unknown>) => {
+                  try {
+                    const width = (chartProps.width as number) || 0
+                    const height = (chartProps.height as number) || 0
+                    const marginLeft = 60
+                    const marginRight = 30
+                    const marginTop = 20
+                    const marginBottom = 20
+                    const innerWidth = Math.max(0, width - marginLeft - marginRight)
+                    const innerHeight = Math.max(0, height - marginTop - marginBottom)
+
+                    const data = chartData || []
+                    if (!data.length) return <g />
+
+                    const xMin = Math.min(...data.map(d => d.time))
+                    const xMax = Math.max(...data.map(d => d.time))
+                    const [yMin, yMax] = yDomain
+
+                    const xFor = (t: number) => {
+                      if (xMax === xMin) return marginLeft + innerWidth / 2
+                      return marginLeft + ((t - xMin) / (xMax - xMin)) * innerWidth
+                    }
+                    const yFor = (v: number) => {
+                      if (yMax === yMin) return marginTop + innerHeight / 2
+                      return marginTop + (1 - (v - yMin) / (yMax - yMin)) * innerHeight
+                    }
+
+                    let lastKnownLocal: number | null = null
+                    const dataMaxLatency = yMax
+                    const pts: { x: number; y: number; color: string }[] = []
+
+                    for (const d of data) {
+                      const explicit = d.latency ?? d.originalLatency ?? null
+                      const loss = d.packetLoss ?? 0
+
+                      let latencyVal: number | null = null
+                      if (explicit !== null && explicit !== undefined) {
+                        latencyVal = explicit as number
+                        lastKnownLocal = latencyVal
+                      } else if (loss > 0 && lastKnownLocal !== null) {
+                        latencyVal = lastKnownLocal
+                      } else if (loss > 0) {
+                        latencyVal = dataMaxLatency * 0.5
+                      }
+
+                      if (latencyVal == null) continue
+
+                      const color =
+                        d.isOnline === false || loss >= 99
+                          ? '#ef4444'
+                          : d.isOnline === null
+                            ? '#9ca3af'
+                            : getPacketLossColor(loss)
+
+                      pts.push({ x: xFor(d.time), y: yFor(latencyVal), color })
+                    }
+
+                    if (!pts.length) return <g />
+
+                    // Single-point: render a short horizontal tick
+                    if (pts.length === 1) {
+                      const p = pts[0]
+                      return (
+                        <g>
+                          <line x1={p.x - 6} x2={p.x + 6} y1={p.y} y2={p.y} stroke={p.color} strokeWidth={2} strokeLinecap="round" />
+                        </g>
+                      )
+                    }
+
+                    // Build individual colored segments between consecutive points.
+                    // Each segment inherits the color of the destination point so the
+                    // color transition happens exactly where packet-loss changes.
+                    const segments: React.ReactElement[] = []
+                    for (let i = 1; i < pts.length; i++) {
+                      const prev = pts[i - 1]
+                      const cur = pts[i]
+
+                      if (prev.color === cur.color) {
+                        // Same color: single segment
+                        segments.push(
+                          <line
+                            key={i}
+                            x1={prev.x}
+                            y1={prev.y}
+                            x2={cur.x}
+                            y2={cur.y}
+                            stroke={cur.color}
+                            strokeWidth={2}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        )
+                      } else {
+                        // Color change: split segment at midpoint for a sharp transition
+                        const mx = (prev.x + cur.x) / 2
+                        const my = (prev.y + cur.y) / 2
+                        segments.push(
+                          <line
+                            key={`${i}a`}
+                            x1={prev.x}
+                            y1={prev.y}
+                            x2={mx}
+                            y2={my}
+                            stroke={prev.color}
+                            strokeWidth={2}
+                            strokeLinecap="round"
+                          />
+                        )
+                        segments.push(
+                          <line
+                            key={`${i}b`}
+                            x1={mx}
+                            y1={my}
+                            x2={cur.x}
+                            y2={cur.y}
+                            stroke={cur.color}
+                            strokeWidth={2}
+                            strokeLinecap="round"
+                          />
+                        )
+                      }
+                    }
+
+                    return <g>{segments}</g>
+                  } catch {
+                    return <g />
+                  }
+                }}
+              />
 
               {/* Small dots to indicate partial packet loss (0<loss<100) */}
               <Scatter
@@ -283,7 +438,7 @@ export const LatencyChart = memo(function LatencyChart({ data, isPolling = false
               />
 
               <XAxis dataKey="time" tickLine={false} axisLine={false} tickMargin={8} minTickGap={50} tickFormatter={formatXAxis} type="number" scale="time" domain={["dataMin", "dataMax"]} />
-              <YAxis tickLine={false} axisLine={false} tickMargin={8} tickFormatter={(value) => `${value}ms`} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={8} tickFormatter={(value) => `${value}ms`} domain={yDomain} />
             </ComposedChart>
           </ChartContainer>
         </motion.div>

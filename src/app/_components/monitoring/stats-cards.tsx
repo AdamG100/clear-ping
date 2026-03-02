@@ -142,37 +142,32 @@ function StatCard({
   trendValue,
   accentColor = "#4fd1c5",
   lastUpdated,
-  isPolling = false,
   isLoading = false,
 }: StatCardProps & { isPolling?: boolean; isLoading?: boolean }) {
   return (
     <div className={cn(
-      "group relative overflow-hidden rounded-xl border border-border/50 bg-card p-6 transition-all duration-300 hover:border-border hover:shadow-lg hover:shadow-primary/5",
-      isPolling && "animate-pulse border-orange-500/50 shadow-lg shadow-orange-500/20"
+      "group relative overflow-hidden rounded-xl border border-border/50 bg-card p-6 transition-all duration-300 hover:border-border hover:shadow-lg hover:shadow-primary/5"
     )}>
       {/* Subtle glow effect */}
       <div
         className={cn(
-          "absolute -right-20 -top-20 h-65 w-65 rounded-full opacity-10 blur-3xl transition-opacity duration-500 group-hover:opacity-20",
-          isPolling && "opacity-30 animate-pulse"
-        )}
-        style={{ backgroundColor: isPolling ? "#f97316" : accentColor }}
+          "absolute -right-20 -top-20 h-65 w-65 rounded-full opacity-10 blur-3xl transition-opacity duration-500 group-hover:opacity-20"
+          )}
+          style={{ backgroundColor: accentColor }}
       />
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="relative flex h-10 w-10 items-center justify-center rounded-lg">
-            {/* Pulsing background ring */}
+            {/* Pulsing background ring (use opacity style so OKLCH works) */}
             <div
-              className="absolute h-10 w-10 rounded-lg custom-ping opacity-75"
-              style={{ backgroundColor: `${accentColor}15` }}
+              className="absolute h-10 w-10 rounded-lg custom-ping"
+              style={{ backgroundColor: accentColor, opacity: 0.15 }}
             />
-            {/* Fixed center icon container */}
-            <div
-              className="relative flex h-10 w-10 items-center justify-center rounded-lg"
-              style={{ backgroundColor: `${accentColor}15` }}
-            >
+            {/* Fixed center icon container with a semi-opaque background layer so the icon stays fully opaque */}
+            <div className="relative flex h-10 w-10 items-center justify-center rounded-lg">
+              <div className="absolute inset-0 rounded-lg" style={{ backgroundColor: accentColor, opacity: 0.08 }} />
               <span style={{ color: accentColor }}>{icon}</span>
             </div>
           </div>

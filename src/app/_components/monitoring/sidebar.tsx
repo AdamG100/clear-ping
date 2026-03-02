@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import type { Target, TargetType, GroupOrder } from '@/types/probe'
 import { Button } from '@/components/ui/button'
@@ -132,7 +132,7 @@ interface DraggableTargetProps {
   onSelectTarget: (id: string) => void
   onEditTarget: (target: Target) => void
   onDeleteTarget: (id: string) => void
-  onMoveToGroup?: (id: string, x: number, y: number) => void
+  onMoveToGroup?: (id: string, destGroup?: string) => void
 }
 
 function DraggableTarget({
@@ -155,9 +155,9 @@ function DraggableTarget({
       whileDrag={{ scale: 1.02, zIndex: 50 }}
       layout
       transition={{ duration: 0.15 }}
-      onDragEnd={(event, info) => {
+      onDragEnd={() => {
         if (onMoveToGroup) {
-          onMoveToGroup(target.id, info.point.x, info.point.y)
+          onMoveToGroup(target.id)
         }
       }}
     >
@@ -173,6 +173,8 @@ function DraggableTarget({
           <button
             type="button"
             onPointerDown={(e) => dragControls.start(e)}
+            draggable
+            onDragStart={(e) => { e.dataTransfer.setData('targetId', target.id); e.dataTransfer.effectAllowed = 'move' }}
             className="p-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/0 group-hover/target:text-muted-foreground/40 hover:text-muted-foreground/70! transition-colors touch-none shrink-0"
             aria-label={`Drag to reorder ${target.name}`}
             onClick={(e) => e.stopPropagation()}
@@ -231,7 +233,7 @@ interface DraggableGroupProps {
   collapsedGroups: Set<string>
   onToggleCollapse: (groupName: string) => void
   onReorderTargets?: (groupName: string, orderedIds: string[]) => void
-  onMoveToGroup?: (id: string, x: number, y: number) => void
+  onMoveToGroup?: (id: string, destGroup?: string) => void
 }
 
 function DraggableGroup({
@@ -246,6 +248,7 @@ function DraggableGroup({
   onReorderTargets,
   onMoveToGroup,
 }: DraggableGroupProps) {
+  const [isDragOver, setIsDragOver] = useState(false)
   const dragControls = useDragControls()
   const isCollapsed = collapsedGroups.has(groupName)
 
@@ -280,7 +283,18 @@ function DraggableGroup({
       layout
       transition={{ duration: 0.2 }}
     >
-      <div className="rounded-lg overflow-hidden" data-group={groupName}>
+      <div
+        className={cn('rounded-lg overflow-hidden transition-colors', isDragOver && 'ring-1 ring-primary/40 bg-primary/5')}
+        data-group={groupName}
+        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false) }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setIsDragOver(false)
+          const id = e.dataTransfer.getData('targetId')
+          if (id && onMoveToGroup) onMoveToGroup(id, groupName)
+        }}
+      >
         {/* Group Header */}
         <div className="flex items-center gap-1 px-2 py-1.5 group/header">
           <button
@@ -856,6 +870,16 @@ export function Sidebar({
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
 
+  // Track the real pointer position independently — framer-motion clamps the dragged
+  // element within its Reorder.Group, so info.point at drag-end is unreliable for
+  // cross-group detection.
+  const lastPointerRef = useRef({ x: 0, y: 0 })
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => { lastPointerRef.current = { x: e.clientX, y: e.clientY } }
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => window.removeEventListener('pointermove', onMove)
+  }, [])
+
   // Get available groups from existing targets
   const availableGroups = useMemo(() => {
     return [...new Set(targets.map(t => t.group).filter(Boolean))] as string[]
@@ -929,25 +953,37 @@ export function Sidebar({
     onReorderTargets(updates)
   }, [onReorderTargets])
 
-  const handleMoveToGroup = useCallback((id: string, x: number, y: number) => {
+  const handleMoveToGroup = useCallback((id: string, destGroup?: string) => {
     if (!onReorderTargets) return
-    const el = document.elementFromPoint(x, y) as HTMLElement | null
-    if (!el) return
 
-    const groupEl = el.closest('[data-group]') as HTMLElement | null
-    const destGroup = groupEl?.getAttribute('data-group') ?? 'Ungrouped'
+    // When called from the HTML5 onDrop handler, destGroup is already known.
+    // When called from framer-motion onDragEnd, fall back to coordinate detection.
+    let resolvedDestGroup: string
+    let elementsAtPoint: HTMLElement[] = []
+
+    if (destGroup) {
+      resolvedDestGroup = destGroup
+    } else {
+      const { x, y } = lastPointerRef.current
+      elementsAtPoint = document.elementsFromPoint(x, y) as HTMLElement[]
+      const groupEl = elementsAtPoint.find(el => el.hasAttribute('data-group')) as HTMLElement | undefined
+      resolvedDestGroup = groupEl?.getAttribute('data-group') ?? 'Ungrouped'
+    }
 
     // find source group
     const sourceEntry = Object.entries(groupedTargets).find(([, list]) => list.some(t => t.id === id))
     const sourceGroup = sourceEntry ? sourceEntry[0] : 'Ungrouped'
 
-    // if same group, nothing to do here (intra-group reordering handled elsewhere)
-    if (sourceGroup === destGroup) return
+    // if same group, nothing to do (intra-group reordering handled elsewhere)
+    if (sourceGroup === resolvedDestGroup) return
 
-    const destTargetEl = el.closest('[data-target-id]') as HTMLElement | null
+    // Find the insertion position within the destination group (only meaningful for pointer drops)
+    const destTargetEl = elementsAtPoint.find(el =>
+      el.hasAttribute('data-target-id') && el.getAttribute('data-target-id') !== id
+    ) as HTMLElement | undefined
     const destTargetId = destTargetEl?.getAttribute('data-target-id') ?? null
 
-    const destList = (groupedTargets[destGroup] ?? []).map(t => t.id).filter(i => i !== id)
+    const destList = (groupedTargets[resolvedDestGroup] ?? []).map(t => t.id).filter(i => i !== id)
     let destIndex = destList.length
     if (destTargetId) {
       const idx = destList.indexOf(destTargetId)
@@ -962,7 +998,7 @@ export function Sidebar({
 
     destList.splice(destIndex, 0, id)
     destList.forEach((tid, idx) => {
-      if (tid === id) updates.push({ id: tid, sortOrder: idx, group: destGroup === 'Ungrouped' ? '' : destGroup })
+      if (tid === id) updates.push({ id: tid, sortOrder: idx, group: resolvedDestGroup === 'Ungrouped' ? '' : resolvedDestGroup })
       else updates.push({ id: tid, sortOrder: idx })
     })
 

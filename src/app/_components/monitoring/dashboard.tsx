@@ -5,7 +5,7 @@ import type { Target, TimeRange, DataPoint, TargetStatistics, ProbeMeasurement, 
 import { Sidebar } from './sidebar'
 import StatsCards from './stats-cards'
 import { TimeRangeSelector } from './time-range-selector'
-import { LatencyChart } from './latency-chart'
+import { LatencyChart } from './latency-and-packet-loss-chart'
 import { Button } from '@/components/ui/button'
 import { Activity, RefreshCw } from 'lucide-react'
 
