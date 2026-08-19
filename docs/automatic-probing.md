@@ -48,17 +48,51 @@ Common intervals:
 
 ### Ping Configuration
 
-By default, each probe sends **20 pings** with a **1 second timeout**. This can be adjusted in [src/lib/ping.ts](../src/lib/ping.ts):
+By default, each probe sends **20 pings**, spaced **10 ms** apart, with a **1 second
+timeout** per packet. The defaults live in [src/lib/ping.ts](../src/lib/ping.ts):
 
 ```typescript
-const { count = 20, timeout = 1000 } = options;
+const DEFAULTS = { count: 20, timeout: 1000, interval: 10 };
 ```
+
+## How Packet Loss Is Measured
+
+A probe reports three separate numbers, and it matters that they are not conflated:
+
+| Metric | Meaning |
+|--------|---------|
+| **Packet loss** | Of the packets this probe sent, the share that got no reply. |
+| **Uptime** | Of the probes in a window, the share that got *at least one* reply. |
+| **Jitter** | Mean absolute difference between *consecutive* round-trip times (RFC 3550 delay variation). |
+
+A path that drops half its packets on every attempt has **50% packet loss and 100%
+uptime**. Reporting only the second number — as a "failed probes / total probes"
+calculation does — makes a badly degraded path look perfect.
+
+Two deliberate choices keep the loss figure honest:
+
+- **Every packet in a probe uses the same timeout.** Escalating the timeout partway
+  through a run would make later packets more forgiving than earlier ones, so the
+  result would depend on packet ordering rather than on the path.
+- **Lost packets are not retried.** A retry hides exactly the loss the probe exists
+  to measure.
+
+If a probe hits its overall deadline, the packets it never sent are excluded from
+both the numerator and the denominator rather than being scored as loss.
 
 ## Scheduler Management
 
 ### Automatic Startup
 
-The scheduler starts automatically when the first API request is made to the server. This happens through the initialization system in [src/lib/init.ts](../src/lib/init.ts).
+The scheduler starts when the server boots, via Next's `register()` hook in
+[src/instrumentation.ts](../src/instrumentation.ts).
+
+It used to start lazily on the first API request, which meant no probing
+happened until somebody opened the page — close the tab, restart the server,
+and monitoring was silently dead until the next visit.
+
+For a deployment you actually depend on, run the prober as a separate process
+instead; see [running.md](./running.md).
 
 ### API Endpoints
 
@@ -82,12 +116,11 @@ Manually starts the scheduler (useful if it was stopped).
 
 ### Monitoring
 
-The dashboard includes a **Scheduler Status** component that shows:
-- ✅ Active/Stopped status
-- 📊 Number of scheduled targets
-- ⏰ Time until next probe for each target
-- 🔄 Currently probing targets (with spinner)
-- 📅 Last probe time
+`GET /api/scheduler/status` reports whether the scheduler is running, how many
+targets it has scheduled, and when each is next due.
+
+For being told when something breaks rather than having to look, add an alert
+rule from the target's Alerts panel — see [alerting.md](./alerting.md).
 
 ## Data Storage
 
@@ -102,29 +135,32 @@ CREATE TABLE measurements (
   timestamp INTEGER NOT NULL,
   latency REAL,
   packet_loss REAL DEFAULT 0,
+  jitter REAL,
   success INTEGER NOT NULL,
   error_message TEXT,
   FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
 );
 ```
 
+`PRAGMA foreign_keys = ON` is set at startup — without it SQLite ignores the
+`ON DELETE CASCADE` above and deleting a target leaves its measurements behind.
+
 ### Data Retention
 
-By default, measurements are kept indefinitely. You can implement automatic cleanup using:
+The scheduler runs retention at startup and every six hours, keeping 90 days by
+default. Set `CLEARPING_RETENTION_DAYS` to change it, or `0` to keep everything.
 
-```typescript
-import { cleanOldMeasurements } from '@/lib/database';
-
-// Keep last 30 days
-await cleanOldMeasurements(30);
-```
+This matters more than it sounds: six targets on a five-minute interval produce
+roughly 630,000 rows a year.
 
 ## Performance Considerations
 
 ### Resource Usage
 
-- Each probe sends 20 ICMP packets (takes ~20 seconds)
-- Probes run sequentially (one at a time per target)
+- Each probe sends 20 ICMP packets (a fully unreachable host takes ~20 seconds,
+  since every packet must wait out its timeout)
+- Ping targets due in the same tick are probed concurrently, up to 8 at a time
+- A target already being probed is skipped rather than probed twice
 - Database writes are batched for efficiency
 - The scheduler uses minimal CPU when idle
 
@@ -139,8 +175,7 @@ The current implementation can handle:
 
 1. **Use appropriate intervals**: Don't probe more frequently than needed
 2. **Monitor packet loss**: High packet loss may indicate aggressive probing
-3. **Clean old data**: Implement data retention policies for large deployments
-4. **Use DNS for domains**: DNS probing is lighter than ping
+3. **Use DNS for domains**: DNS probing is lighter than ping
 
 ## Troubleshooting
 
@@ -186,12 +221,19 @@ If you're seeing unexpected packet loss:
 
 ```
 src/
+├── instrumentation.ts      # Server startup hook (starts the scheduler)
 ├── lib/
-│   ├── scheduler.ts        # Main scheduler logic
-│   ├── init.ts            # Server initialization
-│   ├── ping.ts            # ICMP ping implementation
-│   ├── dns.ts             # DNS probe implementation
-│   └── database.ts        # Database operations
+│   ├── scheduler.ts        # Probe scheduling and retention
+│   ├── init.ts             # Server initialization
+│   ├── ping.ts             # ICMP probe (process handling)
+│   ├── ping-parse.ts       # ICMP output parsing (platform-specific, tested)
+│   ├── dns.ts              # DNS probe
+│   ├── alerts.ts           # Threshold rules and webhook dispatch
+│   ├── metrics.ts          # Shared statistics (median, jitter)
+│   ├── series.ts           # Chart series and gap detection
+│   └── database.ts         # Database operations
+scripts/
+└── prober.ts               # Standalone probe runner (npm run probe)
 └── app/
     ├── api/
     │   ├── scheduler/

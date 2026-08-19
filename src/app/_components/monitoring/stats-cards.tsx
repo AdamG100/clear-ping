@@ -1,21 +1,21 @@
 "use client"
 
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect } from "react"
+import type { TargetStatistics } from "@/types/probe"
 import { cn } from "@/lib/utils"
-import { getLatencyColor, getPacketLossColor } from "@/lib/packet-loss-colors"
+import { getLatencyColor, getPacketLossColor, getPacketLossLabel, isMeaningfulLoss } from "@/lib/packet-loss-colors"
 import { motion, AnimatePresence } from "framer-motion"
 import { ArrowDown, ArrowUp, Gauge, TrendingUp, FileX, Clock, Zap } from "lucide-react"
 
 function RelativeTime({ timestamp }: { timestamp: Date }) {
   const [relativeTime, setRelativeTime] = useState("")
-
-  const time = useMemo(() => timestamp.getTime(), [timestamp])
+  const time = timestamp.getTime()
 
   useEffect(() => {
     const updateRelativeTime = () => {
-      const now = new Date()
-      const diffMs = now.getTime() - timestamp.getTime()
-      
+      const diffMs = Date.now() - time
+
+
       // Handle future timestamps (shouldn't happen, but be safe)
       if (diffMs < 0) {
         setRelativeTime("now")
@@ -48,7 +48,7 @@ function RelativeTime({ timestamp }: { timestamp: Date }) {
     const interval = setInterval(updateRelativeTime, 10000)
 
     return () => clearInterval(interval)
-  }, [time, timestamp]) // Use memoized time to ensure dependency triggers on timestamp changes
+  }, [time])
 
   return (
     <motion.div
@@ -85,30 +85,22 @@ function StatItem({ label, value, highlight = false, variant = "default" }: Stat
         {label}
       </span>
       <AnimatePresence mode="wait">
-        {value === "N/A" ? (
-          <motion.div
-            key="loading-stat"
-            className="h-5 bg-muted/50 rounded animate-pulse"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-          />
-        ) : (
-          <motion.span
-            key={value}
-            className={cn(
-              "text-sm font-mono tabular-nums",
-              highlight ? "text-foreground font-semibold" : variantClasses[variant]
-            )}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-          >
-            {value}
-          </motion.span>
-        )}
+        <motion.span
+          key={value}
+          className={cn(
+            "text-sm font-mono tabular-nums",
+            // A missing reading is muted, never styled as though it were good.
+            value === "—" ? "text-muted-foreground/50"
+              : highlight ? "text-foreground font-semibold"
+              : variantClasses[variant]
+          )}
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+        >
+          {value}
+        </motion.span>
       </AnimatePresence>
     </div>
   )
@@ -213,7 +205,7 @@ function StatCard({
             {isLoading ? (
               <motion.div
                 key="loading"
-                className="h-9 bg-muted/50 rounded animate-pulse"
+                className="h-9 w-32 bg-muted/50 rounded animate-pulse"
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
@@ -247,115 +239,124 @@ function StatCard({
   )
 }
 
+export interface CurrentReadings {
+  latency: number | null
+  packetLoss: number | null
+  jitter: number | null
+  isOnline: boolean
+}
+
+/** "—" for an absent reading, so it is never mistaken for a real zero. */
+const ms = (v: number | null | undefined) =>
+  v === null || v === undefined ? "—" : `${v.toFixed(1)} ms`
+const pct = (v: number | null | undefined) =>
+  v === null || v === undefined ? "—" : `${v.toFixed(2)}%`
+
 export default function StatsCards({
-  avgLatency,
-  minLatency,
-  maxLatency,
-  packetLoss,
-  currentLatency,
-  currentPacketLoss,
-  jitter,
-  minJitter,
-  maxJitter,
-  currentJitter,
+  statistics,
+  current,
   lastUpdated,
-  isPolling = false,
 }: Readonly<{
-  avgLatency: number
-  minLatency: number
-  maxLatency: number
-  packetLoss: number
-  currentLatency: number
-  currentPacketLoss: number
-  jitter: number
-  minJitter: number
-  maxJitter: number
-  currentJitter: number
+  statistics: TargetStatistics | null
+  current: CurrentReadings
   lastUpdated?: Date
-  isPolling?: boolean
 }>) {
-  // Calculate median (simple approximation)
-  const medianLatency = (minLatency + maxLatency) / 2
+  // "Has data" is a question about sample count, not about values. Checking
+  // `avgLatency === 0 && packetLoss === 0` treated a fast, lossless target as
+  // having no data and left it reading "Calculating…" forever.
+  const hasData = !!statistics && statistics.sampleCount > 0
 
-  // Check if we have data (don't require jitter to be available)
-  const hasData = !(avgLatency === 0 && packetLoss === 0)
+  const avgLatency = statistics?.avgLatency ?? null
+  const medianLatency = statistics?.medianLatency ?? null
+  const minLatency = statistics?.minLatency ?? null
+  const maxLatency = statistics?.maxLatency ?? null
+  const packetLoss = statistics?.packetLoss ?? null
+  const minPacketLoss = statistics?.minPacketLoss ?? null
+  const maxPacketLoss = statistics?.maxPacketLoss ?? null
+  const jitter = statistics?.jitter ?? null
+  const minJitter = statistics?.minJitter ?? null
+  const maxJitter = statistics?.maxJitter ?? null
 
-  // Determine latency trend - show offline when current measurement shows complete failure
-  const isCurrentlyOffline = currentPacketLoss === 100
-  const latencyTrend = !hasData ? "stable" : (isCurrentlyOffline ? "down" : 
-    avgLatency <= 100 ? "up" : 
+  const isCurrentlyOffline = hasData && !current.isOnline
+
+  const latencyTrend = !hasData || avgLatency === null ? "stable" : (isCurrentlyOffline ? "down" :
+    avgLatency <= 100 ? "up" :
     avgLatency <= 200 ? "stable" : "down")
-  
-  const latencyTrendValue = !hasData ? "Calculating..." : (isCurrentlyOffline ? "Offline" : 
-    avgLatency <= 50 ? "Excellent" : 
-    avgLatency <= 100 ? "Good" : 
-    avgLatency <= 200 ? "Fair" : 
-    avgLatency <= 400 ? "Poor" : 
+
+  const latencyTrendValue = !hasData ? "Calculating…" : (isCurrentlyOffline ? "Offline" :
+    avgLatency === null ? "No replies" :
+    avgLatency <= 50 ? "Excellent" :
+    avgLatency <= 100 ? "Good" :
+    avgLatency <= 200 ? "Fair" :
+    avgLatency <= 400 ? "Poor" :
     avgLatency <= 800 ? "Very Poor" : "Critical")
 
-  // Determine packet loss trend matching packet-loss-colors.ts thresholds
-  const lossTrend = !hasData ? "stable" : (packetLoss === 0 ? "up" : 
-    packetLoss <= 10 ? "stable" : 
-    packetLoss <= 50 ? "down" : "down")
-  
-  const lossTrendValue = !hasData ? "Calculating..." : (packetLoss === 0 ? "Perfect" : 
-    packetLoss <= 10 ? "Minor Loss" : 
-    packetLoss <= 50 ? "Moderate-Severe" : "High Loss/Failure")
+  // Read from the shared bands rather than restating the thresholds. Keeping a
+  // second copy here is how the card came to call a single stray packet
+  // "Minor Loss" while the rest of the app had moved on.
+  const lossTrend = !hasData || packetLoss === null
+    ? "stable"
+    : isMeaningfulLoss(packetLoss) ? "down" : "up"
 
-  // Determine jitter trend using same thresholds as latency
-  const jitterValue = jitter === null ? 0 : jitter; // Treat null jitter as 0ms
-  const jitterTrend = !hasData ? "stable" : (
-    jitterValue <= 100 ? "up" : "down"
-  )
+  const lossTrendValue = !hasData || packetLoss === null
+    ? "Calculating…"
+    : getPacketLossLabel(packetLoss)
 
-  const jitterTrendValue = !hasData ? "Calculating..." : (
-    jitterValue <= 50 ? "Excellent" : 
-    jitterValue <= 100 ? "Good" : 
-    jitterValue <= 200 ? "Fair" : "Poor"
-  )
+  const jitterTrend = !hasData || jitter === null ? "stable" : (jitter <= 100 ? "up" : "down")
 
-  // Get dynamic accent colors based on current values
-  const latencyAccentColor = !hasData ? '#6b7280' : (isCurrentlyOffline ? '#ef4444' : getLatencyColor(avgLatency)) // Red when offline
-  const packetLossAccentColor = !hasData ? '#6b7280' : getPacketLossColor(packetLoss)
-  const jitterAccentColor = !hasData ? '#6b7280' : getLatencyColor(jitter === null ? 0 : jitter)
+  const jitterTrendValue = !hasData ? "Calculating…" : (
+    jitter === null ? "No data" :
+    jitter <= 50 ? "Excellent" :
+    jitter <= 100 ? "Good" :
+    jitter <= 200 ? "Fair" : "Poor")
+
+  const latencyAccentColor = !hasData ? '#6b7280'
+    : isCurrentlyOffline ? getPacketLossColor(100)
+    : getLatencyColor(avgLatency ?? 0)
+  const packetLossAccentColor = !hasData || packetLoss === null ? '#6b7280' : getPacketLossColor(packetLoss)
+  const jitterAccentColor = !hasData || jitter === null ? '#6b7280' : getLatencyColor(jitter)
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
-      {/* RTT Card */}
+      {/* RTT Card — the headline is a true median. It used to be the midrange,
+          (min + max) / 2, which a single spike drags far from any reading. */}
       <StatCard
         title="Median RTT"
         icon={<Gauge className="h-5 w-5" />}
-        mainValue={!hasData ? "" : `${medianLatency.toFixed(1)} ms`}
-        mainLabel="Average Round Trip Time"
+        mainValue={ms(medianLatency)}
+        mainLabel="Median Round Trip Time"
         accentColor={latencyAccentColor}
         trend={latencyTrend}
         trendValue={latencyTrendValue}
         lastUpdated={lastUpdated}
-        isPolling={isPolling}
+        isLoading={!hasData}
         stats={[
-          { label: "Avg", value: !hasData ? "N/A" : `${avgLatency.toFixed(1)} ms`, variant: "default" },
-          { label: "Max", value: !hasData ? "N/A" : `${maxLatency.toFixed(1)} ms`, variant: avgLatency > 100 ? "warning" : "default" },
-          { label: "Min", value: !hasData ? "N/A" : `${minLatency.toFixed(1)} ms`, variant: "success" },
-          { label: "Now", value: !hasData ? "N/A" : `${currentLatency.toFixed(1)} ms`, variant: "default" },
+          { label: "Avg", value: ms(avgLatency), variant: "default" },
+          { label: "Max", value: ms(maxLatency), variant: avgLatency !== null && avgLatency > 100 ? "warning" : "default" },
+          { label: "Min", value: ms(minLatency), variant: "success" },
+          { label: "Now", value: ms(current.latency), variant: "default" },
         ]}
       />
 
-      {/* Packet Loss Card */}
+      {/* Packet Loss Card — Min and Max are the real extremes over the window.
+          They were previously hardcoded to 0% and to the average. */}
       <StatCard
         title="Packet Loss"
         icon={<FileX className="h-5 w-5" />}
-        mainValue={!hasData ? "" : `${packetLoss.toFixed(2)}%`}
-        mainLabel="Average Packet Loss"
+        mainValue={pct(packetLoss)}
+        mainLabel={hasData && statistics
+          ? `${statistics.uptime.toFixed(1)}% of ${statistics.sampleCount} probes answered`
+          : "Average Packet Loss"}
         accentColor={packetLossAccentColor}
         trend={lossTrend}
         trendValue={lossTrendValue}
         lastUpdated={lastUpdated}
-        isPolling={isPolling}
+        isLoading={!hasData}
         stats={[
-          { label: "Avg", value: !hasData ? "N/A" : `${packetLoss.toFixed(2)}%`, variant: "default" },
-          { label: "Max", value: !hasData ? "N/A" : `${packetLoss.toFixed(2)}%`, variant: packetLoss > 10 ? "danger" : packetLoss > 0 ? "warning" : "success" },
-          { label: "Min", value: !hasData ? "N/A" : "0.00%", variant: "success" },
-          { label: "Now", value: !hasData ? "N/A" : `${currentPacketLoss.toFixed(2)}%`, variant: currentPacketLoss === 0 ? "success" : currentPacketLoss <= 10 ? "warning" : "danger" },
+          { label: "Avg", value: pct(packetLoss), variant: "default" },
+          { label: "Max", value: pct(maxPacketLoss), variant: !isMeaningfulLoss(maxPacketLoss) ? "success" : maxPacketLoss! > 5 ? "danger" : "warning" },
+          { label: "Min", value: pct(minPacketLoss), variant: "success" },
+          { label: "Now", value: pct(current.packetLoss), variant: !isMeaningfulLoss(current.packetLoss) ? "success" : (current.packetLoss ?? 0) <= 5 ? "warning" : "danger" },
         ]}
       />
 
@@ -363,18 +364,18 @@ export default function StatsCards({
       <StatCard
         title="Jitter"
         icon={<Zap className="h-5 w-5" />}
-        mainValue={!hasData ? "" : (jitter === null ? "0ms" : `${jitter.toFixed(1)} ms`)}
-        mainLabel="Average Latency Variation"
+        mainValue={ms(jitter)}
+        mainLabel="Variation between consecutive packets"
         accentColor={jitterAccentColor}
         trend={jitterTrend}
         trendValue={jitterTrendValue}
         lastUpdated={lastUpdated}
-        isPolling={isPolling}
+        isLoading={!hasData}
         stats={[
-          { label: "Avg", value: !hasData ? "N/A" : (jitter === null ? "0ms" : `${jitter.toFixed(1)} ms`), variant: "default" },
-          { label: "Max", value: !hasData ? "N/A" : (maxJitter === null ? "0ms" : `${maxJitter.toFixed(1)} ms`), variant: jitter !== null && jitter > 100 ? "warning" : "default" },
-          { label: "Min", value: !hasData ? "N/A" : (minJitter === null ? "0ms" : `${minJitter.toFixed(1)} ms`), variant: "success" },
-          { label: "Now", value: !hasData ? "N/A" : (currentJitter === null ? "0ms" : `${currentJitter.toFixed(1)} ms`), variant: currentJitter === null || currentJitter <= 50 ? "success" : currentJitter <= 100 ? "warning" : "danger" },
+          { label: "Avg", value: ms(jitter), variant: "default" },
+          { label: "Max", value: ms(maxJitter), variant: jitter !== null && jitter > 100 ? "warning" : "default" },
+          { label: "Min", value: ms(minJitter), variant: "success" },
+          { label: "Now", value: ms(current.jitter), variant: current.jitter === null || current.jitter <= 50 ? "success" : current.jitter <= 100 ? "warning" : "danger" },
         ]}
       />
     </div>

@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import type { Target, TargetType, GroupOrder } from '@/types/probe'
+import type { Target, TargetType, GroupOrder, SparklinePoint } from '@/types/probe'
+import { Sparkline } from './sparkline'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -21,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import { getPacketLossColor } from '@/lib/packet-loss-colors'
+import { getPacketLossColor, isMeaningfulLoss, NO_DATA_COLOR } from '@/lib/packet-loss-colors'
 import { Reorder, useDragControls, AnimatePresence, motion } from 'framer-motion'
 import {
   Plus,
@@ -35,9 +36,10 @@ import {
   Shield,
   Network,
   FolderPlus,
-  BarChart3,
   Wifi,
   Search,
+  Pause,
+  Play,
 } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -49,6 +51,8 @@ interface SidebarProps {
   onAddTarget: (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => void
   onUpdateTarget: (id: string, updates: Partial<Target>) => void
   onDeleteTarget: (id: string) => void
+  onTogglePaused: (target: Target) => void
+  series?: Record<string, SparklinePoint[]>
   groupOrders?: GroupOrder[]
   onReorderGroups?: (groups: GroupOrder[]) => void
   onReorderTargets?: (updates: { id: string; sortOrder: number; group?: string }[]) => void
@@ -56,38 +60,55 @@ interface SidebarProps {
 
 // ─── Status Indicator ───────────────────────────────────────────────────────
 
-function StatusIndicator({ isOnline, packetLoss = 0, createdAt }: { isOnline: boolean; packetLoss?: number; createdAt?: Date | string }) {
-  const [isVeryNew, setIsVeryNew] = useState(false)
+/**
+ * Three-state status dot: online (coloured by packet loss), offline, or
+ * awaiting its first measurement.
+ *
+ * `isOnline` is `undefined` — not `false` — when nothing has been measured yet.
+ * Collapsing those two cases showed a brand new target as though it were down.
+ */
+function StatusIndicator({
+  isOnline,
+  packetLoss,
+}: {
+  isOnline?: boolean
+  packetLoss?: number
+}) {
+  const pending = isOnline === undefined
 
-  useEffect(() => {
-    const updateIsVeryNew = () => {
-      const veryNew = createdAt && (Date.now() - new Date(createdAt).getTime()) < 60000
-      setIsVeryNew(!!veryNew)
-    }
-    updateIsVeryNew()
-    const interval = setInterval(updateIsVeryNew, 5000)
-    return () => clearInterval(interval)
-  }, [createdAt])
+  let statusColor: string
+  let label: string
 
-  let statusColor = '#dc2626'
-  if (isVeryNew) {
-    statusColor = '#6b7280'
+  if (pending) {
+    statusColor = NO_DATA_COLOR
+    label = 'Waiting for first measurement'
   } else if (isOnline) {
-    statusColor = getPacketLossColor(packetLoss)
+    statusColor = getPacketLossColor(packetLoss ?? 0)
+    label = isMeaningfulLoss(packetLoss)
+      ? `Online (${packetLoss!.toFixed(1)}% packet loss)`
+      : 'Online'
+  } else {
+    statusColor = getPacketLossColor(100)
+    label = 'Offline'
   }
 
   return (
-    <span
-      className="relative inline-flex shrink-0"
-      aria-label={
-        isVeryNew ? 'New target - waiting for data...' :
-        isOnline
-          ? packetLoss === 0 ? 'Online' : `Online (${packetLoss.toFixed(1)}% packet loss)`
-          : 'Offline'
-      }
-    >
-      <span className="absolute inline-flex h-2.5 w-2.5 rounded-full custom-ping" style={{ backgroundColor: statusColor }} />
-      <span className="relative inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: statusColor }} />
+    <span className="relative inline-flex shrink-0" title={label}>
+      {/* The pulse only runs for a live target; a steady dot for offline and
+          pending states stops a dead target from looking like active traffic. */}
+      {isOnline && (
+        <span
+          className="absolute inline-flex h-2.5 w-2.5 rounded-full custom-ping"
+          style={{ backgroundColor: statusColor }}
+          aria-hidden="true"
+        />
+      )}
+      <span
+        className="relative inline-block h-2.5 w-2.5 rounded-full"
+        style={{ backgroundColor: statusColor }}
+        aria-hidden="true"
+      />
+      <span className="sr-only">{label}</span>
     </span>
   )
 }
@@ -132,6 +153,8 @@ interface DraggableTargetProps {
   onSelectTarget: (id: string) => void
   onEditTarget: (target: Target) => void
   onDeleteTarget: (id: string) => void
+  onTogglePaused: (target: Target) => void
+  trace?: SparklinePoint[]
   onMoveToGroup?: (id: string, destGroup?: string) => void
 }
 
@@ -141,8 +164,11 @@ function DraggableTarget({
   onSelectTarget,
   onEditTarget,
   onDeleteTarget,
+  onTogglePaused,
+  trace,
   onMoveToGroup,
 }: DraggableTargetProps) {
+  const paused = target.status === 'paused'
   const dragControls = useDragControls()
 
   return (
@@ -161,11 +187,22 @@ function DraggableTarget({
         }
       }}
     >
+      {/* Selecting a target has to work from the keyboard, so the row is a
+          real interactive element rather than a div with a click handler. */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-current={selectedTargetId === target.id}
         onClick={() => onSelectTarget(target.id)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onSelectTarget(target.id)
+          }
+        }}
         className={cn(
           'w-full text-left px-2 py-2 rounded-md transition-colors group/target cursor-pointer',
-          'hover:bg-sidebar-accent',
+          'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           selectedTargetId === target.id && 'bg-sidebar-accent'
         )}
       >
@@ -181,27 +218,61 @@ function DraggableTarget({
           >
             <GripVertical className="h-3 w-3" />
           </button>
-          <StatusIndicator
-            isOnline={target.isOnline || false}
-            packetLoss={target.packetLoss || 0}
-            createdAt={target.createdAt}
-          />
-          <div className="flex-1 min-w-0">
+          <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} />
+
+          {/* The name owns the full width of the first line; the address and the
+              trace share the second. Putting the trace on the same line as the
+              name is what pushed the row past the sidebar's width and clipped
+              the buttons off the end. */}
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-sm text-sidebar-foreground truncate">
+              <span className={cn(
+                'min-w-0 truncate text-sm font-medium',
+                paused ? 'text-muted-foreground line-through' : 'text-sidebar-foreground'
+              )}>
                 {target.name}
               </span>
-              {target.type && <TypeBadge type={target.type} />}
+              {target.type && (
+                <span className="shrink-0">
+                  <TypeBadge type={target.type} />
+                </span>
+              )}
+              {paused && (
+                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                  Paused
+                </span>
+              )}
             </div>
-            <span className="text-xs text-muted-foreground truncate block">
-              {target.address || target.host}
-            </span>
+
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                {target.address || target.host}
+              </span>
+              {/* Stays put on hover: the trace is the reason to look at the row,
+                  so swapping it out for the controls hid the thing being read. */}
+              <span className="ml-auto shrink-0">
+                <Sparkline points={trace ?? []} width={52} height={16} muted={paused} />
+              </span>
+            </div>
           </div>
-          <div className="flex gap-0.5 opacity-0 group-hover/target:opacity-100 transition-opacity">
+
+          {/* Reserves its width at all times, so revealing the controls never
+              reflows the row or pushes the last button out of bounds. */}
+          <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100">
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); onTogglePaused(target) }}
+              className="cursor-pointer rounded p-0.5 transition-colors hover:bg-muted"
+              aria-label={paused ? `Resume ${target.name}` : `Pause ${target.name}`}
+            >
+              {paused
+                ? <Play className="h-3.5 w-3.5 text-muted-foreground" />
+                : <Pause className="h-3.5 w-3.5 text-muted-foreground" />}
+            </button>
             <button
               type="button"
               onClick={e => { e.stopPropagation(); onEditTarget(target) }}
-              className="p-1 hover:bg-blue-500/20 rounded transition-colors cursor-pointer"
+              className="cursor-pointer rounded p-0.5 transition-colors hover:bg-blue-500/20"
               aria-label={`Edit ${target.name}`}
             >
               <Pencil className="h-3.5 w-3.5 text-blue-500" />
@@ -209,7 +280,7 @@ function DraggableTarget({
             <button
               type="button"
               onClick={e => { e.stopPropagation(); onDeleteTarget(target.id) }}
-              className="p-1 hover:bg-destructive/20 rounded transition-colors cursor-pointer"
+              className="cursor-pointer rounded p-0.5 transition-colors hover:bg-destructive/20"
               aria-label={`Delete ${target.name}`}
             >
               <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -230,6 +301,8 @@ interface DraggableGroupProps {
   onSelectTarget: (id: string) => void
   onEditTarget: (target: Target) => void
   onDeleteTarget: (id: string) => void
+  onTogglePaused: (target: Target) => void
+  series?: Record<string, SparklinePoint[]>
   collapsedGroups: Set<string>
   onToggleCollapse: (groupName: string) => void
   onReorderTargets?: (groupName: string, orderedIds: string[]) => void
@@ -243,6 +316,8 @@ function DraggableGroup({
   onSelectTarget,
   onEditTarget,
   onDeleteTarget,
+  onTogglePaused,
+  series,
   collapsedGroups,
   onToggleCollapse,
   onReorderTargets,
@@ -256,9 +331,15 @@ function DraggableGroup({
   const [reorderableTargetIds, setReorderableTargetIds] = useState(targetIds)
   const targetMap = useMemo(() => new Map(groupTargets.map(t => [t.id, t])), [groupTargets])
 
-  useEffect(() => {
+  // Drag reordering needs a local copy it can mutate mid-gesture, which has to
+  // resync when the server order changes. Adjusting during render rather than
+  // in an effect: React re-runs this component immediately without committing
+  // the stale list, so the row order never flashes.
+  const [syncedTargetIds, setSyncedTargetIds] = useState(targetIds)
+  if (syncedTargetIds !== targetIds) {
+    setSyncedTargetIds(targetIds)
     setReorderableTargetIds(targetIds)
-  }, [targetIds])
+  }
 
   // Persist target reorder on pointer up (end of drag)
   useEffect(() => {
@@ -316,12 +397,12 @@ function DraggableGroup({
             ) : (
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             )}
-            <span className="text-xs font-semibold text-sidebar-foreground uppercase tracking-wider truncate">
+            <span className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               {groupName}
             </span>
           </button>
 
-          <span className="text-[10px] text-muted-foreground tabular-nums bg-muted/50 px-1.5 py-0.5 rounded-full">
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
             {groupTargets.length}
           </span>
         </div>
@@ -353,6 +434,8 @@ function DraggableGroup({
                       onSelectTarget={onSelectTarget}
                       onEditTarget={onEditTarget}
                       onDeleteTarget={onDeleteTarget}
+                      onTogglePaused={onTogglePaused}
+                      trace={series?.[targetId]}
                       onMoveToGroup={onMoveToGroup}
                     />
                   )
@@ -859,6 +942,8 @@ export function Sidebar({
   onAddTarget,
   onUpdateTarget,
   onDeleteTarget,
+  onTogglePaused,
+  series,
   groupOrders = [],
   onReorderGroups,
   onReorderTargets,
@@ -938,10 +1023,12 @@ export function Sidebar({
 
   const [reorderableGroups, setReorderableGroups] = useState<string[]>(orderedGroupNames)
 
-  // Sync when external ordering changes
-  useEffect(() => {
+  // Same resync-during-render as the target list above.
+  const [syncedGroupNames, setSyncedGroupNames] = useState(orderedGroupNames)
+  if (syncedGroupNames !== orderedGroupNames) {
+    setSyncedGroupNames(orderedGroupNames)
     setReorderableGroups(orderedGroupNames)
-  }, [orderedGroupNames])
+  }
 
   const handleGroupReorder = useCallback((newOrder: string[]) => {
     setReorderableGroups(newOrder)
@@ -1037,32 +1124,57 @@ export function Sidebar({
     setIsEditOpen(true)
   }
 
-  const onlineCount = targets.filter(t => t.isOnline).length
-  const offlineCount = targets.filter(t => !t.isOnline).length
+  // Targets awaiting their first measurement are counted separately rather
+  // than lumped in with the offline ones.
+  const onlineCount = targets.filter(t => t.isOnline === true).length
+  const offlineCount = targets.filter(t => t.isOnline === false).length
+  const pendingCount = targets.filter(t => t.isOnline === undefined).length
 
   return (
-    <aside className="w-72 bg-sidebar border-r border-sidebar-border flex flex-col h-full">
+    <aside className="flex h-full w-80 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
       {/* Header */}
       <div className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-2 mb-3">
-          <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
-            <BarChart3 className="h-5 w-5 text-primary" />
-          </div>
+          {/* The mark is a miniature trace: the thing the product makes. */}
+          <span
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-sidebar-border bg-sidebar-accent"
+            aria-hidden="true"
+          >
+            <svg viewBox="0 0 20 14" className="h-4 w-5" fill="none">
+              <path
+                d="M1 9 L4 8 L7 10 L10 3 L13 7 L16 6 L19 6.5"
+                stroke="var(--signal-perfect)"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
           <div>
-            <h1 className="font-semibold text-sidebar-foreground">ClearICMP</h1>
-            <p className="text-xs text-muted-foreground">Network Monitor</p>
+            <h1 className="text-sm font-semibold tracking-tight text-sidebar-foreground">
+              ClearPing
+            </h1>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              Path monitor
+            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3 text-xs">
           <div className="flex items-center gap-1.5">
-            <StatusIndicator isOnline={true} />
+            <StatusIndicator isOnline={true} packetLoss={0} />
             <span className="text-muted-foreground">{onlineCount} online</span>
           </div>
           <div className="flex items-center gap-1.5">
             <StatusIndicator isOnline={false} />
             <span className="text-muted-foreground">{offlineCount} offline</span>
           </div>
+          {pendingCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <StatusIndicator />
+              <span className="text-muted-foreground">{pendingCount} pending</span>
+            </div>
+          )}
           {targets.length > 4 && (
             <button
               type="button"
@@ -1116,21 +1228,37 @@ export function Sidebar({
                     {(filteredGroupedTargets[groupName] ?? []).map(target => (
                       <li key={target.id}>
                         <div
+                          role="button"
+                          tabIndex={0}
+                          aria-current={selectedTargetId === target.id}
                           onClick={() => onSelectTarget(target.id)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              onSelectTarget(target.id)
+                            }
+                          }}
                           className={cn(
                             'w-full text-left px-3 py-2 rounded-md transition-colors group cursor-pointer',
-                            'hover:bg-sidebar-accent',
+                            'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                             selectedTargetId === target.id && 'bg-sidebar-accent'
                           )}
                         >
                           <div className="flex items-center gap-2.5">
-                            <StatusIndicator isOnline={target.isOnline || false} packetLoss={target.packetLoss || 0} createdAt={target.createdAt} />
+                            <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium text-sm text-sidebar-foreground truncate">{target.name}</span>
                                 {target.type && <TypeBadge type={target.type} />}
                               </div>
-                              <span className="text-xs text-muted-foreground truncate block">{target.address || target.host}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                                  {target.address || target.host}
+                                </span>
+                                <span className="ml-auto shrink-0">
+                                  <Sparkline points={series?.[target.id] ?? []} width={52} height={16} />
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1165,6 +1293,8 @@ export function Sidebar({
                     onSelectTarget={onSelectTarget}
                     onEditTarget={openEditDialog}
                     onDeleteTarget={onDeleteTarget}
+                    onTogglePaused={onTogglePaused}
+                    series={series}
                     collapsedGroups={collapsedGroups}
                     onToggleCollapse={toggleCollapse}
                     onReorderTargets={handleTargetReorder}

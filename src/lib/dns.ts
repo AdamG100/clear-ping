@@ -1,158 +1,130 @@
-import { promises as dns } from 'dns';
+import { Resolver } from 'dns/promises';
 import { ProbeResult } from '@/types/probe';
+import { jitterFromLatencies, mean, percentile, round } from './metrics';
 
 interface DnsOptions {
   recordType?: 'A' | 'AAAA' | 'MX' | 'TXT' | 'NS' | 'CNAME';
-  timeout?: number; // milliseconds
+  /** Per-query timeout, in milliseconds. */
+  timeout?: number;
+  /** Queries per probe. */
+  count?: number;
+  /** Delay between consecutive queries, in milliseconds. */
+  interval?: number;
+  /** Name resolved when the target is itself a DNS server. */
+  probeName?: string;
+}
+
+const DEFAULTS = {
+  recordType: 'A',
+  timeout: 5000,
+  count: 5,
+  interval: 50,
+  probeName: 'example.com',
+} as const;
+
+/** Loose check that a string looks like a resolvable name (not an IP literal). */
+export function isValidHostname(host: string): boolean {
+  const trimmed = host.trim();
+  if (trimmed.length === 0 || trimmed.length > 253) return false;
+  return /^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(trimmed);
+}
+
+function isIpLiteral(host: string): boolean {
+  const trimmed = host.trim();
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(trimmed)) {
+    return trimmed.split('.').every(part => Number(part) <= 255);
+  }
+  return /^[0-9a-fA-F:]+$/.test(trimmed) && trimmed.includes(':');
 }
 
 /**
- * Execute a DNS probe to resolve a hostname
- * Returns the DNS resolution latency in milliseconds
+ * Execute a DNS probe.
+ *
+ * The target may be either a *name to resolve* (using the system resolver) or a
+ * *DNS server to query* (an IP literal, in which case a known name is resolved
+ * through that server). Distinguishing the two matters: sending an IP address
+ * to `resolve()` would fail every time and report a permanently dead target.
+ *
+ * Reports the same three metrics as the ping probe, so that packet loss means
+ * the same thing on both: the fraction of requests that got no answer.
  */
 export async function executeDnsProbe(
   targetId: string,
   host: string,
   options: DnsOptions = {}
 ): Promise<ProbeResult> {
-  const { recordType = 'A', timeout = 5000 } = options;
+  const recordType = options.recordType ?? DEFAULTS.recordType;
+  const timeout = Math.max(100, options.timeout ?? DEFAULTS.timeout);
+  const count = Math.max(1, Math.floor(options.count ?? DEFAULTS.count));
+  const interval = Math.max(0, options.interval ?? DEFAULTS.interval);
+  const probeName = options.probeName ?? DEFAULTS.probeName;
+
   const timestamp = new Date();
+  const trimmedHost = host.trim();
+
+  const resolver = new Resolver({ timeout, tries: 1 });
+  let queryName = trimmedHost;
+
+  if (isIpLiteral(trimmedHost)) {
+    // The target is a nameserver: ask it to resolve a known name.
+    resolver.setServers([trimmedHost]);
+    queryName = probeName;
+  } else if (!isValidHostname(trimmedHost)) {
+    return {
+      targetId,
+      timestamp,
+      latency: null,
+      packetLoss: 100,
+      jitter: null,
+      success: false,
+      errorMessage: `Invalid DNS target: ${host}`,
+    };
+  }
+
   const latencies: number[] = [];
+  let lastError: string | undefined;
 
-  // Perform multiple DNS queries to calculate jitter
-  const queryCount = 5;
-  let successCount = 0;
-
-  for (let i = 0; i < queryCount; i++) {
+  for (let i = 0; i < count; i++) {
     const startTime = Date.now();
 
     try {
-      // Create a timeout promise
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('DNS query timed out')), timeout);
-      });
-
-      // Execute DNS lookup
-      const lookupPromise = dns.resolve(host, recordType);
-
-      // Race between lookup and timeout
-      await Promise.race([lookupPromise, timeoutPromise]);
-
-      const endTime = Date.now();
-      const latency = endTime - startTime;
-      latencies.push(latency);
-      successCount++;
-
+      // The resolver enforces `timeout` itself, so there is no dangling timer
+      // left running after a fast answer (a Promise.race would leak one).
+      await resolver.resolve(queryName, recordType);
+      latencies.push(Date.now() - startTime);
     } catch (error) {
-      // DNS query failed - don't record latency for failed queries
-      // This ensures jitter is only calculated from successful measurements
+      lastError = error instanceof Error ? error.message : 'DNS query failed';
     }
 
-    // Small delay between queries to avoid overwhelming DNS servers
-    if (i < queryCount - 1) {
-      await new Promise(resolve => setTimeout(resolve, 50));
+    if (i < count - 1 && interval > 0) {
+      await new Promise(resolve => setTimeout(resolve, interval));
     }
   }
 
-  // Calculate average latency only from successful queries
-  const avgLatency = successCount > 0 ? latencies.reduce((sum, lat) => sum + lat, 0) / successCount : null;
+  const received = latencies.length;
+  const packetLoss = round(((count - received) / count) * 100, 2);
+  const avgLatency = received > 0 ? round(mean(latencies)!, 2) : null;
+  const jitter = received > 1 ? round(jitterFromLatencies(latencies)!, 2) : null;
 
-  // Calculate jitter as Mean Absolute Deviation from successful queries only
-  let jitter: number | null = null;
-  if (successCount > 1) {
-    const mean = latencies.reduce((sum, lat) => sum + lat, 0) / successCount;
-    const absoluteDeviations = latencies.map(lat => Math.abs(lat - mean));
-    jitter = Math.round(absoluteDeviations.reduce((sum, dev) => sum + dev, 0) / absoluteDeviations.length);
-  }
-
-  const success = successCount > 0;
+  console.log(
+    `[DNS] ${trimmedHost}: queries=${count} answered=${received} loss=${packetLoss}% ` +
+    `avg=${avgLatency ?? '-'}ms jitter=${jitter ?? '-'}ms`
+  );
 
   return {
     targetId,
     timestamp,
     latency: avgLatency,
+    minLatency: received > 0 ? Math.min(...latencies) : null,
+    maxLatency: received > 0 ? Math.max(...latencies) : null,
+    p10Latency: received > 0 ? percentile(latencies, 10) : null,
+    p25Latency: received > 0 ? percentile(latencies, 25) : null,
+    p50Latency: received > 0 ? percentile(latencies, 50) : null,
+    p75Latency: received > 0 ? percentile(latencies, 75) : null,
+    p90Latency: received > 0 ? percentile(latencies, 90) : null,
+    packetLoss,
     jitter,
-    success,
+    success: received > 0,
+    errorMessage: received === 0 ? lastError ?? 'All DNS queries failed' : undefined,
   };
-}
-
-/**
- * Execute a single DNS probe to resolve a hostname
- * Returns the DNS resolution latency in milliseconds
- */
-async function executeSingleDnsProbe(
-  targetId: string,
-  host: string,
-  options: DnsOptions = {}
-): Promise<ProbeResult> {
-  const { recordType = 'A', timeout = 5000 } = options;
-  const timestamp = new Date();
-  const startTime = Date.now();
-
-  try {
-    // Create a timeout promise
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('DNS query timed out')), timeout);
-    });
-
-    // Execute DNS lookup
-    const lookupPromise = dns.resolve(host, recordType);
-
-    // Race between lookup and timeout
-    await Promise.race([lookupPromise, timeoutPromise]);
-
-    const endTime = Date.now();
-    const latency = endTime - startTime;
-
-    return {
-      targetId,
-      timestamp,
-      latency,
-      success: true,
-    };
-
-  } catch (error) {
-    const endTime = Date.now();
-    const latency = endTime - startTime;
-
-    // Still return latency if query failed but completed
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-    return {
-      targetId,
-      timestamp,
-      latency: latency < timeout ? latency : null,
-      success: false,
-      errorMessage,
-    };
-  }
-}
-export async function executeMultipleDnsProbes(
-  targetId: string,
-  host: string,
-  count: number = 20,
-  options: DnsOptions = {}
-): Promise<ProbeResult[]> {
-  const results: ProbeResult[] = [];
-
-  for (let i = 0; i < count; i++) {
-    const result = await executeSingleDnsProbe(targetId, host, options);
-    results.push(result);
-    
-    // Small delay between probes to avoid overwhelming DNS servers
-    if (i < count - 1) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
-
-  return results;
-}
-
-/**
- * Check if a hostname is valid for DNS probing
- */
-export function isValidHostname(host: string): boolean {
-  // Basic hostname validation
-  const hostnameRegex = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\.[a-zA-Z]{2,11}?$/;
-  return hostnameRegex.test(host);
 }

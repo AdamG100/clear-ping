@@ -1,117 +1,172 @@
 /**
- * Packet Loss & Latency Color Utilities (OKLCH-first)
+ * Packet Loss & Latency Colour Utilities
  *
- * This module centralizes color definitions using OKLCH color strings
- * for perceptual uniformity. For compatibility we keep a hex fallback
- * alongside each OKLCH value so callers can use whichever format they
- * prefer.
+ * One place defines the severity bands, their thresholds and their colours, so
+ * a chart legend, a line segment and a status dot can never disagree about
+ * what "moderate loss" looks like or where it starts.
  */
 
 export interface PacketLossColorScheme {
   hex: string
   oklch: string
+  /** Theme-aware CSS variable; preferred over hex wherever CSS is in play. */
+  cssVar: string
   label: string
+  /** Human-readable threshold, e.g. "≤10%". Rendered in legends. */
+  range: string
   description: string
 }
 
-const PACKET_LOSS_PALETTE = {
-  perfect: {
-    oklch: 'oklch(0.65 0.15 145)',
-    hex: '#22c55e',
-    label: 'Perfect',
-    description: 'No packet loss',
-  },
-  minor: {
-    oklch: 'oklch(0.65 0.10 195)',
-    hex: '#06b6d4',
-    label: 'Minor Loss',
-    description: 'Small, recoverable packet loss',
-  },
-  moderate: {
-    oklch: 'oklch(0.62 0.18 320)',
-    hex: '#d946ef',
-    label: 'Moderate-Severe',
-    description: 'Significant packet loss',
-  },
-  critical: {
-    oklch: 'oklch(0.60 0.20 25)',
-    hex: '#dc2626',
-    label: 'High Loss/Failure',
-    description: 'Path failure or high packet loss',
-  },
-} as const
+/** Colour for a bucket with no measurements — distinct from every severity band. */
+export const NO_DATA_COLOR = 'var(--signal-none)'
 
-const LATENCY_PALETTE = {
-  excellent: { oklch: 'oklch(0.65 0.15 145)', hex: '#22c55e' }, // <=50ms
-  good: { oklch: 'oklch(0.77 0.10 145)', hex: '#4ade80' }, // 51-100ms
-  fair: { oklch: 'oklch(0.65 0.10 200)', hex: '#06b6d4' }, // 101-200ms
-  poor: { oklch: 'oklch(0.60 0.20 25)', hex: '#dc2626' }, // >200ms
+/**
+ * CSS custom properties, so a chart stroke and a status dot resolve to the same
+ * value and both follow the theme. Hex equivalents remain below for the rare
+ * context that cannot take a var().
+ */
+export const SIGNAL_VARS = {
+  perfect: 'var(--signal-perfect)',
+  minor: 'var(--signal-minor)',
+  moderate: 'var(--signal-moderate)',
+  high: 'var(--signal-high)',
+  none: 'var(--signal-none)',
 } as const
 
 /**
- * Return OKLCH string for packet loss percentage.
+ * How much loss counts as none.
+ *
+ * ICMP is the first traffic a busy router deprioritises or rate-limits, so an
+ * isolated unanswered echo is ordinary background noise rather than evidence of
+ * a problem. It is also below the resolution of a single probe: at 20 packets,
+ * the smallest loss one probe can report is 5%, so any window average under 1%
+ * necessarily means "one stray packet somewhere in the window".
  */
-export function getPacketLossColorOKLCH(lossPercent: number | string): string {
-  const n = Number(lossPercent ?? 0)
-  if (Number.isNaN(n)) return PACKET_LOSS_PALETTE.critical.oklch
-  if (n === 0) return PACKET_LOSS_PALETTE.perfect.oklch
-  if (n <= 10) return PACKET_LOSS_PALETTE.minor.oklch
-  if (n <= 50) return PACKET_LOSS_PALETTE.moderate.oklch
-  return PACKET_LOSS_PALETTE.critical.oklch
+export const LOSS_NOISE_FLOOR = 1
+
+/** Whether a loss figure is worth drawing attention to. */
+export function isMeaningfulLoss(lossPercent: number | null | undefined): boolean {
+  return typeof lossPercent === 'number' && Number.isFinite(lossPercent) && lossPercent > LOSS_NOISE_FLOOR
 }
 
 /**
- * Return primary color for packet loss as OKLCH (default) — kept for
- * backwards compatibility with existing callers that expect a single
- * color string.
+ * Severity bands, ordered from best to worst. `maxLoss` is the inclusive upper
+ * bound of the band; the last band catches everything above the previous one.
+ *
+ * Thresholds are set against what the loss does to traffic, not against round
+ * numbers:
+ *
+ *   ≤1%    TCP recovers invisibly and nothing notices. See LOSS_NOISE_FLOOR.
+ *   1-5%   Real but small. One dropped packet in a 20-packet probe is exactly
+ *          5%, so a single-packet blip lands at the top of this band and no
+ *          higher — which is the whole point of putting the boundary there.
+ *   5-20%  VoIP degrades audibly and TCP throughput collapses.
+ *   >20%   The path is effectively broken.
+ *
+ * The previous thresholds were 0 / 10 / 50 / 100, which was wrong at both ends:
+ * a single stray packet in an hour reported as "Minor Loss", while a path
+ * dropping 40% of its traffic was still only "Moderate".
  */
+export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: number })[] = [
+  {
+    maxLoss: LOSS_NOISE_FLOOR,
+    oklch: 'oklch(0.76 0.10 175)',
+    hex: '#43bfae',
+    cssVar: 'var(--signal-perfect)',
+    label: 'Clear',
+    range: '≤1%',
+    description: 'No loss worth acting on',
+  },
+  {
+    maxLoss: 5,
+    oklch: 'oklch(0.84 0.15 95)',
+    hex: '#e3c04a',
+    cssVar: 'var(--signal-minor)',
+    label: 'Minor',
+    range: '1-5%',
+    description: 'Small, recoverable packet loss',
+  },
+  {
+    maxLoss: 20,
+    oklch: 'oklch(0.73 0.19 50)',
+    hex: '#ef8b3c',
+    cssVar: 'var(--signal-moderate)',
+    label: 'Degraded',
+    range: '5-20%',
+    description: 'Calls and streams suffer; throughput drops sharply',
+  },
+  {
+    maxLoss: 100,
+    oklch: 'oklch(0.63 0.23 25)',
+    hex: '#e2453c',
+    cssVar: 'var(--signal-high)',
+    label: 'Severe',
+    range: '>20%',
+    description: 'Path is effectively unusable',
+  },
+] as const
+
+/** The severity band a loss figure falls into, e.g. "Clear" or "Degraded". */
+export function getPacketLossLabel(lossPercent: number | string): string {
+  return getPacketLossColorInfo(lossPercent).label
+}
+
+// Latency reuses the severity ramp, so "amber" means the same degree of
+// trouble whether it is describing loss or round-trip time.
+const LATENCY_PALETTE = {
+  excellent: { oklch: 'var(--signal-perfect)', hex: '#43bfae' }, // <=50ms
+  good: { oklch: 'var(--signal-perfect)', hex: '#43bfae' }, // 51-100ms
+  fair: { oklch: 'var(--signal-minor)', hex: '#e3c04a' }, // 101-200ms
+  poor: { oklch: 'var(--signal-high)', hex: '#e2453c' }, // >200ms
+} as const
+
+/**
+ * Detailed band information for a packet-loss percentage.
+ *
+ * Out-of-range and non-numeric inputs are clamped rather than mapped to the
+ * worst band: a negative value used to fall through to "minor loss", and a
+ * NaN to "critical", which turned a data-handling slip into a false alarm.
+ */
+export function getPacketLossColorInfo(lossPercent: number | string): PacketLossColorScheme {
+  const raw = Number(lossPercent)
+  const loss = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 0
+  const band = PACKET_LOSS_BANDS.find(b => loss <= b.maxLoss) ?? PACKET_LOSS_BANDS[PACKET_LOSS_BANDS.length - 1]
+  const { maxLoss, ...scheme } = band
+  void maxLoss
+  return scheme
+}
+
+/** Hex colour for a packet-loss percentage — reliable in SVG strokes and fills. */
 export function getPacketLossColor(lossPercent: number | string): string {
-  // Return hex fallback for reliable SVG/stroke rendering in charts and
-  // other places that may not yet support OKLCH color strings.
   return getPacketLossColorInfo(lossPercent).hex
 }
 
-/**
- * Detailed color information for packet loss, includes hex fallback and
- * an OKLCH value.
- */
-export function getPacketLossColorInfo(lossPercent: number | string): PacketLossColorScheme {
-  const n = Number(lossPercent ?? 0)
-  if (Number.isNaN(n)) return { ...PACKET_LOSS_PALETTE.critical }
-  if (n === 0) return { ...PACKET_LOSS_PALETTE.perfect }
-  if (n <= 10) return { ...PACKET_LOSS_PALETTE.minor }
-  if (n <= 50) return { ...PACKET_LOSS_PALETTE.moderate }
-  return { ...PACKET_LOSS_PALETTE.critical }
+/** Theme-aware CSS variable for a packet-loss percentage. */
+export function getPacketLossVar(lossPercent: number | string): string {
+  return getPacketLossColorInfo(lossPercent).cssVar
 }
 
-export function getPacketLossTextColor(lossPercent: number): string {
-  // For the lighter `minor` cyan we prefer dark text for contrast
-  if (lossPercent > 0 && lossPercent <= 10) return 'text-gray-900'
-  return 'text-white'
-}
-
-export function getPacketLossBgClass(lossPercent: number): string {
-  if (lossPercent === 0) return 'bg-green-500'
-  if (lossPercent <= 10) return 'bg-cyan-400'
-  if (lossPercent <= 50) return 'bg-fuchsia-500'
-  return 'bg-red-600'
+/** OKLCH colour for a packet-loss percentage, for CSS that supports it. */
+export function getPacketLossColorOKLCH(lossPercent: number | string): string {
+  return getPacketLossColorInfo(lossPercent).oklch
 }
 
 /**
- * Return OKLCH color string for latency buckets. Uses the new rule where
- * anything over 200ms is treated as poor/critical (red).
+ * Latency band colour. Non-numeric input is treated as 0 rather than silently
+ * comparing NaN (which fails every check and returns "poor").
  */
 export function getLatencyColor(latencyMs: number): string {
-  if (latencyMs <= 50) return LATENCY_PALETTE.excellent.oklch
-  if (latencyMs <= 100) return LATENCY_PALETTE.good.oklch
-  if (latencyMs <= 200) return LATENCY_PALETTE.fair.oklch
+  const value = Number.isFinite(latencyMs) ? latencyMs : 0
+  if (value <= 50) return LATENCY_PALETTE.excellent.oklch
+  if (value <= 100) return LATENCY_PALETTE.good.oklch
+  if (value <= 200) return LATENCY_PALETTE.fair.oklch
   return LATENCY_PALETTE.poor.oklch
 }
 
-// Also export hex fallbacks when needed
 export function getLatencyColorHex(latencyMs: number): string {
-  if (latencyMs <= 50) return LATENCY_PALETTE.excellent.hex
-  if (latencyMs <= 100) return LATENCY_PALETTE.good.hex
-  if (latencyMs <= 200) return LATENCY_PALETTE.fair.hex
+  const value = Number.isFinite(latencyMs) ? latencyMs : 0
+  if (value <= 50) return LATENCY_PALETTE.excellent.hex
+  if (value <= 100) return LATENCY_PALETTE.good.hex
+  if (value <= 200) return LATENCY_PALETTE.fair.hex
   return LATENCY_PALETTE.poor.hex
 }

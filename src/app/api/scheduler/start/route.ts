@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { startScheduler } from '@/lib/scheduler';
 
 /**
  * POST /api/scheduler/start
  * Start the probe scheduler
  */
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
     await startScheduler();
 

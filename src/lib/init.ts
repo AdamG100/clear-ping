@@ -1,46 +1,56 @@
 /**
  * Server Initialization
- * 
- * This module handles initialization tasks when the Next.js server starts,
- * including starting the probe scheduler.
+ *
+ * Prepares the database and starts the probe scheduler. Invoked from
+ * instrumentation.ts at server boot, and defensively from API routes so that a
+ * request can never be served against an uninitialised database.
  */
 
 import { startScheduler } from './scheduler';
 import { initDatabase } from './database';
 
-let initialized = false;
+/**
+ * Held on globalThis for the same reason the scheduler is: route handlers are
+ * bundled into separate module graphs, so a module-local flag is not shared
+ * and initialisation would run more than once.
+ */
+const INIT_KEY = Symbol.for('clearping.init');
+
+type InitGlobal = typeof globalThis & {
+  [INIT_KEY]?: Promise<void>;
+};
 
 /**
- * Initialize the server and start background services
+ * Initialize the server and start background services.
+ *
+ * Returns the same promise to concurrent callers, so simultaneous first
+ * requests cannot race two initialisations against each other.
  */
-export async function initializeServer(): Promise<void> {
-  if (initialized) {
-    console.log('[Init] Server already initialized');
-    return;
+export function initializeServer(): Promise<void> {
+  const store = globalThis as InitGlobal;
+
+  if (!store[INIT_KEY]) {
+    store[INIT_KEY] = (async () => {
+      console.log('[Init] Initializing ClearPing server...');
+      await initDatabase();
+
+      if (process.env.CLEARPING_EXTERNAL_PROBER === '1') {
+        console.log('[Init] External prober configured; scheduler not started here');
+      } else {
+        await startScheduler();
+      }
+
+      console.log('[Init] Server initialization complete');
+    })().catch(error => {
+      // Let the next request retry rather than caching a failed startup.
+      store[INIT_KEY] = undefined;
+      throw error;
+    });
   }
 
-  console.log('[Init] Initializing ClearPing server...');
-
-  try {
-    // Initialize database
-    await initDatabase();
-    console.log('[Init] Database initialized');
-
-    // Start the probe scheduler
-    await startScheduler();
-    console.log('[Init] Probe scheduler started');
-
-    initialized = true;
-    console.log('[Init] Server initialization complete');
-  } catch (error) {
-    console.error('[Init] Server initialization failed:', error);
-    throw error;
-  }
+  return store[INIT_KEY];
 }
 
-/**
- * Check if server is initialized
- */
 export function isInitialized(): boolean {
-  return initialized;
+  return (globalThis as InitGlobal)[INIT_KEY] !== undefined;
 }

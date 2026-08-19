@@ -32,14 +32,22 @@ export async function POST(
       );
     }
 
-    // Store the measurement
+    // Store the measurement. `??` rather than `||`: 0% loss and 0ms jitter are
+    // real readings, not missing ones.
     const measurement = {
       id: randomUUID(),
       targetId: result.targetId,
       timestamp: result.timestamp,
       latency: result.latency,
-      packetLoss: result.packetLoss || 0,
-      jitter: result.jitter || null,
+      minLatency: result.minLatency ?? null,
+      maxLatency: result.maxLatency ?? null,
+      p10Latency: result.p10Latency ?? null,
+      p25Latency: result.p25Latency ?? null,
+      p50Latency: result.p50Latency ?? null,
+      p75Latency: result.p75Latency ?? null,
+      p90Latency: result.p90Latency ?? null,
+      packetLoss: result.packetLoss ?? 0,
+      jitter: result.jitter ?? null,
       success: result.success,
       errorMessage: result.errorMessage,
     };

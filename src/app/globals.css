@@ -6,8 +6,14 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --color-signal-perfect: var(--signal-perfect);
+  --color-signal-minor: var(--signal-minor);
+  --color-signal-moderate: var(--signal-moderate);
+  --color-signal-high: var(--signal-high);
+  --color-signal-none: var(--signal-none);
+  --color-trace: var(--trace);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,8 +55,20 @@
   --radius-4xl: calc(var(--radius) + 16px);
 }
 
+/* Light palette. Previously unreachable: the app hardcoded `class="dark"` on
+   <html>, so these values were dead and --success/--warning existed only in the
+   dark block, which would have broken the moment a theme toggle was added. */
 :root {
   --radius: 0.625rem;
+  --success: oklch(0.55 0.16 150);
+  --warning: oklch(0.65 0.15 85);
+  --destructive-foreground: oklch(0.99 0 0);
+  --signal-perfect: oklch(0.58 0.11 175);
+  --signal-minor: oklch(0.68 0.15 85);
+  --signal-moderate: oklch(0.60 0.18 50);
+  --signal-high: oklch(0.53 0.22 25);
+  --signal-none: oklch(0.65 0.02 250);
+  --trace: oklch(0.30 0.02 250);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -85,40 +103,57 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* Cold instrument slate, not neutral black: everything carries a slight blue
+     cast so the signal colours (green/cyan/magenta/red) read as emitted light
+     against it rather than as flat swatches. */
+  --background: oklch(0.17 0.015 250);
+  --foreground: oklch(0.96 0.005 250);
+  --card: oklch(0.215 0.018 250);
+  --card-foreground: oklch(0.96 0.005 250);
+  --popover: oklch(0.215 0.018 250);
+  --popover-foreground: oklch(0.96 0.005 250);
+  --primary: oklch(0.80 0.09 215);
+  --primary-foreground: oklch(0.17 0.02 250);
+  --secondary: oklch(0.26 0.02 250);
+  --secondary-foreground: oklch(0.96 0.005 250);
+  --muted: oklch(0.26 0.02 250);
+  --muted-foreground: oklch(0.70 0.02 250);
+  --accent: oklch(0.28 0.025 250);
+  --accent-foreground: oklch(0.96 0.005 250);
+  --destructive: oklch(0.63 0.20 25);
+  --border: oklch(0.75 0.04 250 / 16%);
+  --input: oklch(0.75 0.04 250 / 20%);
+  --ring: oklch(0.70 0.09 215);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-  --success: oklch(0.70 0.18 145);
-  --warning: oklch(0.75 0.18 85);
-  --destructive-foreground: oklch(0.95 0 0);
+  --sidebar: oklch(0.145 0.016 250);
+  --sidebar-foreground: oklch(0.96 0.005 250);
+  --sidebar-primary: oklch(0.80 0.09 215);
+  --sidebar-primary-foreground: oklch(0.17 0.02 250);
+  --sidebar-accent: oklch(0.25 0.022 250);
+  --sidebar-accent-foreground: oklch(0.96 0.005 250);
+  --sidebar-border: oklch(0.75 0.04 250 / 14%);
+  --sidebar-ring: oklch(0.70 0.09 215);
+  --success: oklch(0.72 0.17 150);
+  --warning: oklch(0.78 0.16 85);
+  --destructive-foreground: oklch(0.97 0 0);
+
+  /* Signal palette. These are the packet-loss severity colours, promoted to
+     first-class tokens: in this app colour *is* the data, so it belongs in the
+     theme rather than hardcoded per component. */
+  /* Severity escalates monotonically: hue sweeps cool to warm, and chroma
+     climbs with it, so a healthy path is visually quiet and a failing one
+     shouts. The previous ramp ran green -> cyan -> magenta -> red, where cyan
+     reads calmer than the green it was supposed to be worse than. */
+  --signal-perfect: oklch(0.76 0.10 175);
+  --signal-minor: oklch(0.84 0.15 95);
+  --signal-moderate: oklch(0.73 0.19 50);
+  --signal-high: oklch(0.63 0.23 25);
+  --signal-none: oklch(0.55 0.02 250);
+  --trace: oklch(0.90 0.02 250);
 }
 
 @layer base {
@@ -142,5 +177,42 @@
   75%, 100% {
     transform: scale(3);
     opacity: 0;
+  }
+}
+
+@layer base {
+  /* Readings are compared column-to-column and tick-to-tick, so digits must
+     never change width as values update. */
+  .font-mono,
+  code,
+  kbd,
+  samp {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "zero" 1;
+  }
+
+  /* Keyboard focus must be visible everywhere, not only where a component
+     happened to style it. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Respect the OS setting: this app animates a lot of live data, and motion
+   sensitivity is common enough that ignoring it is not an option. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .custom-ping {
+    animation: none !important;
+    opacity: 0.35;
   }
 }

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTargets, createTarget, getLatestPacketLossForAllTargets, getGroupOrders } from '@/lib/database';
+import { getAllTargets, createTarget, getLatestMeasurementForAllTargets, getGroupOrders, getRecentSeriesForAllTargets } from '@/lib/database';
 import { randomUUID } from 'crypto';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
+import { isValidPingHost } from '@/lib/ping';
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,12 +16,16 @@ export async function GET(request: NextRequest) {
     const targets = await getAllTargets();
     
     if (includePacketLoss) {
-      const packetLossMap = await getLatestPacketLossForAllTargets();
-      const groupOrders = await getGroupOrders();
+      const [latest, groupOrders, series] = await Promise.all([
+        getLatestMeasurementForAllTargets(),
+        getGroupOrders(),
+        getRecentSeriesForAllTargets(24),
+      ]);
       return NextResponse.json({
         targets,
-        packetLoss: packetLossMap,
+        latest,
         groupOrders,
+        series,
       });
     }
     
@@ -56,12 +61,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Reject hosts the probe could never use, rather than storing a target that
+    // records 100% loss forever.
+    if (!isValidPingHost(String(host))) {
+      return NextResponse.json(
+        { error: 'Invalid host: must be a hostname or IP address' },
+        { status: 400 }
+      );
+    }
+
+    const intervalSeconds = Number(interval);
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds < 10 || intervalSeconds > 86400) {
+      return NextResponse.json(
+        { error: 'Interval must be between 10 and 86400 seconds' },
+        { status: 400 }
+      );
+    }
+
     const target = await createTarget({
       id: randomUUID(),
-      name,
-      host,
+      name: String(name).trim(),
+      host: String(host).trim(),
       probeType,
-      interval,
+      interval: intervalSeconds,
       status: 'active',
       group: group || undefined,
     });
