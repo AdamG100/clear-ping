@@ -70,8 +70,8 @@ export function isMeaningfulLoss(lossPercent: number | null | undefined): boolea
 export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: number })[] = [
   {
     maxLoss: LOSS_NOISE_FLOOR,
-    oklch: 'oklch(0.76 0.10 175)',
-    hex: '#43bfae',
+    oklch: 'oklch(0.75 0.15 150)',
+    hex: '#5dc879',
     cssVar: 'var(--signal-perfect)',
     label: 'Clear',
     range: '≤1%',
@@ -114,8 +114,8 @@ export function getPacketLossLabel(lossPercent: number | string): string {
 // Latency reuses the severity ramp, so "amber" means the same degree of
 // trouble whether it is describing loss or round-trip time.
 const LATENCY_PALETTE = {
-  excellent: { oklch: 'var(--signal-perfect)', hex: '#43bfae' }, // <=50ms
-  good: { oklch: 'var(--signal-perfect)', hex: '#43bfae' }, // 51-100ms
+  excellent: { oklch: 'var(--signal-perfect)', hex: '#5dc879' }, // <=50ms
+  good: { oklch: 'var(--signal-perfect)', hex: '#5dc879' }, // 51-100ms
   fair: { oklch: 'var(--signal-minor)', hex: '#e3c04a' }, // 101-200ms
   poor: { oklch: 'var(--signal-high)', hex: '#e2453c' }, // >200ms
 } as const

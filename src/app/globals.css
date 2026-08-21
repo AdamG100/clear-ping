@@ -63,7 +63,7 @@
   --success: oklch(0.55 0.16 150);
   --warning: oklch(0.65 0.15 85);
   --destructive-foreground: oklch(0.99 0 0);
-  --signal-perfect: oklch(0.58 0.11 175);
+  --signal-perfect: oklch(0.58 0.15 150);
   --signal-minor: oklch(0.68 0.15 85);
   --signal-moderate: oklch(0.60 0.18 50);
   --signal-high: oklch(0.53 0.22 25);
@@ -144,11 +144,13 @@
   /* Signal palette. These are the packet-loss severity colours, promoted to
      first-class tokens: in this app colour *is* the data, so it belongs in the
      theme rather than hardcoded per component. */
-  /* Severity escalates monotonically: hue sweeps cool to warm, and chroma
-     climbs with it, so a healthy path is visually quiet and a failing one
-     shouts. The previous ramp ran green -> cyan -> magenta -> red, where cyan
-     reads calmer than the green it was supposed to be worse than. */
-  --signal-perfect: oklch(0.76 0.10 175);
+  /* Severity escalates monotonically: hue sweeps green -> amber -> orange ->
+     red, and chroma climbs from Minor onwards, so a failing path shouts louder
+     than a merely degraded one. An earlier ramp ran green -> cyan -> magenta ->
+     red, where cyan read calmer than the green it was supposed to be worse
+     than. Clear sits at the same chroma as Minor rather than below it: a
+     healthy path should look actively healthy, not merely un-alarming. */
+  --signal-perfect: oklch(0.75 0.15 150);
   --signal-minor: oklch(0.84 0.15 95);
   --signal-moderate: oklch(0.73 0.19 50);
   --signal-high: oklch(0.63 0.23 25);
