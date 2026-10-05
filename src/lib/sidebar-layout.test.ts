@@ -3,10 +3,14 @@ import type { Target } from '@/types/probe'
 import {
   UNGROUPED,
   buildSidebarLayout,
+  groupsInOrder,
   locateTarget,
   moveTarget,
   pruneEmptyGroups,
+  reorderSubgroups,
+  subgroups,
   targetOrderUpdates,
+  targetsWithin,
   withGroup,
   type SidebarLayout,
 } from './sidebar-layout'
@@ -28,7 +32,21 @@ function target(id: string, group: string | undefined, sortOrder: number): Targe
 
 const layout: SidebarLayout = {
   groups: ['DNS', 'Web'],
+  children: {},
   items: { DNS: ['a', 'b', 'c'], Web: ['x', 'y'] },
+}
+
+/** Home holds a target and two groups; one of those holds a group of its own. */
+const nested: SidebarLayout = {
+  groups: ['Home', 'Web'],
+  children: { Home: ['Home/Network', 'Home/Lab'], 'Home/Network': ['Home/Network/Switches'] },
+  items: {
+    Home: ['door'],
+    'Home/Network': ['router'],
+    'Home/Network/Switches': ['sw1', 'sw2'],
+    'Home/Lab': ['pi'],
+    Web: ['x'],
+  },
 }
 
 describe('buildSidebarLayout', () => {
@@ -38,6 +56,7 @@ describe('buildSidebarLayout', () => {
       []
     )
     expect(built.items).toEqual({ DNS: ['a', 'b'], [UNGROUPED]: ['loose', 'empty'] })
+    expect(built.children).toEqual({})
   })
 
   it('follows the saved group order, then the alphabet, with Ungrouped last', () => {
@@ -46,6 +65,59 @@ describe('buildSidebarLayout', () => {
       [{ groupName: 'Pinned', sortOrder: 0 }]
     )
     expect(built.groups).toEqual(['Pinned', 'Alpha', 'Zed', UNGROUPED])
+  })
+
+  it('nests a group inside another by its path', () => {
+    const built = buildSidebarLayout(
+      [target('sw', 'Home/Network/Switches', 0), target('router', 'Home/Network', 0), target('x', 'Web', 0)],
+      []
+    )
+    expect(built.groups).toEqual(['Home', 'Web'])
+    expect(built.children).toEqual({ Home: ['Home/Network'], 'Home/Network': ['Home/Network/Switches'] })
+    // Home has nothing of its own, and exists because of what is inside it.
+    expect(built.items).toEqual({
+      Home: [],
+      'Home/Network': ['router'],
+      'Home/Network/Switches': ['sw'],
+      Web: ['x'],
+    })
+  })
+
+  it('reads every spelling of a path as the one group', () => {
+    const built = buildSidebarLayout([target('a', 'Home / Lab', 0), target('b', 'Home/Lab', 1)], [])
+    expect(built.items['Home/Lab']).toEqual(['a', 'b'])
+  })
+
+  it('orders the groups inside a group among themselves', () => {
+    const built = buildSidebarLayout(
+      [target('1', 'Home/Alpha', 0), target('2', 'Home/Zed', 0), target('3', 'Home/Mid', 0)],
+      [{ groupName: 'Home/Zed', sortOrder: 0 }]
+    )
+    expect(built.children.Home).toEqual(['Home/Zed', 'Home/Alpha', 'Home/Mid'])
+  })
+})
+
+describe('reading the tree', () => {
+  it('lists the groups inside a group, and the top level for none', () => {
+    expect(subgroups(nested, '')).toEqual(['Home', 'Web'])
+    expect(subgroups(nested, 'Home')).toEqual(['Home/Network', 'Home/Lab'])
+    expect(subgroups(nested, 'Web')).toEqual([])
+  })
+
+  it('lists every group in the order the sidebar shows them', () => {
+    expect(groupsInOrder(nested)).toEqual(['Home', 'Home/Network', 'Home/Network/Switches', 'Home/Lab', 'Web'])
+  })
+
+  it('gathers a group’s targets with those of the groups inside it', () => {
+    expect(targetsWithin(nested, 'Home')).toEqual(['door', 'router', 'sw1', 'sw2', 'pi'])
+    expect(targetsWithin(nested, 'Home/Network')).toEqual(['router', 'sw1', 'sw2'])
+    expect(targetsWithin(nested, 'Web')).toEqual(['x'])
+    expect(targetsWithin(nested, 'Nowhere')).toEqual([])
+  })
+
+  it('finds a target however deep it sits', () => {
+    expect(locateTarget(nested, 'sw2')).toEqual({ group: 'Home/Network/Switches', index: 1 })
+    expect(locateTarget(nested, 'missing')).toBeNull()
   })
 })
 
@@ -58,6 +130,13 @@ describe('moveTarget', () => {
   it('moves a target into another group at the given position', () => {
     const moved = moveTarget(layout, 'b', { group: 'Web', index: 1 })
     expect(moved.items).toEqual({ DNS: ['a', 'c'], Web: ['x', 'b', 'y'] })
+  })
+
+  it('moves a target between a group and one inside it', () => {
+    const moved = moveTarget(nested, 'door', { group: 'Home/Network/Switches', index: 1 })
+    expect(moved.items.Home).toEqual([])
+    expect(moved.items['Home/Network/Switches']).toEqual(['sw1', 'door', 'sw2'])
+    expect(moved.children).toBe(nested.children)
   })
 
   it('clamps an index past the end', () => {
@@ -78,6 +157,17 @@ describe('moveTarget', () => {
   })
 })
 
+describe('reorderSubgroups', () => {
+  it('reorders the top level or the inside of one group, and nothing else', () => {
+    expect(reorderSubgroups(nested, '', ['Web', 'Home']).groups).toEqual(['Web', 'Home'])
+
+    const inside = reorderSubgroups(nested, 'Home', ['Home/Lab', 'Home/Network'])
+    expect(inside.children.Home).toEqual(['Home/Lab', 'Home/Network'])
+    expect(inside.groups).toBe(nested.groups)
+    expect(inside.children['Home/Network']).toBe(nested.children['Home/Network'])
+  })
+})
+
 describe('withGroup and pruneEmptyGroups', () => {
   it('adds an empty group once, at the end', () => {
     const added = withGroup(layout, UNGROUPED)
@@ -90,9 +180,34 @@ describe('withGroup and pruneEmptyGroups', () => {
     const emptied = moveTarget(moveTarget(layout, 'x', { group: 'DNS', index: 0 }), 'y', { group: 'DNS', index: 0 })
     expect(pruneEmptyGroups(withGroup(emptied, UNGROUPED))).toEqual({
       groups: ['DNS'],
+      children: {},
       items: { DNS: ['y', 'x', 'a', 'b', 'c'] },
     })
     expect(pruneEmptyGroups(layout)).toBe(layout)
+  })
+
+  it('keeps a group that holds nothing itself but has a group inside that does', () => {
+    const moved = moveTarget(nested, 'door', { group: 'Web', index: 0 })
+    expect(pruneEmptyGroups(moved)).toBe(moved)
+  })
+
+  it('removes an emptied group along with the groups that only existed to hold it', () => {
+    const only: SidebarLayout = {
+      groups: ['Home', 'Web'],
+      children: { Home: ['Home/Network'], 'Home/Network': ['Home/Network/Switches'] },
+      items: { Home: [], 'Home/Network': [], 'Home/Network/Switches': ['sw'], Web: ['x'] },
+    }
+    expect(pruneEmptyGroups(moveTarget(only, 'sw', { group: 'Web', index: 0 }))).toEqual({
+      groups: ['Web'],
+      children: {},
+      items: { Web: ['sw', 'x'] },
+    })
+  })
+
+  it('removes one emptied group from among its siblings', () => {
+    const pruned = pruneEmptyGroups(moveTarget(nested, 'pi', { group: 'Home', index: 0 }))
+    expect(pruned.children).toEqual({ Home: ['Home/Network'], 'Home/Network': ['Home/Network/Switches'] })
+    expect('Home/Lab' in pruned.items).toBe(false)
   })
 })
 
@@ -117,13 +232,22 @@ describe('targetOrderUpdates', () => {
     ])
   })
 
+  it('saves a move into a nested group under its whole path', () => {
+    const moved = moveTarget(nested, 'x', { group: 'Home/Network/Switches', index: 0 })
+    expect(targetOrderUpdates(moved, 'x', 'Web')).toContainEqual({
+      id: 'x',
+      sortOrder: 0,
+      group: 'Home/Network/Switches',
+    })
+  })
+
   it('saves a move to Ungrouped as an empty group name', () => {
     const moved = moveTarget(withGroup(layout, UNGROUPED), 'a', { group: UNGROUPED, index: 0 })
     expect(targetOrderUpdates(moved, 'a', 'DNS')).toContainEqual({ id: 'a', sortOrder: 0, group: '' })
   })
 
   it('copes with the source group having been pruned away', () => {
-    const single: SidebarLayout = { groups: ['Solo', 'Web'], items: { Solo: ['s'], Web: ['x'] } }
+    const single: SidebarLayout = { groups: ['Solo', 'Web'], children: {}, items: { Solo: ['s'], Web: ['x'] } }
     const moved = pruneEmptyGroups(moveTarget(single, 's', { group: 'Web', index: 1 }))
     expect(targetOrderUpdates(moved, 's', 'Solo')).toEqual([
       { id: 'x', sortOrder: 0 },

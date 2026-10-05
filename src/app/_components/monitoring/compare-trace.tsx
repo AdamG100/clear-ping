@@ -87,6 +87,35 @@ function linePaths(plotted: PlottedPoint[]): { paths: string[]; solos: PlottedPo
   return { paths, solos }
 }
 
+/**
+ * What a line read at a moment: the nearer of the readings either side of it.
+ *
+ * Between two readings the line is drawn straight through, so there is a value
+ * to report however far apart they are. A target probed every five minutes has
+ * a reading every seventy pixels of a one-hour chart, and holding it to a
+ * fixed few pixels left most of the chart reporting nothing for it. Only past
+ * the end of a run, where no line is drawn, does a reading have to be close.
+ */
+function readingAt(line: PlottedLine, x: number): PlottedPoint | null {
+  let before: PlottedPoint | null = null
+  let after: PlottedPoint | null = null
+  for (const p of line.plotted) {
+    if (p.x > x) {
+      after = p
+      break
+    }
+    before = p
+  }
+
+  // A row with no samples is the marker for a break in probing.
+  const measured = (p: PlottedPoint | null): p is PlottedPoint => p !== null && p.point.sampleCount > 0
+  if (measured(before) && measured(after)) return x - before.x <= after.x - x ? before : after
+
+  const nearest = measured(before) ? before : measured(after) ? after : null
+  const reach = Math.max(10, line.cellWidth * 1.2)
+  return nearest && Math.abs(nearest.x - x) <= reach ? nearest : null
+}
+
 export const CompareTrace = memo(function CompareTrace({
   lines,
   start,
@@ -178,27 +207,11 @@ export const CompareTrace = memo(function CompareTrace({
     setHoverX(x >= PAD.left && x <= PAD.left + plotW ? x : null)
   }
 
-  /**
-   * What each line read at the hovered moment: its reading nearest the
-   * pointer, unless that is too far off to be called the same moment. Lines
-   * probe at their own intervals, so a single shared index would not do.
-   */
+  // Lines probe at their own intervals, so each is read on its own rather
+  // than at one shared index.
   const readings = useMemo(() => {
     if (hoverX === null) return null
-
-    return plottedLines.map(line => {
-      let nearest: PlottedPoint | null = null
-      let best = Infinity
-      for (const p of line.plotted) {
-        const distance = Math.abs(p.x - hoverX)
-        if (distance < best) {
-          best = distance
-          nearest = p
-        }
-      }
-      const within = Math.max(10, line.cellWidth * 1.2)
-      return { line, at: nearest && best <= within && nearest.point.sampleCount > 0 ? nearest : null }
-    })
+    return plottedLines.map(line => ({ line, at: readingAt(line, hoverX) }))
   }, [hoverX, plottedLines])
 
   const spanMs = end - start

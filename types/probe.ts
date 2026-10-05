@@ -324,28 +324,70 @@ export type AlertMetric = 'packetLoss' | 'latency' | 'jitter' | 'unreachable' | 
 export type AlertState = 'ok' | 'firing';
 
 /**
- * A threshold rule attached to a target.
+ * Where an alert is sent. Chosen, not worked out from the URL: each kind is
+ * sent in its own format and has its own settings, and there will be more of
+ * them. `none` is an alert that is only shown in the app.
+ */
+export type AlertDestination = 'none' | 'discord' | 'webhook';
+
+export const ALERT_DESTINATION_LABELS: Record<AlertDestination, string> = {
+  none: 'Only show it here',
+  discord: 'Discord',
+  webhook: 'Webhook',
+};
+
+/**
+ * What an alert watches for and where it says so.
  *
  * `consecutiveProbes` is what separates an alert from a nuisance: a single
- * probe crossing a threshold is usually a blip, so a rule only fires once the
- * condition has held for that many probes in a row, and only clears after the
- * same number of clean ones.
+ * probe crossing a threshold is usually a blip, so an alert only fires once
+ * the condition has held for that many probes in a row, and only clears after
+ * the same number of clean ones.
  */
-export interface AlertRule {
-  id: string;
-  targetId: string;
+export interface AlertSettings {
+  /** What to call it. An alert without one is described by its condition. */
+  name?: string;
   metric: AlertMetric;
   /** Threshold value; ignored for the 'unreachable' metric. */
   threshold: number;
   consecutiveProbes: number;
-  /** Sent a JSON payload when the rule fires and when it resolves. */
+  destination: AlertDestination;
+  /**
+   * Posted to when the alert fires and when it resolves: an embed for
+   * `discord`, a plain JSON payload for `webhook`.
+   */
   webhookUrl?: string;
-  enabled: boolean;
+  /** discord: role and user ids to mention when the alert fires. */
+  mentionRoleIds?: string[];
+  mentionUserIds?: string[];
+}
+
+/** How one target currently stands against an alert it is ticked for. */
+export interface AlertTargetState {
+  targetId: string;
   state: AlertState;
   /** Consecutive probes that have currently breached (or cleared). */
   streak: number;
   lastFiredAt?: Date | null;
   lastResolvedAt?: Date | null;
+}
+
+/**
+ * An alert: one condition, watched on every target ticked for it. Each of
+ * those targets fires and resolves on its own.
+ */
+export interface Alert extends AlertSettings {
+  id: string;
+  enabled: boolean;
+  createdAt: Date;
+  targets: AlertTargetState[];
+}
+
+/** An alert as it applies to a single target: what a probe is judged against. */
+export interface AlertRule extends AlertSettings, AlertTargetState {
+  /** The alert's id; with `targetId`, what identifies this rule. */
+  id: string;
+  enabled: boolean;
   createdAt: Date;
 }
 
@@ -353,6 +395,8 @@ export interface AlertEvent {
   rule: AlertRule;
   targetName: string;
   targetHost: string;
+  /** The group the target is in, as a path; absent for a target with none. */
+  targetGroup?: string;
   transition: 'firing' | 'resolved';
   metric: AlertMetric;
   observed: number | null;

@@ -11,7 +11,7 @@ import { executeProbes } from './probe';
 import { measurementFrom, worstOf } from './probe-result';
 import type { IpVersion, ProbeConfig, ProbeResult, ProbeType } from '@/types/probe';
 import { randomUUID } from 'crypto';
-import { dispatchAlert, ensureAlertSchema, evaluateAlerts } from './alerts';
+import { dispatchAlert, evaluateAlerts } from './alerts';
 import { cleanOldTraceroutes, ensureTracerouteSchema, traceAndStore } from './traceroute';
 
 /**
@@ -25,6 +25,8 @@ interface ScheduledTarget {
   id: string;
   name: string;
   host: string;
+  /** Only so an alert can say where the target lives. */
+  group?: string;
   probeType: ProbeType;
   ipVersion: IpVersion;
   probeConfig?: ProbeConfig;
@@ -55,7 +57,6 @@ class ProbeScheduler {
     console.log('[Scheduler] Starting probe scheduler...');
     this.isRunning = true;
 
-    await ensureAlertSchema();
     await ensureTracerouteSchema();
 
     // Load all active targets
@@ -137,6 +138,7 @@ class ProbeScheduler {
           id: target.id,
           name: target.name,
           host: target.host,
+          group: target.group,
           probeType: target.probeType,
           ipVersion: target.ipVersion ?? 'auto',
           probeConfig: target.probeConfig,
@@ -266,7 +268,7 @@ class ProbeScheduler {
   }
 
   /**
-   * Run this target's alert rules against the probe result.
+   * Run the alerts this target is ticked for against the probe result.
    *
    * Alerting must never be able to stop measurements being recorded, so this
    * runs after the measurement is stored and swallows its own failures.
@@ -277,7 +279,7 @@ class ProbeScheduler {
   ): Promise<void> {
     try {
       const events = await evaluateAlerts(
-        { id: target.id, name: target.name, host: target.host },
+        { id: target.id, name: target.name, host: target.host, group: target.group },
         result
       );
 

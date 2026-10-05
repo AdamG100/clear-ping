@@ -5,14 +5,18 @@ import path from 'node:path'
 import sqlite3 from 'sqlite3'
 
 /**
- * Upgrading a database created before TCP and HTTP probes existed.
+ * Upgrading a database left behind by an old version, which is what every
+ * container does the first time it starts on a new image.
  *
- * `targets.probe_type` and `alert_rules.metric` used to carry CHECK
- * constraints listing their allowed values, and SQLite cannot alter a CHECK,
- * so both tables are rebuilt. The rebuild drops and recreates a table that
- * every measurement points at, which makes it the one migration capable of
- * destroying history if it is done carelessly. These tests start from a real
- * old-format file and assert that nothing is lost.
+ * The file below is in the oldest shape there is: before TCP and HTTP probes,
+ * before nested groups, and with alerts still set one target at a time.
+ * Opening it has to bring it all the way up to date with nothing lost.
+ *
+ * `targets.probe_type` used to carry a CHECK constraint listing its allowed
+ * values, and SQLite cannot alter a CHECK, so that table is rebuilt. The
+ * rebuild drops and recreates a table that every measurement points at, which
+ * makes it the one step capable of destroying history if it is done
+ * carelessly.
  */
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clearping-migrate-'))
@@ -61,10 +65,13 @@ const LEGACY_SCHEMA = `
 
   INSERT INTO targets VALUES ('old-ping', 'Router', '192.0.2.1', 'ping', 300, 'active', 'LAN', 1000, 2000, 3000);
   INSERT INTO targets VALUES ('old-dns', 'Resolver', '192.0.2.53', 'dns', 60, 'paused', '', 1000, 2000, 0);
+  INSERT INTO targets VALUES ('old-lab', 'Pi', '192.0.2.7', 'ping', 60, 'active', ' Home / Lab ', 1000, 2000, 0);
   INSERT INTO measurements VALUES ('m1', 'old-ping', 5000, 12.5, 0, 1, NULL);
   INSERT INTO measurements VALUES ('m2', 'old-ping', 6000, NULL, 100, 0, 'Request timed out.');
   INSERT INTO measurements VALUES ('m3', 'old-dns', 7000, 4, 0, 1, NULL);
   INSERT INTO alert_rules VALUES ('r1', 'old-ping', 'packetLoss', 5, 3, 'https://hooks.example/x', 1, 'firing', 2, 111, NULL, 999);
+  INSERT INTO alert_rules VALUES ('r2', 'old-dns', 'packetLoss', 5, 3, 'https://hooks.example/x', 1, 'ok', 1, NULL, 222, 1500);
+  INSERT INTO alert_rules VALUES ('r3', 'old-dns', 'latency', 200, 3, NULL, 0, 'ok', 0, NULL, NULL, 1600);
 `
 
 function execFile(file: string, sql: string) {
@@ -79,6 +86,7 @@ await execFile(dbFile, LEGACY_SCHEMA)
 
 const database = await import('./database')
 const alerts = await import('./alerts')
+const { SCHEMA_VERSION } = await import('./migrations')
 
 function all<T>(sql: string): Promise<T[]> {
   return database.getDatabase().then(
@@ -88,7 +96,6 @@ function all<T>(sql: string): Promise<T[]> {
 
 beforeAll(async () => {
   await database.initDatabase()
-  await alerts.ensureAlertSchema()
 })
 
 afterAll(async () => {
@@ -96,15 +103,22 @@ afterAll(async () => {
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
-describe('migrating a database from before new probe types', () => {
+describe('opening a database left by an old version', () => {
   it('keeps every target, with its settings', async () => {
     const targets = (await database.getAllTargets()).sort((a, b) => a.id.localeCompare(b.id))
     expect(targets.map(t => [t.id, t.name, t.host, t.probeType, t.interval, t.status, t.group])).toEqual([
       ['old-dns', 'Resolver', '192.0.2.53', 'dns', 60, 'paused', ''],
+      // A group name with a slash in it is now a group inside a group, and
+      // is stored the one way such a path is written.
+      ['old-lab', 'Pi', '192.0.2.7', 'ping', 60, 'active', 'Home/Lab'],
       ['old-ping', 'Router', '192.0.2.1', 'ping', 300, 'active', 'LAN'],
     ])
-    expect(targets[1].createdAt.getTime()).toBe(1000)
-    expect(targets[1].ipVersion).toBe('auto')
+    expect(targets[2].createdAt.getTime()).toBe(1000)
+    expect(targets[2].ipVersion).toBe('auto')
+  })
+
+  it('records how far the database has been brought', async () => {
+    expect(await all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }])
   })
 
   it('keeps the measurement history the rebuilt table is referenced by', async () => {
@@ -120,17 +134,43 @@ describe('migrating a database from before new probe types', () => {
     ])
   })
 
-  it('keeps alert rules, including a rule that was firing', async () => {
-    const [rule] = await alerts.getAlertRules('old-ping')
-    expect(rule).toMatchObject({
-      id: 'r1',
-      metric: 'packetLoss',
+  it('turns rules set per target into alerts, one for each distinct rule', async () => {
+    const migrated = await alerts.getAlerts()
+    expect(migrated).toHaveLength(2)
+
+    // The same rule on two targets is one alert ticked for both.
+    const loss = migrated.find(alert => alert.metric === 'packetLoss')!
+    expect(loss).toMatchObject({
       threshold: 5,
+      consecutiveProbes: 3,
+      // Carried over with the destination its URL was being sent as.
+      destination: 'webhook',
       webhookUrl: 'https://hooks.example/x',
-      state: 'firing',
-      streak: 2,
+      enabled: true,
+      mentionRoleIds: [],
+      mentionUserIds: [],
     })
-    expect(rule.lastFiredAt?.getTime()).toBe(111)
+    expect(loss.createdAt.getTime()).toBe(999)
+    expect(loss.targets.map(entry => entry.targetId).sort()).toEqual(['old-dns', 'old-ping'])
+
+    const muted = migrated.find(alert => alert.metric === 'latency')!
+    expect(muted).toMatchObject({ threshold: 200, enabled: false, destination: 'none' })
+    expect(muted.webhookUrl).toBeUndefined()
+    expect(muted.targets.map(entry => entry.targetId)).toEqual(['old-dns'])
+  })
+
+  it('keeps each target’s state, so a rule that was firing does not fire again', async () => {
+    const [firing] = await alerts.getAlertRules('old-ping')
+    expect(firing).toMatchObject({ metric: 'packetLoss', state: 'firing', streak: 2 })
+    expect(firing.lastFiredAt?.getTime()).toBe(111)
+
+    const quiet = (await alerts.getAlertRules('old-dns')).find(rule => rule.metric === 'packetLoss')!
+    expect(quiet).toMatchObject({ state: 'ok', streak: 1 })
+    expect(quiet.lastResolvedAt?.getTime()).toBe(222)
+  })
+
+  it('leaves the old rules where an older version would look for them', async () => {
+    expect(await all('SELECT id FROM alert_rules ORDER BY id')).toEqual([{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }])
   })
 
   it('leaves no dangling references and turns foreign keys back on', async () => {
@@ -165,13 +205,15 @@ describe('migrating a database from before new probe types', () => {
       expectedStatus: 200,
     })
 
-    const rule = await alerts.createAlertRule({
-      targetId: 'new-http',
+    const alert = await alerts.createAlert({
       metric: 'certExpiry',
       threshold: 14,
       consecutiveProbes: 1,
+      destination: 'none',
+      targetIds: ['new-http'],
     })
-    expect(rule.metric).toBe('certExpiry')
+    expect(alert.metric).toBe('certExpiry')
+    expect(alert.targets.map(entry => entry.targetId)).toEqual(['new-http'])
   })
 
   it('still cascades when a target is deleted', async () => {
@@ -185,12 +227,16 @@ describe('migrating a database from before new probe types', () => {
   })
 
   it('does nothing on the next start', async () => {
+    const before = await alerts.getAlerts()
+
     await database.closeDatabase()
     await database.initDatabase()
-    await alerts.ensureAlertSchema()
 
     expect(fs.readdirSync(dir).filter(name => name.includes('.before-probe-types-'))).toHaveLength(1)
-    expect((await database.getAllTargets()).map(t => t.id).sort()).toEqual(['new-tcp', 'old-dns', 'old-ping'])
+    expect((await database.getAllTargets()).map(t => t.id).sort()).toEqual(['new-tcp', 'old-dns', 'old-lab', 'old-ping'])
+    // In particular, the old rules are not turned into alerts a second time.
+    expect(await alerts.getAlerts()).toEqual(before)
+    expect(await all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }])
   })
 
   it('stores and returns probe settings and details', async () => {

@@ -1,0 +1,31 @@
+# An example for running ClearPing behind Traefik. Copy it and make it yours:
+#
+#   cp compose.example.yaml compose.yaml
+#   docker compose up -d
+#
+# Change the hostname and the network name below to match your setup.
+
+services:
+  clearping:
+    image: ghcr.io/adamg100/clear-ping:latest
+    container_name: clear_ping
+    restart: unless-stopped
+    labels:
+      traefik.enable: true
+      traefik.http.routers.clearping.entryPoints: https
+      traefik.http.routers.clearping.rule: Host(`ping.example.com`)
+    # Without Traefik, drop the labels and publish the port instead:
+    # ports:
+    #   - "3000:3000"
+    volumes:
+      # The database. The container runs as uid 1000, so on Linux create the
+      # directory first and hand it over, or the app cannot write to it:
+      #   mkdir -p data && sudo chown 1000:1000 data
+      - ./data:/data
+    networks:
+      - proxy
+
+# The network Traefik is attached to. It has to exist already.
+networks:
+  proxy:
+    external: true

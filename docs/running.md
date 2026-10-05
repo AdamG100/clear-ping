@@ -62,6 +62,53 @@ docker run -d --name clearping -p 3000:3000 -v clearping-data:/data ghcr.io/adam
 - The settings in the table below are passed with `-e`, for example
   `-e CLEARPING_RETENTION_DAYS=30`.
 
+`compose.example.yaml` in the repository root is the same thing as a Compose
+file, set up to sit behind Traefik. Copy it to `compose.yaml` and change the
+hostname and network to yours.
+
+## Upgrading
+
+Pull the new image and recreate the container. Nothing else is needed:
+
+```bash
+docker pull ghcr.io/adamg100/clear-ping:latest
+docker rm -f clearping
+docker run -d --name clearping -p 3000:3000 -v clearping-data:/data ghcr.io/adamg100/clear-ping:latest
+```
+
+or, with Compose, `docker compose pull && docker compose up -d`.
+
+The database stays where it is, in the volume or the directory mounted at
+`/data`, and the new version brings it up to date when it starts. Running from
+source is the same: pull, install, start.
+
+How that works, for when it matters:
+
+- **It happens at start, before anything is probed or served.** The database
+  records which changes it has had (`PRAGMA user_version`), and every change
+  newer than that is applied once, in order. The log says which:
+  `Database: applied migration 2 (shared alerts)`.
+- **Each change is all or nothing.** It runs inside a transaction. If one
+  fails, the database is left exactly as it was and the app stops with the
+  error, rather than running against a database in a shape it does not expect.
+- **Measurement history is never rewritten by an upgrade.** The one upgrade
+  that has to rebuild a table (very old databases, from before TCP and HTTP
+  probes) first saves a copy next to the database, named
+  `clearping.db.before-probe-types-<time>.bak`.
+- **With a separate prober**, both processes open the same file and either may
+  get there first. The other waits for it and finds nothing left to do.
+- **Going back to an older image** works: it starts, and logs that the
+  database is newer than it understands. It will not see things that only
+  exist in the newer shape. Alerts made on the Alerts screen are an example:
+  an image from before that screen looks for alerts where they used to be
+  kept, and finds the ones you had then.
+
+For anyone changing the schema: add a function to the list at the bottom of
+`src/lib/migrations.ts`. Entries already in the list are never edited, since
+databases that have run them will not run them again.
+`src/lib/database-migration.test.ts` opens a database in the oldest shape there
+is and checks that everything survives the trip to the newest.
+
 ## Configuration
 
 See `.env.example`. All settings are optional.

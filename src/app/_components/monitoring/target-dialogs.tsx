@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { addressFamilyFor, classifyHost, isDualStack, isWellKnownResolver, targetTypeFor } from '@/lib/host'
+import { groupLabel, normalizeGroupPath } from '@/lib/group-path'
 import { describeProbe } from '@/lib/probe-labels'
 import {
   DEFAULT_DNS_QUERY_NAME,
@@ -433,7 +434,7 @@ function GroupPicker({
         </button>
         {availableGroups.map(name => (
           <button key={name} type="button" onClick={() => onGroupChange(name)} className={choice(group === name)}>
-            {name}
+            {groupLabel(name)}
           </button>
         ))}
         <button
@@ -447,7 +448,7 @@ function GroupPicker({
       </div>
       {group === NEW_GROUP && (
         <Input
-          placeholder="New group name…"
+          placeholder="New group name, or Home/Network for a group inside a group"
           value={customGroup}
           onChange={e => onCustomGroupChange(e.target.value)}
           className="bg-input border-border text-foreground text-sm mt-1.5"
@@ -455,7 +456,8 @@ function GroupPicker({
         />
       )}
       <p className="text-[11px] text-muted-foreground">
-        Targets in a group can be compared on one chart.
+        Targets in a group can be compared on one chart. A <span className="font-mono">/</span> in
+        a new group&apos;s name puts it inside another: <span className="font-mono">Home/Network</span>.
       </p>
     </div>
   )
@@ -654,7 +656,7 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
       ipVersion: isDomain ? ipVersion : 'auto',
       probeConfig: validation.config,
       interval,
-      group: group === NEW_GROUP ? customGroup.trim() : group,
+      group: group === NEW_GROUP ? normalizeGroupPath(customGroup) : group,
     })
   }
 

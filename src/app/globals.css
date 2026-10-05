@@ -59,6 +59,10 @@
    <html>, so these values were dead and --success/--warning existed only in the
    dark block, which would have broken the moment a theme toggle was added. */
 :root {
+  /* Tells the browser which theme its own parts are drawn for: scrollbars,
+     and any form control not styled here. Without it they stay light, and a
+     scrollbar inside a dark dialog is a white stripe. */
+  color-scheme: light;
   --radius: 0.625rem;
   --success: oklch(0.55 0.16 150);
   --warning: oklch(0.65 0.15 85);
@@ -103,6 +107,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   /* Cold instrument slate, not neutral black: everything carries a slight blue
      cast so the signal colours (green/cyan/magenta/red) read as emitted light
      against it rather than as flat swatches. */

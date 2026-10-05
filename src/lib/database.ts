@@ -4,6 +4,8 @@ import sqlite3 from 'sqlite3';
 import { Target, ProbeMeasurement, TargetStatistics, GroupOrder, LatestMeasurement, FamilyReading, BucketedMeasurement, SparklinePoint, IpVersion, ProbeType, AddressFamily } from '@/types/probe';
 import { addressFamilyFor, FAMILY_LABEL, isDualStack } from './host';
 import { median } from './metrics';
+import { isWithinGroup, normalizeGroupPath, parentGroup, rebaseGroupPath } from './group-path';
+import { runMigrations } from './migrations';
 
 // Use sqlite3.Database type
 type Database = sqlite3.Database;
@@ -456,6 +458,10 @@ export async function initDatabase(): Promise<Database> {
       });
     });
 
+    // Everything above brings a database of any age up to the shape the
+    // numbered migrations start from. Changes made since are in that list.
+    await runMigrations(db);
+
     console.log('Database: Tables and indexes created successfully');
 
     return db!;
@@ -515,12 +521,13 @@ export async function getDatabase(): Promise<Database> {
 export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt'>): Promise<Target> {
   const database = await getDatabase();
   const now = Date.now();
+  const group = normalizeGroupPath(target.group);
 
   return new Promise<Target>((resolve, reject) => {
     database.run(`
       INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, sort_order, ip_version, probe_config, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, target.group || '', target.sortOrder ?? 0, target.ipVersion ?? 'auto', toJson(target.probeConfig), now, now], function(err) {
+    `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, group, target.sortOrder ?? 0, target.ipVersion ?? 'auto', toJson(target.probeConfig), now, now], function(err) {
       if (err) {
         reject(err);
         return;
@@ -528,6 +535,7 @@ export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt
       saveDatabase();
       resolve({
         ...target,
+        group: group || undefined,
         createdAt: new Date(now),
         updatedAt: new Date(now),
       });
@@ -613,7 +621,7 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
   }
   if (updates.group !== undefined) {
     fields.push('group_name = ?');
-    values.push(updates.group || '');
+    values.push(normalizeGroupPath(updates.group));
   }
   if (updates.sortOrder !== undefined) {
     fields.push('sort_order = ?');
@@ -1021,7 +1029,7 @@ export async function saveGroupOrders(orders: GroupOrder[]): Promise<void> {
     new Promise<void>((resolve, reject) => {
       database.run(
         `INSERT OR REPLACE INTO group_orders (group_name, sort_order) VALUES (?, ?)`,
-        [order.groupName, order.sortOrder],
+        [normalizeGroupPath(order.groupName), order.sortOrder],
         function (err) {
           if (err) reject(err);
           else resolve();
@@ -1032,6 +1040,72 @@ export async function saveGroupOrders(orders: GroupOrder[]): Promise<void> {
 
   await Promise.all(promises);
   saveDatabase();
+}
+
+/**
+ * Rename a group, or move it inside another, taking everything beneath it
+ * along. Returns how many targets ended up somewhere new.
+ *
+ * A group is nothing but the front of its targets' paths, so this rewrites
+ * that front on every target under `from`. Moving onto a group that already
+ * exists merges the two.
+ */
+export async function moveGroup(from: string, to: string): Promise<number> {
+  const database = await getDatabase();
+  const source = normalizeGroupPath(from);
+  const destination = normalizeGroupPath(to);
+  if (!source || !destination || source === destination) return 0;
+  if (isWithinGroup(destination, source)) {
+    throw new Error('A group cannot be moved inside itself');
+  }
+
+  const all = <T>(sql: string) =>
+    new Promise<T[]>((resolve, reject) => {
+      database.all(sql, [], (err, rows) => (err ? reject(err) : resolve((rows ?? []) as T[])));
+    });
+
+  await runSql(database, 'BEGIN IMMEDIATE');
+  try {
+    // Matched here rather than with LIKE: a group name may hold `%` or `_`.
+    const groups = (await all<{ group_name: string }>('SELECT DISTINCT group_name FROM targets'))
+      .map(row => row.group_name)
+      .filter(group => group && isWithinGroup(group, source));
+
+    let moved = 0;
+    for (const group of groups) {
+      moved += await new Promise<number>((resolve, reject) => {
+        database.run(
+          'UPDATE targets SET group_name = ?, updated_at = ? WHERE group_name = ?',
+          [rebaseGroupPath(group, source, destination), Date.now(), group],
+          function (err) {
+            if (err) reject(err);
+            else resolve(this.changes);
+          }
+        );
+      });
+    }
+
+    // Saved positions follow their groups. The one for the group that moved is
+    // only carried over if it is still among the same neighbours: a position
+    // among one set of siblings means nothing among another.
+    const sameParent = parentGroup(source) === parentGroup(destination);
+    const orders = (await all<GroupOrderRow>('SELECT * FROM group_orders'))
+      .filter(order => isWithinGroup(order.group_name, source));
+    for (const order of orders) {
+      await runSql(database, 'DELETE FROM group_orders WHERE group_name = ?', [order.group_name]);
+      if (order.group_name === source && !sameParent) continue;
+      await runSql(database, 'INSERT OR IGNORE INTO group_orders (group_name, sort_order) VALUES (?, ?)', [
+        rebaseGroupPath(order.group_name, source, destination),
+        order.sort_order,
+      ]);
+    }
+
+    await runSql(database, 'COMMIT');
+    return moved;
+  } catch (error) {
+    await runSql(database, 'ROLLBACK').catch(() => {});
+    throw error;
+  }
 }
 
 /**
@@ -1046,7 +1120,7 @@ export async function updateTargetSortOrders(updates: { id: string; sortOrder: n
       const values: (string | number)[] = [update.sortOrder];
       if (update.group !== undefined) {
         fields.push('group_name = ?');
-        values.push(update.group || '');
+        values.push(normalizeGroupPath(update.group));
       }
       values.push(update.id);
       database.run(

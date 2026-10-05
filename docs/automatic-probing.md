@@ -1,8 +1,8 @@
-# ClearICMP Automatic Probe Scheduler
+# ClearPing Automatic Probe Scheduler
 
 ## Overview
 
-ClearICMP now includes an automatic probe scheduler that works similarly to **SmokeICMP**. The scheduler automatically probes all active targets at their configured intervals, capturing measurements and storing them for visualization on the graphs.
+ClearPing includes an automatic probe scheduler that works similarly to **Smokeping**. The scheduler automatically probes all active targets at their configured intervals, capturing measurements and storing them for visualization on the graphs.
 
 ## How It Works
 
@@ -143,9 +143,9 @@ the probe once over IPv4 and once over IPv6 and stores a reading for each. The
 target's page opens on a chart with one line per family and has tabs for the full
 readings of either one. In the sidebar the target counts as reachable if either
 family answers, but its status dot takes the colour of the worse one, so a target
-whose IPv6 has gone while IPv4 carries on does not look healthy. Its alert rules
-are judged on the worse of the two readings in each round, and a traceroute is
-taken over each family.
+whose IPv6 has gone while IPv4 carries on does not look healthy. The alerts it is
+ticked for are judged on the worse of the two readings in each round, and a
+traceroute is taken over each family.
 
 Each measurement records the family it was taken over (`measurements.family`, 4 or
 6). Readings stored before that column existed are filed, the next time the
@@ -155,13 +155,42 @@ existing target to *Both* keeps its history on the right line.
 On macOS, IPv6 pings go through `ping6`, which has no per-packet timeout flag; a
 lost packet there is bounded by the prober's own process timeout instead.
 
+## Groups
+
+Targets are arranged into groups in the sidebar, and a group can sit inside
+another to any depth: `Home`, with `Network` inside it, with `Wireless` inside
+that.
+
+- **Making one.** A target's group is chosen when it is added or edited. Pick an
+  existing group, or type a new one. A `/` in a new group's name puts it inside
+  another: `Home/Network` is a group `Network` inside a group `Home`, and both
+  are made if they are not there.
+- **Moving targets.** Drag a target by its handle onto any group, at any depth,
+  or onto *Ungrouped* to take it out of its group.
+- **Renaming and moving groups.** The pencil on a group's header renames it or
+  puts it inside another group. Everything in it goes with it. Giving it the
+  name of a group that already exists merges the two.
+- **Ordering.** Drag a group by its handle to reorder it among the groups beside
+  it.
+- **Collapsing.** A collapsed group shows one trace for everything in it: the
+  mean latency of its targets, marked wherever any of them lost packets. Paused
+  targets are left out of it.
+
+A group exists only while there is a target somewhere in it. There is nothing to
+delete: move its last target out and it is gone.
+
+A group's name cannot contain a `/`, since that is what separates a group from
+the one inside it. Groups made before nesting existed whose names had one in
+them become a group inside a group when the database is upgraded.
+
 ## Comparing Targets
 
-Every group in the sidebar with two or more targets has a chart button on its
-header. It puts the whole group on one chart, the way a Smokeping multi-host graph
-does: one median line per target on a shared time axis and latency scale, so it is
-plain whether a slowdown hit one of them or all of them. Put four resolvers in a
-group and that is a query-time comparison of the four.
+Every group in the sidebar with two or more targets has a Compare button on its
+header. It puts the whole group, including the groups inside it, on one chart,
+the way a Smokeping multi-host graph does: one median line per target on a shared
+time axis and latency scale, so it is plain whether a slowdown hit one of them or
+all of them. Put four resolvers in a group and that is a query-time comparison of
+the four.
 
 - Under the lines there is a **loss strip per target**, in the same order as the
   legend, marking when each one lost packets (or failed requests, or queries).
@@ -262,8 +291,9 @@ Manually starts the scheduler (useful if it was stopped).
 `GET /api/scheduler/status` reports whether the scheduler is running, how many
 targets it has scheduled, and when each is next due.
 
-For being told when something breaks rather than having to look, add an alert
-rule from the target's Alerts panel — see [alerting.md](./alerting.md).
+For being told when something breaks rather than having to look, make an alert
+on the Alerts screen and tick the targets it should watch. See
+[alerting.md](./alerting.md).
 
 ## Data Storage
 
@@ -291,9 +321,15 @@ Per-probe settings (port, URL path, expected status, DNS query) are stored as JS
 `targets.probe_config`, so a probe that needs a new setting does not need a new
 column.
 
-`targets.probe_type` and `alert_rules.metric` used to carry `CHECK` constraints
-listing their allowed values. SQLite cannot alter a `CHECK`, so on first start after
-upgrading both tables are rebuilt without them (the API validates the values
+A target's group is stored as a path in `targets.group_name`, such as
+`Home/Network`; the tree in the sidebar is read off those paths.
+
+The schema is brought up to date automatically whenever the database is opened by
+a newer version; see [Upgrading](./running.md#upgrading).
+
+`targets.probe_type` used to carry a `CHECK` constraint listing its allowed
+values. SQLite cannot alter a `CHECK`, so on first start after upgrading from a
+version that old the table is rebuilt without it (the API validates the value
 instead). The rebuild keeps every row, and a snapshot of the database is written
 next to it first as `clearping.db.before-probe-types-<timestamp>.bak`. Once you are
 satisfied with the upgrade that file can be deleted.
@@ -395,7 +431,10 @@ src/
 │   ├── resolve.ts          # Name resolution for domain targets
 │   ├── traceroute.ts       # Running and storing traceroutes
 │   ├── traceroute-parse.ts # Traceroute output parsing (platform-specific, tested)
-│   ├── alerts.ts           # Threshold rules and webhook dispatch
+│   ├── alerts.ts           # Alerts: storage, judging a probe, delivery
+│   ├── alert-delivery.ts   # What an alert says: the Discord embed and the webhook payload
+│   ├── group-path.ts       # Nested groups as paths
+│   ├── migrations.ts       # Schema changes applied when the database is opened
 │   ├── metrics.ts          # Shared statistics (median, jitter)
 │   ├── series.ts           # Chart series and gap detection
 │   └── database.ts         # Database operations
@@ -418,7 +457,6 @@ scripts/
 
 Potential improvements:
 - [ ] Web UI for configuring probe intervals
-- [ ] Alert system for downtime/high latency
 - [ ] Multiple probe schedules per target
 - [ ] Distributed probing from multiple locations
 - [ ] Export data to Prometheus/Grafana

@@ -1,13 +1,29 @@
 # Alerting
 
-Without an alert rule, ClearPing is a dashboard you have to remember to look at.
-A rule turns it into something that tells you when your network breaks.
+Without an alert, ClearPing is a dashboard you have to remember to look at. An
+alert turns it into something that tells you when your network breaks.
 
-## Creating a rule
+## Making an alert
 
-Select a target and use the **Alerts** panel. Each rule watches one metric:
+Open **Alerts** at the bottom of the sidebar and choose **New alert**. An alert
+is three things:
 
-| Metric | Fires when |
+1. **A condition**: what to watch for, and for how many probes in a row.
+2. **Where to send it**: Discord, a webhook, or nowhere but the Alerts screen.
+3. **The targets it watches**: tick them. Ticking a group ticks every target
+   in it and in the groups inside it.
+
+One alert covers every target ticked for it, but each target is judged on its
+own: it fires and clears separately, and one target in trouble says nothing
+about the rest. A target added later is not ticked for anything until you tick
+it, including one added to a group whose other targets are all ticked.
+
+The Alerts button shows how many alerts are firing, and each target's page lists
+the alerts watching it.
+
+### Conditions
+
+| Watching | Fires when |
 |---|---|
 | Packet loss | Loss exceeds the threshold (%) |
 | Latency | Average RTT exceeds the threshold (ms) |
@@ -15,39 +31,72 @@ Select a target and use the **Alerts** panel. Each rule watches one metric:
 | Unreachable | A probe gets no reply at all |
 | Certificate expires in | Fewer days than the threshold remain on an HTTPS target's certificate |
 
-The certificate rule is offered only on HTTPS targets, and is the one rule that
-fires when a value falls *below* its threshold. It defaults to a single probe
-rather than several in a row: a certificate's expiry date does not flap.
+The certificate condition is the one that fires when a value falls *below* its
+threshold. It defaults to a single probe rather than several in a row: a
+certificate's expiry date does not flap. Only HTTPS targets have a certificate,
+so on any other target it never fires.
 
-When a **packet loss** or **unreachable** rule fires, a traceroute to the target is
-taken automatically and saved to its Route panel.
+When a **packet loss** or **unreachable** alert fires on a target, a traceroute
+to that target is taken automatically and saved to its Route panel.
 
 A target probed over **both IP versions** takes two readings each round, and its
-rules are judged once per round on the worse of the two: the higher loss, the
+alerts are judged once per round on the worse of the two: the higher loss, the
 higher latency, the certificate that expires sooner, and unreachable if either
-family is. A rule therefore fires when either family is in trouble. (Judging the
-two readings one after the other would not work: a healthy IPv4 reading would
-reset the count of consecutive probes a failing IPv6 one had just started.)
+family is. An alert therefore fires when either family is in trouble. (Judging
+the two readings one after the other would not work: a healthy IPv4 reading
+would reset the count of consecutive probes a failing IPv6 one had just
+started.)
 
-## Why "consecutive probes" matters
+## Why "probes in a row" matters
 
-A rule fires only after the condition has held for that many probes in a row,
+An alert fires only after the condition has held for that many probes in a row,
 and clears only after the same number of clean ones. This hysteresis is the
 difference between an alert and a nuisance: a single probe crossing a threshold
-is usually a blip, and a rule that fires and resolves on alternating probes
+is usually a blip, and an alert that fires and resolves on alternating probes
 trains you to ignore it.
 
-With the default of 3 and a 5-minute interval, a rule fires after roughly
+With the default of 3 and a 5-minute interval, an alert fires after roughly
 15 minutes of sustained trouble.
 
-## Webhooks
+## Where an alert is sent
 
-Give a rule a webhook URL and it receives a POST on both transitions:
+The destination is chosen on the alert, not worked out from the URL. Each kind
+is sent in its own format.
+
+Use **Send test** on an alert to post a sample message, marked as a test, and
+find a mistyped URL or ID now rather than during an outage. It changes nothing
+about the alert's state.
+
+### Discord
+
+Create a webhook in Discord (channel settings, Integrations, Webhooks), copy its
+URL and paste it in. Each time the alert fires or clears on a target, one embed
+is posted to the channel:
+
+- red when it fires, green when it clears
+- the target's name and what is wrong in the title
+- its address, the current reading, the alert's name and the target's group as
+  fields
+- the time of the probe as the embed's timestamp
+
+**Mentions.** Give the alert role IDs, user IDs or both, separated by commas,
+and they are mentioned when the alert fires. To copy an ID, turn on Developer
+Mode in Discord (User Settings, Advanced), then right-click the role or user and
+choose Copy ID. A mention pasted as Discord writes it (`<@&123...>`) works too.
+
+- Mentions are sent when an alert **fires**, not when it clears.
+- Only the IDs you listed can be mentioned. Nothing else in the message can
+  ping anyone, so a target named `@everyone` is only text.
+
+### Webhook
+
+Any other URL receives a JSON POST on both transitions:
 
 ```json
 {
   "status": "firing",
-  "target": { "name": "Router", "host": "192.168.1.1" },
+  "alert": { "id": "5f0c...", "name": "Packet loss above 10%" },
+  "target": { "name": "Router", "host": "192.168.1.1", "group": "Home/Network" },
   "metric": "packetLoss",
   "observed": 42.5,
   "threshold": 10,
@@ -56,11 +105,16 @@ Give a rule a webhook URL and it receives a POST on both transitions:
 }
 ```
 
-The `text` field is a ready-made summary, so Slack and Discord incoming webhooks
-work if you point them at a small relay, and most alerting services accept the
-payload directly.
+`status` is `firing` or `resolved`. The `text` field is a ready-made summary,
+which is what a Slack-compatible endpoint reads, and most alerting services
+accept the payload directly. A test message also carries `"test": true`.
 
-Delivery failures are logged and swallowed — a webhook that is down must never
+### Only show it here
+
+Nothing is sent. The alert still fires and clears, and shows on the Alerts
+screen and in the count on the Alerts button.
+
+Delivery failures are logged and swallowed: a webhook that is down must never
 stop the prober from measuring.
 
 ## Behaviour worth knowing
@@ -68,8 +122,36 @@ stop the prober from measuring.
 - **A metric with no reading holds the current state.** A host that is down
   produces no latency figure. Reading that as "0ms, all good" would silently
   resolve a firing latency alert, so an absent reading neither fires nor
-  resolves a rule. Use the *Unreachable* metric to alert on the host being down.
-- **Disabling a rule resets its streak**, so re-enabling it cannot resume
-  part-way through a breach it was not watching.
-- **Rules are evaluated after the measurement is stored**, and alerting failures
+  resolves an alert. Use the *Unreachable* condition to alert on the host being
+  down.
+- **Muting an alert stops it being judged**, and resets its count, so unmuting
+  it cannot resume part-way through a breach it was not watching. Changing its
+  condition resets the count too.
+- **Unticking a target forgets its state for that alert.** The targets that
+  stay ticked keep theirs.
+- **A paused target is not probed**, so its alerts neither fire nor clear until
+  it is resumed.
+- **Alerts are judged after the measurement is stored**, and alerting failures
   cannot prevent a measurement being recorded.
+
+## Alerts made before there was an Alerts screen
+
+Earlier versions set alerts on each target's own page. Those are carried over
+automatically the first time a newer version starts: rules that said the same
+thing on different targets become one alert ticked for all of them, each target
+keeps its state (so one that was firing does not announce itself again), and
+each is sent the way its URL was already being sent.
+
+## API
+
+| | |
+|---|---|
+| `GET /api/alerts` | Every alert, with the state of each ticked target |
+| `POST /api/alerts` | Create one |
+| `PATCH /api/alerts/:id` | Change one; `targetIds` replaces the ticked set, `enabled` mutes |
+| `DELETE /api/alerts/:id` | Delete one |
+| `POST /api/alerts/:id/test` | Send its destination a test message |
+
+An alert is created with `metric`, `threshold`, `consecutiveProbes`,
+`targetIds`, and optionally `name`, `destination` (`none`, `discord` or
+`webhook`), `webhookUrl`, `mentionRoleIds` and `mentionUserIds`.

@@ -123,6 +123,8 @@ interface StatCardProps {
   lastUpdated?: Date
   isPolling?: boolean
   isLoading?: boolean
+  /** No pulsing ring: nothing is being measured, so nothing should look live. */
+  still?: boolean
 }
 
 function StatCard({
@@ -136,6 +138,7 @@ function StatCard({
   accentColor = "#4fd1c5",
   lastUpdated,
   isLoading = false,
+  still = false,
 }: StatCardProps & { isPolling?: boolean; isLoading?: boolean }) {
   return (
     <div className={cn(
@@ -155,7 +158,7 @@ function StatCard({
           <div className="relative flex h-10 w-10 items-center justify-center rounded-lg">
             {/* Pulsing background ring (use opacity style so OKLCH works) */}
             <div
-              className="absolute h-10 w-10 rounded-lg custom-ping"
+              className={cn('absolute h-10 w-10 rounded-lg', !still && 'custom-ping')}
               style={{ backgroundColor: accentColor, opacity: 0.15 }}
             />
             {/* Fixed center icon container with a semi-opaque background layer so the icon stays fully opaque */}
@@ -258,10 +261,17 @@ export default function StatsCards({
   current,
   lastUpdated,
   vocabulary,
+  paused = false,
 }: Readonly<{
   statistics: TargetStatistics | null
   current: CurrentReadings
   lastUpdated?: Date
+  /**
+   * The target is not being probed. The figures still describe the period on
+   * screen, but the cards go grey and stop pulsing, and none of them passes
+   * judgement on a state nobody has measured since.
+   */
+  paused?: boolean
   /** Names for the readings, which differ between ping and DNS targets. */
   vocabulary: ProbeVocabulary
 }>) {
@@ -314,14 +324,14 @@ export default function StatsCards({
     jitter <= 100 ? "Good" :
     jitter <= 200 ? "Fair" : "Poor")
 
-  const latencyAccentColor = !hasData ? '#6b7280'
+  const latencyAccentColor = !hasData || paused ? '#6b7280'
     : isCurrentlyOffline ? getPacketLossColor(100)
     : getLatencyColor(avgLatency ?? 0)
-  const packetLossAccentColor = !hasData || packetLoss === null ? '#6b7280' : getPacketLossColor(packetLoss)
-  const jitterAccentColor = !hasData || jitter === null ? '#6b7280' : getLatencyColor(jitter)
+  const packetLossAccentColor = !hasData || paused || packetLoss === null ? '#6b7280' : getPacketLossColor(packetLoss)
+  const jitterAccentColor = !hasData || paused || jitter === null ? '#6b7280' : getLatencyColor(jitter)
 
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className={cn("grid gap-6 lg:grid-cols-3", paused && "grayscale")}>
       {/* RTT Card — the headline is a true median. It used to be the midrange,
           (min + max) / 2, which a single spike drags far from any reading. */}
       <StatCard
@@ -330,8 +340,9 @@ export default function StatsCards({
         mainValue={ms(medianLatency)}
         mainLabel={vocabulary.latencyLabel}
         accentColor={latencyAccentColor}
-        trend={latencyTrend}
-        trendValue={latencyTrendValue}
+        trend={paused ? 'stable' : latencyTrend}
+        trendValue={paused ? 'Paused' : latencyTrendValue}
+        still={paused}
         lastUpdated={lastUpdated}
         isLoading={!hasData}
         stats={[
@@ -352,8 +363,9 @@ export default function StatsCards({
           ? `${statistics.uptime.toFixed(1)}% of ${statistics.sampleCount} probes answered`
           : vocabulary.lossLabel}
         accentColor={packetLossAccentColor}
-        trend={lossTrend}
-        trendValue={lossTrendValue}
+        trend={paused ? 'stable' : lossTrend}
+        trendValue={paused ? 'Paused' : lossTrendValue}
+        still={paused}
         lastUpdated={lastUpdated}
         isLoading={!hasData}
         stats={[
@@ -371,8 +383,9 @@ export default function StatsCards({
         mainValue={ms(jitter)}
         mainLabel={vocabulary.jitterLabel}
         accentColor={jitterAccentColor}
-        trend={jitterTrend}
-        trendValue={jitterTrendValue}
+        trend={paused ? 'stable' : jitterTrend}
+        trendValue={paused ? 'Paused' : jitterTrendValue}
+        still={paused}
         lastUpdated={lastUpdated}
         isLoading={!hasData}
         stats={[

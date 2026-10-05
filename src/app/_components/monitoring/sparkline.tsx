@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import { getPacketLossVar, isMeaningfulLoss, NO_DATA_COLOR } from '@/lib/packet-loss-colors'
 import type { SparklinePoint } from '@/types/probe'
+import { cn } from '@/lib/utils'
 
 /**
  * A target's recent history, small enough to sit in a list row.
@@ -23,9 +24,14 @@ interface SparklineProps {
   height?: number
   /** Dims the trace for a paused target without changing its shape. */
   muted?: boolean
+  /**
+   * Fill the width of whatever it is placed in, instead of being `width`
+   * pixels wide. `width` then only sets how finely the trace is drawn.
+   */
+  stretch?: boolean
 }
 
-export function Sparkline({ points, width = 64, height = 18, muted = false }: SparklineProps) {
+export function Sparkline({ points, width = 64, height = 18, muted = false, stretch = false }: SparklineProps) {
   const geometry = useMemo(() => {
     const usable = points.filter(p => Number.isFinite(p.timestamp))
     if (usable.length < 2) return null
@@ -57,17 +63,28 @@ export function Sparkline({ points, width = 64, height = 18, muted = false }: Sp
     if (current.length > 1) runs.push(current.join(' L '))
 
     const worstLoss = Math.max(...usable.map(p => p.packetLoss))
-    const failures = usable
-      .map((p, i) => ({ p, i }))
+
+    // Readings in a row that failed the same way are marked as one band. As a
+    // stripe each, a long failure on a wide trace is a comb that hides the
+    // line it is drawn behind.
+    const failures: { from: number; to: number; color: string }[] = []
+    usable.forEach((point, i) => {
       // Only loss worth seeing, so one stray packet does not stripe the trace.
-      .filter(({ p }) => p.latency === null || isMeaningfulLoss(p.packetLoss))
+      if (point.latency !== null && !isMeaningfulLoss(point.packetLoss)) return
+
+      const color = getPacketLossVar(point.latency === null ? 100 : point.packetLoss)
+      const last = failures[failures.length - 1]
+      if (last && last.to === i - 1 && last.color === color) last.to = i
+      else failures.push({ from: i, to: i, color })
+    })
 
     return {
       paths: runs.map(r => `M ${r}`),
       color: usable.every(p => p.latency === null) ? NO_DATA_COLOR : getPacketLossVar(worstLoss),
-      failures: failures.map(({ p, i }) => ({
-        x: i * stepX,
-        color: getPacketLossVar(p.latency === null ? 100 : p.packetLoss),
+      failures: failures.map(({ from, to, color }) => ({
+        x: Math.max(0, from * stepX - 1),
+        width: (to - from) * stepX + 2,
+        color,
       })),
     }
   }, [points, width, height])
@@ -75,8 +92,8 @@ export function Sparkline({ points, width = 64, height = 18, muted = false }: Sp
   if (!geometry) {
     return (
       <span
-        className="inline-block shrink-0 rounded-sm bg-muted/40"
-        style={{ width, height }}
+        className={stretch ? 'block rounded-sm bg-muted/40' : 'inline-block shrink-0 rounded-sm bg-muted/40'}
+        style={{ width: stretch ? '100%' : width, height }}
         aria-hidden="true"
       />
     )
@@ -84,10 +101,11 @@ export function Sparkline({ points, width = 64, height = 18, muted = false }: Sp
 
   return (
     <svg
-      width={width}
+      width={stretch ? '100%' : width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
-      className={muted ? 'shrink-0 opacity-40' : 'shrink-0'}
+      preserveAspectRatio={stretch ? 'none' : undefined}
+      className={cn('shrink-0', stretch && 'block', muted && 'opacity-40')}
       aria-hidden="true"
       focusable="false"
     >
@@ -95,9 +113,9 @@ export function Sparkline({ points, width = 64, height = 18, muted = false }: Sp
       {geometry.failures.map((f, i) => (
         <rect
           key={i}
-          x={Math.max(0, f.x - 1)}
+          x={f.x}
           y={0}
-          width={2}
+          width={f.width}
           height={height}
           fill={f.color}
           opacity={0.35}
@@ -114,6 +132,8 @@ export function Sparkline({ points, width = 64, height = 18, muted = false }: Sp
           strokeWidth={1.25}
           strokeLinecap="round"
           strokeLinejoin="round"
+          // Stretched, the drawing is scaled sideways; the line must not be.
+          vectorEffect={stretch ? 'non-scaling-stroke' : undefined}
         />
       ))}
     </svg>

@@ -1,0 +1,68 @@
+/**
+ * Groups nest by name: a target's group is a path such as `Home/Network`, and
+ * the group `Home` is whatever that path, and any other starting with it,
+ * implies. Nothing else records the tree, so a group still exists only through
+ * the targets somewhere beneath it, and moving a whole branch is a matter of
+ * rewriting the front of some paths.
+ */
+
+export const GROUP_SEPARATOR = '/'
+
+/** The names along a path, outermost first. Empty for no group. */
+export function splitGroupPath(group: string | null | undefined): string[] {
+  return (group ?? '')
+    .split(GROUP_SEPARATOR)
+    .map(segment => segment.trim())
+    .filter(segment => segment !== '')
+}
+
+/**
+ * A path as it is stored and compared. `Home / Network`, `Home//Network` and
+ * `/Home/Network/` are all the one group, and must not become three.
+ */
+export function normalizeGroupPath(group: string | null | undefined): string {
+  return splitGroupPath(group).join(GROUP_SEPARATOR)
+}
+
+export function joinGroupPath(parent: string, name: string): string {
+  return normalizeGroupPath(`${parent}${GROUP_SEPARATOR}${name}`)
+}
+
+/** The group a group sits inside; empty for one at the top level. */
+export function parentGroup(group: string): string {
+  return splitGroupPath(group).slice(0, -1).join(GROUP_SEPARATOR)
+}
+
+/** A group's own name, without the groups it sits inside. */
+export function groupName(group: string): string {
+  return splitGroupPath(group).at(-1) ?? ''
+}
+
+export function groupDepth(group: string): number {
+  return Math.max(0, splitGroupPath(group).length - 1)
+}
+
+/** How a path is shown where there is no tree around it to give it context. */
+export function groupLabel(group: string): string {
+  return splitGroupPath(group).join(' / ')
+}
+
+/** A group and every group it sits inside, outermost first. */
+export function groupWithAncestors(group: string): string[] {
+  const segments = splitGroupPath(group)
+  return segments.map((_, index) => segments.slice(0, index + 1).join(GROUP_SEPARATOR))
+}
+
+/** Whether `group` is `ancestor` itself or somewhere beneath it. */
+export function isWithinGroup(group: string, ancestor: string): boolean {
+  return group === ancestor || group.startsWith(ancestor + GROUP_SEPARATOR)
+}
+
+/**
+ * Where `group` ends up when the branch at `from` is renamed or moved to `to`.
+ * Unchanged if it is not part of that branch.
+ */
+export function rebaseGroupPath(group: string, from: string, to: string): string {
+  if (!isWithinGroup(group, from)) return group
+  return normalizeGroupPath(to + group.slice(from.length))
+}

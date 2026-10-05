@@ -1,160 +1,318 @@
 import { randomUUID } from 'crypto';
-import { getDatabase, rebuildTable, tableDefinition } from './database';
-import type { AlertEvent, AlertMetric, AlertRule, ProbeResult, Target } from '@/types/probe';
-import { ALERT_METRIC_LABELS } from '@/types/probe';
+import { getDatabase } from './database';
+import { isDiscordWebhook, parseMentionIds, payloadFor } from './alert-delivery';
+import type { Alert, AlertDestination, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
+import { ALERT_DESTINATION_LABELS, ALERT_METRIC_LABELS } from '@/types/probe';
 
 export const ALERT_METRICS = Object.keys(ALERT_METRIC_LABELS) as AlertMetric[];
-
-const ALERT_RULE_COLUMNS = [
-  'id', 'target_id', 'metric', 'threshold', 'consecutive_probes', 'webhook_url', 'enabled',
-  'state', 'streak', 'last_fired_at', 'last_resolved_at', 'created_at',
-];
+export const ALERT_DESTINATIONS = Object.keys(ALERT_DESTINATION_LABELS) as AlertDestination[];
 
 /**
- * `metric` is unconstrained for the same reason `targets.probe_type` is: the
- * list grows, and a CHECK naming its members turns every addition into a table
- * rebuild. The API validates it instead.
+ * Alerts, and how each target stands against the ones it is ticked for.
+ *
+ * The tables are created by the migrations in migrations.ts, which run when
+ * the database is opened; there is nothing to set up here.
  */
-const alertRulesTableSql = (name: string) => `
-  CREATE TABLE ${name} (
-    id TEXT PRIMARY KEY,
-    target_id TEXT NOT NULL,
-    metric TEXT NOT NULL,
-    threshold REAL NOT NULL DEFAULT 0,
-    consecutive_probes INTEGER NOT NULL DEFAULT 3,
-    webhook_url TEXT,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    state TEXT NOT NULL DEFAULT 'ok' CHECK(state IN ('ok','firing')),
-    streak INTEGER NOT NULL DEFAULT 0,
-    last_fired_at INTEGER,
-    last_resolved_at INTEGER,
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
-  )`;
 
-interface AlertRuleRow {
+interface AlertRow {
   id: string;
-  target_id: string;
+  name: string;
   metric: AlertMetric;
   threshold: number;
   consecutive_probes: number;
+  destination: AlertDestination;
   webhook_url: string | null;
+  mention_role_ids: string | null;
+  mention_user_ids: string | null;
   enabled: number;
+  created_at: number;
+}
+
+interface AlertTargetRow {
+  alert_id: string;
+  target_id: string;
   state: 'ok' | 'firing';
   streak: number;
   last_fired_at: number | null;
   last_resolved_at: number | null;
-  created_at: number;
 }
 
-function toRule(row: AlertRuleRow): AlertRule {
+function parseIds(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function settingsFromRow(row: AlertRow): AlertSettings & { id: string; enabled: boolean; createdAt: Date } {
   return {
     id: row.id,
-    targetId: row.target_id,
+    name: row.name || undefined,
     metric: row.metric,
     threshold: row.threshold,
     consecutiveProbes: row.consecutive_probes,
+    destination: row.destination,
     webhookUrl: row.webhook_url ?? undefined,
+    mentionRoleIds: parseIds(row.mention_role_ids),
+    mentionUserIds: parseIds(row.mention_user_ids),
     enabled: row.enabled === 1,
-    state: row.state,
-    streak: row.streak,
-    lastFiredAt: row.last_fired_at ? new Date(row.last_fired_at) : null,
-    lastResolvedAt: row.last_resolved_at ? new Date(row.last_resolved_at) : null,
     createdAt: new Date(row.created_at),
   };
 }
 
-export async function ensureAlertSchema(): Promise<void> {
+function stateFromRow(row: AlertTargetRow): AlertTargetState {
+  return {
+    targetId: row.target_id,
+    state: row.state,
+    streak: row.streak,
+    lastFiredAt: row.last_fired_at ? new Date(row.last_fired_at) : null,
+    lastResolvedAt: row.last_resolved_at ? new Date(row.last_resolved_at) : null,
+  };
+}
+
+async function run(sql: string, params: unknown[] = []): Promise<number> {
   const db = await getDatabase();
-
-  await new Promise<void>((resolve, reject) => {
-    db.run(
-      alertRulesTableSql('alert_rules').replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'),
-      err => (err ? reject(err) : resolve())
-    );
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
   });
+}
 
-  // Tables created before certificate alerts existed reject any metric they
-  // were not told about. The index below is dropped with the old table and
-  // recreated by the statement that follows.
-  const existing = await tableDefinition(db, 'alert_rules');
-  if (existing && /CHECK\s*\(\s*metric/i.test(existing)) {
-    await rebuildTable(db, 'alert_rules', alertRulesTableSql, ALERT_RULE_COLUMNS);
-    console.log('[Alerts] Migrated alert_rules table to accept new metrics');
+async function all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+  const db = await getDatabase();
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve((rows ?? []) as T[])));
+  });
+}
+
+// ─── Reading and writing alerts ─────────────────────────────────────────────
+
+export async function getAlerts(): Promise<Alert[]> {
+  const [alerts, states] = await Promise.all([
+    all<AlertRow>('SELECT * FROM alerts ORDER BY created_at ASC'),
+    all<AlertTargetRow>('SELECT * FROM alert_targets'),
+  ]);
+
+  const byAlert = new Map<string, AlertTargetState[]>();
+  for (const row of states) {
+    const list = byAlert.get(row.alert_id) ?? [];
+    list.push(stateFromRow(row));
+    byAlert.set(row.alert_id, list);
   }
 
-  await new Promise<void>((resolve, reject) => {
-    db.run(
-      'CREATE INDEX IF NOT EXISTS idx_alert_rules_target ON alert_rules(target_id)',
-      err => (err ? reject(err) : resolve())
-    );
-  });
+  return alerts.map(row => ({ ...settingsFromRow(row), targets: byAlert.get(row.id) ?? [] }));
 }
 
-export async function getAlertRules(targetId?: string): Promise<AlertRule[]> {
-  const db = await getDatabase();
-  const sql = targetId
-    ? 'SELECT * FROM alert_rules WHERE target_id = ? ORDER BY created_at ASC'
-    : 'SELECT * FROM alert_rules ORDER BY created_at ASC';
-
-  return new Promise((resolve, reject) => {
-    db.all(sql, targetId ? [targetId] : [], (err, rows) => {
-      if (err) reject(err);
-      else resolve((rows as AlertRuleRow[]).map(toRule));
-    });
-  });
+export async function getAlert(id: string): Promise<Alert | null> {
+  return (await getAlerts()).find(alert => alert.id === id) ?? null;
 }
 
-export async function createAlertRule(input: {
-  targetId: string;
-  metric: AlertMetric;
-  threshold: number;
-  consecutiveProbes: number;
-  webhookUrl?: string;
-}): Promise<AlertRule> {
-  const db = await getDatabase();
+/** Every alert a target is ticked for, each with that target's state. */
+export async function getAlertRules(targetId: string): Promise<AlertRule[]> {
+  const rows = await all<AlertRow & AlertTargetRow>(
+    `SELECT a.*, t.target_id, t.state, t.streak, t.last_fired_at, t.last_resolved_at
+     FROM alert_targets t
+     JOIN alerts a ON a.id = t.alert_id
+     WHERE t.target_id = ?
+     ORDER BY a.created_at ASC`,
+    [targetId]
+  );
+  return rows.map(row => ({ ...settingsFromRow(row), ...stateFromRow(row) }));
+}
+
+export type AlertInput = AlertSettings & { targetIds: string[]; enabled?: boolean };
+
+/**
+ * Check and tidy what the API was sent for an alert.
+ *
+ * With `partial`, only the fields present are checked: that is an edit, which
+ * may be nothing more than switching the alert off.
+ */
+export function parseAlertInput(
+  body: Record<string, unknown>,
+  partial = false
+): { ok: true; input: Partial<AlertInput> } | { ok: false; error: string } {
+  const input: Partial<AlertInput> = {};
+  const fail = (error: string) => ({ ok: false as const, error });
+  const given = (field: string) => body[field] !== undefined;
+
+  if (given('name')) input.name = String(body.name ?? '').trim().slice(0, 80);
+
+  if (given('metric') || !partial) {
+    if (!ALERT_METRICS.includes(body.metric as AlertMetric)) {
+      return fail(`Invalid metric. Expected one of: ${ALERT_METRICS.join(', ')}`);
+    }
+    input.metric = body.metric as AlertMetric;
+  }
+
+  if (given('threshold') || !partial) {
+    // 'unreachable' has no threshold to compare against; everything else does.
+    const threshold = body.metric === 'unreachable' ? 0 : Number(body.threshold);
+    if (!Number.isFinite(threshold) || threshold < 0) return fail('Threshold must be a non-negative number');
+    input.threshold = threshold;
+  }
+
+  if (given('consecutiveProbes') || !partial) {
+    const consecutiveProbes = Number(body.consecutiveProbes ?? 3);
+    if (!Number.isInteger(consecutiveProbes) || consecutiveProbes < 1 || consecutiveProbes > 100) {
+      return fail('consecutiveProbes must be between 1 and 100');
+    }
+    input.consecutiveProbes = consecutiveProbes;
+  }
+
+  if (given('webhookUrl')) {
+    const webhookUrl = typeof body.webhookUrl === 'string' ? body.webhookUrl.trim() : '';
+    if (webhookUrl && !/^https?:\/\//i.test(webhookUrl)) {
+      return fail('Webhook URL must start with http:// or https://');
+    }
+    // Empty is how an edit takes the webhook away.
+    input.webhookUrl = webhookUrl;
+  }
+
+  if (given('destination')) {
+    if (!ALERT_DESTINATIONS.includes(body.destination as AlertDestination)) {
+      return fail(`Invalid destination. Expected one of: ${ALERT_DESTINATIONS.join(', ')}`);
+    }
+    input.destination = body.destination as AlertDestination;
+  } else if (!partial) {
+    // Not said, which is what anything written before there was a choice
+    // sends: the URL is the only clue there is.
+    input.destination = !input.webhookUrl ? 'none' : isDiscordWebhook(input.webhookUrl) ? 'discord' : 'webhook';
+  }
+
+  if (input.destination === 'none') {
+    input.webhookUrl = '';
+  } else if (input.destination !== undefined && (input.webhookUrl === '' || (!partial && !input.webhookUrl))) {
+    // An edit may change the destination and leave the URL as it is; a new
+    // alert has no URL to leave.
+    return fail(`Give the webhook URL to send to, or choose "${ALERT_DESTINATION_LABELS.none}"`);
+  }
+
+  for (const [field, what] of [['mentionRoleIds', 'Role'], ['mentionUserIds', 'User']] as const) {
+    if (!given(field)) continue;
+    const ids = parseMentionIds(body[field]);
+    if (!ids) return fail(`${what} IDs must be Discord IDs: numbers, separated by commas or spaces`);
+    input[field] = ids;
+  }
+  // Mentions mean something only to Discord, and must not linger on an alert
+  // that has stopped going there.
+  if (input.destination !== undefined && input.destination !== 'discord') {
+    input.mentionRoleIds = [];
+    input.mentionUserIds = [];
+  }
+
+  if (given('targetIds') || !partial) {
+    if (!Array.isArray(body.targetIds)) return fail('targetIds must be a list of target ids');
+    input.targetIds = [...new Set(body.targetIds.map(String))];
+  }
+
+  if (given('enabled')) {
+    if (typeof body.enabled !== 'boolean') return fail('enabled must be a boolean');
+    input.enabled = body.enabled;
+  }
+
+  return { ok: true, input };
+}
+
+/** The ids among `targetIds` that are real targets, so a stale tick cannot fail the insert. */
+async function existingTargets(targetIds: string[]): Promise<string[]> {
+  const known = new Set((await all<{ id: string }>('SELECT id FROM targets')).map(row => row.id));
+  return targetIds.filter(id => known.has(id));
+}
+
+export async function createAlert(input: AlertInput): Promise<Alert> {
   const id = randomUUID();
-  const now = Date.now();
 
-  await new Promise<void>((resolve, reject) => {
-    db.run(
-      `INSERT INTO alert_rules
-        (id, target_id, metric, threshold, consecutive_probes, webhook_url, enabled, state, streak, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 'ok', 0, ?)`,
-      [id, input.targetId, input.metric, input.threshold, input.consecutiveProbes, input.webhookUrl ?? null, now],
-      err => (err ? reject(err) : resolve())
-    );
-  });
+  await run(
+    `INSERT INTO alerts
+      (id, name, metric, threshold, consecutive_probes, destination, webhook_url, mention_role_ids, mention_user_ids, enabled, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      input.name ?? '',
+      input.metric,
+      input.threshold,
+      input.consecutiveProbes,
+      input.destination,
+      input.webhookUrl || null,
+      JSON.stringify(input.mentionRoleIds ?? []),
+      JSON.stringify(input.mentionUserIds ?? []),
+      input.enabled === false ? 0 : 1,
+      Date.now(),
+    ]
+  );
 
-  const rules = await getAlertRules(input.targetId);
-  return rules.find(r => r.id === id)!;
+  for (const targetId of await existingTargets(input.targetIds)) {
+    await run('INSERT OR IGNORE INTO alert_targets (alert_id, target_id) VALUES (?, ?)', [id, targetId]);
+  }
+
+  return (await getAlert(id))!;
 }
 
-export async function deleteAlertRule(id: string): Promise<boolean> {
-  const db = await getDatabase();
-  return new Promise((resolve, reject) => {
-    db.run('DELETE FROM alert_rules WHERE id = ?', [id], function (err) {
-      if (err) reject(err);
-      else resolve(this.changes > 0);
-    });
-  });
+export async function updateAlert(id: string, changes: Partial<AlertInput>): Promise<Alert | null> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  const set = (column: string, value: unknown) => {
+    fields.push(`${column} = ?`);
+    values.push(value);
+  };
+
+  if (changes.name !== undefined) set('name', changes.name);
+  if (changes.metric !== undefined) set('metric', changes.metric);
+  if (changes.threshold !== undefined) set('threshold', changes.threshold);
+  if (changes.consecutiveProbes !== undefined) set('consecutive_probes', changes.consecutiveProbes);
+  if (changes.destination !== undefined) set('destination', changes.destination);
+  if (changes.webhookUrl !== undefined) set('webhook_url', changes.webhookUrl || null);
+  if (changes.mentionRoleIds !== undefined) set('mention_role_ids', JSON.stringify(changes.mentionRoleIds));
+  if (changes.mentionUserIds !== undefined) set('mention_user_ids', JSON.stringify(changes.mentionUserIds));
+  if (changes.enabled !== undefined) set('enabled', changes.enabled ? 1 : 0);
+
+  if (fields.length > 0) {
+    const changed = await run(`UPDATE alerts SET ${fields.join(', ')} WHERE id = ?`, [...values, id]);
+    if (changed === 0) return null;
+  } else if (!(await getAlert(id))) {
+    return null;
+  }
+
+  if (changes.targetIds !== undefined) {
+    const wanted = await existingTargets(changes.targetIds);
+    const ticked = (await all<{ target_id: string }>('SELECT target_id FROM alert_targets WHERE alert_id = ?', [id]))
+      .map(row => row.target_id);
+
+    // Targets that stay ticked keep their state: unticking one must not make
+    // the others forget that they are firing.
+    for (const targetId of ticked.filter(targetId => !wanted.includes(targetId))) {
+      await run('DELETE FROM alert_targets WHERE alert_id = ? AND target_id = ?', [id, targetId]);
+    }
+    for (const targetId of wanted.filter(targetId => !ticked.includes(targetId))) {
+      await run('INSERT OR IGNORE INTO alert_targets (alert_id, target_id) VALUES (?, ?)', [id, targetId]);
+    }
+  }
+
+  // A count of probes towards a condition says nothing about a different
+  // condition, and a re-enabled alert must not resume part-way through a
+  // breach it was not watching.
+  const conditionChanged =
+    changes.metric !== undefined || changes.threshold !== undefined || changes.consecutiveProbes !== undefined;
+  if (conditionChanged || changes.enabled !== undefined) {
+    await run('UPDATE alert_targets SET streak = 0 WHERE alert_id = ?', [id]);
+  }
+
+  return getAlert(id);
 }
 
-export async function setAlertRuleEnabled(id: string, enabled: boolean): Promise<boolean> {
-  const db = await getDatabase();
-  return new Promise((resolve, reject) => {
-    db.run(
-      // Resetting the streak stops a re-enabled rule resuming part-way through
-      // a breach it was not watching.
-      'UPDATE alert_rules SET enabled = ?, streak = 0 WHERE id = ?',
-      [enabled ? 1 : 0, id],
-      function (err) {
-        if (err) reject(err);
-        else resolve(this.changes > 0);
-      }
-    );
-  });
+export async function deleteAlert(id: string): Promise<boolean> {
+  // Removed explicitly as well as by the cascade, as measurements are.
+  await run('DELETE FROM alert_targets WHERE alert_id = ?', [id]);
+  return (await run('DELETE FROM alerts WHERE id = ?', [id])) > 0;
 }
+
+// ─── Judging a probe ────────────────────────────────────────────────────────
 
 /** The value a rule watches, or null when the probe produced no reading for it. */
 export function observedValue(rule: Pick<AlertRule, 'metric'>, result: ProbeResult): number | null {
@@ -227,12 +385,11 @@ export function nextRuleState(
 }
 
 async function persistRuleState(
-  id: string,
+  rule: Pick<AlertRule, 'id' | 'targetId'>,
   next: { streak: number; state: AlertRule['state'] },
   transition: 'firing' | 'resolved' | null,
   at: number
 ): Promise<void> {
-  const db = await getDatabase();
   const fields = ['streak = ?', 'state = ?'];
   const values: (string | number)[] = [next.streak, next.state];
 
@@ -244,21 +401,19 @@ async function persistRuleState(
     values.push(at);
   }
 
-  values.push(id);
-
-  await new Promise<void>((resolve, reject) => {
-    db.run(`UPDATE alert_rules SET ${fields.join(', ')} WHERE id = ?`, values, err =>
-      err ? reject(err) : resolve()
-    );
-  });
+  await run(`UPDATE alert_targets SET ${fields.join(', ')} WHERE alert_id = ? AND target_id = ?`, [
+    ...values,
+    rule.id,
+    rule.targetId,
+  ]);
 }
 
 /**
- * Evaluate every enabled rule for a target against one probe result.
+ * Evaluate every enabled alert a target is ticked for against one probe result.
  * Returns the transitions that occurred; notification is the caller's job.
  */
 export async function evaluateAlerts(
-  target: Pick<Target, 'id' | 'name' | 'host'>,
+  target: Pick<Target, 'id' | 'name' | 'host' | 'group'>,
   result: ProbeResult
 ): Promise<AlertEvent[]> {
   const rules = (await getAlertRules(target.id)).filter(r => r.enabled);
@@ -269,13 +424,14 @@ export async function evaluateAlerts(
     const breaching = isBreaching(rule, result);
     const next = nextRuleState(rule, breaching);
 
-    await persistRuleState(rule.id, next, next.transition, at);
+    await persistRuleState(rule, next, next.transition, at);
 
     if (next.transition) {
       events.push({
         rule: { ...rule, state: next.state, streak: next.streak },
         targetName: target.name,
         targetHost: target.host,
+        targetGroup: target.group || undefined,
         transition: next.transition,
         metric: rule.metric,
         observed: observedValue(rule, result),
@@ -288,30 +444,18 @@ export async function evaluateAlerts(
   return events;
 }
 
-/**
- * POST an alert transition to its webhook.
- *
- * Failures are logged and swallowed: a webhook that is down must not take the
- * prober with it or delay the next probe.
- */
-export async function dispatchAlert(event: AlertEvent): Promise<void> {
+// ─── Telling someone ────────────────────────────────────────────────────────
+
+export interface DeliveryResult {
+  ok: boolean;
+  /** Why it was not delivered, in words fit to show the person who set it up. */
+  detail?: string;
+}
+
+/** POST an alert transition to its webhook and say how that went. */
+export async function deliverAlert(event: AlertEvent, options: { test?: boolean } = {}): Promise<DeliveryResult> {
   const url = event.rule.webhookUrl;
-  if (!url) return;
-
-  const summary =
-    event.transition === 'firing'
-      ? `${event.targetName} (${event.targetHost}): ${event.metric} is ${event.observed ?? 'unknown'}, past threshold ${event.threshold}`
-      : `${event.targetName} (${event.targetHost}): ${event.metric} recovered`;
-
-  const payload = {
-    status: event.transition,
-    target: { name: event.targetName, host: event.targetHost },
-    metric: event.metric,
-    observed: event.observed,
-    threshold: event.threshold,
-    at: event.at.toISOString(),
-    text: summary,
-  };
+  if (!url || event.rule.destination === 'none') return { ok: false, detail: 'This alert is not sent anywhere' };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
@@ -320,16 +464,71 @@ export async function dispatchAlert(event: AlertEvent): Promise<void> {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payloadFor(event, options)),
       signal: controller.signal,
     });
 
-    if (!response.ok) {
-      console.error(`[Alerts] Webhook returned ${response.status} for ${event.targetName}`);
-    }
+    if (response.ok) return { ok: true };
+
+    // Discord explains a rejected post in its body; pass that on.
+    const body = (await response.text().catch(() => '')).slice(0, 300);
+    const service = event.rule.destination === 'discord' ? 'Discord' : 'The webhook';
+    return { ok: false, detail: `${service} answered ${response.status}${body ? `: ${body}` : ''}` };
   } catch (error) {
-    console.error('[Alerts] Webhook delivery failed:', error);
+    return {
+      ok: false,
+      detail: controller.signal.aborted
+        ? 'The webhook did not answer within 10 seconds'
+        : `Could not reach the webhook: ${error instanceof Error ? error.message : String(error)}`,
+    };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Deliver an alert transition from the prober.
+ *
+ * Failures are logged and swallowed: a webhook that is down must not take the
+ * prober with it or delay the next probe.
+ */
+export async function dispatchAlert(event: AlertEvent): Promise<void> {
+  if (!event.rule.webhookUrl) return;
+
+  const result = await deliverAlert(event);
+  if (!result.ok) console.error(`[Alerts] Delivery failed for ${event.targetName}: ${result.detail}`);
+}
+
+/**
+ * Send an alert's webhook a sample of what it would send for real, so that a
+ * mistyped URL or role id is found now rather than during an outage.
+ */
+export async function sendTestAlert(alert: Alert, target?: Pick<Target, 'id' | 'name' | 'host' | 'group'>): Promise<DeliveryResult> {
+  const sample: Record<AlertMetric, number> = {
+    packetLoss: Math.max(alert.threshold + 20, 25),
+    latency: alert.threshold + 150,
+    jitter: alert.threshold + 30,
+    unreachable: 1,
+    certExpiry: Math.max(0, alert.threshold - 5),
+  };
+
+  return deliverAlert(
+    {
+      rule: {
+        ...alert,
+        targetId: target?.id ?? 'test',
+        state: 'firing',
+        streak: 0,
+      },
+      targetName: target?.name ?? 'Example target',
+      targetHost: target?.host ?? 'example.com',
+      targetGroup: target?.group || undefined,
+      transition: 'firing',
+      metric: alert.metric,
+      observed: sample[alert.metric],
+      threshold: alert.threshold,
+      at: new Date(),
+    },
+    { test: true }
+  );
 }

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import type { Target, GroupOrder, SparklinePoint } from '@/types/probe'
 import { Sparkline } from './sparkline'
 import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-dialogs'
+import { GroupDialog } from './group-dialog'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,10 +15,16 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { getPacketLossColor, isMeaningfulLoss, NO_DATA_COLOR } from '@/lib/packet-loss-colors'
 import { addressFamilyFor, isDualStack } from '@/lib/host'
 import { targetAddressLabel } from '@/lib/probe-config'
+import { groupLabel, groupName, rebaseGroupPath } from '@/lib/group-path'
+import { combineSeries } from '@/lib/group-series'
 import {
   UNGROUPED,
   buildSidebarLayout,
+  groupsInOrder,
+  reorderSubgroups,
+  subgroups,
   targetOrderUpdates,
+  targetsWithin,
   type SidebarLayout,
 } from '@/lib/sidebar-layout'
 import { DRAG_SPRING, useTargetDrag, type ActiveTargetDrag } from './use-target-drag'
@@ -33,6 +40,7 @@ import {
   Pause,
   Play,
   ChartLine,
+  Bell,
 } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -51,34 +59,49 @@ interface SidebarProps {
   series?: Record<string, SparklinePoint[]>
   groupOrders?: GroupOrder[]
   onReorderGroups?: (groups: GroupOrder[]) => void
+  /** Rename a group or move it inside another: its path changes from one to the other. */
+  onMoveGroup?: (from: string, to: string) => void
+  /** Whether the alerts screen is what the main pane is showing. */
+  alertsOpen?: boolean
+  onOpenAlerts?: () => void
+  /** How many alerts are firing on at least one target. */
+  firingAlerts?: number
   onReorderTargets?: (updates: { id: string; sortOrder: number; group?: string }[]) => void
 }
 
 // ─── Status Indicator ───────────────────────────────────────────────────────
 
 /**
- * Three-state status dot: online (coloured by packet loss), offline, or
- * awaiting its first measurement.
+ * Status dot: online (coloured by packet loss), offline, awaiting its first
+ * measurement, or paused.
  *
  * `isOnline` is `undefined` — not `false` — when nothing has been measured yet.
  * Collapsing those two cases showed a brand new target as though it were down.
+ *
+ * A paused target is grey whatever its last reading was. That reading is from
+ * before it was paused, and a green or red light would be a claim about now.
  */
 function StatusIndicator({
   isOnline,
   packetLoss,
   note,
+  paused = false,
 }: {
   isOnline?: boolean
   packetLoss?: number
   /** Replaces the description: how each address family of a dual-stack target is doing. */
   note?: string
+  paused?: boolean
 }) {
   const pending = isOnline === undefined
 
   let statusColor: string
   let label: string
 
-  if (pending) {
+  if (paused) {
+    statusColor = NO_DATA_COLOR
+    label = 'Paused'
+  } else if (pending) {
     statusColor = NO_DATA_COLOR
     label = 'Waiting for first measurement'
   } else if (isOnline) {
@@ -91,13 +114,13 @@ function StatusIndicator({
     label = 'Offline'
   }
 
-  if (note && !pending) label = note
+  if (note && !pending && !paused) label = note
 
   return (
     <span className="relative inline-flex shrink-0" title={label}>
       {/* The pulse only runs for a live target; a steady dot for offline and
           pending states stops a dead target from looking like active traffic. */}
-      {isOnline && (
+      {isOnline && !paused && (
         <span
           className="absolute inline-flex h-2.5 w-2.5 rounded-full custom-ping"
           style={{ backgroundColor: statusColor }}
@@ -194,13 +217,20 @@ function TargetRow({
         >
           <GripVertical className="h-3 w-3" />
         </button>
-        <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} note={target.statusNote} />
+        <StatusIndicator
+          isOnline={target.isOnline}
+          packetLoss={target.packetLoss}
+          note={target.statusNote}
+          paused={paused}
+        />
 
         {/* The name owns the full width of the first line; the address and the
             trace share the second. Putting the trace on the same line as the
             name is what pushed the row past the sidebar's width and clipped
             the buttons off the end. */}
-        <div className="min-w-0 flex-1">
+        {/* Paused, everything that describes the target goes grey, badges
+            included. The buttons beside it do not: resume is one of them. */}
+        <div className={cn('min-w-0 flex-1', paused && 'opacity-60 grayscale')}>
           <div className="flex items-center gap-2">
             <span className={cn(
               'min-w-0 truncate text-sm font-medium',
@@ -371,23 +401,25 @@ function TargetDragOverlay({
   )
 }
 
-// ─── Target Group ───────────────────────────────────────────────────────────
+// ─── Group Tree ─────────────────────────────────────────────────────────────
 
-interface TargetGroupProps {
-  groupName: string
-  targetIds: string[]
+/** What every group in the tree needs, handed down unchanged from the sidebar. */
+interface GroupTreeProps {
+  layout: SidebarLayout
   targetsById: Map<string, Target>
   selectedTargetId: string | null
+  /** The group whose comparison chart the main pane is showing, if any. */
+  selectedGroup: string | null
   series?: Record<string, SparklinePoint[]>
-  isCollapsed: boolean
-  /** Whether this group's comparison chart is what the main pane is showing. */
-  isCompared: boolean
+  collapsedGroups: Set<string>
   /** The target drag in progress, if any. */
   drag: ActiveTargetDrag | null
-  onToggleCollapse: (groupName: string) => void
-  onCompare?: (groupName: string) => void
+  onToggleCollapse: (group: string) => void
+  onCompare?: (group: string) => void
+  onEditGroup?: (group: string) => void
+  onReorderSubgroups: (parent: string, ordered: string[]) => void
   onGroupDragStart: () => void
-  onGroupDragEnd: () => void
+  onGroupDragEnd: (parent: string) => void
   onSelectTarget: (id: string) => void
   onEditTarget: (target: Target) => void
   onDeleteTarget: (id: string) => void
@@ -395,30 +427,78 @@ interface TargetGroupProps {
   onHandlePointerDown: (id: string, event: ReactPointerEvent<HTMLElement>) => void
 }
 
-function TargetGroup({
-  groupName,
-  targetIds,
-  targetsById,
-  selectedTargetId,
-  series,
-  isCollapsed,
-  isCompared,
-  drag,
-  onToggleCollapse,
-  onCompare,
-  onGroupDragStart,
-  onGroupDragEnd,
-  ...rowHandlers
-}: TargetGroupProps) {
+/**
+ * The groups inside one group, or the top level for an empty `parent`.
+ *
+ * Each level is its own reorderable list, so a group is dragged among its
+ * siblings and cannot be dropped out of the group it belongs to by accident.
+ * Moving a group somewhere else in the tree is done from its edit dialog.
+ */
+function GroupList({ parent, ...tree }: GroupTreeProps & { parent: string }) {
+  return (
+    <Reorder.Group
+      axis="y"
+      values={subgroups(tree.layout, parent)}
+      onReorder={ordered => tree.onReorderSubgroups(parent, ordered)}
+      className="space-y-1"
+    >
+      {subgroups(tree.layout, parent).map(group => (
+        <TargetGroup key={group} group={group} parent={parent} {...tree} />
+      ))}
+    </Reorder.Group>
+  )
+}
+
+function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: string; parent: string }) {
+  const {
+    layout,
+    targetsById,
+    selectedTargetId,
+    selectedGroup,
+    series,
+    collapsedGroups,
+    drag,
+    onToggleCollapse,
+    onCompare,
+    onEditGroup,
+    onGroupDragStart,
+    onGroupDragEnd,
+    onSelectTarget,
+    onEditTarget,
+    onDeleteTarget,
+    onTogglePaused,
+    onHandlePointerDown,
+  } = tree
   const dragControls = useDragControls()
+
+  const name = groupName(group)
+  const targetIds = layout.items[group] ?? []
+  const inside = subgroups(layout, group)
+  const isCollapsed = collapsedGroups.has(group)
+  const isCompared = selectedGroup === group
+
+  // Everything under the group, not only what sits directly in it: that is
+  // what collapsing it hides and what its chart compares.
+  const memberIds = useMemo(() => targetsWithin(layout, group), [layout, group])
+
+  // Only worked out while it is on show. Paused targets are left out: their
+  // last reading is from whenever they were paused, not from now.
+  const groupTrace = useMemo(() => {
+    if (!isCollapsed || !series) return null
+    const traces = memberIds
+      .filter(id => targetsById.get(id)?.status !== 'paused')
+      .map(id => series[id] ?? [])
+    const combined = combineSeries(traces)
+    return combined.length > 1 ? combined : null
+  }, [isCollapsed, series, memberIds, targetsById])
 
   // Highlighted only as a destination: lighting up the group a row was just
   // picked up from says nothing the empty slot does not already say.
-  const isDropDestination = !!drag && drag.overGroup === groupName && drag.originGroup !== groupName
+  const isDropDestination = !!drag && drag.overGroup === group && drag.originGroup !== group
 
   return (
     <Reorder.Item
-      value={groupName}
+      value={group}
       dragListener={false}
       dragControls={dragControls}
       className="select-none"
@@ -428,15 +508,18 @@ function TargetGroup({
       layout="position"
       transition={DRAG_SPRING}
       onDragStart={onGroupDragStart}
-      onDragEnd={onGroupDragEnd}
+      onDragEnd={() => onGroupDragEnd(parent)}
     >
+      {/* The header and the group's own rows are what a dragged target is
+          dropped on. The groups inside are separate destinations below it, so
+          they are deliberately outside this element. */}
       <div
         className={cn(
           'rounded-lg ring-1 ring-transparent transition-[background-color,box-shadow] duration-150',
           isDropDestination && 'bg-primary/5 ring-primary/40',
           isCompared && !isDropDestination && 'bg-sidebar-accent/60 ring-sidebar-ring/40'
         )}
-        data-group={groupName}
+        data-group={group}
       >
         {/* Group Header */}
         <div className="flex items-center gap-1 px-2 py-1.5 group/header">
@@ -444,14 +527,15 @@ function TargetGroup({
             type="button"
             onPointerDown={(e) => dragControls.start(e)}
             className="p-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground transition-colors touch-none"
-            aria-label={`Drag to reorder ${groupName}`}
+            aria-label={`Drag to reorder ${name}`}
           >
             <GripVertical className="h-3.5 w-3.5" />
           </button>
 
           <button
             type="button"
-            onClick={() => onToggleCollapse(groupName)}
+            onClick={() => onToggleCollapse(group)}
+            aria-expanded={!isCollapsed}
             className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer"
           >
             {isCollapsed ? (
@@ -460,23 +544,37 @@ function TargetGroup({
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             )}
             <span className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              {groupName}
+              {name}
             </span>
           </button>
 
+          {/* Ungrouped is where targets without a group are listed, not a
+              group that can be renamed or put inside another. */}
+          {onEditGroup && group !== UNGROUPED && (
+            <button
+              type="button"
+              onClick={() => onEditGroup(group)}
+              className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-blue-500/20 focus-visible:opacity-100 group-hover/header:opacity-100"
+              aria-label={`Rename or move ${name}`}
+              title="Rename this group or move it inside another"
+            >
+              <Pencil className="h-3 w-3 text-blue-500" />
+            </button>
+          )}
+
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-            {targetIds.length}
+            {memberIds.length}
           </span>
 
           {/* A comparison needs at least two lines to compare. Labelled and
               in the accent colour: as a bare grey icon it read as decoration,
               and nobody found the group chart without being told where it was. */}
-          {onCompare && targetIds.length > 1 && (
+          {onCompare && memberIds.length > 1 && (
             <button
               type="button"
-              onClick={() => onCompare(groupName)}
+              onClick={() => onCompare(group)}
               aria-pressed={isCompared}
-              aria-label={`Compare the targets in ${groupName} on one chart`}
+              aria-label={`Compare the targets in ${name} on one chart`}
               title="Show every target in this group on one chart"
               className={cn(
                 'ml-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium leading-none transition-colors',
@@ -491,9 +589,30 @@ function TargetGroup({
           )}
         </div>
 
+        {/* Collapsed, the rows that say how the group is doing are hidden, so
+            one trace for all of them takes their place. */}
+        <AnimatePresence initial={false}>
+          {groupTrace && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div
+                className="px-2 pb-2"
+                title={`${name}: mean latency across its ${memberIds.length} target${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}
+              >
+                <Sparkline points={groupTrace} width={240} height={22} stretch />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Target List */}
         <AnimatePresence initial={false}>
-          {!isCollapsed && (
+          {!isCollapsed && (targetIds.length > 0 || inside.length === 0) && (
             <motion.div
               // Clipped only while the group is opening or closing. Left
               // clipped, a row sliding up into a group that has just lost one
@@ -514,7 +633,11 @@ function TargetGroup({
                       selected={selectedTargetId === targetId}
                       trace={series?.[targetId]}
                       isDragSource={drag?.id === targetId}
-                      {...rowHandlers}
+                      onSelectTarget={onSelectTarget}
+                      onEditTarget={onEditTarget}
+                      onDeleteTarget={onDeleteTarget}
+                      onTogglePaused={onTogglePaused}
+                      onHandlePointerDown={onHandlePointerDown}
                     />
                   )
                 })}
@@ -528,7 +651,7 @@ function TargetGroup({
                     transition={{ duration: 0.15 }}
                     className="flex h-11 list-none items-center justify-center rounded-md border border-dashed border-border text-[11px] text-muted-foreground"
                   >
-                    {groupName === UNGROUPED ? 'Drop here to remove from its group' : 'Drop here'}
+                    {group === UNGROUPED ? 'Drop here to remove from its group' : 'Drop here'}
                   </motion.li>
                 )}
               </ul>
@@ -536,6 +659,23 @@ function TargetGroup({
           )}
         </AnimatePresence>
       </div>
+
+      {/* Groups inside this one, set in from it with a rule down the side so
+          the eye can follow which header they belong to. */}
+      <AnimatePresence initial={false}>
+        {!isCollapsed && inside.length > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0, overflow: 'hidden' }}
+            animate={{ height: 'auto', opacity: 1, transitionEnd: { overflow: 'visible' } }}
+            exit={{ height: 0, opacity: 0, overflow: 'hidden' }}
+            transition={{ duration: 0.2 }}
+          >
+            <div className="ml-3 mt-1 border-l border-sidebar-border pl-1">
+              <GroupList parent={group} {...tree} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Reorder.Item>
   )
 }
@@ -555,6 +695,10 @@ export function Sidebar({
   series,
   groupOrders = [],
   onReorderGroups,
+  onMoveGroup,
+  alertsOpen = false,
+  onOpenAlerts,
+  firingAlerts = 0,
   onReorderTargets,
 }: SidebarProps) {
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -563,21 +707,24 @@ export function Sidebar({
   // Held by id, so the dialog always describes the target as it is now and
   // closes by itself if the target goes away underneath it.
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [editingGroup, setEditingGroup] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
   const [isGroupDragging, setIsGroupDragging] = useState(false)
   const listRef = useRef<HTMLElement>(null)
 
-  // Get available groups from existing targets
-  const availableGroups = useMemo(() => {
-    return [...new Set(targets.map(t => t.group).filter(Boolean))] as string[]
-  }, [targets])
-
   const targetsById = useMemo(() => new Map(targets.map(t => [t.id, t])), [targets])
 
   // The arrangement the server knows about...
   const savedLayout = useMemo(() => buildSidebarLayout(targets, groupOrders), [targets, groupOrders])
+
+  // Every group a target could be put in, including ones that hold only other
+  // groups, in the order the sidebar lists them.
+  const availableGroups = useMemo(
+    () => groupsInOrder(savedLayout).filter(group => group !== UNGROUPED),
+    [savedLayout]
+  )
 
   // ...and the one on screen, which runs ahead of it while something is being
   // dragged and is only written back on the drop.
@@ -612,10 +759,10 @@ export function Sidebar({
     const q = searchQuery.trim().toLowerCase()
     if (!q) return null
 
-    return savedLayout.groups
-      .map(groupName => ({
-        groupName,
-        targets: savedLayout.items[groupName]
+    return groupsInOrder(savedLayout)
+      .map(group => ({
+        group,
+        targets: savedLayout.items[group]
           .map(id => targetsById.get(id))
           .filter((t): t is Target =>
             !!t && (t.name.toLowerCase().includes(q) || targetAddressLabel(t).toLowerCase().includes(q))
@@ -624,30 +771,40 @@ export function Sidebar({
       .filter(group => group.targets.length > 0)
   }, [savedLayout, targetsById, searchQuery])
 
-  const handleGroupReorder = useCallback((groups: string[]) => {
-    setLayout(current => ({ ...current, groups }))
+  const handleGroupReorder = useCallback((parent: string, ordered: string[]) => {
+    setLayout(current => reorderSubgroups(current, parent, ordered))
   }, [])
 
   const handleGroupDragStart = useCallback(() => setIsGroupDragging(true), [])
 
-  const handleGroupDragEnd = () => {
+  // A group is only ever dragged among its siblings, so that one list is all
+  // there is to save.
+  const handleGroupDragEnd = (parent: string) => {
     setIsGroupDragging(false)
     if (!onReorderGroups) return
 
-    const changed = layout.groups.some((groupName, i) => groupName !== savedLayout.groups[i])
-    if (changed) {
-      onReorderGroups(layout.groups.map((groupName, sortOrder) => ({ groupName, sortOrder })))
+    const ordered = subgroups(layout, parent)
+    const saved = subgroups(savedLayout, parent)
+    if (ordered.some((group, i) => group !== saved[i])) {
+      onReorderGroups(ordered.map((group, sortOrder) => ({ groupName: group, sortOrder })))
     }
   }
 
-  const toggleCollapse = useCallback((groupName: string) => {
+  const toggleCollapse = useCallback((group: string) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev)
-      if (next.has(groupName)) next.delete(groupName)
-      else next.add(groupName)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
       return next
     })
   }, [])
+
+  const handleMoveGroup = (from: string, to: string) => {
+    setEditingGroup(null)
+    // A group that was folded away stays folded under its new name.
+    setCollapsedGroups(prev => new Set([...prev].map(group => rebaseGroupPath(group, from, to))))
+    onMoveGroup?.(from, to)
+  }
 
   const openEditDialog = (target: Target) => {
     setEditingTarget(target)
@@ -655,10 +812,13 @@ export function Sidebar({
   }
 
   // Targets awaiting their first measurement are counted separately rather
-  // than lumped in with the offline ones.
-  const onlineCount = targets.filter(t => t.isOnline === true).length
-  const offlineCount = targets.filter(t => t.isOnline === false).length
-  const pendingCount = targets.filter(t => t.isOnline === undefined).length
+  // than lumped in with the offline ones. Paused ones are counted as neither
+  // online nor offline: nobody has asked them lately.
+  const probed = targets.filter(t => t.status !== 'paused')
+  const onlineCount = probed.filter(t => t.isOnline === true).length
+  const offlineCount = probed.filter(t => t.isOnline === false).length
+  const pendingCount = probed.filter(t => t.isOnline === undefined).length
+  const pausedCount = targets.length - probed.length
 
   const draggedTarget = drag.active ? targetsById.get(drag.active.id) : undefined
   const deletingTarget = deletingId ? targetsById.get(deletingId) ?? null : null
@@ -693,7 +853,7 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <div className="flex items-center gap-1.5">
             <StatusIndicator isOnline={true} packetLoss={0} />
             <span className="text-muted-foreground">{onlineCount} online</span>
@@ -706,6 +866,12 @@ export function Sidebar({
             <div className="flex items-center gap-1.5">
               <StatusIndicator />
               <span className="text-muted-foreground">{pendingCount} pending</span>
+            </div>
+          )}
+          {pausedCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <StatusIndicator paused />
+              <span className="text-muted-foreground">{pausedCount} paused</span>
             </div>
           )}
           {targets.length > 4 && (
@@ -762,11 +928,13 @@ export function Sidebar({
             {searchResults ? (
               // Search mode: plain list, no drag
               <div className="space-y-3">
-                {searchResults.map(({ groupName, targets: matches }) => (
-                  <div key={groupName}>
+                {searchResults.map(({ group, targets: matches }) => (
+                  <div key={group}>
                     <div className="flex items-center gap-1 px-2 py-1.5">
+                      {/* The whole path: out of the tree, a name alone does
+                          not say which of two same-named groups this is. */}
                       <span className="text-xs font-semibold text-sidebar-foreground uppercase tracking-wider truncate">
-                        {groupName}
+                        {groupLabel(group)}
                       </span>
                       <span className="text-[10px] text-muted-foreground tabular-nums bg-muted/50 px-1.5 py-0.5 rounded-full ml-auto">
                         {matches.length}
@@ -793,8 +961,12 @@ export function Sidebar({
                             )}
                           >
                             <div className="flex items-center gap-2.5">
-                              <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} />
-                              <div className="flex-1 min-w-0">
+                              <StatusIndicator
+                                isOnline={target.isOnline}
+                                packetLoss={target.packetLoss}
+                                paused={target.status === 'paused'}
+                              />
+                              <div className={cn('flex-1 min-w-0', target.status === 'paused' && 'opacity-60 grayscale')}>
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-sm text-sidebar-foreground truncate">{target.name}</span>
                                   {target.type && <TypeBadge type={target.type} />}
@@ -804,7 +976,12 @@ export function Sidebar({
                                     {targetAddressLabel(target)}
                                   </span>
                                   <span className="ml-auto shrink-0">
-                                    <Sparkline points={series?.[target.id] ?? []} width={52} height={16} />
+                                    <Sparkline
+                                      points={series?.[target.id] ?? []}
+                                      width={52}
+                                      height={16}
+                                      muted={target.status === 'paused'}
+                                    />
                                   </span>
                                 </div>
                               </div>
@@ -821,35 +998,27 @@ export function Sidebar({
               </div>
             ) : (
               // Normal mode: draggable groups
-              <Reorder.Group
-                axis="y"
-                values={layout.groups}
-                onReorder={handleGroupReorder}
-                className="space-y-1"
-              >
-                {layout.groups.map(groupName => (
-                  <TargetGroup
-                    key={groupName}
-                    groupName={groupName}
-                    targetIds={layout.items[groupName] ?? []}
-                    targetsById={targetsById}
-                    selectedTargetId={selectedTargetId}
-                    series={series}
-                    isCollapsed={collapsedGroups.has(groupName)}
-                    isCompared={selectedGroup === groupName}
-                    drag={drag.active}
-                    onToggleCollapse={toggleCollapse}
-                    onCompare={onSelectGroup}
-                    onGroupDragStart={handleGroupDragStart}
-                    onGroupDragEnd={handleGroupDragEnd}
-                    onSelectTarget={onSelectTarget}
-                    onEditTarget={openEditDialog}
-                    onDeleteTarget={setDeletingId}
-                    onTogglePaused={onTogglePaused}
-                    onHandlePointerDown={drag.onHandlePointerDown}
-                  />
-                ))}
-              </Reorder.Group>
+              <GroupList
+                parent=""
+                layout={layout}
+                targetsById={targetsById}
+                selectedTargetId={selectedTargetId}
+                selectedGroup={selectedGroup}
+                series={series}
+                collapsedGroups={collapsedGroups}
+                drag={drag.active}
+                onToggleCollapse={toggleCollapse}
+                onCompare={onSelectGroup}
+                onEditGroup={onMoveGroup ? setEditingGroup : undefined}
+                onReorderSubgroups={handleGroupReorder}
+                onGroupDragStart={handleGroupDragStart}
+                onGroupDragEnd={handleGroupDragEnd}
+                onSelectTarget={onSelectTarget}
+                onEditTarget={openEditDialog}
+                onDeleteTarget={setDeletingId}
+                onTogglePaused={onTogglePaused}
+                onHandlePointerDown={drag.onHandlePointerDown}
+              />
             )}
           </nav>
         </ScrollArea>
@@ -872,11 +1041,29 @@ export function Sidebar({
       </MotionConfig>
 
       {/* Footer actions */}
-      <div className="p-3 border-t border-sidebar-border space-y-2">
-        {/* Refresh button removed */}
-
+      <div className="flex gap-2 border-t border-sidebar-border p-3">
+        {onOpenAlerts && (
+          <Button
+            variant={alertsOpen ? 'secondary' : 'outline'}
+            size="sm"
+            onClick={onOpenAlerts}
+            aria-pressed={alertsOpen}
+            className="shrink-0"
+            suppressHydrationWarning
+          >
+            <Bell className="h-4 w-4 mr-2" />
+            Alerts
+            {/* Said here so a firing alert is seen from any screen. */}
+            {firingAlerts > 0 && (
+              <span className="ml-2 rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                {firingAlerts}
+                <span className="sr-only"> firing</span>
+              </span>
+            )}
+          </Button>
+        )}
         <Button
-          className="w-full"
+          className="min-w-0 flex-1"
           size="sm"
           onClick={() => setIsAddOpen(true)}
           suppressHydrationWarning
@@ -901,6 +1088,13 @@ export function Sidebar({
         target={editingTarget}
         onSave={onUpdateTarget}
         availableGroups={availableGroups}
+      />
+
+      <GroupDialog
+        group={editingGroup}
+        groups={availableGroups}
+        onCancel={() => setEditingGroup(null)}
+        onSave={handleMoveGroup}
       />
 
       {/* Nothing is deleted from the row itself: the button there only asks. */}

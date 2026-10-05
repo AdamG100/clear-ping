@@ -22,13 +22,15 @@ import { SmokeTrace } from './smoke-trace'
 import { ReadoutSkeleton, TraceSkeleton } from './skeleton'
 import { buildSeries, MIN_WINDOW_MS } from '@/lib/series'
 import { addressFamilyFor, FAMILY_LABEL, isDualStack, targetTypeFor } from '@/lib/host'
+import { alertTitle } from '@/lib/alert-delivery'
 import { probeVocabulary } from '@/lib/probe-labels'
 import { targetAddressLabel } from '@/lib/probe-config'
-import { buildSidebarLayout } from '@/lib/sidebar-layout'
+import { groupLabel, isWithinGroup, rebaseGroupPath } from '@/lib/group-path'
+import { buildSidebarLayout, targetsWithin } from '@/lib/sidebar-layout'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
-import { AlertsPanel } from './alerts-panel'
+import { AlertsView, type AlertResponse } from './alerts-view'
 import { ProbeDetailsPanel } from './probe-details'
 import { TraceroutePanel } from './traceroute-panel'
 import { ComparePanel } from './compare-panel'
@@ -167,8 +169,10 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
   }, [loadTargets, reportError])
 
   const reorderGroups = useCallback(async (orders: GroupOrder[]) => {
-    // Optimistic update
-    setGroupOrders(orders)
+    // Optimistic update. Only one level of the tree is saved at a time, so
+    // the positions of every other group are kept as they were.
+    const reordered = new Set(orders.map(order => order.groupName))
+    setGroupOrders(previous => [...previous.filter(order => !reordered.has(order.groupName)), ...orders])
     try {
       await fetch('/api/targets/reorder', {
         method: 'PUT',
@@ -198,7 +202,51 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     }
   }, [reportError])
 
-  return { targets, latest, series, groupOrders, addTarget, updateTarget, deleteTarget, reorderGroups, reorderTargets, isLoaded, reloadTargets: loadTargets }
+  const moveGroup = useCallback(async (from: string, to: string): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/groups', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, to }),
+      })
+      if (response.ok) {
+        await loadTargets()
+        return true
+      }
+      const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
+      reportError('Could not move the group', error)
+    } catch (error) {
+      reportError('Could not move the group', error)
+    }
+    return false
+  }, [loadTargets, reportError])
+
+  return { targets, latest, series, groupOrders, addTarget, updateTarget, deleteTarget, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
+}
+
+function useAlerts(reportError: (title: string, error?: unknown) => void) {
+  const [alerts, setAlerts] = useState<AlertResponse[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch('/api/alerts')
+      if (response.ok) setAlerts((await response.json()).alerts ?? [])
+      else reportError('Could not load alerts', `Server responded ${response.status}`)
+    } catch (error) {
+      reportError('Could not load alerts', error)
+    } finally {
+      setLoaded(true)
+    }
+  }, [reportError])
+
+  useEffect(() => {
+    // As with the targets: nothing is set before the fetch has been awaited.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load()
+  }, [load])
+
+  return { alerts, loaded, reload: load }
 }
 
 interface RangeSnapshot {
@@ -398,9 +446,67 @@ function currentReadings(points: DataPoint[]) {
   return { latency: null, packetLoss: null, jitter: null, isOnline: false }
 }
 
+/**
+ * Which alerts are watching the target on screen, and a way to the place they
+ * are managed. Alerts are no longer made here, but a target's page should
+ * still say whether anything would tell you if it broke.
+ */
+function TargetAlerts({
+  alerts,
+  targetId,
+  onManage,
+}: {
+  alerts: AlertResponse[]
+  targetId: string
+  onManage: () => void
+}) {
+  const watching = alerts.filter(alert => alert.targets.some(entry => entry.targetId === targetId))
+
+  return (
+    <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-5 py-4">
+      <h2 className="text-sm font-medium text-foreground">Alerts</h2>
+      {watching.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No alert is watching this target.</p>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {watching.map(alert => {
+            const firing = alert.enabled && alert.targets.some(entry => entry.targetId === targetId && entry.state === 'firing')
+            return (
+              <li
+                key={alert.id}
+                className={cn(
+                  'flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-foreground',
+                  firing ? 'border-destructive/50 bg-destructive/10' : 'border-border bg-background',
+                  !alert.enabled && 'opacity-55'
+                )}
+              >
+                <span
+                  className={cn(
+                    'h-1.5 w-1.5 shrink-0 rounded-full',
+                    firing ? 'bg-destructive' : alert.enabled ? 'bg-signal-perfect' : 'bg-muted-foreground'
+                  )}
+                  aria-hidden="true"
+                />
+                {alertTitle(alert)}
+                {firing && <span className="sr-only">(firing)</span>}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <Button variant="outline" size="sm" className="ml-auto h-7 px-2 text-xs" onClick={onManage}>
+        Manage alerts
+      </Button>
+    </section>
+  )
+}
+
 export function Dashboard() {
   const { notify, reportError } = useToast()
-  const { targets, latest, series, groupOrders, addTarget, updateTarget, deleteTarget, reorderGroups, reorderTargets, isLoaded, reloadTargets } = useTargets(reportError)
+  const { targets, latest, series, groupOrders, addTarget, updateTarget, deleteTarget, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
+  const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
+  // The alerts screen takes the place of a target or a group in the main pane.
+  const [showingAlerts, setShowingAlerts] = useState(false)
   const [timeRange, setTimeRange] = useState<TimeRange>('1h')
   // A period picked out by dragging across the chart. It narrows the range
   // rather than replacing it, and is dropped whenever the range or the target
@@ -431,6 +537,7 @@ export function Dashboard() {
   const setSelectedTargetId = useCallback((id: string | null) => {
     setSelectedTargetIdState(id)
     setSelectedGroupState(null)
+    setShowingAlerts(false)
     setZoom(null)
     setFamilyView('both')
     if (typeof window === 'undefined') return
@@ -441,9 +548,20 @@ export function Dashboard() {
 
   const selectGroup = useCallback((groupName: string) => {
     setSelectedGroupState(groupName)
+    setShowingAlerts(false)
     setZoom(null)
     if (typeof window !== 'undefined') localStorage.setItem('selectedGroup', groupName)
   }, [])
+
+  // A group on screen keeps being on screen under its new name.
+  const handleMoveGroup = useCallback(async (from: string, to: string) => {
+    if (!(await moveGroup(from, to))) return
+    if (selectedGroup && isWithinGroup(selectedGroup, from)) {
+      const moved = rebaseGroupPath(selectedGroup, from, to)
+      setSelectedGroupState(moved)
+      if (typeof window !== 'undefined') localStorage.setItem('selectedGroup', moved)
+    }
+  }, [moveGroup, selectedGroup])
 
   // Fall back to the first target once loading finishes, and recover if the
   // remembered target has since been deleted. Resolved during render so the
@@ -475,12 +593,13 @@ export function Dashboard() {
   const usesHttps = selectedTarget?.probeType === 'http' && (selectedTarget.probeConfig?.scheme ?? 'https') === 'https'
   const methodLabel = selectedTarget?.probeType === 'http' ? (usesHttps ? 'HTTPS' : 'HTTP') : vocabulary.method
 
-  // The members of the group on screen, in sidebar order; null when it is a
-  // target that is on screen (or the remembered group no longer exists).
+  // The members of the group on screen, in sidebar order, including those of
+  // the groups inside it; null when it is a target that is on screen (or the
+  // remembered group no longer exists).
   const groupTargets = useMemo(() => {
     if (!selectedGroup) return null
-    const ids = buildSidebarLayout(targets, groupOrders).items[selectedGroup]
-    if (!ids || ids.length === 0) return null
+    const ids = targetsWithin(buildSidebarLayout(targets, groupOrders), selectedGroup)
+    if (ids.length === 0) return null
 
     const byId = new Map(targets.map(target => [target.id, target]))
     return ids.map(id => byId.get(id)).filter((target): target is Target => !!target)
@@ -511,15 +630,18 @@ export function Dashboard() {
   // the sidebar indicator and the graph never disagree about what "now" is.
   const reloadRef = useRef(reload)
   const reloadTargetsRef = useRef(reloadTargets)
+  const reloadAlertsRef = useRef(reloadAlerts)
   useEffect(() => {
     reloadRef.current = reload
     reloadTargetsRef.current = reloadTargets
-  }, [reload, reloadTargets])
+    reloadAlertsRef.current = reloadAlerts
+  }, [reload, reloadTargets, reloadAlerts])
 
   useEffect(() => {
     const interval = setInterval(async () => {
       await reloadTargetsRef.current()
       await reloadRef.current()
+      await reloadAlertsRef.current()
     }, REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [])
@@ -629,7 +751,13 @@ export function Dashboard() {
     })
   }, [targets, latest])
 
-  const showEmptyState = !selectedTarget && !groupTargets
+  // Alerts that are firing on at least one target, for the sidebar's count.
+  const firingAlerts = useMemo(
+    () => alerts.filter(alert => alert.enabled && alert.targets.some(entry => entry.state === 'firing')).length,
+    [alerts]
+  )
+
+  const showEmptyState = !selectedTarget && !groupTargets && !showingAlerts
   // Only the very first load for a target blanks the pane. Switching ranges
   // keeps the previous range on screen and dims it, so the layout never
   // collapses and reflows underneath the pointer.
@@ -640,10 +768,14 @@ export function Dashboard() {
     <div className="flex h-screen bg-background">
       <Sidebar
         targets={transformedTargets}
-        selectedTargetId={groupTargets ? null : selectedTargetId}
+        selectedTargetId={groupTargets || showingAlerts ? null : selectedTargetId}
         onSelectTarget={setSelectedTargetId}
-        selectedGroup={groupTargets ? selectedGroup : null}
+        selectedGroup={groupTargets && !showingAlerts ? selectedGroup : null}
         onSelectGroup={selectGroup}
+        onMoveGroup={handleMoveGroup}
+        alertsOpen={showingAlerts}
+        onOpenAlerts={() => setShowingAlerts(true)}
+        firingAlerts={firingAlerts}
         onAddTarget={addTarget}
         onUpdateTarget={updateTarget}
         onDeleteTarget={deleteTarget}
@@ -686,7 +818,26 @@ export function Dashboard() {
           // in between.
           <MotionConfig reducedMotion="user">
           <AnimatePresence mode="wait" initial={false}>
-          {groupTargets ? (
+          {showingAlerts ? (
+          <motion.div
+            key="alerts"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+          >
+            <ErrorBoundary label="Alerts">
+              <AlertsView
+                alerts={alerts}
+                loaded={alertsLoaded}
+                targets={transformedTargets}
+                groupOrders={groupOrders}
+                onChanged={reloadAlerts}
+                onSelectTarget={setSelectedTargetId}
+              />
+            </ErrorBoundary>
+          </motion.div>
+          ) : groupTargets ? (
           <motion.div
             key={`group:${selectedGroup}`}
             className="p-6 space-y-6"
@@ -697,7 +848,7 @@ export function Dashboard() {
           >
             <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-foreground">{selectedGroup}</h1>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">{groupLabel(selectedGroup ?? '')}</h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                   <span>
                     {groupTargets.length} target{groupTargets.length === 1 ? '' : 's'} on one chart
@@ -859,6 +1010,7 @@ export function Dashboard() {
                     current={current}
                     lastUpdated={lastUpdated}
                     vocabulary={vocabulary}
+                    paused={selectedTarget.status === 'paused'}
                   />
                 )}
               </motion.div>
@@ -944,14 +1096,11 @@ export function Dashboard() {
                   />
                 </ErrorBoundary>
 
-                <ErrorBoundary label="Alerts">
-                  <AlertsPanel
-                    key={selectedTarget.id}
-                    targetId={selectedTarget.id}
-                    targetName={selectedTarget.name}
-                    hasCertificate={usesHttps}
-                  />
-                </ErrorBoundary>
+                <TargetAlerts
+                  alerts={alerts}
+                  targetId={selectedTarget.id}
+                  onManage={() => setShowingAlerts(true)}
+                />
             </div>
           </motion.div>
           ) : null}
