@@ -10,12 +10,16 @@ build
 coverage
 *.tsbuildinfo
 
-# Never bake a database or local settings into an image.
+# Never bake a database or local settings into an image. `**/` because a bare
+# pattern only matches at the top of the context, and a database can be
+# anywhere CLEARPING_DB_PATH has pointed. The Dockerfile checks for the same
+# files and fails the build if one gets through.
 data
-*.db
-*.db-shm
-*.db-wal
-*.bak
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.db.*
+**/*.bak
 .env*
 
 # Not needed to build.

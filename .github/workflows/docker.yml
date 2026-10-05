@@ -52,6 +52,15 @@ jobs:
       # is writable, and `ping` runs as the unprivileged user.
       - name: Smoke test
         run: |
+          # No database may ship inside the image. Looked for before the first
+          # start, since starting is what creates the real one in /data.
+          shipped=$(docker run --rm clearping:ci sh -c \
+            "find /app /data -path '*/node_modules' -prune -o -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.db.*' \) -print")
+          if [ -n "$shipped" ]; then
+            echo "::error::The image contains a database: $shipped"
+            exit 1
+          fi
+
           docker run -d --name clearping -p 3000:3000 clearping:ci
 
           for attempt in $(seq 1 30); do
@@ -64,6 +73,12 @@ jobs:
           if [ -z "$up" ]; then
             echo "::error::The server did not come up"
             docker logs clearping
+            exit 1
+          fi
+
+          # A new install starts empty: no targets carried over from anywhere.
+          if ! curl -fsS http://localhost:3000/api/targets | jq -e 'length == 0' > /dev/null; then
+            echo "::error::A fresh container already has targets in it"
             exit 1
           fi
 
