@@ -30,6 +30,8 @@ import { ALERT_METRIC_LABELS } from '@/types/probe'
 interface AlertsPanelProps {
   targetId: string
   targetName: string
+  /** The target is served over HTTPS, so its certificate can be watched. */
+  hasCertificate?: boolean
 }
 
 interface RuleResponse extends Omit<AlertRule, 'createdAt' | 'lastFiredAt' | 'lastResolvedAt'> {
@@ -56,12 +58,26 @@ const PRESETS: Preset[] = [
   { id: 'latency', label: 'Latency above 200ms', metric: 'latency', threshold: 200, consecutiveProbes: 3 },
 ]
 
-function ruleSummary(rule: RuleResponse) {
-  const { label, unit } = ALERT_METRIC_LABELS[rule.metric]
-  return rule.metric === 'unreachable' ? 'Stops responding' : `${label} above ${rule.threshold}${unit}`
+/**
+ * One probe is enough here, unlike the others: a certificate does not flap,
+ * so there is no blip to wait out.
+ */
+const CERTIFICATE_PRESET: Preset = {
+  id: 'certificate',
+  label: 'Certificate expires within 14 days',
+  metric: 'certExpiry',
+  threshold: 14,
+  consecutiveProbes: 1,
 }
 
-export function AlertsPanel({ targetId, targetName }: AlertsPanelProps) {
+function ruleSummary(rule: RuleResponse) {
+  const { label, unit, comparison } = ALERT_METRIC_LABELS[rule.metric]
+  if (rule.metric === 'unreachable') return 'Stops responding'
+  if (rule.metric === 'certExpiry') return `Certificate expires within ${rule.threshold} days`
+  return `${label} ${comparison} ${rule.threshold}${unit}`
+}
+
+export function AlertsPanel({ targetId, targetName, hasCertificate = false }: AlertsPanelProps) {
   const { notify, reportError } = useToast()
   const [rules, setRules] = useState<RuleResponse[]>([])
   const [loading, setLoading] = useState(true)
@@ -125,10 +141,10 @@ export function AlertsPanel({ targetId, targetName }: AlertsPanelProps) {
   // with duplicates of the same rule.
   const availablePresets = useMemo(
     () =>
-      PRESETS.filter(
+      [...PRESETS, ...(hasCertificate ? [CERTIFICATE_PRESET] : [])].filter(
         preset => !rules.some(r => r.metric === preset.metric && r.threshold === preset.threshold)
       ),
-    [rules]
+    [rules, hasCertificate]
   )
 
   const addPreset = async (preset: Preset) => {
@@ -330,18 +346,25 @@ export function AlertsPanel({ targetId, targetName }: AlertsPanelProps) {
                         onValueChange={v => {
                           const next = v as AlertMetric
                           setMetric(next)
-                          setThreshold(next === 'latency' ? '200' : next === 'jitter' ? '50' : '5')
+                          setThreshold(
+                            next === 'latency' ? '200' : next === 'jitter' ? '50' : next === 'certExpiry' ? '14' : '5'
+                          )
+                          if (next === 'certExpiry') setConsecutiveProbes('1')
                         }}
                       >
                         <SelectTrigger id="alert-metric" className="h-8 w-40 text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {(Object.keys(ALERT_METRIC_LABELS) as AlertMetric[]).map(m => (
-                            <SelectItem key={m} value={m}>
-                              {ALERT_METRIC_LABELS[m].label}
-                            </SelectItem>
-                          ))}
+                          {(Object.keys(ALERT_METRIC_LABELS) as AlertMetric[])
+                            // A certificate rule on a target with no
+                            // certificate would sit there never firing.
+                            .filter(m => m !== 'certExpiry' || hasCertificate)
+                            .map(m => (
+                              <SelectItem key={m} value={m}>
+                                {ALERT_METRIC_LABELS[m].label}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -349,7 +372,8 @@ export function AlertsPanel({ targetId, targetName }: AlertsPanelProps) {
                     {metric !== 'unreachable' && (
                       <div className="space-y-1.5">
                         <Label htmlFor="alert-threshold" className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                          Above ({ALERT_METRIC_LABELS[metric].unit})
+                          {ALERT_METRIC_LABELS[metric].comparison === 'below' ? 'Under' : 'Above'} (
+                          {ALERT_METRIC_LABELS[metric].unit.trim()})
                         </Label>
                         <Input
                           id="alert-threshold"

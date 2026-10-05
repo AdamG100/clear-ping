@@ -7,17 +7,27 @@
  */
 
 import { getAllTargets, storeMeasurement, getDatabase, saveDatabaseToDisk, cleanOldMeasurements } from './database';
-import { executePing, pingMultipleTargets } from './ping';
-import { executeDnsProbe } from './dns';
-import type { ProbeResult } from '@/types/probe';
+import { executeProbes } from './probe';
+import { measurementFrom, worstOf } from './probe-result';
+import type { IpVersion, ProbeConfig, ProbeResult, ProbeType } from '@/types/probe';
 import { randomUUID } from 'crypto';
 import { dispatchAlert, ensureAlertSchema, evaluateAlerts } from './alerts';
+import { cleanOldTraceroutes, ensureTracerouteSchema, traceAndStore } from './traceroute';
+
+/**
+ * Targets probed at once, per kind. Bounded so a long target list cannot
+ * spawn hundreds of `ping` processes together, which would distort the very
+ * latencies being measured.
+ */
+const PROBE_CONCURRENCY = 8;
 
 interface ScheduledTarget {
   id: string;
   name: string;
   host: string;
-  probeType: 'ping' | 'dns';
+  probeType: ProbeType;
+  ipVersion: IpVersion;
+  probeConfig?: ProbeConfig;
   interval: number; // seconds
   lastProbeTime: number; // timestamp
   isProbing: boolean;
@@ -46,6 +56,7 @@ class ProbeScheduler {
     this.isRunning = true;
 
     await ensureAlertSchema();
+    await ensureTracerouteSchema();
 
     // Load all active targets
     await this.loadTargets();
@@ -127,6 +138,8 @@ class ProbeScheduler {
           name: target.name,
           host: target.host,
           probeType: target.probeType,
+          ipVersion: target.ipVersion ?? 'auto',
+          probeConfig: target.probeConfig,
           interval: target.interval,
           // A probe in flight has already claimed its slot; restoring the
           // stored timestamp underneath it would schedule a duplicate run.
@@ -180,99 +193,59 @@ class ProbeScheduler {
     const pingTargets = targetsToProbe.filter(t => t.probeType === 'ping');
     const otherTargets = targetsToProbe.filter(t => t.probeType !== 'ping');
 
-    // Batch ping targets together; a single one still has to be probed, so it
-    // goes through the same path rather than being dropped from both branches.
-    if (pingTargets.length > 0) {
-      await this.probeTargetsParallel(pingTargets);
-    }
-
-    for (const target of otherTargets) {
-      await this.probeTarget(target.id);
-    }
+    // Pings and the rest are worked through side by side, a few at a time
+    // each. An unresponsive HTTP or TCP target spends its whole timeout on
+    // every attempt, and in one shared queue a handful of those in a row held
+    // up every ping waiting behind them.
+    await Promise.all([this.probeEach(pingTargets), this.probeEach(otherTargets)]);
   }
 
-  /**
-   * Probe multiple ping targets in parallel
-   */
-  private async probeTargetsParallel(targets: ScheduledTarget[]): Promise<void> {
-    // Mark all targets as probing
-    targets.forEach(target => {
-      target.isProbing = true;
-      target.lastProbeTime = Date.now();
-    });
+  /** Probe targets individually, with bounded concurrency. */
+  private async probeEach(targets: ScheduledTarget[]): Promise<void> {
+    let next = 0;
 
-    try {
-      const targetData = targets.map(target => ({
-        id: target.id,
-        host: target.host,
-      }));
-
-      const results = await pingMultipleTargets(targetData);
-
-      // Store results independently: one target failing to store must not
-      // discard the measurements of every target after it in the batch.
-      for (const result of results) {
-        const target = targets.find(t => t.id === result.targetId);
-        if (!target) continue;
-
-        try {
-          await this.recordResult(target, result);
-        } catch (error) {
-          console.error(`[Scheduler] Failed to record probe for ${target.name}:`, error);
-        }
+    const worker = async () => {
+      while (next < targets.length) {
+        await this.probeTarget(targets[next++].id);
       }
+    };
 
-      saveDatabaseToDisk();
-
-    } catch (error) {
-      console.error('[Scheduler] Error in parallel probing:', error);
-    } finally {
-      // Mark all targets as no longer probing
-      targets.forEach(target => {
-        target.isProbing = false;
-      });
-    }
+    await Promise.all(
+      Array.from({ length: Math.min(PROBE_CONCURRENCY, targets.length) }, worker)
+    );
   }
 
   /**
-   * Persist a probe result and stamp the target's last-probe time.
+   * Persist a round of probing and stamp the target's last-probe time.
+   *
+   * A round is one result, or one per address family for a target probed over
+   * both; each is stored as its own measurement.
    *
    * `last_probe_at` is written even when the probe failed. If it were only
    * written on success, `loadTargets()` would keep restoring a stale (or zero)
    * timestamp for an unreachable target and the scheduler would re-probe it on
    * every 10-second tick instead of at its configured interval.
    */
-  private async recordResult(
+  private async recordResults(
     target: ScheduledTarget,
-    result: ProbeResult
+    results: ProbeResult[]
   ): Promise<void> {
     const db = await getDatabase();
+    const round = worstOf(results);
 
     try {
-      await storeMeasurement({
-        id: randomUUID(),
-        targetId: result.targetId,
-        timestamp: result.timestamp,
-        latency: result.latency,
-        minLatency: result.minLatency ?? null,
-        maxLatency: result.maxLatency ?? null,
-        p10Latency: result.p10Latency ?? null,
-        p25Latency: result.p25Latency ?? null,
-        p50Latency: result.p50Latency ?? null,
-        p75Latency: result.p75Latency ?? null,
-        p90Latency: result.p90Latency ?? null,
-        // `??`, not `||`: a jitter of exactly 0 is a perfectly stable path, not
-        // a missing reading, and 0% loss is not the same as "unknown".
-        packetLoss: result.packetLoss ?? 0,
-        jitter: result.jitter ?? null,
-        success: result.success,
-        errorMessage: result.errorMessage,
-      });
+      for (const result of results) {
+        await storeMeasurement(measurementFrom(randomUUID(), result));
+      }
     } finally {
       await new Promise<void>((resolve, reject) => {
         db.run(
-          'UPDATE targets SET updated_at = ?, last_probe_at = ? WHERE id = ?',
-          [Date.now(), target.lastProbeTime, target.id],
+          // A probe that could not resolve the name has no address to report;
+          // COALESCE keeps the last one that worked rather than blanking it.
+          `UPDATE targets
+           SET updated_at = ?, last_probe_at = ?, resolved_address = COALESCE(?, resolved_address)
+           WHERE id = ?`,
+          [Date.now(), target.lastProbeTime, round.resolvedAddress ?? null, target.id],
           function (err) {
             if (err) reject(err);
             else resolve();
@@ -281,13 +254,15 @@ class ProbeScheduler {
       });
     }
 
-    console.log(
-      `[Scheduler] Probe complete for ${target.name}: ` +
-      `${result.success ? `${result.latency}ms` : 'FAILED'} ` +
-      `(Loss: ${result.packetLoss ?? 0}%)`
-    );
+    for (const result of results) {
+      console.log(
+        `[Scheduler] Probe complete for ${target.name}${result.family && results.length > 1 ? ` (IPv${result.family})` : ''}: ` +
+        `${result.success ? `${result.latency}ms` : 'FAILED'} ` +
+        `(Loss: ${result.packetLoss ?? 0}%)`
+      );
+    }
 
-    await this.evaluateAndNotify(target, result);
+    await this.evaluateAndNotify(target, round);
   }
 
   /**
@@ -313,6 +288,21 @@ class ProbeScheduler {
         );
         await dispatchAlert(event);
       }
+
+      // The moment a loss alert fires is the one chance to see the route the
+      // packets are being lost on. Not awaited: a trace through a dead path
+      // can take a minute, and the next probe must not wait for it.
+      const lostPath = events.some(
+        event =>
+          event.transition === 'firing' &&
+          (event.metric === 'packetLoss' || event.metric === 'unreachable')
+      );
+      if (lostPath) {
+        console.log(`[Scheduler] Tracing route to ${target.name} after alert`);
+        void traceAndStore(target, 'alert').catch(error =>
+          console.error(`[Scheduler] Traceroute failed for ${target.name}:`, error)
+        );
+      }
     } catch (error) {
       console.error(`[Scheduler] Alert evaluation failed for ${target.name}:`, error);
     }
@@ -332,18 +322,9 @@ class ProbeScheduler {
     try {
       console.log(`[Scheduler] Probing ${target.name} (${target.host}) via ${target.probeType.toUpperCase()}`);
 
-      let result;
+      const results = await executeProbes(target);
 
-      if (target.probeType === 'ping') {
-        result = await executePing(target.id, target.host);
-      } else if (target.probeType === 'dns') {
-        result = await executeDnsProbe(target.id, target.host);
-      } else {
-        console.error(`[Scheduler] Invalid probe type for target ${target.id}`);
-        return;
-      }
-
-      await this.recordResult(target, result);
+      await this.recordResults(target, results);
       saveDatabaseToDisk();
     } catch (error) {
       console.error(`[Scheduler] Error probing target ${target.name}:`, error);
@@ -385,6 +366,7 @@ class ProbeScheduler {
       if (removed > 0) {
         console.log(`[Scheduler] Retention: removed ${removed} measurements older than ${this.retentionDays}d`);
       }
+      await cleanOldTraceroutes(this.retentionDays);
     } catch (error) {
       console.error('[Scheduler] Retention failed:', error);
     }

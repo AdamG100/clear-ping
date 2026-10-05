@@ -1,0 +1,133 @@
+import { describe, expect, it } from 'vitest'
+import {
+  firstDeadHop,
+  hopLoss,
+  parseTraceroute,
+  traceReached,
+  tracerouteCommand,
+} from './traceroute-parse'
+import * as fixture from './__fixtures__/traceroute-output'
+
+describe('parseTraceroute', () => {
+  it('reads every hop of a Windows trace, counting "<1 ms" as a reply', () => {
+    const hops = parseTraceroute(fixture.WINDOWS_COMPLETE)
+
+    expect(hops).toHaveLength(6)
+    expect(hops[0]).toEqual({ hop: 1, address: '172.22.2.1', rtts: [1, 1, 1], sent: 3 })
+    expect(hops[4]).toEqual({ hop: 5, address: '154.0.2.115', rtts: [3, 2, 5], sent: 3 })
+    expect(traceReached(hops, '1.1.1.1')).toBe(true)
+  })
+
+  it('does not mistake the "maximum of 24 hops" header for a hop', () => {
+    expect(parseTraceroute(fixture.WINDOWS_COMPLETE)[0].hop).toBe(1)
+  })
+
+  it('reads IPv6 addresses, including a link-local first hop', () => {
+    const hops = parseTraceroute(fixture.WINDOWS_IPV6)
+
+    expect(hops.map(h => h.address)).toEqual([
+      'fe80::ba69:f4ff:feae:febd',
+      '2c0f:f9a8:3000::1:9657',
+      '2c0f:f9a8::1:27:11:4',
+      '2606:4700:4700::1111',
+    ])
+    expect(traceReached(hops, '2606:4700:4700::1111')).toBe(true)
+  })
+
+  it('counts a partly answered hop as partial loss', () => {
+    const hop = parseTraceroute(fixture.WINDOWS_DEAD_END)[2]
+
+    expect(hop).toEqual({ hop: 3, address: '154.0.0.89', rtts: [2, 1], sent: 3 })
+    expect(hopLoss(hop)).toBeCloseTo(33.33, 1)
+  })
+
+  it('keeps one silent hop at a dead end and drops the rest of the run', () => {
+    const hops = parseTraceroute(fixture.WINDOWS_DEAD_END)
+
+    expect(hops.map(h => h.hop)).toEqual([1, 2, 3, 4])
+    expect(hops[3]).toEqual({ hop: 4, address: null, rtts: [], sent: 3 })
+    expect(traceReached(hops, '192.0.2.1')).toBe(false)
+  })
+
+  it('keeps a silent hop in the middle of a path that carries on', () => {
+    const hops = parseTraceroute(fixture.WINDOWS_SILENT_MIDDLE)
+
+    expect(hops.map(h => h.rtts.length)).toEqual([3, 0, 3])
+    expect(traceReached(hops, '1.1.1.1')).toBe(true)
+  })
+
+  it('reads Linux output, where the address comes first and may change mid-hop', () => {
+    const hops = parseTraceroute(fixture.LINUX_COMPLETE)
+
+    expect(hops).toEqual([
+      { hop: 1, address: '192.168.1.1', rtts: [0.345, 0.301, 0.289], sent: 3 },
+      { hop: 2, address: null, rtts: [], sent: 3 },
+      { hop: 3, address: '10.0.0.1', rtts: [2.113, 2.301, 2.207], sent: 3 },
+      { hop: 4, address: '1.1.1.1', rtts: [3.512, 3.401], sent: 3 },
+    ])
+  })
+
+  it('reads timings flagged as administratively prohibited', () => {
+    const hops = parseTraceroute(fixture.LINUX_ADMIN_PROHIBITED)
+
+    expect(hops[1]).toEqual({ hop: 2, address: '198.51.100.1', rtts: [4.12, 4.09, 4.011], sent: 3 })
+    expect(traceReached(hops, '203.0.113.9')).toBe(false)
+  })
+
+  it('reads macOS traceroute6 output', () => {
+    const hops = parseTraceroute(fixture.MACOS_IPV6)
+
+    expect(hops.map(h => h.address)).toEqual(['2001:db8::1', '2606:4700:4700::1111'])
+  })
+
+  it('returns nothing for an error message or empty output', () => {
+    expect(parseTraceroute(fixture.WINDOWS_UNRESOLVED)).toEqual([])
+    expect(parseTraceroute('')).toEqual([])
+    expect(parseTraceroute(undefined as unknown as string)).toEqual([])
+  })
+})
+
+describe('firstDeadHop', () => {
+  it('points at the first hop nothing came back from', () => {
+    const hops = parseTraceroute(fixture.WINDOWS_DEAD_END)
+    expect(firstDeadHop(hops, false)).toBe(4)
+  })
+
+  it('does not blame a silent router on a path that arrived', () => {
+    // The classic misreading: hop 2 never answers, but hop 3 does, so hop 2 is
+    // forwarding traffic and merely declining to reply to the probes.
+    const hops = parseTraceroute(fixture.WINDOWS_SILENT_MIDDLE)
+    expect(firstDeadHop(hops, true)).toBeNull()
+  })
+
+  it('has nothing to point at when the last hop answered but was not the target', () => {
+    const hops = parseTraceroute(fixture.LINUX_ADMIN_PROHIBITED)
+    expect(firstDeadHop(hops, false)).toBeNull()
+  })
+})
+
+describe('tracerouteCommand', () => {
+  it('uses tracert without name lookups on Windows, pinned to the family', () => {
+    const { command, args } = tracerouteCommand('2001:db8::1', 6, 'win32')
+
+    expect(command).toBe('tracert')
+    expect(args).toContain('-d')
+    expect(args).toContain('-6')
+    expect(args.at(-1)).toBe('2001:db8::1')
+  })
+
+  it('uses numeric traceroute on Linux, pinned to the family', () => {
+    const { command, args } = tracerouteCommand('192.0.2.1', 4, 'linux')
+
+    expect(command).toBe('traceroute')
+    expect(args).toContain('-n')
+    expect(args).toContain('-4')
+    expect(args.at(-1)).toBe('192.0.2.1')
+  })
+
+  it('switches binary rather than flag for IPv6 on macOS', () => {
+    expect(tracerouteCommand('2001:db8::1', 6, 'darwin').command).toBe('traceroute6')
+    expect(tracerouteCommand('192.0.2.1', 4, 'darwin').command).toBe('traceroute')
+    expect(tracerouteCommand('2001:db8::1', 6, 'darwin').args).not.toContain('-6')
+  })
+})

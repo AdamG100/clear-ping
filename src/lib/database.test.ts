@@ -12,6 +12,8 @@ const {
   createTarget,
   deleteTarget,
   updateTarget,
+  getTargetById,
+  setResolvedAddress,
   storeMeasurement,
   getTargetStatistics,
   getLatestMeasurementForAllTargets,
@@ -55,6 +57,44 @@ afterAll(async () => {
   // Windows keeps the file locked until the handle is closed.
   await closeDatabase()
   fs.rmSync(path.dirname(dbFile), { recursive: true, force: true })
+})
+
+describe('address family and resolved address', () => {
+  const DOMAIN = 'domain-under-test'
+
+  it('defaults to auto and round-trips an explicit choice', async () => {
+    expect((await getTargetById(TARGET))?.ipVersion).toBe('auto')
+
+    await createTarget({
+      id: DOMAIN,
+      name: 'Domain',
+      host: 'example.com',
+      probeType: 'ping',
+      interval: 300,
+      status: 'active',
+      ipVersion: 'ipv6',
+    })
+    expect((await getTargetById(DOMAIN))?.ipVersion).toBe('ipv6')
+  })
+
+  it('remembers what the last probe resolved to', async () => {
+    await setResolvedAddress(DOMAIN, '2001:db8::1')
+    expect((await getTargetById(DOMAIN))?.resolvedAddress).toBe('2001:db8::1')
+  })
+
+  it('keeps the resolved address across edits that do not move the target', async () => {
+    await updateTarget(DOMAIN, { name: 'Renamed' })
+    expect((await getTargetById(DOMAIN))?.resolvedAddress).toBe('2001:db8::1')
+  })
+
+  it('forgets it once the family changes, since it no longer describes the target', async () => {
+    await updateTarget(DOMAIN, { ipVersion: 'ipv4' })
+    const target = await getTargetById(DOMAIN)
+    expect(target?.ipVersion).toBe('ipv4')
+    expect(target?.resolvedAddress).toBeUndefined()
+
+    await deleteTarget(DOMAIN)
+  })
 })
 
 describe('getTargetStatistics', () => {

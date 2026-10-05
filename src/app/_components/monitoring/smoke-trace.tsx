@@ -7,7 +7,8 @@ import {
   PACKET_LOSS_BANDS,
   NO_DATA_COLOR,
 } from '@/lib/packet-loss-colors'
-import type { DataPoint, TimeRange } from '@/types/probe'
+import type { DataPoint, TimeRange, TimeWindow } from '@/types/probe'
+import { BrushBox, BrushLabel, formatTick, latencyDomain, niceTicks, useChartBrush } from './chart-brush'
 
 /**
  * The smoke trace.
@@ -27,12 +28,27 @@ import type { DataPoint, TimeRange } from '@/types/probe'
  *
  * Intervals that lost packets are also striped across the latency panel, so
  * loss is visible without looking away from the trace you are reading.
+ *
+ * Dragging across either panel selects a period to zoom into; the parent
+ * refetches that period, so the zoomed view is drawn from finer-grained data
+ * rather than a stretched copy of what was already on screen.
  */
 
 interface SmokeTraceProps {
   data: DataPoint[]
   timeRange: TimeRange
   height?: number
+  /**
+   * The zoomed period being shown. When set, the time axis spans exactly this
+   * window rather than the extent of the data, so what was selected is what is
+   * drawn even if probes are missing at either end.
+   */
+  window?: TimeWindow | null
+  /** Called with the period selected by dragging, in epoch milliseconds. */
+  onZoom?: (start: number, end: number) => void
+  onResetZoom?: () => void
+  /** Text for the loss lane when nothing was lost. */
+  noLossLabel?: string
 }
 
 interface Plotted {
@@ -67,29 +83,14 @@ const PAD = { top: 14, right: 16, bottom: 26, left: 54 }
 const LOSS_LANE = 56
 const LANE_GAP = 16
 
-function formatTick(value: number, timeRange: TimeRange) {
-  const date = new Date(value)
-  if (timeRange === '7d' || timeRange === '30d') {
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  }
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-}
-
-function niceTicks(min: number, max: number, count = 4): number[] {
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return [min]
-  const raw = (max - min) / count
-  const mag = 10 ** Math.floor(Math.log10(raw))
-  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) ?? mag * 10
-
-  const ticks: number[] = []
-  for (let v = Math.ceil(min / step) * step; v <= max; v += step) ticks.push(Number(v.toFixed(6)))
-  return ticks
-}
-
 export const SmokeTrace = memo(function SmokeTrace({
   data,
   timeRange,
   height = 340,
+  window: zoomWindow = null,
+  onZoom,
+  onResetZoom,
+  noLossLabel = 'No packet loss in this window',
 }: SmokeTraceProps) {
   const [width, setWidth] = useState(880)
   const [hover, setHover] = useState<number | null>(null)
@@ -121,21 +122,11 @@ export const SmokeTrace = memo(function SmokeTrace({
       }
     }
 
-    const dataMin = values.length ? Math.min(...values) : 0
-    const dataMax = values.length ? Math.max(...values) : 100
-
-    // Padding is proportional to the observed range. A fixed 2ms floor swamped
-    // it on LAN paths: a 2-6ms trace was padded to a 0-8ms domain and used
-    // under half the panel.
-    const span = dataMax - dataMin
-    const pad = Math.max(span * 0.18, span === 0 ? Math.max(dataMax * 0.1, 0.5) : 0.2)
-
-    const lo = Math.max(0, dataMin - pad)
-    const hi = dataMax + pad
+    const { min: lo, max: hi } = latencyDomain(values)
 
     const times = data.map(d => d.timestamp.getTime())
-    const tMin = times.length ? Math.min(...times) : 0
-    const tMax = times.length ? Math.max(...times) : 1
+    const tMin = zoomWindow?.start ?? (times.length ? Math.min(...times) : 0)
+    const tMax = zoomWindow?.end ?? (times.length ? Math.max(...times) : 1)
 
     const xFor = (t: number) =>
       PAD.left + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
@@ -178,7 +169,7 @@ export const SmokeTrace = memo(function SmokeTrace({
       barWidth: Math.min(14, Math.max(3, spacing * 0.65)),
       worstLoss: rows.reduce((max, r) => Math.max(max, r.loss), 0),
     }
-  }, [data, plotW, traceH])
+  }, [data, plotW, traceH, zoomWindow])
 
   const yPos = (v: number) =>
     PAD.top + (yMax === yMin ? traceH / 2 : (1 - (v - yMin) / (yMax - yMin)) * traceH)
@@ -216,9 +207,23 @@ export const SmokeTrace = memo(function SmokeTrace({
   // quantitative and still plots any non-zero reading.
   const lossy = plotted.filter(p => isMeaningfulLoss(p.loss))
 
-  const handleMove = (event: React.MouseEvent<SVGSVGElement>) => {
+  const brush = useChartBrush({
+    svgRef,
+    width,
+    plotLeft: PAD.left,
+    plotWidth: plotW,
+    xMin,
+    xMax,
+    onZoom,
+  })
+  const canZoom = brush.enabled
+  const selection = brush.selection
+
+  const handleMove = (event: React.PointerEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect || plotted.length === 0) return
+
+    if (brush.move(event)) return
 
     const x = ((event.clientX - rect.left) / rect.width) * width
     let nearest = 0
@@ -233,7 +238,13 @@ export const SmokeTrace = memo(function SmokeTrace({
     setHover(nearest)
   }
 
+  const endBrush = (event: React.PointerEvent<SVGSVGElement>, commit: boolean) => {
+    if (brush.end(event, commit)) setHover(null)
+  }
+
   const tooltipLeft = active ? Math.min(Math.max(active.x, 100), width - 100) : 0
+
+  const spanMs = xMax - xMin
 
   return (
     <div ref={containerRef} className="relative w-full">
@@ -242,11 +253,17 @@ export const SmokeTrace = memo(function SmokeTrace({
         viewBox={`0 0 ${width} ${height}`}
         width="100%"
         height={height}
-        onMouseMove={handleMove}
-        onMouseLeave={() => setHover(null)}
+        onPointerDown={brush.start}
+        onPointerMove={handleMove}
+        onPointerUp={event => endBrush(event, true)}
+        onPointerCancel={event => endBrush(event, false)}
+        onPointerLeave={() => setHover(null)}
+        onDoubleClick={() => { if (zoomWindow) onResetZoom?.() }}
         role="img"
         aria-label={`Latency and packet loss over the last ${timeRange}. Worst packet loss ${worstLoss.toFixed(1)} percent.`}
-        className="overflow-visible"
+        // `touch-pan-y` leaves vertical scrolling to the page while a sideways
+        // drag selects; `select-none` stops that drag highlighting axis labels.
+        className={`overflow-visible select-none touch-pan-y ${canZoom ? 'cursor-crosshair' : ''}`}
       >
         {/* Loss stripes run the full height of the latency panel, so a lossy
             interval is visible while reading the trace rather than only in the
@@ -429,7 +446,7 @@ export const SmokeTrace = memo(function SmokeTrace({
             className="fill-muted-foreground"
             fontSize={10}
           >
-            No packet loss in this window
+            {noLossLabel}
           </text>
         )}
 
@@ -443,11 +460,15 @@ export const SmokeTrace = memo(function SmokeTrace({
             className="fill-muted-foreground font-mono"
             fontSize={10}
           >
-            {formatTick(t, timeRange)}
+            {formatTick(t, spanMs)}
           </text>
         ))}
 
-        {active && (
+        {/* The period being selected, across both panels: the loss lane is
+            usually what prompted the zoom, so it has to be inside the box. */}
+        {selection && <BrushBox selection={selection} top={PAD.top} bottom={lossBottom} />}
+
+        {active && !selection && (
           <g>
             <line
               x1={active.x}
@@ -467,7 +488,9 @@ export const SmokeTrace = memo(function SmokeTrace({
         )}
       </svg>
 
-      {active && (
+      {selection && <BrushLabel selection={selection} chartWidth={width} spanMs={spanMs} />}
+
+      {active && !selection && (
         <div
           className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 rounded-md border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur-sm"
           style={{ left: `${(tooltipLeft / width) * 100}%` }}
@@ -551,6 +574,11 @@ export const SmokeTrace = memo(function SmokeTrace({
           <span className="h-2 w-4 rounded-sm bg-[var(--trace)] opacity-25" />
           <span className="text-muted-foreground">Latency distribution</span>
         </span>
+        {canZoom && (
+          <span className="ml-auto text-muted-foreground/70">
+            {zoomWindow ? 'Drag to zoom further · double-click to reset' : 'Drag across the chart to zoom in'}
+          </span>
+        )}
       </div>
     </div>
   )

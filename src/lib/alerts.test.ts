@@ -117,3 +117,36 @@ describe('observedValue', () => {
     expect(observedValue({ metric: 'jitter' }, p)).toBe(3)
   })
 })
+
+describe('certificate expiry', () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const at = new Date('2026-10-05T12:00:00.000Z')
+  const certRule = rule({ metric: 'certExpiry', threshold: 14 })
+  const expiringIn = (days: number) =>
+    probe({ timestamp: at, details: { certExpiresAt: at.getTime() + days * DAY } })
+
+  it('reports the days of validity left as of the probe', () => {
+    expect(observedValue(certRule, expiringIn(30))).toBe(30)
+    expect(observedValue(certRule, expiringIn(2.5))).toBe(2.5)
+  })
+
+  it('breaches when fewer days remain than the threshold, the reverse of every other metric', () => {
+    expect(isBreaching(certRule, expiringIn(30))).toBe(false)
+    expect(isBreaching(certRule, expiringIn(14))).toBe(false)
+    expect(isBreaching(certRule, expiringIn(13))).toBe(true)
+  })
+
+  it('breaches for a certificate that has already expired', () => {
+    expect(isBreaching(certRule, expiringIn(-1))).toBe(true)
+  })
+
+  it('holds its state when a probe saw no certificate at all', () => {
+    // A target that is down, or one that is not HTTPS, says nothing about its
+    // certificate. That must neither raise the alert nor quietly clear it.
+    const blind = probe({ timestamp: at, success: false })
+
+    expect(observedValue(certRule, blind)).toBeNull()
+    expect(isBreaching(certRule, blind)).toBe(false)
+    expect(isBreaching({ ...certRule, state: 'firing' }, blind)).toBe(true)
+  })
+})

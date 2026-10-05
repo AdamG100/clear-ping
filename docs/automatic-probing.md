@@ -55,6 +55,149 @@ timeout** per packet. The defaults live in [src/lib/ping.ts](../src/lib/ping.ts)
 const DEFAULTS = { count: 20, timeout: 1000, interval: 10 };
 ```
 
+## What Each Kind of Target Measures
+
+The sidebar labels every target `IP`, `DOMAIN`, `TCP`, `HTTP` or `DNS`. The label is
+derived from the address and the probe method, and each kind is measured differently:
+
+| Target | Example | What a probe does |
+|--------|---------|-------------------|
+| **IP** | `1.1.1.1`, `2606:4700:4700::1111` | Pings the address directly with ICMP echo requests. |
+| **Domain** | `example.com` | Resolves the name once, then sends every packet of that probe to the one address it returned. |
+| **TCP** | `db.internal:5432` | Opens a connection to the port, times the handshake and closes it. 10 attempts per probe. |
+| **HTTP** | `https://example.com/health` | Makes the request and checks the answer. 3 requests per probe, each on a fresh connection. |
+| **DNS** (server) | `8.8.8.8` with the DNS method | Sends DNS queries straight to that server and times the answers. No ping. |
+| **DNS** (name) | `example.com` with the DNS method | Looks the name up through the system resolver and times the answer. No ping. |
+
+The address box accepts a URL or `host:port` and picks the method to match. Whatever
+the method, the host is resolved once per probe and the resolved address is shown
+next to the target, so the IPv4/IPv6 setting below applies to all of them.
+
+### TCP
+
+For hosts that drop ICMP, and for knowing a service is listening rather than merely
+that the machine is up. "Loss" is the share of connection attempts that failed. The
+error distinguishes a refused connection (nothing listening) from a timeout
+(something dropping the packets).
+
+### HTTP(S)
+
+A response counts as a success when its status is the expected one — any 2xx or 3xx
+by default, or exactly the status you set — and, if a keyword is set, the body
+contains it. Redirects are not followed: a redirect is an answer from the server
+being watched, and following it would measure a different server.
+
+The time recorded is from starting the request to the first byte of the response.
+The latest probe's time is also broken down into connect, TLS and server wait, and
+for HTTPS the certificate's expiry date is recorded; both are shown above the chart.
+An alert can be set on the certificate running out (see [alerting.md](./alerting.md)).
+
+### DNS settings
+
+A **server** target can be told what to ask: the name to look up (default
+`example.com`) and the record type (A, AAAA, CNAME, MX, NS, TXT).
+
+Either kind of DNS target can be given an **expected answer**. A reply then only
+counts if it includes that value, which turns "does this server answer" into "does
+my record still point where it should". TXT records match on a substring, so
+`v=spf1` matches an SPF record; everything else must match a whole record.
+
+Why a domain is resolved by the prober rather than handed to `ping`:
+
+- **One address per probe.** `ping example.com` resolves the name again for each
+  packet. A name with several records spreads one probe across different servers
+  and reports the difference between them as jitter on a path that has none.
+- **Resolution failures are reported as such.** A name that stops resolving is
+  recorded as `DNS resolution failed …`, not as 100% packet loss with a generic
+  error.
+- **The address is visible.** The address the last probe measured is stored on the
+  target and shown next to its name.
+
+For DNS targets, "packet loss" is the share of queries that went unanswered. A
+server replying "no such name" has still answered, so that counts as a success
+when the target is a server; when the target is a name, failing to resolve is the
+failure being watched for. A name target goes through the operating system's
+resolver, cache included, so it measures what applications on this machine
+experience rather than one upstream server.
+
+### IPv4 and IPv6
+
+An IP target uses the family of its address. Bracketed (`[2001:db8::1]`) and
+scoped link-local (`fe80::1%eth0`) forms are accepted.
+
+A target named by a hostname has an **IP version** setting, whatever it is probed
+with (ping, TCP, HTTP or DNS):
+
+| Setting | What is probed |
+|---------|----------------|
+| *Automatic* | Whichever address the system lists first, as a browser would use. |
+| *IPv4 only* | The name's A record. |
+| *IPv6 only* | The name's AAAA record. |
+| *Both* | Each of them, every time, kept as two separate series. |
+
+A name with no record of a pinned family reports
+`no IPv6 address (AAAA record) for …` rather than silently falling back.
+
+**Both** is for watching the two paths to one host side by side. Every round runs
+the probe once over IPv4 and once over IPv6 and stores a reading for each. The
+target's page opens on a chart with one line per family and has tabs for the full
+readings of either one. In the sidebar the target counts as reachable if either
+family answers, but its status dot takes the colour of the worse one, so a target
+whose IPv6 has gone while IPv4 carries on does not look healthy. Its alert rules
+are judged on the worse of the two readings in each round, and a traceroute is
+taken over each family.
+
+Each measurement records the family it was taken over (`measurements.family`, 4 or
+6). Readings stored before that column existed are filed, the next time the
+database is opened, under the family their target is probed over, so switching an
+existing target to *Both* keeps its history on the right line.
+
+On macOS, IPv6 pings go through `ping6`, which has no per-packet timeout flag; a
+lost packet there is bounded by the prober's own process timeout instead.
+
+## Comparing Targets
+
+Every group in the sidebar with two or more targets has a chart button on its
+header. It puts the whole group on one chart, the way a Smokeping multi-host graph
+does: one median line per target on a shared time axis and latency scale, so it is
+plain whether a slowdown hit one of them or all of them. Put four resolvers in a
+group and that is a query-time comparison of the four.
+
+- Under the lines there is a **loss strip per target**, in the same order as the
+  legend, marking when each one lost packets (or failed requests, or queries).
+- The **legend is a table**: for each line its latest reading and its median,
+  average, minimum, maximum, loss and uptime over the period shown. Pointing at a
+  row picks its line out; clicking the name opens that target's own page.
+- Dragging across the chart zooms in, as on a single target's chart.
+- A target set to *Both* IP versions contributes two lines, one per family.
+
+Only the median is drawn. The latency spread that surrounds it on a single
+target's chart would bury a dozen overlapping lines, and is one click away.
+
+Groups can mix probe types, but a 400 ms HTTP check and a 2 ms ping share one
+scale, so the ping will be a flat line at the bottom. Group like with like.
+
+## Traceroute
+
+The chart shows that packets were lost; a traceroute shows where. Each target has a
+**Route** panel listing its recent traces hop by hop: name, address, loss and
+latency, in the style of PingPlotter.
+
+- **Trace route** runs one on demand.
+- One is taken **automatically when a packet-loss or unreachable alert fires**, which
+  is the only time the route through a failure can be captured. This needs an alert
+  rule on the target; without one nothing triggers it.
+
+Hop names come from reverse DNS and are looked up after the trace is stored, so the
+route appears at once and the names fill in over the following seconds.
+
+A hop that shows 100% loss while later hops answer is a router that forwards traffic
+but will not reply to probes. It is labelled as such and is not the fault. The fault
+is where replies stop and never resume.
+
+Uses the system `tracert` (Windows) or `traceroute` (Linux, macOS), which must be
+installed. Traces are kept for the same retention period as measurements.
+
 ## How Packet Loss Is Measured
 
 A probe reports three separate numbers, and it matters that they are not conflated:
@@ -138,9 +281,22 @@ CREATE TABLE measurements (
   jitter REAL,
   success INTEGER NOT NULL,
   error_message TEXT,
+  details TEXT,  -- JSON: HTTP status and timings, certificate expiry, DNS answer
+  family INTEGER,  -- 4 or 6: the address family the probe ran over
   FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
 );
 ```
+
+Per-probe settings (port, URL path, expected status, DNS query) are stored as JSON in
+`targets.probe_config`, so a probe that needs a new setting does not need a new
+column.
+
+`targets.probe_type` and `alert_rules.metric` used to carry `CHECK` constraints
+listing their allowed values. SQLite cannot alter a `CHECK`, so on first start after
+upgrading both tables are rebuilt without them (the API validates the values
+instead). The rebuild keeps every row, and a snapshot of the database is written
+next to it first as `clearping.db.before-probe-types-<timestamp>.bak`. Once you are
+satisfied with the upgrade that file can be deleted.
 
 `PRAGMA foreign_keys = ON` is set at startup — without it SQLite ignores the
 `ON DELETE CASCADE` above and deleting a target leaves its measurements behind.
@@ -175,7 +331,7 @@ The current implementation can handle:
 
 1. **Use appropriate intervals**: Don't probe more frequently than needed
 2. **Monitor packet loss**: High packet loss may indicate aggressive probing
-3. **Use DNS for domains**: DNS probing is lighter than ping
+3. **Pick the probe for the question**: ping measures the path to a host; a DNS probe measures a resolver, and says nothing about whether the host behind a name is reachable
 
 ## Troubleshooting
 
@@ -212,7 +368,9 @@ If you're seeing unexpected packet loss:
 |---------|-----------|-----------|
 | Default Interval | 300s | 300s |
 | Pings per Probe | 20 | 20 |
-| Probe Types | ICMP, DNS | ICMP, DNS, HTTP, etc. |
+| Probe Types | ICMP, TCP, HTTP(S), DNS | ICMP, DNS, HTTP, etc. |
+| IPv4 / IPv6 | Per target: either, or both side by side | Separate probes (FPing, FPing6) |
+| Multi-host graphs | Any sidebar group | Configured per graph |
 | Storage | SQLite | RRD files |
 | UI | React/Next.js | CGI/Perl |
 | Real-time Updates | Yes | Limited |
@@ -227,7 +385,16 @@ src/
 │   ├── init.ts             # Server initialization
 │   ├── ping.ts             # ICMP probe (process handling)
 │   ├── ping-parse.ts       # ICMP output parsing (platform-specific, tested)
+│   ├── tcp.ts              # TCP connect probe
+│   ├── http-probe.ts       # HTTP(S) probe, including certificate expiry
 │   ├── dns.ts              # DNS probe
+│   ├── probe.ts            # Runs a target's probe, once per address family
+│   ├── probe-result.ts     # Loss, latency and jitter from a probe's samples
+│   ├── probe-config.ts     # Per-probe settings: parsing and validation
+│   ├── host.ts             # Address classification (IPv4, IPv6, hostname)
+│   ├── resolve.ts          # Name resolution for domain targets
+│   ├── traceroute.ts       # Running and storing traceroutes
+│   ├── traceroute-parse.ts # Traceroute output parsing (platform-specific, tested)
 │   ├── alerts.ts           # Threshold rules and webhook dispatch
 │   ├── metrics.ts          # Shared statistics (median, jitter)
 │   ├── series.ts           # Chart series and gap detection

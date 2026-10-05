@@ -1,10 +1,76 @@
-export type ProbeType = 'ping' | 'dns';
+export type ProbeType = 'ping' | 'dns' | 'tcp' | 'http';
 
 export type ProbeStatus = 'active' | 'paused' | 'error';
 
 export type TimeRange = '1h' | '3h' | '6h' | '24h' | '7d' | '30d';
 
-export type TargetType = 'ip' | 'domain' | 'dns';
+export type TargetType = 'ip' | 'domain' | 'dns' | 'tcp' | 'http';
+
+export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'NS' | 'TXT';
+
+/**
+ * Settings that only mean something to one kind of probe. Stored as a single
+ * JSON value per target, so a probe that needs a new setting does not need a
+ * new column. Fields a target's probe does not use are never stored.
+ */
+export interface ProbeConfig {
+  /** tcp: the port to connect to. http: the port, when not the scheme's default. */
+  port?: number;
+  /** http */
+  scheme?: 'http' | 'https';
+  /** http: path and query, starting with `/`. */
+  path?: string;
+  /** http: the exact status a healthy response has. Unset accepts any 2xx or 3xx. */
+  expectedStatus?: number;
+  /** http: text the response body must contain. */
+  keyword?: string;
+  /** dns, server targets: the name to ask the server for. */
+  queryName?: string;
+  /** dns, server targets: the record type to ask for. */
+  recordType?: DnsRecordType;
+  /** dns: a value the answer must include, such as the address a name should resolve to. */
+  expectedAnswer?: string;
+}
+
+/**
+ * What a probe learned beyond its timings. Kept with each measurement so the
+ * latest reading can explain itself: which status came back, where the time
+ * went, when the certificate runs out.
+ */
+export interface ProbeDetails {
+  /** http: status of the last response received. */
+  statusCode?: number;
+  /** http: mean time to open the TCP connection, in milliseconds. */
+  connectMs?: number;
+  /** https: mean time for the TLS handshake. */
+  tlsMs?: number;
+  /** http: mean time from sending the request to the first byte of the response. */
+  waitMs?: number;
+  /** https: when the server's certificate stops being valid, in epoch milliseconds. */
+  certExpiresAt?: number;
+  /** dns: the answer to the last query that got one. */
+  answers?: string[];
+}
+
+/** An explicit span of time, in epoch milliseconds: what a chart zoom selects. */
+export interface TimeWindow {
+  start: number;
+  end: number;
+}
+
+/**
+ * Which address family a target named by a domain is probed over. `auto` takes
+ * whichever address the system resolver lists first. `both` probes the name
+ * over IPv4 and over IPv6 every time and keeps the two as separate series, so
+ * one family failing or slowing down is visible beside the other. An IP
+ * literal fixes its own family, so the setting has no effect there.
+ */
+export type IpVersion = 'auto' | 'ipv4' | 'ipv6' | 'both';
+
+/** What a single probe can be pinned to: `both` is two probes, not one. */
+export type ProbeIpVersion = Exclude<IpVersion, 'both'>;
+
+export type AddressFamily = 4 | 6;
 
 export interface Target {
   id: string;
@@ -15,6 +81,10 @@ export interface Target {
   status: ProbeStatus;
   group?: string; // Optional group for organization
   sortOrder?: number; // Order within group
+  ipVersion?: IpVersion;
+  /** Address the most recent probe of a domain target resolved to and measured. */
+  resolvedAddress?: string;
+  probeConfig?: ProbeConfig;
   createdAt: Date;
   updatedAt: Date;
   // Extended fields for UI compatibility
@@ -25,6 +95,8 @@ export interface Target {
   avgLatency?: number;
   packetLoss?: number;
   isNew?: boolean;
+  /** How each address family is doing, for a target probed over both. */
+  statusNote?: string;
 }
 
 export interface GroupOrder {
@@ -51,6 +123,9 @@ export interface ProbeMeasurement {
   jitter: number | null; // milliseconds, variation in latency
   success: boolean;
   errorMessage?: string;
+  details?: ProbeDetails;
+  /** The address family this reading was taken over, when it is known. */
+  family?: AddressFamily;
 }
 
 export interface DataPoint {
@@ -98,6 +173,11 @@ export interface ProbeResult {
   jitter?: number | null; // milliseconds, variation in latency
   success: boolean;
   errorMessage?: string;
+  /** Set when the target is a domain: the address this probe actually measured. */
+  resolvedAddress?: string;
+  details?: ProbeDetails;
+  /** The address family the probe ran over, when it is known. */
+  family?: AddressFamily;
 }
 
 export interface SmokeGraphData {
@@ -162,6 +242,64 @@ export interface LatestMeasurement {
   packetLoss: number;
   latency: number | null;
   success: boolean;
+  /** Why the probe failed, when it did. */
+  errorMessage?: string;
+  details?: ProbeDetails;
+  /**
+   * Set for a target probed over both families: the newest reading of each.
+   * The fields above then describe the two together, reachable if either is
+   * and with the loss of the worse one, so a row that is half down looks it.
+   */
+  byFamily?: Partial<Record<AddressFamily, FamilyReading>>;
+}
+
+/** One family's share of a dual-stack target's latest reading. */
+export type FamilyReading = Omit<LatestMeasurement, 'byFamily'>;
+
+/**
+ * One line on a comparison chart: a target, or one address family of a target
+ * that is probed over both.
+ */
+export interface ComparisonSeries {
+  targetId: string;
+  /** Null when the target is not split by family. */
+  family: AddressFamily | null;
+  buckets: BucketedMeasurement[];
+  statistics: TargetStatistics | null;
+}
+
+/** One router on the way to a target, as seen by a traceroute. */
+export interface TracerouteHop {
+  hop: number;
+  /** Null when the router never identified itself. */
+  address: string | null;
+  /**
+   * The router's name from reverse DNS. Null when it has none; absent while
+   * the lookup is still running, which it does after the trace itself is done.
+   */
+  hostname?: string | null;
+  /** Round-trip times of the packets that came back, in milliseconds. */
+  rtts: number[];
+  /** Packets sent to this hop. */
+  sent: number;
+}
+
+/**
+ * A recorded traceroute. `alert` ones are taken automatically at the moment a
+ * loss or unreachable alert fires, which is the only time the route through a
+ * failure can be captured: by the time anyone looks, it has usually recovered.
+ */
+export interface Traceroute {
+  id: string;
+  targetId: string;
+  timestamp: Date;
+  trigger: 'manual' | 'alert';
+  /** The address that was traced: the target's, or what its name resolved to. */
+  address: string;
+  hops: TracerouteHop[];
+  /** Whether the final hop was the address being traced. */
+  reached: boolean;
+  errorMessage?: string;
 }
 
 /**
@@ -181,7 +319,7 @@ export const TIME_RANGE_CONFIG: Record<
   '30d': { label: '30 Days', hours: 720, bucketMinutes: 240 },
 };
 
-export type AlertMetric = 'packetLoss' | 'latency' | 'jitter' | 'unreachable';
+export type AlertMetric = 'packetLoss' | 'latency' | 'jitter' | 'unreachable' | 'certExpiry';
 
 export type AlertState = 'ok' | 'firing';
 
@@ -222,9 +360,18 @@ export interface AlertEvent {
   at: Date;
 }
 
-export const ALERT_METRIC_LABELS: Record<AlertMetric, { label: string; unit: string }> = {
-  packetLoss: { label: 'Packet loss', unit: '%' },
-  latency: { label: 'Latency', unit: 'ms' },
-  jitter: { label: 'Jitter', unit: 'ms' },
-  unreachable: { label: 'Unreachable', unit: '' },
+/**
+ * `comparison` is the side of the threshold that is a problem. Every metric
+ * but one is bad when it climbs; a certificate's remaining life is bad when it
+ * runs down.
+ */
+export const ALERT_METRIC_LABELS: Record<
+  AlertMetric,
+  { label: string; unit: string; comparison: 'above' | 'below' }
+> = {
+  packetLoss: { label: 'Packet loss', unit: '%', comparison: 'above' },
+  latency: { label: 'Latency', unit: 'ms', comparison: 'above' },
+  jitter: { label: 'Jitter', unit: 'ms', comparison: 'above' },
+  unreachable: { label: 'Unreachable', unit: '', comparison: 'above' },
+  certExpiry: { label: 'Certificate expires in', unit: ' days', comparison: 'below' },
 };

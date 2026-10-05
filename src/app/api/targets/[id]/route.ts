@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTargetById, updateTarget, deleteTarget } from '@/lib/database';
-import { isValidPingHost } from '@/lib/ping';
+import { IP_VERSIONS, isIpVersion, isValidHost, normalizeHost } from '@/lib/host';
+import { isProbeType, PROBE_TYPES, validateProbeConfig } from '@/lib/probe-config';
 import { getScheduler } from '@/lib/scheduler';
 import { initializeServer } from '@/lib/init';
 import type { Target } from '@/types/probe';
 
 const STATUSES = ['active', 'paused', 'error'] as const;
-const PROBE_TYPES = ['ping', 'dns'] as const;
 
 export async function GET(
   request: NextRequest,
@@ -57,19 +57,32 @@ export async function PATCH(
     }
 
     if (body.host !== undefined) {
-      const host = String(body.host).trim();
-      if (!isValidPingHost(host)) {
+      const host = normalizeHost(String(body.host));
+      if (!isValidHost(host)) {
         return NextResponse.json(
-          { error: 'Invalid host: must be a hostname or IP address' },
+          { error: 'Invalid host: must be a hostname or an IPv4/IPv6 address' },
           { status: 400 }
         );
       }
       updates.host = host;
     }
 
+    if (body.ipVersion !== undefined) {
+      if (!isIpVersion(body.ipVersion)) {
+        return NextResponse.json(
+          { error: `Invalid IP version. Expected one of: ${IP_VERSIONS.join(', ')}` },
+          { status: 400 }
+        );
+      }
+      updates.ipVersion = body.ipVersion;
+    }
+
     if (body.probeType !== undefined) {
-      if (!PROBE_TYPES.includes(body.probeType)) {
-        return NextResponse.json({ error: 'Invalid probe type' }, { status: 400 });
+      if (!isProbeType(body.probeType)) {
+        return NextResponse.json(
+          { error: `Invalid probe type. Expected one of: ${PROBE_TYPES.join(', ')}` },
+          { status: 400 }
+        );
       }
       updates.probeType = body.probeType;
     }
@@ -96,7 +109,29 @@ export async function PATCH(
     }
 
     if (body.group !== undefined) {
-      updates.group = body.group ? String(body.group).trim() : undefined;
+      // An empty group is a real value here: it is how a target is taken out
+      // of its group. Mapping it to undefined made the update skip the field.
+      updates.group = body.group ? String(body.group).trim() : '';
+    }
+
+    // A probe's settings are only valid for that probe and that host, so
+    // changing any of the three means re-checking the settings against what
+    // the target is about to become, not against what was sent on its own.
+    if (updates.probeType !== undefined || updates.host !== undefined || body.probeConfig !== undefined) {
+      const existing = await getTargetById(id);
+      if (!existing) {
+        return NextResponse.json({ error: 'Target not found' }, { status: 404 });
+      }
+
+      const config = validateProbeConfig(
+        updates.probeType ?? existing.probeType,
+        updates.host ?? existing.host,
+        body.probeConfig ?? existing.probeConfig
+      );
+      if (!config.ok) {
+        return NextResponse.json({ error: config.error }, { status: 400 });
+      }
+      updates.probeConfig = config.config;
     }
 
     if (Object.keys(updates).length === 0) {

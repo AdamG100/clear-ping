@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react"
 import type { TargetStatistics } from "@/types/probe"
+import type { ProbeVocabulary } from "@/lib/probe-labels"
 import { cn } from "@/lib/utils"
 import { getLatencyColor, getPacketLossColor, getPacketLossLabel, isMeaningfulLoss } from "@/lib/packet-loss-colors"
 import { motion, AnimatePresence } from "framer-motion"
@@ -256,10 +257,13 @@ export default function StatsCards({
   statistics,
   current,
   lastUpdated,
+  vocabulary,
 }: Readonly<{
   statistics: TargetStatistics | null
   current: CurrentReadings
   lastUpdated?: Date
+  /** Names for the readings, which differ between ping and DNS targets. */
+  vocabulary: ProbeVocabulary
 }>) {
   // "Has data" is a question about sample count, not about values. Checking
   // `avgLatency === 0 && packetLoss === 0` treated a fast, lossless target as
@@ -321,10 +325,10 @@ export default function StatsCards({
       {/* RTT Card — the headline is a true median. It used to be the midrange,
           (min + max) / 2, which a single spike drags far from any reading. */}
       <StatCard
-        title="Median RTT"
+        title={vocabulary.latencyTitle}
         icon={<Gauge className="h-5 w-5" />}
         mainValue={ms(medianLatency)}
-        mainLabel="Median Round Trip Time"
+        mainLabel={vocabulary.latencyLabel}
         accentColor={latencyAccentColor}
         trend={latencyTrend}
         trendValue={latencyTrendValue}
@@ -341,12 +345,12 @@ export default function StatsCards({
       {/* Packet Loss Card — Min and Max are the real extremes over the window.
           They were previously hardcoded to 0% and to the average. */}
       <StatCard
-        title="Packet Loss"
+        title={vocabulary.lossTitle}
         icon={<FileX className="h-5 w-5" />}
         mainValue={pct(packetLoss)}
         mainLabel={hasData && statistics
           ? `${statistics.uptime.toFixed(1)}% of ${statistics.sampleCount} probes answered`
-          : "Average Packet Loss"}
+          : vocabulary.lossLabel}
         accentColor={packetLossAccentColor}
         trend={lossTrend}
         trendValue={lossTrendValue}
@@ -365,7 +369,7 @@ export default function StatsCards({
         title="Jitter"
         icon={<Zap className="h-5 w-5" />}
         mainValue={ms(jitter)}
-        mainLabel="Variation between consecutive packets"
+        mainLabel={vocabulary.jitterLabel}
         accentColor={jitterAccentColor}
         trend={jitterTrend}
         trendValue={jitterTrendValue}

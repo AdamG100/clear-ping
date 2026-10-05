@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTargetById, storeMeasurement } from '@/lib/database';
-import { executePing } from '@/lib/ping';
-import { executeDnsProbe } from '@/lib/dns';
+import { getTargetById, setResolvedAddress, storeMeasurement } from '@/lib/database';
+import { executeProbes } from '@/lib/probe';
+import { measurementFrom, worstOf } from '@/lib/probe-result';
 import { randomUUID } from 'crypto';
 
 export async function POST(
@@ -19,44 +19,26 @@ export async function POST(
       );
     }
 
-    let result;
-    
-    if (target.probeType === 'ping') {
-      result = await executePing(target.id, target.host);
-    } else if (target.probeType === 'dns') {
-      result = await executeDnsProbe(target.id, target.host);
-    } else {
-      return NextResponse.json(
-        { error: 'Invalid probe type' },
-        { status: 400 }
-      );
+    // One result, or one per address family for a target probed over both.
+    const results = await executeProbes(target);
+    const measurements = results.map(result => measurementFrom(randomUUID(), result));
+
+    for (const measurement of measurements) {
+      await storeMeasurement(measurement);
     }
 
-    // Store the measurement. `??` rather than `||`: 0% loss and 0ms jitter are
-    // real readings, not missing ones.
-    const measurement = {
-      id: randomUUID(),
-      targetId: result.targetId,
-      timestamp: result.timestamp,
-      latency: result.latency,
-      minLatency: result.minLatency ?? null,
-      maxLatency: result.maxLatency ?? null,
-      p10Latency: result.p10Latency ?? null,
-      p25Latency: result.p25Latency ?? null,
-      p50Latency: result.p50Latency ?? null,
-      p75Latency: result.p75Latency ?? null,
-      p90Latency: result.p90Latency ?? null,
-      packetLoss: result.packetLoss ?? 0,
-      jitter: result.jitter ?? null,
-      success: result.success,
-      errorMessage: result.errorMessage,
-    };
+    // What the caller reports back to the user: the round as a whole, which
+    // for a pair is the worse of the two.
+    const result = worstOf(results);
 
-    await storeMeasurement(measurement);
+    if (result.resolvedAddress) {
+      await setResolvedAddress(target.id, result.resolvedAddress);
+    }
 
     return NextResponse.json({
       result,
-      measurement,
+      results,
+      measurements,
     });
   } catch (error) {
     console.error('Error executing probe:', error);

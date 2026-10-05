@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidPingHost, parsePingOutput, pingArgs } from './ping-parse'
+import { isValidPingHost, parsePingOutput, pingArgs, pingCommand } from './ping-parse'
 import * as fixture from './__fixtures__/ping-output'
 
 describe('parsePingOutput', () => {
@@ -19,6 +19,20 @@ describe('parsePingOutput', () => {
     const parsed = parsePingOutput(fixture.WINDOWS_SUB_MILLISECOND)
     expect(parsed.received).toBe(true)
     expect(parsed.latency).toBe(1)
+  })
+
+  it.each([
+    ['Windows', fixture.WINDOWS_IPV6_REPLY, 3],
+    ['Linux', fixture.LINUX_IPV6_REPLY, 3.21],
+  ])('reads an IPv6 reply on %s, whose line has no bytes= or TTL= fields', (_label, output, latency) => {
+    expect(parsePingOutput(output)).toEqual({ received: true, latency })
+  })
+
+  it('counts a Windows IPv6 send failure as loss with a reason', () => {
+    // What a host with no IPv6 route prints. It must not read as a reply.
+    const parsed = parsePingOutput(fixture.WINDOWS_IPV6_NO_ROUTE)
+    expect(parsed.received).toBe(false)
+    expect(parsed.error).toMatch(/general failure/i)
   })
 
   it.each([
@@ -82,8 +96,32 @@ describe('pingArgs', () => {
   })
 })
 
+describe('address family', () => {
+  it.each(['win32', 'linux'] as const)('pins the family with a flag on %s', platform => {
+    expect(pingArgs('2001:db8::1', 1000, platform, 6)).toContain('-6')
+    expect(pingArgs('192.0.2.1', 1000, platform, 4)).toContain('-4')
+  })
+
+  it('still puts the host last when a family flag is present', () => {
+    for (const platform of ['win32', 'darwin', 'linux'] as const) {
+      expect(pingArgs('2001:db8::1', 1000, platform, 6).at(-1)).toBe('2001:db8::1')
+    }
+  })
+
+  it('uses ping6 on macOS, where ping is IPv4-only, and none of its IPv4 flags', () => {
+    expect(pingCommand('darwin', 6)).toBe('ping6')
+    expect(pingCommand('darwin', 4)).toBe('ping')
+    expect(pingArgs('2001:db8::1', 1000, 'darwin', 6)).toEqual(['-c', '1', '2001:db8::1'])
+  })
+
+  it('uses plain ping everywhere else', () => {
+    expect(pingCommand('win32', 6)).toBe('ping')
+    expect(pingCommand('linux', 6)).toBe('ping')
+  })
+})
+
 describe('isValidPingHost', () => {
-  it.each(['8.8.8.8', 'example.com', 'my-host.local', '2001:db8::1', '192.168.1.1'])(
+  it.each(['8.8.8.8', 'example.com', 'my-host.local', '2001:db8::1', '192.168.1.1', '[2001:db8::1]', 'fe80::1%eth0'])(
     'accepts %s',
     host => expect(isValidPingHost(host)).toBe(true)
   )

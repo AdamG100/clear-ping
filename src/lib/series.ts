@@ -1,7 +1,63 @@
-import type { BucketedMeasurement, DataPoint } from '@/types/probe'
+import type { BucketedMeasurement, DataPoint, TimeWindow } from '@/types/probe'
 
 /** Points beyond this are indistinguishable at typical chart widths. */
 export const MAX_CHART_POINTS = 400
+
+/** Narrowest window worth asking for: below this there is at most one probe. */
+export const MIN_WINDOW_MS = 60_000
+
+const MAX_WINDOW_MS = 31 * 24 * 60 * 60 * 1000
+
+/**
+ * Read an explicit `start`/`end` window from request parameters.
+ *
+ * Returns null unless both are usable, so a caller can fall back to its
+ * default window rather than query a nonsensical one: an unparseable bound
+ * becomes NaN, and `timestamp >= NaN` silently matches nothing.
+ */
+export function parseWindow(
+  start: string | null,
+  end: string | null,
+  now: number = Date.now()
+): TimeWindow | null {
+  if (start === null || end === null) return null
+
+  const from = Number(start)
+  const to = Math.min(Number(end), now)
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null
+  if (to - from < MIN_WINDOW_MS || to - from > MAX_WINDOW_MS) return null
+
+  return { start: from, end: to }
+}
+
+/**
+ * The window and bucket width a measurements request is asking for.
+ *
+ * An explicit `start`/`end` is what zooming into a chart sends; otherwise the
+ * window is the last `hours`. Because the bucket width is derived from the
+ * window, a narrower window comes back at finer resolution rather than as a
+ * crop of the coarse one.
+ */
+export function windowFromQuery(
+  searchParams: URLSearchParams,
+  now: number = Date.now()
+): TimeWindow & { bucketMs: number } {
+  // An unparseable `hours` used to produce a NaN window, which queried
+  // `timestamp >= NaN` and silently returned nothing.
+  const parsedHours = Number(searchParams.get('hours') ?? 24)
+  const hours = Number.isFinite(parsedHours) ? Math.min(24 * 31, Math.max(1, parsedHours)) : 24
+
+  const parsedMaxPoints = Number(searchParams.get('maxPoints') ?? MAX_CHART_POINTS)
+  const maxPoints = Number.isFinite(parsedMaxPoints)
+    ? Math.min(2000, Math.max(10, Math.floor(parsedMaxPoints)))
+    : MAX_CHART_POINTS
+
+  const explicit = parseWindow(searchParams.get('start'), searchParams.get('end'), now)
+  const end = explicit?.end ?? now
+  const windowMs = explicit ? explicit.end - explicit.start : hours * 60 * 60 * 1000
+
+  return { start: end - windowMs, end, bucketMs: bucketWidthFor(windowMs, maxPoints) }
+}
 
 /**
  * Choose a bucket width for a window.

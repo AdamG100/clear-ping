@@ -7,6 +7,8 @@
  * written against one silently mis-reads the others.
  */
 
+import { isValidHost, type AddressFamily } from './host'
+
 export type PingPlatform = 'win32' | 'darwin' | 'linux'
 
 /** Matches "time=12ms", "time<1ms" (Windows) and "time=12.3 ms" (Linux/macOS). */
@@ -67,33 +69,47 @@ export function firstFailureLine(stdout: string): string | undefined {
  * milliseconds, Linux `-W` takes seconds. Passing a millisecond value to Linux
  * turns a 1s timeout into a ~17 minute one, so every packet appears to arrive
  * and the probe reports a flawless path.
+ *
+ * `family` pins the address family. It is passed even though the address is a
+ * literal that implies it, because older Linux `ping` builds refuse an IPv6
+ * literal without `-6`.
  */
 export function pingArgs(
   host: string,
   timeoutMs: number,
-  platform: PingPlatform = process.platform as PingPlatform
+  platform: PingPlatform = process.platform as PingPlatform,
+  family?: AddressFamily
 ): string[] {
   const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
+  const familyFlag = family ? [`-${family}`] : []
 
   switch (platform) {
     case 'win32':
-      return ['-n', '1', '-w', String(timeoutMs), host]
+      return ['-n', '1', '-w', String(timeoutMs), ...familyFlag, host]
     case 'darwin':
-      return ['-c', '1', '-W', String(timeoutMs), '-t', String(timeoutSeconds), host]
+      // macOS splits the two families across binaries (see pingCommand), and
+      // `ping6` has no per-packet timeout flag: the caller's process timeout
+      // is what bounds a lost IPv6 packet there.
+      return family === 6
+        ? ['-c', '1', host]
+        : ['-c', '1', '-W', String(timeoutMs), '-t', String(timeoutSeconds), host]
     default:
-      return ['-c', '1', '-W', String(timeoutSeconds), '-w', String(timeoutSeconds), host]
+      return ['-c', '1', '-W', String(timeoutSeconds), '-w', String(timeoutSeconds), ...familyFlag, host]
   }
 }
 
-/**
- * Hosts we are willing to hand to `ping`.
- *
- * Deliberately strict: no whitespace, no shell metacharacters, and nothing
- * starting with `-`, which `ping` would interpret as an option rather than a
- * destination.
- */
-const HOST_PATTERN = /^(?!-)[A-Za-z0-9._:[\]-]{1,253}$/
+/** The binary to run. Only macOS still ships IPv6 ping as a separate program. */
+export function pingCommand(
+  platform: PingPlatform = process.platform as PingPlatform,
+  family?: AddressFamily
+): string {
+  return platform === 'darwin' && family === 6 ? 'ping6' : 'ping'
+}
 
+/**
+ * Hosts we are willing to hand to `ping`: an IPv4 or IPv6 literal, or a
+ * hostname. See ./host for the rules, which are deliberately strict.
+ */
 export function isValidPingHost(host: string): boolean {
-  return HOST_PATTERN.test((host ?? '').trim())
+  return isValidHost(host ?? '')
 }

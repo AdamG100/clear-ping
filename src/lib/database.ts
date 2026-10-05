@@ -1,7 +1,8 @@
 import path from 'path';
 import fs from 'fs';
 import sqlite3 from 'sqlite3';
-import { Target, ProbeMeasurement, TargetStatistics, GroupOrder, LatestMeasurement, BucketedMeasurement, SparklinePoint } from '@/types/probe';
+import { Target, ProbeMeasurement, TargetStatistics, GroupOrder, LatestMeasurement, FamilyReading, BucketedMeasurement, SparklinePoint, IpVersion, ProbeType, AddressFamily } from '@/types/probe';
+import { addressFamilyFor, FAMILY_LABEL, isDualStack } from './host';
 import { median } from './metrics';
 
 // Use sqlite3.Database type
@@ -12,13 +13,183 @@ interface TargetRow {
   id: string;
   name: string;
   host: string;
-  probe_type: 'ping' | 'dns';
+  probe_type: ProbeType;
   interval: number;
   status: 'active' | 'paused' | 'error';
   group_name?: string;
   sort_order: number;
+  ip_version: IpVersion | null;
+  resolved_address: string | null;
+  probe_config: string | null;
   created_at: number;
   updated_at: number;
+}
+
+/**
+ * Read a JSON column. A value that will not parse is treated as absent: one
+ * damaged row must not make every target unreadable.
+ */
+function parseJson<T>(value: string | null | undefined): T | undefined {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Write a JSON column, storing nothing at all for an empty object. */
+function toJson(value: object | undefined | null): string | null {
+  if (!value) return null;
+  const json = JSON.stringify(value);
+  return json === '{}' ? null : json;
+}
+
+function runSql(database: Database, sql: string, params: unknown[] = []): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    database.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+/** The CREATE TABLE statement a table was made with, or null if it does not exist. */
+export async function tableDefinition(database: Database, table: string): Promise<string | null> {
+  return new Promise((resolve, reject) => {
+    database.get(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+      [table],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve((row as { sql: string } | undefined)?.sql ?? null);
+      }
+    );
+  });
+}
+
+/**
+ * Replace a table's definition while keeping its rows.
+ *
+ * SQLite cannot alter a CHECK constraint, so loosening one means building the
+ * table again under a temporary name, copying the rows across and swapping it
+ * in. Foreign keys are switched off for the duration, which is what stops
+ * dropping the old table from cascading into every row that references it: with
+ * them on, rebuilding `targets` would delete the entire measurement history.
+ * The switch cannot be flipped inside a transaction, so it brackets one.
+ */
+export async function rebuildTable(
+  database: Database,
+  table: string,
+  createSql: (name: string) => string,
+  columns: string[]
+): Promise<void> {
+  const replacement = `${table}_rebuild`;
+  const list = columns.join(', ');
+
+  await runSql(database, 'PRAGMA foreign_keys = OFF');
+  try {
+    await runSql(database, 'BEGIN IMMEDIATE');
+    try {
+      // Left behind only if a previous attempt was killed part-way.
+      await runSql(database, `DROP TABLE IF EXISTS ${replacement}`);
+      await runSql(database, createSql(replacement));
+      await runSql(database, `INSERT INTO ${replacement} (${list}) SELECT ${list} FROM ${table}`);
+      await runSql(database, `DROP TABLE ${table}`);
+      await runSql(database, `ALTER TABLE ${replacement} RENAME TO ${table}`);
+      await runSql(database, 'COMMIT');
+    } catch (error) {
+      await runSql(database, 'ROLLBACK').catch(() => {});
+      throw error;
+    }
+  } finally {
+    await runSql(database, 'PRAGMA foreign_keys = ON');
+  }
+}
+
+/**
+ * File measurements that have no recorded family under the family their
+ * target is probed over.
+ *
+ * Every reading taken before the family was recorded is one of these. Left
+ * unfiled, a target's whole history would drop off its chart the day it was
+ * switched to both families, because each family's line is drawn from the
+ * readings filed under it. An address is its own family and a pinned name
+ * says its own; a name left to the resolver is filed under the family it
+ * last resolved to, which is the one it will have been measured over unless
+ * the resolver's preference changed part-way through its history.
+ */
+async function backfillMeasurementFamilies(database: Database): Promise<void> {
+  const targets = await new Promise<Pick<TargetRow, 'id' | 'host' | 'ip_version' | 'resolved_address'>[]>(
+    (resolve, reject) => {
+      database.all(
+        `SELECT id, host, ip_version, resolved_address FROM targets
+         WHERE id IN (SELECT DISTINCT target_id FROM measurements WHERE family IS NULL)`,
+        [],
+        (err, rows) => (err ? reject(err) : resolve((rows ?? []) as TargetRow[]))
+      );
+    }
+  );
+
+  for (const target of targets) {
+    const pinned = target.ip_version === 'ipv4' || target.ip_version === 'ipv6' ? target.ip_version : 'auto';
+    const family =
+      addressFamilyFor(target.host, pinned) ??
+      (target.resolved_address ? addressFamilyFor(target.resolved_address) : null);
+    if (!family) continue;
+
+    await runSql(database, 'UPDATE measurements SET family = ? WHERE target_id = ? AND family IS NULL', [
+      family,
+      target.id,
+    ]);
+  }
+}
+
+const TARGET_COLUMNS = [
+  'id', 'name', 'host', 'probe_type', 'interval', 'status', 'group_name', 'created_at',
+  'updated_at', 'last_probe_at', 'sort_order', 'ip_version', 'resolved_address', 'probe_config',
+];
+
+/**
+ * `probe_type` is deliberately unconstrained here. It used to carry
+ * CHECK(probe_type IN ('ping', 'dns')), which made adding a probe a table
+ * rebuild; the set of valid probes is enforced where targets are created and
+ * edited instead.
+ */
+const targetsTableSql = (name: string) => `
+  CREATE TABLE ${name} (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    probe_type TEXT NOT NULL,
+    interval INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'error')),
+    group_name TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_probe_at INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
+    ip_version TEXT NOT NULL DEFAULT 'auto',
+    resolved_address TEXT,
+    probe_config TEXT
+  )`;
+
+function targetFromRow(r: TargetRow): Target {
+  return {
+    id: r.id,
+    name: r.name,
+    host: r.host,
+    probeType: r.probe_type,
+    interval: r.interval,
+    status: r.status,
+    group: r.group_name,
+    sortOrder: r.sort_order ?? 0,
+    ipVersion: r.ip_version ?? 'auto',
+    resolvedAddress: r.resolved_address ?? undefined,
+    probeConfig: parseJson(r.probe_config),
+    createdAt: new Date(r.created_at),
+    updatedAt: new Date(r.updated_at),
+  };
 }
 
 interface GroupOrderRow {
@@ -35,6 +206,20 @@ interface MeasurementRow {
   jitter: number | null;
   success: number;
   error_message: string | null;
+  family: number | null;
+}
+
+/** A stored family, or undefined for a row written before it was recorded. */
+function familyFromRow(value: number | null): AddressFamily | undefined {
+  return value === 4 || value === 6 ? value : undefined;
+}
+
+/**
+ * Restrict a measurements query to one address family. Without a family the
+ * query covers every row, which is right for any target that is not split.
+ */
+function familyFilter(family?: AddressFamily): { clause: string; params: number[] } {
+  return family ? { clause: 'AND family = ?', params: [family] } : { clause: '', params: [] };
 }
 
 interface StatisticsRow {
@@ -105,20 +290,7 @@ export async function initDatabase(): Promise<Database> {
 
     // Create targets table
     await new Promise<void>((resolve, reject) => {
-      db!.run(`
-        CREATE TABLE IF NOT EXISTS targets (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          host TEXT NOT NULL,
-          probe_type TEXT NOT NULL CHECK(probe_type IN ('ping', 'dns')),
-          interval INTEGER NOT NULL,
-          status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'error')),
-          group_name TEXT,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          last_probe_at INTEGER DEFAULT 0
-        )
-      `, function(err) {
+      db!.run(targetsTableSql('targets').replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'), function(err) {
         if (err) {
           console.error('Database: Error creating targets table:', err);
           reject(err);
@@ -165,6 +337,12 @@ export async function initDatabase(): Promise<Database> {
     // in place; rows written before a column existed keep NULL, and every read
     // path falls back rather than assuming the value is there.
     for (const column of [
+      // What the probe learned beyond its timings, as JSON; see ProbeDetails.
+      'details TEXT',
+      // 4 or 6: the address family the probe ran over. A target probed over
+      // both writes one row of each per round. NULL where it is not known,
+      // which includes every row written before the column existed.
+      'family INTEGER',
       'jitter REAL',
       'latency_min REAL',
       'latency_max REAL',
@@ -214,6 +392,49 @@ export async function initDatabase(): Promise<Database> {
         }
       });
     });
+
+    // Address-family choice for domain targets, and the address the last probe
+    // of one resolved to. Targets that predate the columns read as 'auto',
+    // which is how they were already being probed.
+    for (const column of [
+      `ip_version TEXT NOT NULL DEFAULT 'auto'`,
+      'resolved_address TEXT',
+      // Per-probe settings as JSON; see ProbeConfig.
+      'probe_config TEXT',
+    ]) {
+      await new Promise<void>((resolve, reject) => {
+        db!.run(`ALTER TABLE targets ADD COLUMN ${column}`, function (err) {
+          if (err && !err.message.includes('duplicate column name')) {
+            console.error(`Database: Error adding column ${column}:`, err);
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+
+    // Databases created before TCP and HTTP probes existed only accept 'ping'
+    // and 'dns' in probe_type. Every column the rebuild copies exists by now,
+    // because the ALTERs above have already run.
+    const targetsSql = await tableDefinition(db, 'targets');
+    if (targetsSql && /CHECK\s*\(\s*probe_type/i.test(targetsSql)) {
+      // A rebuild is transactional, but it is also the one migration here that
+      // rewrites existing rows rather than adding to them, so take a snapshot
+      // first. VACUUM INTO copies a consistent image, write-ahead log included.
+      const backupPath = `${dbPath}.before-probe-types-${Date.now()}.bak`;
+      try {
+        await runSql(db, 'VACUUM INTO ?', [backupPath]);
+        console.log(`Database: Backed up to ${backupPath} before migrating the targets table`);
+      } catch (error) {
+        console.warn('Database: Could not back up before migrating; continuing:', error);
+      }
+
+      await rebuildTable(db, 'targets', targetsTableSql, TARGET_COLUMNS);
+      console.log('Database: Migrated targets table to accept new probe types');
+    }
+
+    await backfillMeasurementFamilies(db);
 
     // Create group_orders table
     await new Promise<void>((resolve, reject) => {
@@ -294,9 +515,9 @@ export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt
 
   return new Promise<Target>((resolve, reject) => {
     database.run(`
-      INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, target.group || '', target.sortOrder ?? 0, now, now], function(err) {
+      INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, sort_order, ip_version, probe_config, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, target.group || '', target.sortOrder ?? 0, target.ipVersion ?? 'auto', toJson(target.probeConfig), now, now], function(err) {
       if (err) {
         reject(err);
         return;
@@ -329,23 +550,7 @@ export async function getAllTargets(): Promise<Target[]> {
         return;
       }
 
-      const targets: Target[] = rows.map((row) => {
-        const r = row as TargetRow;
-        return {
-          id: r.id,
-          name: r.name,
-          host: r.host,
-          probeType: r.probe_type,
-          interval: r.interval,
-          status: r.status,
-          group: r.group_name,
-          sortOrder: r.sort_order ?? 0,
-          createdAt: new Date(r.created_at),
-          updatedAt: new Date(r.updated_at),
-        };
-      });
-      
-      resolve(targets);
+      resolve(rows.map(row => targetFromRow(row as TargetRow)));
     });
   });
 }
@@ -368,19 +573,7 @@ export async function getTargetById(id: string): Promise<Target | null> {
         return;
       }
 
-      const r = row as TargetRow;
-      resolve({
-        id: r.id,
-        name: r.name,
-        host: r.host,
-        probeType: r.probe_type,
-        interval: r.interval,
-        status: r.status,
-        group: r.group_name,
-        sortOrder: r.sort_order ?? 0,
-        createdAt: new Date(r.created_at),
-        updatedAt: new Date(r.updated_at),
-      });
+      resolve(targetFromRow(row as TargetRow));
     });
   });
 }
@@ -393,7 +586,7 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
   const now = Date.now();
 
   const fields: string[] = [];
-  const values: (string | number)[] = [];
+  const values: (string | number | null)[] = [];
 
   if (updates.name !== undefined) {
     fields.push('name = ?');
@@ -422,6 +615,21 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
   if (updates.sortOrder !== undefined) {
     fields.push('sort_order = ?');
     values.push(updates.sortOrder);
+  }
+  if (updates.ipVersion !== undefined) {
+    fields.push('ip_version = ?');
+    values.push(updates.ipVersion);
+  }
+  if (updates.probeConfig !== undefined) {
+    fields.push('probe_config = ?');
+    values.push(toJson(updates.probeConfig));
+  }
+  // The stored address describes what the old host resolved to. Once the host,
+  // its address family or its probe changes it describes nothing, and showing
+  // it until the next probe would label the target with somewhere it no longer
+  // points.
+  if (updates.host !== undefined || updates.ipVersion !== undefined || updates.probeType !== undefined) {
+    fields.push('resolved_address = NULL');
   }
 
   if (fields.length === 0) return false;
@@ -473,38 +681,52 @@ export async function deleteTarget(id: string): Promise<boolean> {
   });
 }
 
-export async function storeMeasurement(measurement: ProbeMeasurement & { packetLoss?: number }): Promise<void> {
+/**
+ * Record the address a domain target's latest probe resolved to.
+ */
+export async function setResolvedAddress(id: string, address: string): Promise<void> {
   const database = await getDatabase();
-  
+
   return new Promise<void>((resolve, reject) => {
-    database.run(`
-      INSERT INTO measurements (id, target_id, timestamp, latency, latency_min, latency_max, latency_p10, latency_p25, latency_p50, latency_p75, latency_p90, packet_loss, jitter, success, error_message)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      measurement.id,
-      measurement.targetId,
-      measurement.timestamp.getTime(),
-      measurement.latency,
-      measurement.minLatency ?? null,
-      measurement.maxLatency ?? null,
-      measurement.p10Latency ?? null,
-      measurement.p25Latency ?? null,
-      measurement.p50Latency ?? null,
-      measurement.p75Latency ?? null,
-      measurement.p90Latency ?? null,
-      measurement.packetLoss ?? 0,
-      measurement.jitter,
-      measurement.success ? 1 : 0,
-      measurement.errorMessage || null
-    ], function(err) {
-      if (err) {
-        reject(err);
-        return;
-      }
-      saveDatabase();
-      resolve();
+    database.run('UPDATE targets SET resolved_address = ? WHERE id = ?', [address, id], function (err) {
+      if (err) reject(err);
+      else resolve();
     });
   });
+}
+
+const INSERT_MEASUREMENT = `
+  INSERT INTO measurements (id, target_id, timestamp, latency, latency_min, latency_max, latency_p10, latency_p25, latency_p50, latency_p75, latency_p90, packet_loss, jitter, success, error_message, details, family)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+function measurementParams(measurement: ProbeMeasurement & { packetLoss?: number }) {
+  return [
+    measurement.id,
+    measurement.targetId,
+    measurement.timestamp.getTime(),
+    measurement.latency,
+    measurement.minLatency ?? null,
+    measurement.maxLatency ?? null,
+    measurement.p10Latency ?? null,
+    measurement.p25Latency ?? null,
+    measurement.p50Latency ?? null,
+    measurement.p75Latency ?? null,
+    measurement.p90Latency ?? null,
+    measurement.packetLoss ?? 0,
+    measurement.jitter,
+    measurement.success ? 1 : 0,
+    measurement.errorMessage || null,
+    toJson(measurement.details),
+    measurement.family ?? null,
+  ];
+}
+
+export async function storeMeasurement(measurement: ProbeMeasurement & { packetLoss?: number }): Promise<void> {
+  const database = await getDatabase();
+
+  await runSql(database, INSERT_MEASUREMENT, measurementParams(measurement));
+  saveDatabase();
 }
 
 /**
@@ -512,39 +734,8 @@ export async function storeMeasurement(measurement: ProbeMeasurement & { packetL
  */
 export async function storeMeasurements(measurements: ProbeMeasurement[]): Promise<void> {
   const database = await getDatabase();
-  
-  const promises = measurements.map(item => 
-    new Promise<void>((resolve, reject) => {
-      database.run(`
-        INSERT INTO measurements (id, target_id, timestamp, latency, latency_min, latency_max, latency_p10, latency_p25, latency_p50, latency_p75, latency_p90, packet_loss, jitter, success, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        item.id,
-        item.targetId,
-        item.timestamp.getTime(),
-        item.latency,
-        item.minLatency ?? null,
-        item.maxLatency ?? null,
-        item.p10Latency ?? null,
-        item.p25Latency ?? null,
-        item.p50Latency ?? null,
-        item.p75Latency ?? null,
-        item.p90Latency ?? null,
-        item.packetLoss ?? 0,
-        item.jitter,
-        item.success ? 1 : 0,
-        item.errorMessage || null
-      ], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-    })
-  );
-  
-  await Promise.all(promises);
+
+  await Promise.all(measurements.map(item => runSql(database, INSERT_MEASUREMENT, measurementParams(item))));
   saveDatabase();
 }
 
@@ -585,6 +776,7 @@ export async function getMeasurements(
           jitter: r.jitter,
           success: r.success === 1,
           errorMessage: r.error_message || undefined,
+          family: familyFromRow(r.family),
         };
       });
       
@@ -601,13 +793,19 @@ export async function getMeasurements(
  * drops half its packets on every probe has 50% loss and 100% uptime, and only
  * the former tells you the path is degraded. `uptime` reports the second
  * quantity separately.
+ *
+ * Pass a `family` for a target probed over both: its IPv4 and IPv6 readings
+ * are two paths, and one set of statistics over the pair describes neither.
  */
 export async function getTargetStatistics(
   targetId: string,
   startTime: Date,
-  endTime: Date
+  endTime: Date,
+  family?: AddressFamily
 ): Promise<TargetStatistics | null> {
   const database = await getDatabase();
+  const only = familyFilter(family);
+  const window = [targetId, startTime.getTime(), endTime.getTime(), ...only.params];
 
   const aggregates = await new Promise<StatisticsRow | null>((resolve, reject) => {
     database.get(`
@@ -625,8 +823,8 @@ export async function getTargetStatistics(
         SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures,
         MAX(timestamp) as last_probe
       FROM measurements
-      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
-    `, [targetId, startTime.getTime(), endTime.getTime()], (err, row) => {
+      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? ${only.clause}
+    `, window, (err, row) => {
       if (err) reject(err);
       else resolve((row as StatisticsRow) ?? null);
     });
@@ -638,8 +836,8 @@ export async function getTargetStatistics(
   const latencies = await new Promise<number[]>((resolve, reject) => {
     database.all(`
       SELECT latency FROM measurements
-      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? AND latency IS NOT NULL
-    `, [targetId, startTime.getTime(), endTime.getTime()], (err, rows) => {
+      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? AND latency IS NOT NULL ${only.clause}
+    `, window, (err, rows) => {
       if (err) reject(err);
       else resolve((rows as { latency: number }[]).map(r => r.latency));
     });
@@ -665,6 +863,60 @@ export async function getTargetStatistics(
   };
 }
 
+interface LatestRow {
+  target_id: string;
+  family: number | null;
+  timestamp: number;
+  packet_loss: number | null;
+  latency: number | null;
+  success: number;
+  error_message: string | null;
+  details: string | null;
+  host: string;
+  ip_version: IpVersion | null;
+}
+
+function readingFromRow(r: LatestRow): FamilyReading {
+  return {
+    targetId: r.target_id,
+    timestamp: new Date(r.timestamp),
+    packetLoss: r.packet_loss ?? 0,
+    latency: r.latency,
+    success: r.success === 1,
+    errorMessage: r.error_message ?? undefined,
+    details: parseJson(r.details),
+  };
+}
+
+/**
+ * The newest IPv4 and IPv6 readings of a dual-stack target, as one.
+ *
+ * Reachable if either family is, with the loss of the worse one: a target
+ * whose IPv6 has gone while IPv4 carries on is not down, but it is not fine
+ * either, and reporting only the family that works would hide the failure
+ * the second probe exists to catch.
+ */
+function combineFamilies(byFamily: Partial<Record<AddressFamily, FamilyReading>>): LatestMeasurement {
+  const families = ([4, 6] as const).filter(family => byFamily[family]);
+  const readings = families.map(family => byFamily[family]!);
+  const newest = readings.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
+  const reachable = readings.find(reading => reading.success);
+  const failures = families
+    .filter(family => !byFamily[family]!.success && byFamily[family]!.errorMessage)
+    .map(family => `${FAMILY_LABEL[family]}: ${byFamily[family]!.errorMessage}`);
+
+  return {
+    targetId: newest.targetId,
+    timestamp: newest.timestamp,
+    packetLoss: Math.max(...readings.map(reading => reading.packetLoss)),
+    latency: reachable?.latency ?? null,
+    success: !!reachable,
+    errorMessage: failures.length > 0 ? failures.join('; ') : undefined,
+    details: (reachable ?? newest).details,
+    byFamily,
+  };
+}
+
 /**
  * Get the most recent measurement for every target.
  *
@@ -672,48 +924,56 @@ export async function getTargetStatistics(
  * with 40% loss" from "unreachable" and from "no data yet" — the sidebar needs
  * all three. Joined against `targets` so measurements orphaned by an old
  * delete never resurrect a target in the UI.
+ *
+ * A target probed over both families gets the newest reading of each, and a
+ * summary of the pair (see combineFamilies).
  */
 export async function getLatestMeasurementForAllTargets(): Promise<Record<string, LatestMeasurement>> {
   const database = await getDatabase();
 
-  return new Promise((resolve, reject) => {
+  const rows = await new Promise<LatestRow[]>((resolve, reject) => {
     database.all(`
-      SELECT m.target_id, m.timestamp, m.packet_loss, m.latency, m.success
+      SELECT m.target_id, m.family, m.timestamp, m.packet_loss, m.latency, m.success, m.error_message, m.details,
+             t.host, t.ip_version
       FROM measurements m
       JOIN targets t ON t.id = m.target_id
       JOIN (
-        SELECT target_id, MAX(timestamp) AS max_ts
+        SELECT target_id, COALESCE(family, 0) AS fam, MAX(timestamp) AS max_ts
         FROM measurements
-        GROUP BY target_id
-      ) latest ON latest.target_id = m.target_id AND latest.max_ts = m.timestamp
-      GROUP BY m.target_id
-    `, [], (err, rows) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-
-      const map: Record<string, LatestMeasurement> = {};
-      for (const row of (rows ?? [])) {
-        const r = row as {
-          target_id: string;
-          timestamp: number;
-          packet_loss: number | null;
-          latency: number | null;
-          success: number;
-        };
-        map[r.target_id] = {
-          targetId: r.target_id,
-          timestamp: new Date(r.timestamp),
-          packetLoss: r.packet_loss ?? 0,
-          latency: r.latency,
-          success: r.success === 1,
-        };
-      }
-
-      resolve(map);
+        GROUP BY target_id, COALESCE(family, 0)
+      ) latest ON latest.target_id = m.target_id
+              AND latest.fam = COALESCE(m.family, 0)
+              AND latest.max_ts = m.timestamp
+      ORDER BY m.timestamp DESC
+    `, [], (err, result) => {
+      if (err) reject(err);
+      else resolve((result ?? []) as LatestRow[]);
     });
   });
+
+  // Newest first, so the first row seen for a target (or for one family of
+  // it) is the one to keep.
+  const newest = new Map<string, LatestRow>();
+  const perFamily = new Map<string, Partial<Record<AddressFamily, FamilyReading>>>();
+
+  for (const row of rows) {
+    if (!newest.has(row.target_id)) newest.set(row.target_id, row);
+
+    const family = familyFromRow(row.family);
+    if (family && isDualStack(row.host, row.ip_version ?? 'auto')) {
+      const readings = perFamily.get(row.target_id) ?? {};
+      readings[family] ??= readingFromRow(row);
+      perFamily.set(row.target_id, readings);
+    }
+  }
+
+  const map: Record<string, LatestMeasurement> = {};
+  for (const [targetId, row] of newest) {
+    const byFamily = perFamily.get(targetId);
+    map[targetId] = byFamily ? combineFamilies(byFamily) : readingFromRow(row);
+  }
+
+  return map;
 }
 
 /**
@@ -812,15 +1072,19 @@ export async function updateTargetSortOrders(updates: { id: string; sortOrder: n
  * Empty buckets are simply absent from the result. Callers distinguish "no
  * probe ran" from "probe ran and lost everything" by the presence of the row,
  * not by a zero.
+ *
+ * Pass a `family` to read one side of a target probed over both.
  */
 export async function getBucketedMeasurements(
   targetId: string,
   startTime: Date,
   endTime: Date,
-  bucketMs: number
+  bucketMs: number,
+  family?: AddressFamily
 ): Promise<BucketedMeasurement[]> {
   const database = await getDatabase();
   const width = Math.max(1000, Math.floor(bucketMs));
+  const only = familyFilter(family);
 
   return new Promise((resolve, reject) => {
     database.all(
@@ -844,11 +1108,11 @@ export async function getBucketedMeasurements(
         AVG(jitter)         AS avg_jitter,
         SUM(success)        AS successes
       FROM measurements
-      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
+      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? ${only.clause}
       GROUP BY bucket_start
       ORDER BY bucket_start ASC
       `,
-      [width, width, targetId, startTime.getTime(), endTime.getTime()],
+      [width, width, targetId, startTime.getTime(), endTime.getTime(), ...only.params],
       (err, rows) => {
         if (err) {
           reject(err);
@@ -921,6 +1185,10 @@ export async function cleanOldMeasurements(daysToKeep: number = 90): Promise<num
  *
  * Feeds the sparkline traces in the sidebar. One window-function query rather
  * than one query per target, so adding targets does not multiply round trips.
+ *
+ * Rows sharing a target and a timestamp are one round of a target probed over
+ * both families, and are drawn as one point carrying the worse loss. Left as
+ * two, the trace would zigzag between the IPv4 and IPv6 latencies.
  */
 export async function getRecentSeriesForAllTargets(
   pointsPerTarget = 24
@@ -933,10 +1201,15 @@ export async function getRecentSeriesForAllTargets(
       `
       SELECT target_id, timestamp, latency, packet_loss, success
       FROM (
-        SELECT m.target_id, m.timestamp, m.latency, m.packet_loss, m.success,
+        SELECT m.target_id, m.timestamp,
+               AVG(m.latency) AS latency,
+               -- A failed probe with no recorded loss lost everything.
+               MAX(COALESCE(m.packet_loss, CASE WHEN m.success = 1 THEN 0 ELSE 100 END)) AS packet_loss,
+               MIN(m.success) AS success,
                ROW_NUMBER() OVER (PARTITION BY m.target_id ORDER BY m.timestamp DESC) AS rn
         FROM measurements m
         JOIN targets t ON t.id = m.target_id
+        GROUP BY m.target_id, m.timestamp
       )
       WHERE rn <= ?
       ORDER BY target_id ASC, timestamp ASC
@@ -962,7 +1235,6 @@ export async function getRecentSeriesForAllTargets(
           (series[r.target_id] ??= []).push({
             timestamp: r.timestamp,
             latency: r.latency,
-            // A failed probe with no recorded loss lost everything.
             packetLoss: r.packet_loss ?? (r.success === 1 ? 0 : 100),
           });
         }

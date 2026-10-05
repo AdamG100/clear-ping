@@ -13,6 +13,21 @@ Select a target and use the **Alerts** panel. Each rule watches one metric:
 | Latency | Average RTT exceeds the threshold (ms) |
 | Jitter | Jitter exceeds the threshold (ms) |
 | Unreachable | A probe gets no reply at all |
+| Certificate expires in | Fewer days than the threshold remain on an HTTPS target's certificate |
+
+The certificate rule is offered only on HTTPS targets, and is the one rule that
+fires when a value falls *below* its threshold. It defaults to a single probe
+rather than several in a row: a certificate's expiry date does not flap.
+
+When a **packet loss** or **unreachable** rule fires, a traceroute to the target is
+taken automatically and saved to its Route panel.
+
+A target probed over **both IP versions** takes two readings each round, and its
+rules are judged once per round on the worse of the two: the higher loss, the
+higher latency, the certificate that expires sooner, and unreachable if either
+family is. A rule therefore fires when either family is in trouble. (Judging the
+two readings one after the other would not work: a healthy IPv4 reading would
+reset the count of consecutive probes a failing IPv6 one had just started.)
 
 ## Why "consecutive probes" matters
 

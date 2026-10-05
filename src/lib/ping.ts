@@ -1,8 +1,10 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { ProbeResult } from '@/types/probe';
-import { jitterFromLatencies, mean, percentile, round } from './metrics';
-import { isValidPingHost, parsePingOutput, pingArgs } from './ping-parse';
+import { ProbeIpVersion, ProbeResult } from '@/types/probe';
+import { classifyHost, normalizeHost, type AddressFamily } from './host';
+import { parsePingOutput, pingArgs, pingCommand } from './ping-parse';
+import { failedProbe, summarizeProbe } from './probe-result';
+import { resolveHost } from './resolve';
 
 const execFileAsync = promisify(execFile);
 
@@ -17,6 +19,10 @@ export { isValidPingHost } from './ping-parse';
  *   packetLoss = (sent - received) / sent * 100
  *   latency    = mean RTT of the received packets
  *   jitter     = mean absolute difference between consecutive RTTs
+ *
+ * An IP target is pinged as given. A domain target is resolved first, once per
+ * probe, and the address that came back is what gets pinged (see ./resolve for
+ * why the name itself is never handed to `ping`).
  *
  * Design notes:
  *
@@ -45,6 +51,8 @@ export interface PingOptions {
   interval?: number;
   /** Hard ceiling on the whole probe, in milliseconds. */
   maxDuration?: number;
+  /** Address family to resolve a domain target to. Ignored for IP literals. */
+  ipVersion?: ProbeIpVersion;
 }
 
 const DEFAULTS = {
@@ -54,13 +62,13 @@ const DEFAULTS = {
 } as const;
 
 /** Send one echo request and parse the reply. */
-async function sendPacket(host: string, timeoutMs: number) {
-  const args = pingArgs(host, timeoutMs);
+async function sendPacket(address: string, family: AddressFamily, timeoutMs: number) {
+  const args = pingArgs(address, timeoutMs, undefined, family);
   let stdout = '';
   let failure: string | undefined;
 
   try {
-    const result = await execFileAsync('ping', args, {
+    const result = await execFileAsync(pingCommand(undefined, family), args, {
       // Give the child a little slack over the ICMP timeout before we kill it.
       timeout: timeoutMs + 1000,
       windowsHide: true,
@@ -90,21 +98,33 @@ export async function executePing(
   const maxDuration = options.maxDuration ?? count * (timeout + interval) + 2000;
 
   const timestamp = new Date();
+  const failed = (errorMessage: string) => failedProbe(targetId, timestamp, errorMessage);
 
-  if (!isValidPingHost(host)) {
-    return {
-      targetId,
-      timestamp,
-      latency: null,
-      packetLoss: 100,
-      jitter: null,
-      success: false,
-      errorMessage: `Invalid host: ${host}`,
-    };
+  const trimmedHost = normalizeHost(host);
+  const kind = classifyHost(trimmedHost);
+
+  if (kind === 'invalid') {
+    return failed(`Invalid host: ${host}`);
   }
 
-  const trimmedHost = host.trim();
   const deadline = Date.now() + maxDuration;
+
+  let address = trimmedHost;
+  let family: AddressFamily = kind === 'ipv6' ? 6 : 4;
+
+  if (kind === 'hostname') {
+    const resolved = await resolveHost(trimmedHost, options.ipVersion);
+    if (!resolved.ok) {
+      console.log(`[Ping] ${trimmedHost}: ${resolved.error}`);
+      return failed(resolved.error);
+    }
+    address = resolved.address;
+    family = resolved.family;
+  }
+
+  // What the log lines call this target: the name, and where it pointed.
+  const label = kind === 'hostname' ? `${trimmedHost} (${address})` : trimmedHost;
+  const resolvedAddress = kind === 'hostname' ? address : undefined;
 
   let sent = 0;
   let received = 0;
@@ -113,12 +133,12 @@ export async function executePing(
 
   for (let i = 0; i < count; i++) {
     if (Date.now() >= deadline) {
-      console.warn(`[Ping] ${trimmedHost}: deadline reached after ${sent}/${count} packets`);
+      console.warn(`[Ping] ${label}: deadline reached after ${sent}/${count} packets`);
       break;
     }
 
     sent++;
-    const packet = await sendPacket(trimmedHost, timeout);
+    const packet = await sendPacket(address, family, timeout);
 
     if (packet.received && packet.latency !== null) {
       received++;
@@ -135,83 +155,22 @@ export async function executePing(
   // No packet actually went out (deadline already passed) — report that rather
   // than inventing a loss figure from zero samples.
   if (sent === 0) {
-    return {
-      targetId,
-      timestamp,
-      latency: null,
-      packetLoss: 100,
-      jitter: null,
-      success: false,
-      errorMessage: 'Probe deadline exceeded before any packet was sent',
-    };
+    return { ...failed('Probe deadline exceeded before any packet was sent'), resolvedAddress };
   }
 
-  const packetLoss = round(((sent - received) / sent) * 100, 2);
-  const avgLatency = received > 0 ? round(mean(latencies)!, 2) : null;
-  const jitter = latencies.length > 1 ? round(jitterFromLatencies(latencies)!, 2) : null;
-
-  console.log(
-    `[Ping] ${trimmedHost}: sent=${sent} received=${received} loss=${packetLoss}% ` +
-    `avg=${avgLatency ?? '-'}ms jitter=${jitter ?? '-'}ms`
-  );
-
-  return {
+  const result = summarizeProbe({
     targetId,
     timestamp,
-    latency: avgLatency,
-    // The extremes of the individual packets, not of the probe averages. This
-    // is what makes the smoke band show real delay distribution: a path
-    // averaging 20ms while individual packets range 8–400ms is unusable, and
-    // the mean alone cannot say so.
-    minLatency: received > 0 ? round(Math.min(...latencies), 2) : null,
-    maxLatency: received > 0 ? round(Math.max(...latencies), 2) : null,
-    // Percentiles turn the band from a pair of edges into a distribution: they
-    // are what shows a path whose packets mostly arrive together but
-    // occasionally do not, as distinct from one that is uniformly erratic.
-    p10Latency: received > 0 ? round(percentile(latencies, 10)!, 2) : null,
-    p25Latency: received > 0 ? round(percentile(latencies, 25)!, 2) : null,
-    p50Latency: received > 0 ? round(percentile(latencies, 50)!, 2) : null,
-    p75Latency: received > 0 ? round(percentile(latencies, 75)!, 2) : null,
-    p90Latency: received > 0 ? round(percentile(latencies, 90)!, 2) : null,
-    packetLoss,
-    jitter,
-    success: received > 0,
-    errorMessage: received === 0 ? lastError ?? 'All packets lost' : undefined,
-  };
-}
-
-/**
- * Ping several targets concurrently.
- *
- * Concurrency is bounded so a large target list cannot spawn hundreds of
- * `ping` processes at once, which would distort the very latencies it is
- * trying to measure.
- */
-export async function pingMultipleTargets(
-  targets: Array<{ id: string; host: string }>,
-  options: PingOptions = {},
-  concurrency = 8
-): Promise<ProbeResult[]> {
-  const results: ProbeResult[] = new Array(targets.length);
-  let next = 0;
-
-  const worker = async () => {
-    for (;;) {
-      const index = next++;
-      if (index >= targets.length) return;
-      const target = targets[index];
-      results[index] = await executePing(target.id, target.host, options);
-    }
-  };
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, targets.length) }, worker)
-  );
+    latencies,
+    attempted: sent,
+    failureReason: lastError ?? 'All packets lost',
+    resolvedAddress,
+  });
 
   console.log(
-    `[Ping] Probed ${targets.length} targets: ` +
-    `${results.filter(r => r.success).length} reachable`
+    `[Ping] ${label}: sent=${sent} received=${received} loss=${result.packetLoss}% ` +
+    `avg=${result.latency ?? '-'}ms jitter=${result.jitter ?? '-'}ms`
   );
 
-  return results;
+  return result;
 }

@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAlertRule, ensureAlertSchema, getAlertRules } from '@/lib/alerts';
+import { ALERT_METRICS, createAlertRule, ensureAlertSchema, getAlertRules } from '@/lib/alerts';
 import { getTargetById } from '@/lib/database';
 import { initializeServer } from '@/lib/init';
 import type { AlertMetric } from '@/types/probe';
-
-const METRICS: AlertMetric[] = ['packetLoss', 'latency', 'jitter', 'unreachable'];
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -31,8 +29,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const body = await request.json();
     const metric = body.metric as AlertMetric;
 
-    if (!METRICS.includes(metric)) {
-      return NextResponse.json({ error: `Invalid metric. Expected one of: ${METRICS.join(', ')}` }, { status: 400 });
+    if (!ALERT_METRICS.includes(metric)) {
+      return NextResponse.json({ error: `Invalid metric. Expected one of: ${ALERT_METRICS.join(', ')}` }, { status: 400 });
     }
 
     // 'unreachable' has no threshold to compare against; everything else does.

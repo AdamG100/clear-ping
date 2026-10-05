@@ -3,7 +3,8 @@ import { getAllTargets, createTarget, getLatestMeasurementForAllTargets, getGrou
 import { randomUUID } from 'crypto';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
-import { isValidPingHost } from '@/lib/ping';
+import { IP_VERSIONS, isIpVersion, isValidHost, normalizeHost } from '@/lib/host';
+import { isProbeType, PROBE_TYPES, validateProbeConfig } from '@/lib/probe-config';
 
 export async function GET(request: NextRequest) {
   try {
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     await initializeServer();
     
     const body = await request.json();
-    const { name, host, probeType, interval, group } = body;
+    const { name, host, probeType, interval, group, ipVersion, probeConfig } = body;
 
     if (!name || !host || !probeType || !interval) {
       return NextResponse.json(
@@ -54,18 +55,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (probeType !== 'ping' && probeType !== 'dns') {
+    if (!isProbeType(probeType)) {
       return NextResponse.json(
-        { error: 'Invalid probe type' },
+        { error: `Invalid probe type. Expected one of: ${PROBE_TYPES.join(', ')}` },
         { status: 400 }
       );
     }
 
     // Reject hosts the probe could never use, rather than storing a target that
     // records 100% loss forever.
-    if (!isValidPingHost(String(host))) {
+    if (!isValidHost(String(host))) {
       return NextResponse.json(
-        { error: 'Invalid host: must be a hostname or IP address' },
+        { error: 'Invalid host: must be a hostname or an IPv4/IPv6 address' },
+        { status: 400 }
+      );
+    }
+
+    if (ipVersion !== undefined && !isIpVersion(ipVersion)) {
+      return NextResponse.json(
+        { error: `Invalid IP version. Expected one of: ${IP_VERSIONS.join(', ')}` },
         { status: 400 }
       );
     }
@@ -78,11 +86,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Checked against the probe it is for, and reduced to the settings that
+    // probe uses: a TCP target without a port could never measure anything.
+    const config = validateProbeConfig(probeType, String(host), probeConfig);
+    if (!config.ok) {
+      return NextResponse.json({ error: config.error }, { status: 400 });
+    }
+
     const target = await createTarget({
       id: randomUUID(),
       name: String(name).trim(),
-      host: String(host).trim(),
+      host: normalizeHost(String(host)),
       probeType,
+      ipVersion: ipVersion ?? 'auto',
+      probeConfig: config.config,
       interval: intervalSeconds,
       status: 'active',
       group: group || undefined,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bucketWidthFor, buildSeries, MAX_CHART_POINTS } from './series'
+import { bucketWidthFor, buildSeries, MAX_CHART_POINTS, parseWindow, windowFromQuery } from './series'
 import type { BucketedMeasurement } from '@/types/probe'
 
 const MINUTE = 60_000
@@ -148,5 +148,64 @@ describe('buildSeries', () => {
   it('keeps the sample count so the tooltip can report how many probes it covers', () => {
     const series = buildSeries([bucket(0, { sampleCount: 37 })], FIVE_MIN_PROBE, 60 * MINUTE)
     expect(series[0].sampleCount).toBe(37)
+  })
+})
+
+describe('parseWindow', () => {
+  const now = base + 24 * 60 * MINUTE
+
+  it('reads a start and end in epoch milliseconds', () => {
+    expect(parseWindow(String(base), String(base + 30 * MINUTE), now)).toEqual({
+      start: base,
+      end: base + 30 * MINUTE,
+    })
+  })
+
+  it('falls back when either bound is absent or unparseable', () => {
+    expect(parseWindow(null, String(base), now)).toBeNull()
+    expect(parseWindow(String(base), null, now)).toBeNull()
+    expect(parseWindow('yesterday', String(base), now)).toBeNull()
+  })
+
+  it('does not reach into the future', () => {
+    expect(parseWindow(String(now - 10 * MINUTE), String(now + 60 * MINUTE), now)?.end).toBe(now)
+  })
+
+  it('rejects a window that is inverted, too narrow or too wide', () => {
+    expect(parseWindow(String(base + MINUTE), String(base), now)).toBeNull()
+    expect(parseWindow(String(base), String(base + 1000), now)).toBeNull()
+    expect(parseWindow(String(base - 40 * 24 * 60 * MINUTE), String(base), now)).toBeNull()
+  })
+})
+
+describe('windowFromQuery', () => {
+  const now = Date.parse('2026-08-19T12:00:00.000Z')
+  const query = (text: string) => windowFromQuery(new URLSearchParams(text), now)
+
+  it('reaches back the requested number of hours from now', () => {
+    const window = query('hours=6')
+    expect(window.end).toBe(now)
+    expect(window.end - window.start).toBe(6 * 60 * 60 * 1000)
+    expect(window.bucketMs).toBe(bucketWidthFor(6 * 60 * 60 * 1000))
+  })
+
+  it('falls back to a day when the hours are missing or nonsense', () => {
+    expect(query('').end - query('').start).toBe(24 * 60 * 60 * 1000)
+    expect(query('hours=banana').end - query('hours=banana').start).toBe(24 * 60 * 60 * 1000)
+  })
+
+  it('uses an explicit window as given, at a resolution that suits it', () => {
+    const start = now - 30 * 60 * 1000
+    const end = now - 10 * 60 * 1000
+    const window = query(`hours=168&start=${start}&end=${end}`)
+
+    expect(window).toMatchObject({ start, end })
+    // Zoomed in, so finer than the week the range would have given.
+    expect(window.bucketMs).toBeLessThan(query('hours=168').bucketMs)
+  })
+
+  it('ignores an explicit window it cannot use', () => {
+    const window = query(`hours=3&start=abc&end=${now}`)
+    expect(window.end - window.start).toBe(3 * 60 * 60 * 1000)
   })
 })

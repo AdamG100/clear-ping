@@ -1,6 +1,36 @@
 import { randomUUID } from 'crypto';
-import { getDatabase } from './database';
+import { getDatabase, rebuildTable, tableDefinition } from './database';
 import type { AlertEvent, AlertMetric, AlertRule, ProbeResult, Target } from '@/types/probe';
+import { ALERT_METRIC_LABELS } from '@/types/probe';
+
+export const ALERT_METRICS = Object.keys(ALERT_METRIC_LABELS) as AlertMetric[];
+
+const ALERT_RULE_COLUMNS = [
+  'id', 'target_id', 'metric', 'threshold', 'consecutive_probes', 'webhook_url', 'enabled',
+  'state', 'streak', 'last_fired_at', 'last_resolved_at', 'created_at',
+];
+
+/**
+ * `metric` is unconstrained for the same reason `targets.probe_type` is: the
+ * list grows, and a CHECK naming its members turns every addition into a table
+ * rebuild. The API validates it instead.
+ */
+const alertRulesTableSql = (name: string) => `
+  CREATE TABLE ${name} (
+    id TEXT PRIMARY KEY,
+    target_id TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    threshold REAL NOT NULL DEFAULT 0,
+    consecutive_probes INTEGER NOT NULL DEFAULT 3,
+    webhook_url TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    state TEXT NOT NULL DEFAULT 'ok' CHECK(state IN ('ok','firing')),
+    streak INTEGER NOT NULL DEFAULT 0,
+    last_fired_at INTEGER,
+    last_resolved_at INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
+  )`;
 
 interface AlertRuleRow {
   id: string;
@@ -39,24 +69,19 @@ export async function ensureAlertSchema(): Promise<void> {
 
   await new Promise<void>((resolve, reject) => {
     db.run(
-      `CREATE TABLE IF NOT EXISTS alert_rules (
-        id TEXT PRIMARY KEY,
-        target_id TEXT NOT NULL,
-        metric TEXT NOT NULL CHECK(metric IN ('packetLoss','latency','jitter','unreachable')),
-        threshold REAL NOT NULL DEFAULT 0,
-        consecutive_probes INTEGER NOT NULL DEFAULT 3,
-        webhook_url TEXT,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        state TEXT NOT NULL DEFAULT 'ok' CHECK(state IN ('ok','firing')),
-        streak INTEGER NOT NULL DEFAULT 0,
-        last_fired_at INTEGER,
-        last_resolved_at INTEGER,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
-      )`,
+      alertRulesTableSql('alert_rules').replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'),
       err => (err ? reject(err) : resolve())
     );
   });
+
+  // Tables created before certificate alerts existed reject any metric they
+  // were not told about. The index below is dropped with the old table and
+  // recreated by the statement that follows.
+  const existing = await tableDefinition(db, 'alert_rules');
+  if (existing && /CHECK\s*\(\s*metric/i.test(existing)) {
+    await rebuildTable(db, 'alert_rules', alertRulesTableSql, ALERT_RULE_COLUMNS);
+    console.log('[Alerts] Migrated alert_rules table to accept new metrics');
+  }
 
   await new Promise<void>((resolve, reject) => {
     db.run(
@@ -142,8 +167,18 @@ export function observedValue(rule: Pick<AlertRule, 'metric'>, result: ProbeResu
       return result.jitter ?? null;
     case 'unreachable':
       return result.success ? 0 : 1;
+    case 'certExpiry': {
+      // Days of validity left, as of the probe that saw the certificate. Null
+      // for anything that is not HTTPS, and for a probe that never got as far
+      // as a handshake.
+      const expiresAt = result.details?.certExpiresAt;
+      if (expiresAt === undefined) return null;
+      return Math.round(((expiresAt - result.timestamp.getTime()) / DAY_MS) * 10) / 10;
+    }
   }
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Whether this probe breaches the rule. */
 export function isBreaching(
@@ -159,7 +194,9 @@ export function isBreaching(
   // would fire a latency rule on a host that is simply down.
   if (value === null) return rule.state === 'firing';
 
-  return value > rule.threshold;
+  return ALERT_METRIC_LABELS[rule.metric].comparison === 'below'
+    ? value < rule.threshold
+    : value > rule.threshold;
 }
 
 /**

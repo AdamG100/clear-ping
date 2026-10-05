@@ -1,29 +1,27 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
-import type { Target, TargetType, GroupOrder, SparklinePoint } from '@/types/probe'
+import type { Target, GroupOrder, SparklinePoint } from '@/types/probe'
 import { Sparkline } from './sparkline'
+import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-dialogs'
+import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Label } from '@/components/ui/label'
 import { getPacketLossColor, isMeaningfulLoss, NO_DATA_COLOR } from '@/lib/packet-loss-colors'
-import { Reorder, useDragControls, AnimatePresence, motion } from 'framer-motion'
+import { addressFamilyFor, isDualStack } from '@/lib/host'
+import { targetAddressLabel } from '@/lib/probe-config'
+import {
+  UNGROUPED,
+  buildSidebarLayout,
+  targetOrderUpdates,
+  type SidebarLayout,
+} from '@/lib/sidebar-layout'
+import { DRAG_SPRING, useTargetDrag, type ActiveTargetDrag } from './use-target-drag'
+import { Reorder, useDragControls, AnimatePresence, MotionConfig, motion, type MotionValue } from 'framer-motion'
 import {
   Plus,
   GripVertical,
@@ -31,15 +29,10 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
-  Globe,
-  Server,
-  Shield,
-  Network,
-  FolderPlus,
-  Wifi,
   Search,
   Pause,
   Play,
+  ChartLine,
 } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -52,6 +45,9 @@ interface SidebarProps {
   onUpdateTarget: (id: string, updates: Partial<Target>) => void
   onDeleteTarget: (id: string) => void
   onTogglePaused: (target: Target) => void
+  /** The group whose comparison chart is on screen, if one is. */
+  selectedGroup?: string | null
+  onSelectGroup?: (groupName: string) => void
   series?: Record<string, SparklinePoint[]>
   groupOrders?: GroupOrder[]
   onReorderGroups?: (groups: GroupOrder[]) => void
@@ -70,9 +66,12 @@ interface SidebarProps {
 function StatusIndicator({
   isOnline,
   packetLoss,
+  note,
 }: {
   isOnline?: boolean
   packetLoss?: number
+  /** Replaces the description: how each address family of a dual-stack target is doing. */
+  note?: string
 }) {
   const pending = isOnline === undefined
 
@@ -91,6 +90,8 @@ function StatusIndicator({
     statusColor = getPacketLossColor(100)
     label = 'Offline'
   }
+
+  if (note && !pending) label = note
 
   return (
     <span className="relative inline-flex shrink-0" title={label}>
@@ -113,246 +114,307 @@ function StatusIndicator({
   )
 }
 
-// ─── Type Badge ─────────────────────────────────────────────────────────────
+// ─── Target Row ─────────────────────────────────────────────────────────────
 
-function TypeBadge({ type }: { type: TargetType }) {
-  const config = {
-    ip: { color: 'bg-chart-2/20 text-chart-2' },
-    domain: { color: 'bg-chart-1/20 text-chart-1' },
-    dns: { color: 'bg-chart-3/20 text-chart-3' },
-  }
-  const { color } = config[type]
-
-  return (
-    <span className={cn('px-1.5 py-0.5 text-[10px] font-medium rounded uppercase', color)}>
-      {type}
-    </span>
-  )
-}
-
-// ─── Address auto-detection ─────────────────────────────────────────────────
-
-function detectTargetType(address: string): TargetType {
-  const trimmed = address.trim()
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(trimmed)) return 'ip'
-  if (/^[0-9a-fA-F:]+$/.test(trimmed) && trimmed.includes(':')) return 'ip'
-  if (['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1', '9.9.9.9'].includes(trimmed)) return 'dns'
-  if (/^[a-zA-Z0-9][a-zA-Z0-9-]*(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/.test(trimmed)) return 'domain'
-  return 'ip'
-}
-
-function detectProbeType(type: TargetType): 'ping' | 'dns' {
-  return type === 'dns' ? 'dns' : 'ping'
-}
-
-// ─── Draggable Target ───────────────────────────────────────────────────────
-
-interface DraggableTargetProps {
+interface TargetRowProps {
   target: Target
-  selectedTargetId: string | null
-  onSelectTarget: (id: string) => void
-  onEditTarget: (target: Target) => void
-  onDeleteTarget: (id: string) => void
-  onTogglePaused: (target: Target) => void
+  selected: boolean
   trace?: SparklinePoint[]
-  onMoveToGroup?: (id: string, destGroup?: string) => void
+  /**
+   * True for the copy that follows the pointer during a drag. It is a picture
+   * of the row, not a second set of controls, so nothing in it is reachable.
+   */
+  floating?: boolean
+  onSelectTarget?: (id: string) => void
+  onEditTarget?: (target: Target) => void
+  onDeleteTarget?: (id: string) => void
+  onTogglePaused?: (target: Target) => void
+  onHandlePointerDown?: (id: string, event: ReactPointerEvent<HTMLElement>) => void
 }
 
-function DraggableTarget({
+function TargetRow({
   target,
-  selectedTargetId,
+  selected,
+  trace,
+  floating = false,
   onSelectTarget,
   onEditTarget,
   onDeleteTarget,
   onTogglePaused,
-  trace,
-  onMoveToGroup,
-}: DraggableTargetProps) {
+  onHandlePointerDown,
+}: TargetRowProps) {
   const paused = target.status === 'paused'
-  const dragControls = useDragControls()
+  const address = targetAddressLabel(target)
+  const dualStack = isDualStack(target.host, target.ipVersion)
+  const usesIpv6 = addressFamilyFor(target.host, target.ipVersion) === 6
 
   return (
-    <Reorder.Item
-      value={target.id}
-      data-target-id={target.id}
-      dragListener={false}
-      dragControls={dragControls}
-      className="select-none"
-      whileDrag={{ scale: 1.02, zIndex: 50 }}
-      layout
-      transition={{ duration: 0.15 }}
-      onDragEnd={() => {
-        if (onMoveToGroup) {
-          onMoveToGroup(target.id)
+    // Selecting a target has to work from the keyboard, so the row is a real
+    // interactive element rather than a div with a click handler.
+    <div
+      role="button"
+      tabIndex={floating ? -1 : 0}
+      aria-current={selected}
+      onClick={() => onSelectTarget?.(target.id)}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelectTarget?.(target.id)
         }
       }}
+      className={cn(
+        'relative w-full text-left px-2 py-2 rounded-md transition-colors group/target cursor-pointer',
+        'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        floating && selected && 'bg-sidebar-accent'
+      )}
     >
-      {/* Selecting a target has to work from the keyboard, so the row is a
-          real interactive element rather than a div with a click handler. */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-current={selectedTargetId === target.id}
-        onClick={() => onSelectTarget(target.id)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            onSelectTarget(target.id)
-          }
-        }}
-        className={cn(
-          'w-full text-left px-2 py-2 rounded-md transition-colors group/target cursor-pointer',
-          'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          selectedTargetId === target.id && 'bg-sidebar-accent'
-        )}
-      >
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onPointerDown={(e) => dragControls.start(e)}
-            draggable
-            onDragStart={(e) => { e.dataTransfer.setData('targetId', target.id); e.dataTransfer.effectAllowed = 'move' }}
-            className="p-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/0 group-hover/target:text-muted-foreground/40 hover:text-muted-foreground/70! transition-colors touch-none shrink-0"
-            aria-label={`Drag to reorder ${target.name}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <GripVertical className="h-3 w-3" />
-          </button>
-          <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} />
+      {/* One highlight shared by every row: selecting another target slides
+          it there instead of switching one background off and another on. */}
+      {selected && !floating && (
+        <motion.span
+          layoutId="selected-target"
+          aria-hidden="true"
+          className="absolute inset-0 rounded-md bg-sidebar-accent"
+          transition={DRAG_SPRING}
+        />
+      )}
+      <div className="relative flex items-center gap-1.5">
+        <button
+          type="button"
+          tabIndex={floating ? -1 : undefined}
+          onPointerDown={e => onHandlePointerDown?.(target.id, e)}
+          className={cn(
+            'p-0.5 cursor-grab active:cursor-grabbing transition-colors touch-none shrink-0',
+            floating
+              ? 'text-muted-foreground/70'
+              : 'text-muted-foreground/0 group-hover/target:text-muted-foreground/40 hover:text-muted-foreground/70!'
+          )}
+          aria-label={`Drag to reorder ${target.name}`}
+          onClick={e => e.stopPropagation()}
+        >
+          <GripVertical className="h-3 w-3" />
+        </button>
+        <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} note={target.statusNote} />
 
-          {/* The name owns the full width of the first line; the address and the
-              trace share the second. Putting the trace on the same line as the
-              name is what pushed the row past the sidebar's width and clipped
-              the buttons off the end. */}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className={cn(
-                'min-w-0 truncate text-sm font-medium',
-                paused ? 'text-muted-foreground line-through' : 'text-sidebar-foreground'
-              )}>
-                {target.name}
+        {/* The name owns the full width of the first line; the address and the
+            trace share the second. Putting the trace on the same line as the
+            name is what pushed the row past the sidebar's width and clipped
+            the buttons off the end. */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className={cn(
+              'min-w-0 truncate text-sm font-medium',
+              paused ? 'text-muted-foreground line-through' : 'text-sidebar-foreground'
+            )}>
+              {target.name}
+            </span>
+            {target.type && (
+              <span className="shrink-0">
+                <TypeBadge type={target.type} />
               </span>
-              {target.type && (
-                <span className="shrink-0">
-                  <TypeBadge type={target.type} />
-                </span>
-              )}
-              {paused && (
-                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
-                  Paused
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-                {target.address || target.host}
+            )}
+            {paused && (
+              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                Paused
               </span>
-              {/* Stays put on hover: the trace is the reason to look at the row,
-                  so swapping it out for the controls hid the thing being read. */}
-              <span className="ml-auto shrink-0">
-                <Sparkline points={trace ?? []} width={52} height={16} muted={paused} />
-              </span>
-            </div>
+            )}
           </div>
 
-          {/* Reserves its width at all times, so revealing the controls never
-              reflows the row or pushes the last button out of bounds. */}
-          <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100">
-            <button
-              type="button"
-              onClick={e => { e.stopPropagation(); onTogglePaused(target) }}
-              className="cursor-pointer rounded p-0.5 transition-colors hover:bg-muted"
-              aria-label={paused ? `Resume ${target.name}` : `Pause ${target.name}`}
+          <div className="flex items-center gap-2">
+            {/* An IPv6 address rarely fits; the tooltip carries it in full,
+                along with where a domain last resolved to. */}
+            <span
+              className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
+              title={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address}
             >
-              {paused
-                ? <Play className="h-3.5 w-3.5 text-muted-foreground" />
-                : <Pause className="h-3.5 w-3.5 text-muted-foreground" />}
-            </button>
-            <button
-              type="button"
-              onClick={e => { e.stopPropagation(); onEditTarget(target) }}
-              className="cursor-pointer rounded p-0.5 transition-colors hover:bg-blue-500/20"
-              aria-label={`Edit ${target.name}`}
-            >
-              <Pencil className="h-3.5 w-3.5 text-blue-500" />
-            </button>
-            <button
-              type="button"
-              onClick={e => { e.stopPropagation(); onDeleteTarget(target.id) }}
-              className="cursor-pointer rounded p-0.5 transition-colors hover:bg-destructive/20"
-              aria-label={`Delete ${target.name}`}
-            >
-              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-            </button>
+              {address}
+            </span>
+            {/* The family sits with the address it describes, and off the
+                name's line, where every badge costs the name some letters. */}
+            {(dualStack || usesIpv6) && (
+              <span className="flex shrink-0">{dualStack ? <DualStackBadge /> : <Ipv6Badge />}</span>
+            )}
+            {/* Stays put on hover: the trace is the reason to look at the row,
+                so swapping it out for the controls hid the thing being read. */}
+            <span className="ml-auto shrink-0">
+              <Sparkline points={trace ?? []} width={52} height={16} muted={paused} />
+            </span>
           </div>
         </div>
+
+        {/* Reserves its width at all times, so revealing the controls never
+            reflows the row or pushes the last button out of bounds. */}
+        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100">
+          <button
+            type="button"
+            tabIndex={floating ? -1 : undefined}
+            onClick={e => { e.stopPropagation(); onTogglePaused?.(target) }}
+            className="cursor-pointer rounded p-0.5 transition-colors hover:bg-muted"
+            aria-label={paused ? `Resume ${target.name}` : `Pause ${target.name}`}
+          >
+            {paused
+              ? <Play className="h-3.5 w-3.5 text-muted-foreground" />
+              : <Pause className="h-3.5 w-3.5 text-muted-foreground" />}
+          </button>
+          <button
+            type="button"
+            tabIndex={floating ? -1 : undefined}
+            onClick={e => { e.stopPropagation(); onEditTarget?.(target) }}
+            className="cursor-pointer rounded p-0.5 transition-colors hover:bg-blue-500/20"
+            aria-label={`Edit ${target.name}`}
+          >
+            <Pencil className="h-3.5 w-3.5 text-blue-500" />
+          </button>
+          <button
+            type="button"
+            tabIndex={floating ? -1 : undefined}
+            onClick={e => { e.stopPropagation(); onDeleteTarget?.(target.id) }}
+            className="cursor-pointer rounded p-0.5 transition-colors hover:bg-destructive/20"
+            aria-label={`Delete ${target.name}`}
+          >
+            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+          </button>
+        </div>
       </div>
-    </Reorder.Item>
+    </div>
   )
 }
 
-// ─── Draggable Group ────────────────────────────────────────────────────────
+// ─── Sortable Target ────────────────────────────────────────────────────────
 
-interface DraggableGroupProps {
+/**
+ * A row in its place in the list.
+ *
+ * While its target is being dragged the row stays where the drop would put it
+ * but shows as an empty slot: the content is hidden rather than removed, so
+ * the slot is exactly the height of the row that will fill it. `layout` is
+ * what makes neighbouring rows slide rather than jump when the slot moves.
+ */
+function SortableTarget({ isDragSource, ...row }: TargetRowProps & { isDragSource: boolean }) {
+  return (
+    <motion.li
+      layout="position"
+      transition={DRAG_SPRING}
+      data-target-id={row.target.id}
+      className="relative list-none select-none"
+    >
+      {isDragSource && (
+        <motion.div
+          aria-hidden="true"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.12 }}
+          className="absolute inset-0 rounded-md border border-dashed border-primary/40 bg-primary/5"
+        />
+      )}
+      <div className={cn(isDragSource && 'invisible')}>
+        <TargetRow {...row} />
+      </div>
+    </motion.li>
+  )
+}
+
+// ─── Drag Overlay ───────────────────────────────────────────────────────────
+
+const SHADOW_RESTING = '0 0 0 0 rgb(0 0 0 / 0)'
+const SHADOW_LIFTED = '0 14px 32px -10px rgb(0 0 0 / 0.55)'
+
+/**
+ * The copy of a row that follows the pointer. Rendered into the body so no
+ * group's `overflow: hidden` can clip it on the way to another group.
+ */
+function TargetDragOverlay({
+  drag,
+  x,
+  y,
+  selected,
+  children,
+}: {
+  drag: ActiveTargetDrag
+  x: MotionValue<number>
+  y: MotionValue<number>
+  selected: boolean
+  children: ReactNode
+}) {
+  const lifted = drag.phase === 'dragging'
+  const absorbing = drag.phase === 'absorbing'
+
+  return createPortal(
+    <motion.div
+      aria-hidden="true"
+      className="pointer-events-none fixed left-0 top-0 z-50"
+      style={{ x, y, width: drag.width }}
+    >
+      <motion.div
+        // The base is the sidebar's own colour: once the copy has settled it
+        // looks exactly like the row about to replace it, so the swap is not
+        // visible.
+        className="relative rounded-md bg-sidebar"
+        initial={{ scale: 1, opacity: 1, boxShadow: SHADOW_RESTING }}
+        animate={{
+          scale: lifted ? 1.03 : absorbing ? 0.9 : 1,
+          opacity: absorbing ? 0 : 1,
+          boxShadow: lifted ? SHADOW_LIFTED : SHADOW_RESTING,
+        }}
+        transition={DRAG_SPRING}
+      >
+        <motion.div
+          className="absolute inset-0 rounded-md bg-sidebar-accent outline-1 outline-sidebar-ring/50"
+          initial={{ opacity: selected ? 1 : 0 }}
+          animate={{ opacity: lifted || selected ? 1 : 0 }}
+          transition={{ duration: 0.15 }}
+        />
+        <div className="relative">{children}</div>
+      </motion.div>
+    </motion.div>,
+    document.body
+  )
+}
+
+// ─── Target Group ───────────────────────────────────────────────────────────
+
+interface TargetGroupProps {
   groupName: string
-  groupTargets: Target[]
+  targetIds: string[]
+  targetsById: Map<string, Target>
   selectedTargetId: string | null
+  series?: Record<string, SparklinePoint[]>
+  isCollapsed: boolean
+  /** Whether this group's comparison chart is what the main pane is showing. */
+  isCompared: boolean
+  /** The target drag in progress, if any. */
+  drag: ActiveTargetDrag | null
+  onToggleCollapse: (groupName: string) => void
+  onCompare?: (groupName: string) => void
+  onGroupDragStart: () => void
+  onGroupDragEnd: () => void
   onSelectTarget: (id: string) => void
   onEditTarget: (target: Target) => void
   onDeleteTarget: (id: string) => void
   onTogglePaused: (target: Target) => void
-  series?: Record<string, SparklinePoint[]>
-  collapsedGroups: Set<string>
-  onToggleCollapse: (groupName: string) => void
-  onReorderTargets?: (groupName: string, orderedIds: string[]) => void
-  onMoveToGroup?: (id: string, destGroup?: string) => void
+  onHandlePointerDown: (id: string, event: ReactPointerEvent<HTMLElement>) => void
 }
 
-function DraggableGroup({
+function TargetGroup({
   groupName,
-  groupTargets,
+  targetIds,
+  targetsById,
   selectedTargetId,
-  onSelectTarget,
-  onEditTarget,
-  onDeleteTarget,
-  onTogglePaused,
   series,
-  collapsedGroups,
+  isCollapsed,
+  isCompared,
+  drag,
   onToggleCollapse,
-  onReorderTargets,
-  onMoveToGroup,
-}: DraggableGroupProps) {
-  const [isDragOver, setIsDragOver] = useState(false)
+  onCompare,
+  onGroupDragStart,
+  onGroupDragEnd,
+  ...rowHandlers
+}: TargetGroupProps) {
   const dragControls = useDragControls()
-  const isCollapsed = collapsedGroups.has(groupName)
 
-  const targetIds = useMemo(() => groupTargets.map(t => t.id), [groupTargets])
-  const [reorderableTargetIds, setReorderableTargetIds] = useState(targetIds)
-  const targetMap = useMemo(() => new Map(groupTargets.map(t => [t.id, t])), [groupTargets])
-
-  // Drag reordering needs a local copy it can mutate mid-gesture, which has to
-  // resync when the server order changes. Adjusting during render rather than
-  // in an effect: React re-runs this component immediately without committing
-  // the stale list, so the row order never flashes.
-  const [syncedTargetIds, setSyncedTargetIds] = useState(targetIds)
-  if (syncedTargetIds !== targetIds) {
-    setSyncedTargetIds(targetIds)
-    setReorderableTargetIds(targetIds)
-  }
-
-  // Persist target reorder on pointer up (end of drag)
-  useEffect(() => {
-    const handlePointerUp = () => {
-      if (!onReorderTargets) return
-      const changed = reorderableTargetIds.some((id, i) => id !== targetIds[i])
-      if (changed) {
-        onReorderTargets(groupName, reorderableTargetIds)
-      }
-    }
-    window.addEventListener('pointerup', handlePointerUp)
-    return () => window.removeEventListener('pointerup', handlePointerUp)
-  }, [reorderableTargetIds, targetIds, onReorderTargets, groupName])
+  // Highlighted only as a destination: lighting up the group a row was just
+  // picked up from says nothing the empty slot does not already say.
+  const isDropDestination = !!drag && drag.overGroup === groupName && drag.originGroup !== groupName
 
   return (
     <Reorder.Item
@@ -361,20 +423,20 @@ function DraggableGroup({
       dragControls={dragControls}
       className="select-none"
       whileDrag={{ scale: 1.02, zIndex: 50 }}
-      layout
-      transition={{ duration: 0.2 }}
+      // Position only. Animating size as well scales the whole group while a
+      // row enters or leaves it, which visibly stretches the header text.
+      layout="position"
+      transition={DRAG_SPRING}
+      onDragStart={onGroupDragStart}
+      onDragEnd={onGroupDragEnd}
     >
       <div
-        className={cn('rounded-lg overflow-hidden transition-colors', isDragOver && 'ring-1 ring-primary/40 bg-primary/5')}
+        className={cn(
+          'rounded-lg ring-1 ring-transparent transition-[background-color,box-shadow] duration-150',
+          isDropDestination && 'bg-primary/5 ring-primary/40',
+          isCompared && !isDropDestination && 'bg-sidebar-accent/60 ring-sidebar-ring/40'
+        )}
         data-group={groupName}
-        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
-        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false) }}
-        onDrop={(e) => {
-          e.preventDefault()
-          setIsDragOver(false)
-          const id = e.dataTransfer.getData('targetId')
-          if (id && onMoveToGroup) onMoveToGroup(id, groupName)
-        }}
       >
         {/* Group Header */}
         <div className="flex items-center gap-1 px-2 py-1.5 group/header">
@@ -403,533 +465,78 @@ function DraggableGroup({
           </button>
 
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-            {groupTargets.length}
+            {targetIds.length}
           </span>
+
+          {/* A comparison needs at least two lines to compare. Labelled and
+              in the accent colour: as a bare grey icon it read as decoration,
+              and nobody found the group chart without being told where it was. */}
+          {onCompare && targetIds.length > 1 && (
+            <button
+              type="button"
+              onClick={() => onCompare(groupName)}
+              aria-pressed={isCompared}
+              aria-label={`Compare the targets in ${groupName} on one chart`}
+              title="Show every target in this group on one chart"
+              className={cn(
+                'ml-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium leading-none transition-colors',
+                isCompared
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-primary/40 bg-primary/10 text-primary hover:border-primary/70 hover:bg-primary/20'
+              )}
+            >
+              <ChartLine className="h-3.5 w-3.5" />
+              Compare
+            </button>
+          )}
         </div>
 
         {/* Target List */}
         <AnimatePresence initial={false}>
           {!isCollapsed && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              // Clipped only while the group is opening or closing. Left
+              // clipped, a row sliding up into a group that has just lost one
+              // starts outside the shrunken box and is cut off mid-slide.
+              initial={{ height: 0, opacity: 0, overflow: 'hidden' }}
+              animate={{ height: 'auto', opacity: 1, transitionEnd: { overflow: 'visible' } }}
+              exit={{ height: 0, opacity: 0, overflow: 'hidden' }}
               transition={{ duration: 0.2 }}
-              className="overflow-hidden"
             >
-              <Reorder.Group
-                axis="y"
-                values={reorderableTargetIds}
-                onReorder={setReorderableTargetIds}
-                className="space-y-0.5 ml-1"
-              >
-                {reorderableTargetIds.map(targetId => {
-                  const target = targetMap.get(targetId)
+              <ul className="space-y-0.5 ml-1">
+                {targetIds.map(targetId => {
+                  const target = targetsById.get(targetId)
                   if (!target) return null
                   return (
-                    <DraggableTarget
+                    <SortableTarget
                       key={targetId}
                       target={target}
-                      selectedTargetId={selectedTargetId}
-                      onSelectTarget={onSelectTarget}
-                      onEditTarget={onEditTarget}
-                      onDeleteTarget={onDeleteTarget}
-                      onTogglePaused={onTogglePaused}
+                      selected={selectedTargetId === targetId}
                       trace={series?.[targetId]}
-                      onMoveToGroup={onMoveToGroup}
+                      isDragSource={drag?.id === targetId}
+                      {...rowHandlers}
                     />
                   )
                 })}
-              </Reorder.Group>
+                {/* Only reachable mid-drag: a group whose last row was carried
+                    off, or the Ungrouped zone offered for the drag. Without
+                    something to aim at it would be a bare header. */}
+                {targetIds.length === 0 && (
+                  <motion.li
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.15 }}
+                    className="flex h-11 list-none items-center justify-center rounded-md border border-dashed border-border text-[11px] text-muted-foreground"
+                  >
+                    {groupName === UNGROUPED ? 'Drop here to remove from its group' : 'Drop here'}
+                  </motion.li>
+                )}
+              </ul>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
     </Reorder.Item>
-  )
-}
-
-// ─── Add Target Dialog ──────────────────────────────────────────────────────
-
-interface AddTargetDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onAddTarget: (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => void
-  availableGroups: string[]
-}
-
-function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGroups }: AddTargetDialogProps) {
-  const [name, setName] = useState('')
-  const [address, setAddress] = useState('')
-  const [type, setType] = useState<TargetType>('ip')
-  const [probeType, setProbeType] = useState<'ping' | 'dns'>('ping')
-  const [interval, setInterval] = useState(300)
-  const [group, setGroup] = useState('')
-  const [customGroup, setCustomGroup] = useState('')
-  const [showAdvanced, setShowAdvanced] = useState(false)
-
-  const handleAddressChange = (value: string) => {
-    setAddress(value)
-    if (value) {
-      const detected = detectTargetType(value)
-      setType(detected)
-      setProbeType(detectProbeType(detected))
-    }
-  }
-
-  const resetForm = useCallback(() => {
-    setName('')
-    setAddress('')
-    setType('ip')
-    setProbeType('ping')
-    setInterval(300)
-    setGroup('')
-    setCustomGroup('')
-    setShowAdvanced(false)
-  }, [])
-
-  const handleSubmit = () => {
-    if (!name.trim() || !address.trim()) return
-
-    const resolvedGroup = group === '__custom__' ? customGroup.trim() : group
-
-    onAddTarget({
-      name: name.trim(),
-      host: address.trim(),
-      probeType,
-      interval,
-      status: 'active',
-      group: resolvedGroup || undefined,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      type,
-    })
-
-    resetForm()
-    onOpenChange(false)
-  }
-
-  const handleOpenChange = (isOpen: boolean) => {
-    if (!isOpen) resetForm()
-    onOpenChange(isOpen)
-  }
-
-  const isValid = name.trim() && address.trim()
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-card border-border sm:max-w-md" suppressHydrationWarning>
-        <DialogHeader>
-          <DialogTitle className="text-card-foreground flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Plus className="h-4 w-4 text-primary" />
-            </div>
-            Add New Target
-          </DialogTitle>
-          <DialogDescription className="text-muted-foreground">
-            Add a server, website, or DNS target to monitor.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4 pt-2">
-          {/* Address — the most important field, first */}
-          <div className="space-y-2">
-            <Label htmlFor="add-address" className="text-card-foreground text-sm font-medium">
-              Address
-            </Label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                id="add-address"
-                placeholder="e.g., 192.168.1.1, example.com, 8.8.8.8"
-                value={address}
-                onChange={e => handleAddressChange(e.target.value)}
-                className="bg-input border-border text-foreground pl-9"
-                autoFocus
-              />
-            </div>
-            {address && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>Detected:</span>
-                <TypeBadge type={type} />
-                <span className="text-muted-foreground/60">&bull;</span>
-                <span>{probeType === 'ping' ? 'ICMP Ping' : 'DNS Query'}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Name */}
-          <div className="space-y-2">
-            <Label htmlFor="add-name" className="text-card-foreground text-sm font-medium">
-              Display Name
-            </Label>
-            <Input
-              id="add-name"
-              placeholder="e.g., Production Server, Google DNS"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              className="bg-input border-border text-foreground"
-            />
-          </div>
-
-          {/* Group selection */}
-          <div className="space-y-2">
-            <Label className="text-card-foreground text-sm font-medium">
-              Group
-            </Label>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setGroup('')}
-                className={cn(
-                  'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer',
-                  group === ''
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                )}
-              >
-                None
-              </button>
-              {availableGroups.map(g => (
-                <button
-                  key={g}
-                  type="button"
-                  onClick={() => { setGroup(g); setCustomGroup('') }}
-                  className={cn(
-                    'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer',
-                    group === g
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                  )}
-                >
-                  {g}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setGroup('__custom__')}
-                className={cn(
-                  'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer flex items-center gap-1',
-                  group === '__custom__'
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                )}
-              >
-                <FolderPlus className="h-3 w-3" />
-                New
-              </button>
-            </div>
-            {group === '__custom__' && (
-              <Input
-                placeholder="New group name…"
-                value={customGroup}
-                onChange={e => setCustomGroup(e.target.value)}
-                className="bg-input border-border text-foreground text-sm mt-1.5"
-                autoFocus
-              />
-            )}
-          </div>
-
-          {/* Advanced toggle */}
-          <button
-            type="button"
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-          >
-            {showAdvanced ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Advanced Settings
-          </button>
-
-          <AnimatePresence initial={false}>
-            {showAdvanced && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <div className="space-y-4 pb-1">
-                  {/* Type override */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="add-type" className="text-card-foreground text-xs">Type</Label>
-                      <Select value={type} onValueChange={(v: TargetType) => setType(v)}>
-                        <SelectTrigger id="add-type" className="bg-input border-border text-foreground h-9 text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-popover border-border">
-                          <SelectItem value="ip">
-                            <div className="flex items-center gap-2"><Server className="h-3.5 w-3.5" /> IP Address</div>
-                          </SelectItem>
-                          <SelectItem value="domain">
-                            <div className="flex items-center gap-2"><Globe className="h-3.5 w-3.5" /> Domain</div>
-                          </SelectItem>
-                          <SelectItem value="dns">
-                            <div className="flex items-center gap-2"><Shield className="h-3.5 w-3.5" /> DNS Server</div>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="add-probe" className="text-card-foreground text-xs">Probe</Label>
-                      <Select value={probeType} onValueChange={(v: 'ping' | 'dns') => setProbeType(v)}>
-                        <SelectTrigger id="add-probe" className="bg-input border-border text-foreground h-9 text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-popover border-border">
-                          <SelectItem value="ping">
-                            <div className="flex items-center gap-2"><Wifi className="h-3.5 w-3.5" /> ICMP</div>
-                          </SelectItem>
-                          <SelectItem value="dns">
-                            <div className="flex items-center gap-2"><Network className="h-3.5 w-3.5" /> DNS</div>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  {/* Interval */}
-                  <div className="space-y-2">
-                    <Label htmlFor="add-interval" className="text-card-foreground text-xs">Probe Interval</Label>
-                    <Select value={interval.toString()} onValueChange={(v) => setInterval(parseInt(v))}>
-                      <SelectTrigger id="add-interval" className="bg-input border-border text-foreground h-9 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-popover border-border">
-                        <SelectItem value="30">30 seconds</SelectItem>
-                        <SelectItem value="60">1 minute</SelectItem>
-                        <SelectItem value="120">2 minutes</SelectItem>
-                        <SelectItem value="300">5 minutes</SelectItem>
-                        <SelectItem value="600">10 minutes</SelectItem>
-                        <SelectItem value="1800">30 minutes</SelectItem>
-                        <SelectItem value="3600">1 hour</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Submit */}
-          <Button
-            onClick={handleSubmit}
-            className="w-full"
-            disabled={!isValid}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Target
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ─── Edit Target Dialog ─────────────────────────────────────────────────────
-
-interface EditTargetDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  target: Target | null
-  onSave: (id: string, updates: Partial<Target>) => void
-  availableGroups: string[]
-}
-
-function EditTargetDialog({ open, onOpenChange, target, onSave, availableGroups }: EditTargetDialogProps) {
-  if (!target) return null
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border sm:max-w-md" suppressHydrationWarning>
-        <EditTargetForm
-          key={target.id}
-          target={target}
-          onSave={onSave}
-          onClose={() => onOpenChange(false)}
-          availableGroups={availableGroups}
-        />
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function EditTargetForm({ target, onSave, onClose, availableGroups }: {
-  target: Target
-  onSave: (id: string, updates: Partial<Target>) => void
-  onClose: () => void
-  availableGroups: string[]
-}) {
-  const initGroup = target.group || ''
-  const isCustom = initGroup && !availableGroups.includes(initGroup)
-
-  const [name, setName] = useState(target.name)
-  const [address, setAddress] = useState(target.address || target.host)
-  const [type, setType] = useState<TargetType>(target.type || 'ip')
-  const [probeType, setProbeType] = useState<'ping' | 'dns'>(target.probeType)
-  const [interval, setInterval] = useState(target.interval)
-  const [group, setGroup] = useState(isCustom ? '__custom__' : initGroup)
-  const [customGroup, setCustomGroup] = useState(isCustom ? initGroup : '')
-
-  const handleSave = () => {
-    if (!name.trim() || !address.trim()) return
-
-    const resolvedGroup = group === '__custom__' ? customGroup.trim() : group
-
-    onSave(target.id, {
-      name: name.trim(),
-      host: address.trim(),
-      probeType,
-      interval,
-      group: resolvedGroup || undefined,
-      type,
-      updatedAt: new Date(),
-    })
-    onClose()
-  }
-
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle className="text-card-foreground flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-            <Pencil className="h-4 w-4 text-blue-500" />
-          </div>
-          Edit Target
-        </DialogTitle>
-      </DialogHeader>
-
-      <div className="space-y-4 pt-2">
-        <div className="space-y-2">
-          <Label htmlFor="edit-name" className="text-card-foreground text-sm font-medium">Display Name</Label>
-          <Input
-              id="edit-name"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              className="bg-input border-border text-foreground"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="edit-address" className="text-card-foreground text-sm font-medium">Address</Label>
-            <Input
-              id="edit-address"
-              value={address}
-              onChange={e => setAddress(e.target.value)}
-              className="bg-input border-border text-foreground"
-            />
-          </div>
-
-          {/* Group selection */}
-          <div className="space-y-2">
-            <Label className="text-card-foreground text-sm font-medium">Group</Label>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setGroup('')}
-                className={cn(
-                  'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer',
-                  group === ''
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                )}
-              >
-                None
-              </button>
-              {availableGroups.map(g => (
-                <button
-                  key={g}
-                  type="button"
-                  onClick={() => { setGroup(g); setCustomGroup('') }}
-                  className={cn(
-                    'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer',
-                    group === g
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                  )}
-                >
-                  {g}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setGroup('__custom__')}
-                className={cn(
-                  'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer flex items-center gap-1',
-                  group === '__custom__'
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-                )}
-              >
-                <FolderPlus className="h-3 w-3" />
-                New
-              </button>
-            </div>
-            {group === '__custom__' && (
-              <Input
-                placeholder="New group name…"
-                value={customGroup}
-                onChange={e => setCustomGroup(e.target.value)}
-                className="bg-input border-border text-foreground text-sm mt-1.5"
-                autoFocus
-              />
-            )}
-          </div>
-
-          {/* Type + Probe */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="edit-type" className="text-card-foreground text-xs">Type</Label>
-              <Select value={type} onValueChange={(v: TargetType) => setType(v)}>
-                <SelectTrigger id="edit-type" className="bg-input border-border text-foreground h-9 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem value="ip">IP Address</SelectItem>
-                  <SelectItem value="domain">Domain</SelectItem>
-                  <SelectItem value="dns">DNS Server</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-probe" className="text-card-foreground text-xs">Probe</Label>
-              <Select value={probeType} onValueChange={(v: 'ping' | 'dns') => setProbeType(v)}>
-                <SelectTrigger id="edit-probe" className="bg-input border-border text-foreground h-9 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem value="ping">ICMP</SelectItem>
-                  <SelectItem value="dns">DNS Query</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Interval */}
-          <div className="space-y-2">
-            <Label htmlFor="edit-interval" className="text-card-foreground text-xs">Probe Interval</Label>
-            <Select value={interval.toString()} onValueChange={(v) => setInterval(parseInt(v))}>
-              <SelectTrigger id="edit-interval" className="bg-input border-border text-foreground h-9 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-popover border-border">
-                <SelectItem value="30">30 seconds</SelectItem>
-                <SelectItem value="60">1 minute</SelectItem>
-                <SelectItem value="120">2 minutes</SelectItem>
-                <SelectItem value="300">5 minutes</SelectItem>
-                <SelectItem value="600">10 minutes</SelectItem>
-                <SelectItem value="1800">30 minutes</SelectItem>
-                <SelectItem value="3600">1 hour</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <Button onClick={handleSave} className="w-full">
-            Save Changes
-          </Button>
-        </div>
-    </>
   )
 }
 
@@ -943,6 +550,8 @@ export function Sidebar({
   onUpdateTarget,
   onDeleteTarget,
   onTogglePaused,
+  selectedGroup = null,
+  onSelectGroup,
   series,
   groupOrders = [],
   onReorderGroups,
@@ -951,164 +560,85 @@ export function Sidebar({
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [editingTarget, setEditingTarget] = useState<Target | null>(null)
+  // Held by id, so the dialog always describes the target as it is now and
+  // closes by itself if the target goes away underneath it.
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
-
-  // Track the real pointer position independently — framer-motion clamps the dragged
-  // element within its Reorder.Group, so info.point at drag-end is unreliable for
-  // cross-group detection.
-  const lastPointerRef = useRef({ x: 0, y: 0 })
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => { lastPointerRef.current = { x: e.clientX, y: e.clientY } }
-    window.addEventListener('pointermove', onMove, { passive: true })
-    return () => window.removeEventListener('pointermove', onMove)
-  }, [])
+  const [isGroupDragging, setIsGroupDragging] = useState(false)
+  const listRef = useRef<HTMLElement>(null)
 
   // Get available groups from existing targets
   const availableGroups = useMemo(() => {
     return [...new Set(targets.map(t => t.group).filter(Boolean))] as string[]
   }, [targets])
 
-  // Group targets with ordering
-  const { orderedGroupNames, groupedTargets } = useMemo(() => {
-    const grouped = targets.reduce((acc, target) => {
-      const g = target.group || 'Ungrouped'
-      if (!acc[g]) acc[g] = []
-      acc[g].push(target)
-      return acc
-    }, {} as Record<string, Target[]>)
+  const targetsById = useMemo(() => new Map(targets.map(t => [t.id, t])), [targets])
 
-    // Sort targets within each group by sortOrder
-    Object.values(grouped).forEach(list => {
-      list.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-    })
+  // The arrangement the server knows about...
+  const savedLayout = useMemo(() => buildSidebarLayout(targets, groupOrders), [targets, groupOrders])
 
-    // Order groups: use persisted ordering, then add any new groups at end
-    const orderMap = new Map(groupOrders.map(o => [o.groupName, o.sortOrder]))
-    const allGroupNames = Object.keys(grouped)
+  // ...and the one on screen, which runs ahead of it while something is being
+  // dragged and is only written back on the drop.
+  const [layout, setLayout] = useState<SidebarLayout>(savedLayout)
 
-    const ordered = [...allGroupNames].sort((a, b) => {
-      const aOrder = orderMap.get(a) ?? 999
-      const bOrder = orderMap.get(b) ?? 999
-      if (aOrder !== bOrder) return aOrder - bOrder
-      if (a === 'Ungrouped') return 1
-      if (b === 'Ungrouped') return -1
-      return a.localeCompare(b)
-    })
-
-    return { orderedGroupNames: ordered, groupedTargets: grouped }
-  }, [targets, groupOrders])
-
-  // Filter targets by search
-  const filteredGroupedTargets = useMemo(() => {
-    if (!searchQuery.trim()) return groupedTargets
-
-    const q = searchQuery.toLowerCase()
-    const filtered: Record<string, Target[]> = {}
-    for (const [groupKey, list] of Object.entries(groupedTargets)) {
-      const matches = list.filter(t =>
-        t.name.toLowerCase().includes(q) ||
-        (t.address || t.host).toLowerCase().includes(q)
-      )
-      if (matches.length > 0) filtered[groupKey] = matches
-    }
-    return filtered
-  }, [groupedTargets, searchQuery])
-
-  const filteredGroupNames = useMemo(() => {
-    if (!searchQuery.trim()) return orderedGroupNames
-    return orderedGroupNames.filter(g => filteredGroupedTargets[g])
-  }, [orderedGroupNames, filteredGroupedTargets, searchQuery])
-
-  const [reorderableGroups, setReorderableGroups] = useState<string[]>(orderedGroupNames)
-
-  // Same resync-during-render as the target list above.
-  const [syncedGroupNames, setSyncedGroupNames] = useState(orderedGroupNames)
-  if (syncedGroupNames !== orderedGroupNames) {
-    setSyncedGroupNames(orderedGroupNames)
-    setReorderableGroups(orderedGroupNames)
-  }
-
-  const handleGroupReorder = useCallback((newOrder: string[]) => {
-    setReorderableGroups(newOrder)
-  }, [])
-
-  const handleTargetReorder = useCallback((groupName: string, orderedIds: string[]) => {
-    if (!onReorderTargets) return
-    const updates = orderedIds.map((id, index) => ({ id, sortOrder: index }))
-    onReorderTargets(updates)
+  const handleTargetDrop = useCallback((dropped: SidebarLayout, id: string, fromGroup: string) => {
+    onReorderTargets?.(targetOrderUpdates(dropped, id, fromGroup))
   }, [onReorderTargets])
 
-  const handleMoveToGroup = useCallback((id: string, destGroup?: string) => {
-    if (!onReorderTargets) return
+  const drag = useTargetDrag({
+    layout,
+    setLayout,
+    rootRef: listRef,
+    collapsedGroups,
+    onDrop: handleTargetDrop,
+  })
 
-    // When called from the HTML5 onDrop handler, destGroup is already known.
-    // When called from framer-motion onDragEnd, fall back to coordinate detection.
-    let resolvedDestGroup: string
-    let elementsAtPoint: HTMLElement[] = []
+  // Resync when the saved arrangement changes. Adjusting during render rather
+  // than in an effect: React re-runs this component immediately without
+  // committing the stale list, so the row order never flashes. Held off for
+  // the length of a drag — the target list is re-fetched every 30 seconds, and
+  // a refresh landing mid-drag would otherwise snap the row out of the user's
+  // hand and back to where it started.
+  const [syncedLayout, setSyncedLayout] = useState(savedLayout)
+  if (syncedLayout !== savedLayout && !drag.active && !isGroupDragging) {
+    setSyncedLayout(savedLayout)
+    setLayout(savedLayout)
+  }
 
-    if (destGroup) {
-      resolvedDestGroup = destGroup
-    } else {
-      const { x, y } = lastPointerRef.current
-      elementsAtPoint = document.elementsFromPoint(x, y) as HTMLElement[]
-      const groupEl = elementsAtPoint.find(el => el.hasAttribute('data-group')) as HTMLElement | undefined
-      resolvedDestGroup = groupEl?.getAttribute('data-group') ?? 'Ungrouped'
+  // Filter targets by search
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return null
+
+    return savedLayout.groups
+      .map(groupName => ({
+        groupName,
+        targets: savedLayout.items[groupName]
+          .map(id => targetsById.get(id))
+          .filter((t): t is Target =>
+            !!t && (t.name.toLowerCase().includes(q) || targetAddressLabel(t).toLowerCase().includes(q))
+          ),
+      }))
+      .filter(group => group.targets.length > 0)
+  }, [savedLayout, targetsById, searchQuery])
+
+  const handleGroupReorder = useCallback((groups: string[]) => {
+    setLayout(current => ({ ...current, groups }))
+  }, [])
+
+  const handleGroupDragStart = useCallback(() => setIsGroupDragging(true), [])
+
+  const handleGroupDragEnd = () => {
+    setIsGroupDragging(false)
+    if (!onReorderGroups) return
+
+    const changed = layout.groups.some((groupName, i) => groupName !== savedLayout.groups[i])
+    if (changed) {
+      onReorderGroups(layout.groups.map((groupName, sortOrder) => ({ groupName, sortOrder })))
     }
-
-    // find source group
-    const sourceEntry = Object.entries(groupedTargets).find(([, list]) => list.some(t => t.id === id))
-    const sourceGroup = sourceEntry ? sourceEntry[0] : 'Ungrouped'
-
-    // if same group, nothing to do (intra-group reordering handled elsewhere)
-    if (sourceGroup === resolvedDestGroup) return
-
-    // Find the insertion position within the destination group (only meaningful for pointer drops)
-    const destTargetEl = elementsAtPoint.find(el =>
-      el.hasAttribute('data-target-id') && el.getAttribute('data-target-id') !== id
-    ) as HTMLElement | undefined
-    const destTargetId = destTargetEl?.getAttribute('data-target-id') ?? null
-
-    const destList = (groupedTargets[resolvedDestGroup] ?? []).map(t => t.id).filter(i => i !== id)
-    let destIndex = destList.length
-    if (destTargetId) {
-      const idx = destList.indexOf(destTargetId)
-      destIndex = idx === -1 ? destList.length : idx
-    }
-
-    // build updates for source (remove) and dest (insert)
-    const updates: { id: string; sortOrder: number; group?: string }[] = []
-
-    const sourceList = (groupedTargets[sourceGroup] ?? []).map(t => t.id).filter(i => i !== id)
-    sourceList.forEach((tid, idx) => updates.push({ id: tid, sortOrder: idx }))
-
-    destList.splice(destIndex, 0, id)
-    destList.forEach((tid, idx) => {
-      if (tid === id) updates.push({ id: tid, sortOrder: idx, group: resolvedDestGroup === 'Ungrouped' ? '' : resolvedDestGroup })
-      else updates.push({ id: tid, sortOrder: idx })
-    })
-
-    if (updates.length > 0) onReorderTargets(updates)
-  }, [groupedTargets, onReorderTargets])
-
-  // Persist reorder on pointer up (end of drag)
-  useEffect(() => {
-    const handlePointerUp = () => {
-      if (!onReorderGroups) return
-      // Only fire if the order actually differs from orderedGroupNames
-      const changed = reorderableGroups.some((g, i) => g !== orderedGroupNames[i])
-      if (changed) {
-        const newOrders: GroupOrder[] = reorderableGroups.map((name, i) => ({
-          groupName: name,
-          sortOrder: i,
-        }))
-        onReorderGroups(newOrders)
-      }
-    }
-    window.addEventListener('pointerup', handlePointerUp)
-    return () => window.removeEventListener('pointerup', handlePointerUp)
-  }, [reorderableGroups, orderedGroupNames, onReorderGroups])
+  }
 
   const toggleCollapse = useCallback((groupName: string) => {
     setCollapsedGroups(prev => {
@@ -1120,7 +650,7 @@ export function Sidebar({
   }, [])
 
   const openEditDialog = (target: Target) => {
-    setEditingTarget({ ...target, address: target.address || target.host })
+    setEditingTarget(target)
     setIsEditOpen(true)
   }
 
@@ -1129,6 +659,9 @@ export function Sidebar({
   const onlineCount = targets.filter(t => t.isOnline === true).length
   const offlineCount = targets.filter(t => t.isOnline === false).length
   const pendingCount = targets.filter(t => t.isOnline === undefined).length
+
+  const draggedTarget = drag.active ? targetsById.get(drag.active.id) : undefined
+  const deletingTarget = deletingId ? targetsById.get(deletingId) ?? null : null
 
   return (
     <aside className="flex h-full w-80 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
@@ -1209,103 +742,134 @@ export function Sidebar({
       </div>
 
       {/* Target List */}
-      <ScrollArea className="flex-1">
-        <nav className="p-2" aria-label="Targets">
-          {searchQuery.trim() ? (
-            // Search mode: plain list, no drag
-            <div className="space-y-3">
-              {filteredGroupNames.map(groupName => (
-                <div key={groupName}>
-                  <div className="flex items-center gap-1 px-2 py-1.5">
-                    <span className="text-xs font-semibold text-sidebar-foreground uppercase tracking-wider truncate">
-                      {groupName}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground tabular-nums bg-muted/50 px-1.5 py-0.5 rounded-full ml-auto">
-                      {filteredGroupedTargets[groupName]?.length ?? 0}
-                    </span>
-                  </div>
-                  <ul className="space-y-0.5 ml-1">
-                    {(filteredGroupedTargets[groupName] ?? []).map(target => (
-                      <li key={target.id}>
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          aria-current={selectedTargetId === target.id}
-                          onClick={() => onSelectTarget(target.id)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault()
-                              onSelectTarget(target.id)
-                            }
-                          }}
-                          className={cn(
-                            'w-full text-left px-3 py-2 rounded-md transition-colors group cursor-pointer',
-                            'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                            selectedTargetId === target.id && 'bg-sidebar-accent'
-                          )}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-sm text-sidebar-foreground truncate">{target.name}</span>
-                                {target.type && <TypeBadge type={target.type} />}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-                                  {target.address || target.host}
-                                </span>
-                                <span className="ml-auto shrink-0">
-                                  <Sparkline points={series?.[target.id] ?? []} width={52} height={16} />
-                                </span>
+      {/* `reducedMotion="user"` turns the sliding and springing below into
+          plain repositioning for anyone whose system asks for less motion. */}
+      <MotionConfig reducedMotion="user">
+        {/* The scroll area lays its content out as a table, which grows to fit
+            its widest row instead of truncating it. One long URL was enough to
+            make every row wider than the sidebar and push the pause, edit and
+            delete buttons out past its edge. As a block, rows are held to the
+            sidebar's width and long addresses are cut short instead. */}
+        <ScrollArea className="flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
+          <nav
+            ref={listRef}
+            // While a row is in the air the list must not react to the pointer
+            // passing over it: no hover highlights trailing the drag, and no
+            // click landing on whatever happens to be underneath on release.
+            className={cn('p-2', drag.active && 'pointer-events-none')}
+            aria-label="Targets"
+          >
+            {searchResults ? (
+              // Search mode: plain list, no drag
+              <div className="space-y-3">
+                {searchResults.map(({ groupName, targets: matches }) => (
+                  <div key={groupName}>
+                    <div className="flex items-center gap-1 px-2 py-1.5">
+                      <span className="text-xs font-semibold text-sidebar-foreground uppercase tracking-wider truncate">
+                        {groupName}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground tabular-nums bg-muted/50 px-1.5 py-0.5 rounded-full ml-auto">
+                        {matches.length}
+                      </span>
+                    </div>
+                    <ul className="space-y-0.5 ml-1">
+                      {matches.map(target => (
+                        <li key={target.id}>
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            aria-current={selectedTargetId === target.id}
+                            onClick={() => onSelectTarget(target.id)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                onSelectTarget(target.id)
+                              }
+                            }}
+                            className={cn(
+                              'w-full text-left px-3 py-2 rounded-md transition-colors group cursor-pointer',
+                              'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                              selectedTargetId === target.id && 'bg-sidebar-accent'
+                            )}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-sm text-sidebar-foreground truncate">{target.name}</span>
+                                  {target.type && <TypeBadge type={target.type} />}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                                    {targetAddressLabel(target)}
+                                  </span>
+                                  <span className="ml-auto shrink-0">
+                                    <Sparkline points={series?.[target.id] ?? []} width={52} height={16} />
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-              {filteredGroupNames.length === 0 && (
-                <p className="text-center text-sm text-muted-foreground py-8">No targets found</p>
-              )}
-            </div>
-          ) : (
-            // Normal mode: draggable groups
-            <Reorder.Group
-              axis="y"
-              values={reorderableGroups}
-              onReorder={handleGroupReorder}
-              className="space-y-1"
-              layoutScroll
-            >
-              {reorderableGroups.map(groupName => {
-                const groupTargets = groupedTargets[groupName]
-                if (!groupTargets) return null
-
-                return (
-                  <DraggableGroup
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+                {searchResults.length === 0 && (
+                  <p className="text-center text-sm text-muted-foreground py-8">No targets found</p>
+                )}
+              </div>
+            ) : (
+              // Normal mode: draggable groups
+              <Reorder.Group
+                axis="y"
+                values={layout.groups}
+                onReorder={handleGroupReorder}
+                className="space-y-1"
+              >
+                {layout.groups.map(groupName => (
+                  <TargetGroup
                     key={groupName}
                     groupName={groupName}
-                    groupTargets={groupTargets}
+                    targetIds={layout.items[groupName] ?? []}
+                    targetsById={targetsById}
                     selectedTargetId={selectedTargetId}
+                    series={series}
+                    isCollapsed={collapsedGroups.has(groupName)}
+                    isCompared={selectedGroup === groupName}
+                    drag={drag.active}
+                    onToggleCollapse={toggleCollapse}
+                    onCompare={onSelectGroup}
+                    onGroupDragStart={handleGroupDragStart}
+                    onGroupDragEnd={handleGroupDragEnd}
                     onSelectTarget={onSelectTarget}
                     onEditTarget={openEditDialog}
-                    onDeleteTarget={onDeleteTarget}
+                    onDeleteTarget={setDeletingId}
                     onTogglePaused={onTogglePaused}
-                    series={series}
-                    collapsedGroups={collapsedGroups}
-                    onToggleCollapse={toggleCollapse}
-                    onReorderTargets={handleTargetReorder}
-                    onMoveToGroup={handleMoveToGroup}
+                    onHandlePointerDown={drag.onHandlePointerDown}
                   />
-                )
-              })}
-            </Reorder.Group>
-          )}
-        </nav>
-      </ScrollArea>
+                ))}
+              </Reorder.Group>
+            )}
+          </nav>
+        </ScrollArea>
+
+        {drag.active && draggedTarget && (
+          <TargetDragOverlay
+            drag={drag.active}
+            x={drag.x}
+            y={drag.y}
+            selected={selectedTargetId === draggedTarget.id}
+          >
+            <TargetRow
+              target={draggedTarget}
+              selected={selectedTargetId === draggedTarget.id}
+              trace={series?.[draggedTarget.id]}
+              floating
+            />
+          </TargetDragOverlay>
+        )}
+      </MotionConfig>
 
       {/* Footer actions */}
       <div className="p-3 border-t border-sidebar-border space-y-2">
@@ -1337,6 +901,14 @@ export function Sidebar({
         target={editingTarget}
         onSave={onUpdateTarget}
         availableGroups={availableGroups}
+      />
+
+      {/* Nothing is deleted from the row itself: the button there only asks. */}
+      <DeleteTargetDialog
+        target={deletingTarget}
+        onCancel={() => setDeletingId(null)}
+        onConfirm={id => { setDeletingId(null); onDeleteTarget(id) }}
+        onPause={onTogglePaused}
       />
     </aside>
   )

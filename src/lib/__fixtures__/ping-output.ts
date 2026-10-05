@@ -74,3 +74,31 @@ export const MACOS_TIMEOUT = [
   '--- 192.0.2.1 ping statistics ---',
   '1 packets transmitted, 0 packets received, 100.0% packet loss',
 ].join('\n')
+
+/** IPv6 replies carry no "bytes=" or "TTL=" fields on Windows. */
+export const WINDOWS_IPV6_REPLY = [
+  '',
+  'Pinging 2606:4700:4700::1111 with 32 bytes of data:',
+  'Reply from 2606:4700:4700::1111: time=3ms ',
+  '',
+  'Ping statistics for 2606:4700:4700::1111:',
+  '    Packets: Sent = 1, Received = 1, Lost = 0 (0% loss),',
+].join('\r\n')
+
+/** A machine with no IPv6 route cannot even send the packet. */
+export const WINDOWS_IPV6_NO_ROUTE = [
+  '',
+  'Pinging 2606:4700:4700::1111 with 32 bytes of data:',
+  'PING: transmit failed. General failure. ',
+  '',
+  'Ping statistics for 2606:4700:4700::1111:',
+  '    Packets: Sent = 1, Received = 0, Lost = 1 (100% loss),',
+].join('\r\n')
+
+export const LINUX_IPV6_REPLY = [
+  'PING 2606:4700:4700::1111(2606:4700:4700::1111) 56 data bytes',
+  '64 bytes from 2606:4700:4700::1111: icmp_seq=1 ttl=58 time=3.21 ms',
+  '',
+  '--- 2606:4700:4700::1111 ping statistics ---',
+  '1 packets transmitted, 1 received, 0% packet loss, time 0ms',
+].join('\n')

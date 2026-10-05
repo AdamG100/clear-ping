@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBucketedMeasurements, getTargetStatistics } from '@/lib/database';
-import { bucketWidthFor, MAX_CHART_POINTS } from '@/lib/series';
+import { windowFromQuery } from '@/lib/series';
 import { initializeServer } from '@/lib/init';
 
 export async function GET(
@@ -13,29 +13,22 @@ export async function GET(
     const { id } = await params;
     const { searchParams } = new URL(request.url);
 
-    // An unparseable `hours` used to produce a NaN window, which queried
-    // `timestamp >= NaN` and silently returned nothing.
-    const parsedHours = Number(searchParams.get('hours') ?? 24);
-    const hours = Number.isFinite(parsedHours)
-      ? Math.min(24 * 31, Math.max(1, parsedHours))
-      : 24;
-
-    const parsedMaxPoints = Number(searchParams.get('maxPoints') ?? MAX_CHART_POINTS);
-    const maxPoints = Number.isFinite(parsedMaxPoints)
-      ? Math.min(2000, Math.max(10, Math.floor(parsedMaxPoints)))
-      : MAX_CHART_POINTS;
-
-    const endTime = new Date();
-    const windowMs = hours * 60 * 60 * 1000;
-    const startTime = new Date(endTime.getTime() - windowMs);
-    const bucketMs = bucketWidthFor(windowMs, maxPoints);
+    const window = windowFromQuery(searchParams);
+    const startTime = new Date(window.start);
+    const endTime = new Date(window.end);
+    const { bucketMs } = window;
 
     // Aggregated in SQL rather than returning every raw row: a 30-day window at
     // a 30-second probe interval is ~86,000 rows per target, all of which the
     // browser previously downloaded only to average them away.
+    // One side of a target probed over both address families. Anything else
+    // is read whole.
+    const requestedFamily = Number(searchParams.get('family'));
+    const family = requestedFamily === 4 || requestedFamily === 6 ? requestedFamily : undefined;
+
     const [buckets, statistics] = await Promise.all([
-      getBucketedMeasurements(id, startTime, endTime, bucketMs),
-      getTargetStatistics(id, startTime, endTime),
+      getBucketedMeasurements(id, startTime, endTime, bucketMs, family),
+      getTargetStatistics(id, startTime, endTime, family),
     ]);
 
     return NextResponse.json({
