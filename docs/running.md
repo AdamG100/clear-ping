@@ -32,6 +32,36 @@ Why bother:
 Both processes open the same SQLite file. WAL mode is enabled, so the prober
 writes while the UI reads without either blocking the other.
 
+## Docker
+
+The image runs the web app and the scheduler in one container, with `ping` and
+`traceroute` installed.
+
+```bash
+# from the repository root
+docker build -f docker/Dockerfile -t clearping .
+docker run -d --name clearping -p 3000:3000 -v clearping-data:/data clearping
+```
+
+Or pull the one GitHub builds on every push to `main`
+(`.github/workflows/docker.yml`):
+
+```bash
+docker run -d --name clearping -p 3000:3000 -v clearping-data:/data ghcr.io/adamg100/clear-ping:latest
+```
+
+- **Keep the volume.** The database is at `/data/clearping.db`. Without `-v`,
+  the measurement history is lost when the container is removed.
+- **IPv6 needs IPv6 in the container.** Docker's default network is IPv4 only,
+  so IPv6 targets, and the IPv6 half of a target set to *Both*, fail there.
+  Either enable IPv6 for the Docker network, or on Linux run the container with
+  `--network host`.
+- **Latency is measured from inside the container.** With the default bridge
+  network that adds a small, constant amount to every reading; `--network host`
+  removes it.
+- The settings in the table below are passed with `-e`, for example
+  `-e CLEARPING_RETENTION_DAYS=30`.
+
 ## Configuration
 
 See `.env.example`. All settings are optional.

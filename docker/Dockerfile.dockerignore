@@ -1,0 +1,26 @@
+# What is kept out of the build context for docker/Dockerfile. BuildKit picks
+# this file up by its name, so it applies even though the context is the
+# repository root.
+
+# Built inside the image, for the image's platform.
+node_modules
+.next
+out
+build
+coverage
+*.tsbuildinfo
+
+# Never bake a database or local settings into an image.
+data
+*.db
+*.db-shm
+*.db-wal
+*.bak
+.env*
+
+# Not needed to build.
+.git
+.github
+.vscode
+docs
+*.md

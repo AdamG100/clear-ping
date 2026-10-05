@@ -255,7 +255,10 @@ export async function initDatabase(): Promise<Database> {
     // working directory) and the tests can point at their own file.
     const dbPath = process.env.CLEARPING_DB_PATH
       ? path.resolve(process.env.CLEARPING_DB_PATH)
-      : path.join(process.cwd(), 'data', 'clearping.db');
+      // The comment keeps the bundler from reading this as a file the build
+      // depends on. Without it a standalone build copies ./data/clearping.db,
+      // the live database, into its output.
+      : path.join(/* turbopackIgnore: true */ process.cwd(), 'data', 'clearping.db');
 
     const dataDir = path.dirname(dbPath);
     if (!fs.existsSync(dataDir)) {

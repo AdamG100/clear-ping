@@ -1,0 +1,112 @@
+name: Docker image
+
+# Builds the image from docker/Dockerfile, checks that it actually runs, and
+# publishes it to the GitHub Container Registry.
+#
+#   pull request      build and test only, nothing is published
+#   push to main      ghcr.io/<owner>/<repo>:latest and :sha-<commit>
+#   tag v1.2.3        ghcr.io/<owner>/<repo>:1.2.3 and :1.2
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: clearping:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A build that succeeds says the image exists, not that it works. This
+      # starts it and takes a real reading: the server answers, the database
+      # is writable, and `ping` runs as the unprivileged user.
+      - name: Smoke test
+        run: |
+          docker run -d --name clearping -p 3000:3000 clearping:ci
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/api/scheduler/status > /dev/null; then
+              up=1
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then
+            echo "::error::The server did not come up"
+            docker logs clearping
+            exit 1
+          fi
+
+          docker exec clearping sh -c 'command -v ping && command -v traceroute'
+
+          id=$(curl -fsS -X POST http://localhost:3000/api/targets \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"loopback","host":"127.0.0.1","probeType":"ping","interval":300}' | jq -r .id)
+
+          if ! curl -fsS -X POST "http://localhost:3000/api/targets/$id/probe" | jq -e '.result.success == true'; then
+            echo "::error::A ping of 127.0.0.1 from inside the container failed"
+            docker logs clearping
+            exit 1
+          fi
+
+      - name: Log in to the registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Work out tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=ref,event=pr
+
+      # The layers are already in the cache from the build above, so this
+      # only tags and uploads them.
+      - name: Publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
