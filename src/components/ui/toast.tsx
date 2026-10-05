@@ -74,8 +74,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
 
+      {/* Above dialogs, which share z-50 and are added to the page later: a
+          failure reported while one was open came up underneath its backdrop,
+          dimmed to the point of going unnoticed. */}
       <div
-        className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-full max-w-sm flex-col gap-2"
+        className="pointer-events-none fixed bottom-4 right-4 z-60 flex w-full max-w-sm flex-col gap-2"
         role="region"
         aria-label="Notifications"
       >

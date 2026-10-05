@@ -1,9 +1,9 @@
 'use client'
 
-import { useMemo, useState, useRef, memo, useCallback } from 'react'
+import { useMemo, useState, useRef, memo } from 'react'
 import { getPacketLossVar, isMeaningfulLoss } from '@/lib/packet-loss-colors'
 import type { DataPoint } from '@/types/probe'
-import { BrushBox, BrushLabel, formatTick, latencyDomain, niceTicks, useChartBrush } from './chart-brush'
+import { BrushBox, BrushLabel, formatTick, latencyDomain, niceTicks, useChartBrush, useChartWidth } from './chart-brush'
 
 /**
  * Several targets on one chart: Smokeping's multi-host graph.
@@ -126,20 +126,10 @@ export const CompareTrace = memo(function CompareTrace({
   onZoom,
   onResetZoom,
 }: CompareTraceProps) {
-  const [width, setWidth] = useState(880)
+  const [width, containerRef] = useChartWidth()
   // The moment under the pointer, as an x position in chart units.
   const [hoverX, setHoverX] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
-
-  const containerRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return
-    const observer = new ResizeObserver(entries => {
-      const next = entries[0]?.contentRect.width
-      if (next && next > 0) setWidth(next)
-    })
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [])
 
   // Strips thin out as lines are added, so two lines get a readable lane and
   // twenty do not push the chart off the screen.

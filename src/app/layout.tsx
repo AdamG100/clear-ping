@@ -39,9 +39,11 @@ export default function RootLayout({
         <script
           // Applies the saved theme before first paint. Without this the page
           // renders in the default theme and then snaps, which is worse than
-          // the flash it is meant to prevent.
+          // the flash it is meant to prevent. It also notes whether a group
+          // was left open rather than a target, so the loading placeholder
+          // can take the right shape (see `.skeleton-target-only`).
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.classList.toggle('dark',t!=='light');}catch(e){document.documentElement.classList.add('dark');}})();`,
+            __html: `(function(){var d=document.documentElement;try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}d.classList.toggle('dark',t!=='light');if(localStorage.getItem('selectedGroup'))d.dataset.view='group';}catch(e){d.classList.add('dark');}})();`,
           }}
         />
       </head>

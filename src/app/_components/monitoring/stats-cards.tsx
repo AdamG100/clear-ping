@@ -4,52 +4,38 @@ import React, { useState, useEffect } from "react"
 import type { TargetStatistics } from "@/types/probe"
 import type { ProbeVocabulary } from "@/lib/probe-labels"
 import { cn } from "@/lib/utils"
-import { getLatencyColor, getPacketLossColor, getPacketLossLabel, isMeaningfulLoss } from "@/lib/packet-loss-colors"
+import { getLatencyColor, getPacketLossLabel, getPacketLossVar, isMeaningfulLoss, NO_DATA_COLOR } from "@/lib/packet-loss-colors"
 import { motion, AnimatePresence } from "framer-motion"
 import { ArrowDown, ArrowUp, Gauge, TrendingUp, FileX, Clock, Zap } from "lucide-react"
 
+/** How long ago something was, to the coarsest unit that says anything. */
+function describeAge(diffMs: number): string {
+  const diffSeconds = Math.floor(diffMs / 1000)
+  const diffMinutes = Math.floor(diffSeconds / 60)
+  const diffHours = Math.floor(diffMinutes / 60)
+  const diffDays = Math.floor(diffHours / 24)
+
+  // Also covers a timestamp in the future (shouldn't happen, but be safe).
+  if (diffSeconds < 60) return "now"
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  return `${diffDays}d ago`
+}
+
 function RelativeTime({ timestamp }: { timestamp: Date }) {
-  const [relativeTime, setRelativeTime] = useState("")
-  const time = timestamp.getTime()
+  // The clock is the state and the label is worked out from it, so there is
+  // one on the first render and whenever the timestamp changes. Starting blank
+  // and filling in from an effect drew an empty pill on every card for a frame.
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    const updateRelativeTime = () => {
-      const diffMs = Date.now() - time
-
-
-      // Handle future timestamps (shouldn't happen, but be safe)
-      if (diffMs < 0) {
-        setRelativeTime("now")
-        return
-      }
-      
-      const diffSeconds = Math.floor(diffMs / 1000)
-      const diffMinutes = Math.floor(diffSeconds / 60)
-      const diffHours = Math.floor(diffMinutes / 60)
-      const diffDays = Math.floor(diffHours / 24)
-
-      let newRelativeTime = ""
-      if (diffSeconds < 60) {
-        newRelativeTime = "now"
-      } else if (diffMinutes < 60) {
-        newRelativeTime = `${diffMinutes}m ago`
-      } else if (diffHours < 24) {
-        newRelativeTime = `${diffHours}h ago`
-      } else {
-        newRelativeTime = `${diffDays}d ago`
-      }
-
-      setRelativeTime(newRelativeTime)
-    }
-
-    // Update immediately
-    updateRelativeTime()
-    
     // Update every 10 seconds for very responsive display
-    const interval = setInterval(updateRelativeTime, 10000)
+    const interval = setInterval(() => setNow(Date.now()), 10000)
 
     return () => clearInterval(interval)
-  }, [time])
+  }, [])
+
+  const relativeTime = describeAge(now - timestamp.getTime())
 
   return (
     <motion.div
@@ -121,8 +107,6 @@ interface StatCardProps {
   trendValue?: string
   accentColor?: string
   lastUpdated?: Date
-  isPolling?: boolean
-  isLoading?: boolean
   /** No pulsing ring: nothing is being measured, so nothing should look live. */
   still?: boolean
 }
@@ -137,9 +121,8 @@ function StatCard({
   trendValue,
   accentColor = "#4fd1c5",
   lastUpdated,
-  isLoading = false,
   still = false,
-}: StatCardProps & { isPolling?: boolean; isLoading?: boolean }) {
+}: StatCardProps) {
   return (
     <div className={cn(
       "group relative overflow-hidden rounded-xl border border-border/50 bg-card p-6 transition-all duration-300 hover:border-border hover:shadow-lg hover:shadow-primary/5"
@@ -157,9 +140,13 @@ function StatCard({
         <div className="flex items-center gap-3">
           <div className="relative flex h-10 w-10 items-center justify-center rounded-lg">
             {/* Pulsing background ring (use opacity style so OKLCH works) */}
+            {/* The pulse starts no brighter than the ring is at rest. At the
+                animation's usual strength the ring began each cycle as a
+                near-solid square of the icon's own colour, and the icon
+                blinked out against it every two seconds. */}
             <div
               className={cn('absolute h-10 w-10 rounded-lg', !still && 'custom-ping')}
-              style={{ backgroundColor: accentColor, opacity: 0.15 }}
+              style={{ backgroundColor: accentColor, opacity: 0.15, '--ping-peak': 0.15 } as React.CSSProperties}
             />
             {/* Fixed center icon container with a semi-opaque background layer so the icon stays fully opaque */}
             <div className="relative flex h-10 w-10 items-center justify-center rounded-lg">
@@ -174,8 +161,11 @@ function StatCard({
             <motion.div
               key={`${trend}-${trendValue}`}
               className="flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-colors duration-500"
+              // Mixed rather than given an alpha suffix: the accent is as
+              // often a `var(--…)` as a hex code, and `var(--…)20` is not a
+              // colour, which left those pills with no background at all.
               style={{
-                backgroundColor: `${accentColor}20`,
+                backgroundColor: `color-mix(in oklab, ${accentColor} 13%, transparent)`,
                 color: accentColor
               }}
               initial={{ opacity: 0, scale: 0.8, x: 10 }}
@@ -205,28 +195,23 @@ function StatCard({
       {/* Main Value */}
       <div className="mt-6">
         <div className="flex items-center justify-between">
+          {/* A period with no readings says so with a dash. It used to show a
+              pulsing placeholder here, which is the sign for "loading" and
+              never stopped: the cards are only drawn once loading is over. */}
           <AnimatePresence mode="wait">
-            {isLoading ? (
-              <motion.div
-                key="loading"
-                className="h-9 w-32 bg-muted/50 rounded animate-pulse"
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
-              />
-            ) : (
-              <motion.p
-                key={mainValue}
-                className="text-3xl font-bold tracking-tight text-foreground"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
-              >
-                {mainValue}
-              </motion.p>
-            )}
+            <motion.p
+              key={mainValue}
+              className={cn(
+                "text-3xl font-bold tracking-tight",
+                mainValue === "—" ? "text-muted-foreground/50" : "text-foreground"
+              )}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              {mainValue}
+            </motion.p>
           </AnimatePresence>
           {lastUpdated && <RelativeTime timestamp={lastUpdated} />}
         </div>
@@ -297,7 +282,10 @@ export default function StatsCards({
     avgLatency <= 100 ? "up" :
     avgLatency <= 200 ? "stable" : "down")
 
-  const latencyTrendValue = !hasData ? "Calculating…" : (isCurrentlyOffline ? "Offline" :
+  // With no readings the cards say "No data". They said "Calculating…", but
+  // nothing is being calculated: by the time they are drawn the period has
+  // been loaded and found empty.
+  const latencyTrendValue = !hasData ? "No data" : (isCurrentlyOffline ? "Offline" :
     avgLatency === null ? "No replies" :
     avgLatency <= 50 ? "Excellent" :
     avgLatency <= 100 ? "Good" :
@@ -313,22 +301,24 @@ export default function StatsCards({
     : isMeaningfulLoss(packetLoss) ? "down" : "up"
 
   const lossTrendValue = !hasData || packetLoss === null
-    ? "Calculating…"
+    ? "No data"
     : getPacketLossLabel(packetLoss)
 
   const jitterTrend = !hasData || jitter === null ? "stable" : (jitter <= 100 ? "up" : "down")
 
-  const jitterTrendValue = !hasData ? "Calculating…" : (
+  const jitterTrendValue = !hasData ? "No data" : (
     jitter === null ? "No data" :
     jitter <= 50 ? "Excellent" :
     jitter <= 100 ? "Good" :
     jitter <= 200 ? "Fair" : "Poor")
 
-  const latencyAccentColor = !hasData || paused ? '#6b7280'
-    : isCurrentlyOffline ? getPacketLossColor(100)
+  // All from the theme's signal colours, so the three cards agree with each
+  // other and with the chart underneath in either theme.
+  const latencyAccentColor = !hasData || paused ? NO_DATA_COLOR
+    : isCurrentlyOffline ? getPacketLossVar(100)
     : getLatencyColor(avgLatency ?? 0)
-  const packetLossAccentColor = !hasData || paused || packetLoss === null ? '#6b7280' : getPacketLossColor(packetLoss)
-  const jitterAccentColor = !hasData || paused || jitter === null ? '#6b7280' : getLatencyColor(jitter)
+  const packetLossAccentColor = !hasData || paused || packetLoss === null ? NO_DATA_COLOR : getPacketLossVar(packetLoss)
+  const jitterAccentColor = !hasData || paused || jitter === null ? NO_DATA_COLOR : getLatencyColor(jitter)
 
   return (
     <div className={cn("grid gap-6 lg:grid-cols-3", paused && "grayscale")}>
@@ -344,7 +334,6 @@ export default function StatsCards({
         trendValue={paused ? 'Paused' : latencyTrendValue}
         still={paused}
         lastUpdated={lastUpdated}
-        isLoading={!hasData}
         stats={[
           { label: "Avg", value: ms(avgLatency), variant: "default" },
           { label: "Max", value: ms(maxLatency), variant: avgLatency !== null && avgLatency > 100 ? "warning" : "default" },
@@ -367,7 +356,6 @@ export default function StatsCards({
         trendValue={paused ? 'Paused' : lossTrendValue}
         still={paused}
         lastUpdated={lastUpdated}
-        isLoading={!hasData}
         stats={[
           { label: "Avg", value: pct(packetLoss), variant: "default" },
           { label: "Max", value: pct(maxPacketLoss), variant: !isMeaningfulLoss(maxPacketLoss) ? "success" : maxPacketLoss! > 5 ? "danger" : "warning" },
@@ -387,7 +375,6 @@ export default function StatsCards({
         trendValue={paused ? 'Paused' : jitterTrendValue}
         still={paused}
         lastUpdated={lastUpdated}
-        isLoading={!hasData}
         stats={[
           { label: "Avg", value: ms(jitter), variant: "default" },
           { label: "Max", value: ms(maxJitter), variant: jitter !== null && jitter > 100 ? "warning" : "default" },

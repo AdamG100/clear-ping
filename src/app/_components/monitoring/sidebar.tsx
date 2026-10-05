@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import type { Target, GroupOrder, SparklinePoint } from '@/types/probe'
 import { Sparkline } from './sparkline'
+import { SidebarSkeleton } from './skeleton'
 import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-dialogs'
 import { GroupDialog } from './group-dialog'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
@@ -67,6 +68,8 @@ interface SidebarProps {
   /** How many alerts are firing on at least one target. */
   firingAlerts?: number
   onReorderTargets?: (updates: { id: string; sortOrder: number; group?: string }[]) => void
+  /** The targets have not arrived yet: there is no list to show and nothing to count. */
+  loading?: boolean
 }
 
 // ─── Status Indicator ───────────────────────────────────────────────────────
@@ -700,6 +703,7 @@ export function Sidebar({
   onOpenAlerts,
   firingAlerts = 0,
   onReorderTargets,
+  loading = false,
 }: SidebarProps) {
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -853,15 +857,25 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-          <div className="flex items-center gap-1.5">
-            <StatusIndicator isOnline={true} packetLoss={0} />
-            <span className="text-muted-foreground">{onlineCount} online</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <StatusIndicator isOnline={false} />
-            <span className="text-muted-foreground">{offlineCount} offline</span>
-          </div>
+        {/* As tall as it is with the search button in it, which only appears
+            past a few targets, so the header is the same height either way. */}
+        <div className="flex min-h-5.5 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+          {/* Not "0 online, 0 offline" while the list is on its way: that
+              is a count of nothing, and it reads as everything being gone. */}
+          {loading ? (
+            <span className="h-3 w-36 animate-pulse rounded bg-muted/50" aria-hidden="true" />
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5">
+                <StatusIndicator isOnline={true} packetLoss={0} />
+                <span className="text-muted-foreground">{onlineCount} online</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <StatusIndicator isOnline={false} />
+                <span className="text-muted-foreground">{offlineCount} offline</span>
+              </div>
+            </>
+          )}
           {pendingCount > 0 && (
             <div className="flex items-center gap-1.5">
               <StatusIndicator />
@@ -925,7 +939,9 @@ export function Sidebar({
             className={cn('p-2', drag.active && 'pointer-events-none')}
             aria-label="Targets"
           >
-            {searchResults ? (
+            {loading ? (
+              <SidebarSkeleton />
+            ) : searchResults ? (
               // Search mode: plain list, no drag
               <div className="space-y-3">
                 {searchResults.map(({ group, targets: matches }) => (

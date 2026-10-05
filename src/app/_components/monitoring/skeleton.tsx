@@ -25,10 +25,77 @@ export function ReadoutSkeleton() {
           <Block className="mt-6 h-9 w-32" />
           <Block className="mt-2 h-3 w-40" />
           <div className="mt-6 grid grid-cols-4 gap-4 border-t border-border/50 pt-4">
+            {/* As tall as a label over a figure, so the cards do not grow when
+                the figures arrive and push the chart down the page. */}
             {[0, 1, 2, 3].map(j => (
-              <div key={j} className="space-y-1.5">
+              <div key={j} className="flex h-[40.5px] flex-col justify-between py-1">
                 <Block className="h-2 w-8" />
                 <Block className="h-4 w-12" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The whole main pane, for before the list of targets has arrived.
+ *
+ * Until then there is nothing to say what is on screen, and the pane used to
+ * fill the gap with the "pick a path" message meant for an installation with
+ * no targets at all. It showed on every refresh, for as long as the list took
+ * to load, and was then replaced by the target that had been selected all
+ * along. This holds the shape of that target's page instead.
+ */
+export function PaneSkeleton() {
+  return (
+    <div className="space-y-6 p-6" role="status" aria-busy="true">
+      <span className="sr-only">Loading</span>
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center" aria-hidden="true">
+        <div>
+          <Block className="h-8 w-56" />
+          <Block className="mt-1 h-5 w-72" />
+        </div>
+        <Block className="h-10 w-72 rounded-lg" />
+      </div>
+
+      {/* A group's page has no readouts. Which kind of page was left open is
+          only known in the browser, so it is the stylesheet that leaves these
+          out, from a mark set on the document before anything is drawn. */}
+      <div className="skeleton-target-only">
+        <ReadoutSkeleton />
+      </div>
+
+      <section className="min-h-[26rem] rounded-xl border border-border bg-card p-5" aria-hidden="true">
+        <div className="mb-4">
+          <Block className="h-5 w-40" />
+          <Block className="mt-0.5 h-4 w-80 max-w-full" />
+        </div>
+        <TraceSkeleton />
+      </section>
+    </div>
+  )
+}
+
+/** The sidebar's list, before the targets have arrived: a couple of groups of rows. */
+export function SidebarSkeleton() {
+  return (
+    <div className="space-y-1" aria-hidden="true">
+      {[3, 2].map((rows, group) => (
+        <div key={group}>
+          <div className="flex h-[30px] items-center px-2">
+            <Block className="h-2.5 w-24" />
+          </div>
+          <div className="ml-1 space-y-0.5">
+            {Array.from({ length: rows }, (_, row) => (
+              <div key={row} className="flex items-center gap-2.5 px-2 py-2">
+                <Block className="h-2.5 w-2.5 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1">
+                  <Block className="my-0.5 h-4 w-32" />
+                  <Block className="my-0.5 h-3 w-44" />
+                </div>
               </div>
             ))}
           </div>

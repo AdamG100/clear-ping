@@ -1,14 +1,43 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
 
 /**
- * What the time charts share: how the axes are labelled, and selecting a
- * period to zoom into by dragging across the plot.
+ * What the time charts share: how wide they are drawn, how the axes are
+ * labelled, and selecting a period to zoom into by dragging across the plot.
  */
 
 const HOUR_MS = 60 * 60 * 1000
+
+/**
+ * The width of whatever a chart is placed in, and the ref that measures it.
+ *
+ * A chart is drawn in its own pixels, so it has to know how many it has. The
+ * first measurement is taken as the chart is attached, which React applies
+ * before the browser paints. Waiting for the resize observer's first report
+ * instead let one frame through at a guessed width: the chart appeared narrow
+ * and centred, then snapped out to the full width of the card.
+ */
+export function useChartWidth(fallback = 880) {
+  const [width, setWidth] = useState(fallback)
+
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return
+
+    const measured = node.getBoundingClientRect().width
+    if (measured > 0) setWidth(measured)
+
+    const observer = new ResizeObserver(entries => {
+      const next = entries[0]?.contentRect.width
+      if (next && next > 0) setWidth(next)
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  return [width, containerRef] as const
+}
 
 /**
  * Label a point on the time axis at a precision that suits the span on screen.

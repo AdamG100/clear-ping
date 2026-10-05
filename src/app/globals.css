@@ -172,14 +172,25 @@
   }
 }
 
+/* The loading placeholder for the main pane is drawn before the page knows
+   whether a target or a group was left open. The script in the document head
+   does know, and marks the document, so the parts only a target's page has can
+   be left out here without the server and the browser disagreeing. */
+html[data-view='group'] .skeleton-target-only {
+  display: none;
+}
+
 /* Custom slower ping animation for NetworkStatus indicator */
 .custom-ping {
   animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
+/* `--ping-peak` is how solid the ring is at its start. A status dot wants it
+   bright; a ring behind an icon of its own colour does not, or the icon
+   disappears into it at the top of every pulse. */
 @keyframes ping {
   0% {
     transform: scale(1);
-    opacity: 0.8;
+    opacity: var(--ping-peak, 0.8);
   }
   75%, 100% {
     transform: scale(3);
@@ -220,6 +231,6 @@
 
   .custom-ping {
     animation: none !important;
-    opacity: 0.35;
+    opacity: min(0.35, var(--ping-peak, 0.8));
   }
 }

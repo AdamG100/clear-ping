@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useRef, memo, useCallback } from 'react'
+import { useMemo, useState, useRef, memo } from 'react'
 import {
   getPacketLossVar,
   isMeaningfulLoss,
@@ -8,7 +8,7 @@ import {
   NO_DATA_COLOR,
 } from '@/lib/packet-loss-colors'
 import type { DataPoint, TimeRange, TimeWindow } from '@/types/probe'
-import { BrushBox, BrushLabel, formatTick, latencyDomain, niceTicks, useChartBrush } from './chart-brush'
+import { BrushBox, BrushLabel, formatTick, latencyDomain, niceTicks, useChartBrush, useChartWidth } from './chart-brush'
 
 /**
  * The smoke trace.
@@ -92,19 +92,9 @@ export const SmokeTrace = memo(function SmokeTrace({
   onResetZoom,
   noLossLabel = 'No packet loss in this window',
 }: SmokeTraceProps) {
-  const [width, setWidth] = useState(880)
+  const [width, containerRef] = useChartWidth()
   const [hover, setHover] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
-
-  const containerRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return
-    const observer = new ResizeObserver(entries => {
-      const next = entries[0]?.contentRect.width
-      if (next && next > 0) setWidth(next)
-    })
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [])
 
   const plotW = Math.max(120, width - PAD.left - PAD.right)
   const plotH = Math.max(140, height - PAD.top - PAD.bottom)

@@ -19,7 +19,7 @@ import { Sidebar } from './sidebar'
 import StatsCards from './stats-cards'
 import { TimeRangeSelector } from './time-range-selector'
 import { SmokeTrace } from './smoke-trace'
-import { ReadoutSkeleton, TraceSkeleton } from './skeleton'
+import { PaneSkeleton, ReadoutSkeleton, TraceSkeleton } from './skeleton'
 import { buildSeries, MIN_WINDOW_MS } from '@/lib/series'
 import { addressFamilyFor, FAMILY_LABEL, isDualStack, targetTypeFor } from '@/lib/host'
 import { alertTitle } from '@/lib/alert-delivery'
@@ -757,6 +757,10 @@ export function Dashboard() {
     [alerts]
   )
 
+  // Before the list of targets has arrived, "nothing selected" only means
+  // "not known yet". Saying so with the empty state flashed "Pick a path to
+  // inspect" on every refresh, ahead of the target that was selected all along.
+  const showLoadingState = !isLoaded && !showingAlerts
   const showEmptyState = !selectedTarget && !groupTargets && !showingAlerts
   // Only the very first load for a target blanks the pane. Switching ranges
   // keeps the previous range on screen and dims it, so the layout never
@@ -784,10 +788,16 @@ export function Dashboard() {
         groupOrders={groupOrders}
         onReorderGroups={reorderGroups}
         onReorderTargets={reorderTargets}
+        loading={!isLoaded}
       />
 
-      <main className="flex-1 overflow-auto">
-        {showEmptyState ? (
+      {/* The gutter is kept whether or not the page is long enough to scroll.
+          Otherwise the scrollbar arriving with the last panels narrows the
+          pane, and everything in it, charts included, shifts sideways. */}
+      <main className="flex-1 overflow-auto scrollbar-gutter-stable">
+        {showLoadingState ? (
+          <PaneSkeleton />
+        ) : showEmptyState ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
               <svg viewBox="0 0 120 40" className="mx-auto mb-5 h-10 w-32" fill="none" aria-hidden="true">
@@ -1001,19 +1011,21 @@ export function Dashboard() {
                 </>
               ) : (
               <>
-              <motion.div key={showSpinner ? 'loading' : 'ready'} {...FADE_IN}>
-                {showSpinner ? (
-                  <ReadoutSkeleton />
-                ) : (
-                  <StatsCards
-                    statistics={statistics}
-                    current={current}
-                    lastUpdated={lastUpdated}
-                    vocabulary={vocabulary}
-                    paused={selectedTarget.status === 'paused'}
-                  />
-                )}
-              </motion.div>
+              {/* No fade of its own. The placeholder and the cards are the
+                  same boxes, and the figures inside the cards already come up
+                  one by one; fading the whole row in from nothing as well
+                  blinked the boxes out and back between the two. */}
+              {showSpinner ? (
+                <ReadoutSkeleton />
+              ) : (
+                <StatsCards
+                  statistics={statistics}
+                  current={current}
+                  lastUpdated={lastUpdated}
+                  vocabulary={vocabulary}
+                  paused={selectedTarget.status === 'paused'}
+                />
+              )}
 
               <ProbeDetailsPanel probeType={selectedTarget.probeType} latest={latestReading} />
 
