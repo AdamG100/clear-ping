@@ -50,6 +50,10 @@ Or pull the one GitHub builds on every push to `main`
 docker run -d --name clearping -p 3000:3000 -v clearping-data:/data ghcr.io/adamg100/clear-ping:latest
 ```
 
+That image is published for x64 and for 64-bit ARM (a Raspberry Pi 4 or 5 on a
+64-bit OS, an ARM cloud server, Apple silicon), and Docker pulls the one that
+matches the machine. 32-bit ARM is not supported.
+
 - **Keep the volume.** The database is at `/data/clearping.db`. Without `-v`,
   the measurement history is lost when the container is removed.
 - **IPv6 needs IPv6 in the container.** Docker's default network is IPv4 only,

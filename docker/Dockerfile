@@ -7,6 +7,15 @@
 #   docker build -f docker/Dockerfile -t clearping .
 #   docker run -d -p 3000:3000 -v clearping-data:/data clearping
 #
+# It builds for x64 and for 64-bit ARM, and for whichever of the two the
+# machine is unless told otherwise:
+#
+#   docker build --platform linux/arm64 -f docker/Dockerfile -t clearping .
+#
+# Nothing below names an architecture: the base image, the Debian packages and
+# the sqlite3 binary all come in both. 32-bit ARM is the exception, because
+# Next.js has no compiler for it.
+#
 # Debian rather than Alpine on purpose. Probing shells out to `ping` and
 # `traceroute` and reads what they print; the parsers are tested against the
 # iputils and traceroute builds Debian ships, not BusyBox's.

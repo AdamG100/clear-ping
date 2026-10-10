@@ -1,7 +1,8 @@
 name: Docker image
 
-# Builds the image from docker/Dockerfile, checks that it actually runs, and
-# publishes it to the GitHub Container Registry.
+# Builds the image from docker/Dockerfile for x64 and ARM64, checks that each
+# one actually runs, and publishes them to the GitHub Container Registry under
+# one name, so `docker pull` picks the right one for the machine.
 #
 #   pull request      build and test only, nothing is published
 #   push to main      ghcr.io/<owner>/<repo>:latest and :sha-<commit>
@@ -24,8 +25,20 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # One job per architecture, each on a runner of that architecture. Nothing
+  # is emulated, so the build is as fast as it was and the smoke test below
+  # runs the real thing on both.
   build:
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
@@ -37,15 +50,18 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
+      # The cache is kept per architecture, or the two jobs would overwrite
+      # each other's layers.
       - name: Build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
+          platforms: linux/${{ matrix.arch }}
           load: true
           tags: clearping:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       # A build that succeeds says the image exists, not that it works. This
       # starts it and takes a real reading: the server answers, the database
@@ -102,7 +118,81 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Work out tags and labels
+      # The registry only takes lower-case names, and the owner's is not.
+      - name: Work out the image name
+        id: image
+        if: github.event_name != 'pull_request'
+        run: echo "name=${REGISTRY}/${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Work out labels
+        id: meta
+        if: github.event_name != 'pull_request'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      # The layers are already in the cache from the build above, so this only
+      # uploads them. It is pushed without a tag, by its digest: the tags
+      # belong to the pair, and the publish job puts them on once both exist.
+      - name: Push by digest
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+
+      - name: Record the digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Hand the digest to the publish job
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Joins the two images under the tags people pull. It needs both builds to
+  # have passed, so a tag never points at an image for one architecture only.
+  publish:
+    name: Publish
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Collect the digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Work out tags
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -112,16 +202,14 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
-            type=ref,event=pr
 
-      # The layers are already in the cache from the build above, so this
-      # only tags and uploads them.
-      - name: Publish
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+      - name: Tag the pair
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          image="${REGISTRY}/${IMAGE_NAME,,}"
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "$image@sha256:%s " *)
+
+          # Printed so the log shows both architectures behind the tag.
+          docker buildx imagetools inspect "$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
