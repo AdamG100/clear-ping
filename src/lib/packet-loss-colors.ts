@@ -30,6 +30,8 @@ export const SIGNAL_VARS = {
   minor: 'var(--signal-minor)',
   moderate: 'var(--signal-moderate)',
   high: 'var(--signal-high)',
+  severe: 'var(--signal-severe)',
+  critical: 'var(--signal-critical)',
   none: 'var(--signal-none)',
 } as const
 
@@ -60,8 +62,14 @@ export function isMeaningfulLoss(lossPercent: number | null | undefined): boolea
  *   1-5%   Real but small. One dropped packet in a 20-packet probe is exactly
  *          5%, so a single-packet blip lands at the top of this band and no
  *          higher — which is the whole point of putting the boundary there.
- *   5-20%  VoIP degrades audibly and TCP throughput collapses.
+ *   5-10%  VoIP and video start to degrade audibly.
+ *   10-15% TCP throughput collapses; bulk transfers crawl.
+ *   15-20% Interactive traffic is barely usable.
  *   >20%   The path is effectively broken.
+ *
+ * Above 5% the bands step every five points — one more dropped packet per
+ * 20-packet probe — so the colour says how bad a degraded path is rather than
+ * lumping 6% and 19% together.
  *
  * The previous thresholds were 0 / 10 / 50 / 100, which was wrong at both ends:
  * a single stray packet in an hour reported as "Minor Loss", while a path
@@ -87,37 +95,56 @@ export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: num
     description: 'Small, recoverable packet loss',
   },
   {
-    maxLoss: 20,
+    maxLoss: 10,
     oklch: 'oklch(0.73 0.19 50)',
     hex: '#ef8b3c',
     cssVar: 'var(--signal-moderate)',
-    label: 'Degraded',
-    range: '5-20%',
-    description: 'Calls and streams suffer; throughput drops sharply',
+    label: 'Moderate',
+    range: '5-10%',
+    description: 'Calls and streams start to suffer',
+  },
+  {
+    maxLoss: 15,
+    oklch: 'oklch(0.62 0.24 305)',
+    hex: '#a94ff6',
+    cssVar: 'var(--signal-high)',
+    label: 'High',
+    range: '10-15%',
+    description: 'Throughput drops sharply',
+  },
+  {
+    maxLoss: 20,
+    oklch: 'oklch(0.66 0.25 350)',
+    hex: '#f72fa7',
+    cssVar: 'var(--signal-severe)',
+    label: 'Severe',
+    range: '15-20%',
+    description: 'Interactive traffic is barely usable',
   },
   {
     maxLoss: 100,
     oklch: 'oklch(0.63 0.23 25)',
     hex: '#e2453c',
-    cssVar: 'var(--signal-high)',
-    label: 'Severe',
+    cssVar: 'var(--signal-critical)',
+    label: 'Critical',
     range: '>20%',
     description: 'Path is effectively unusable',
   },
 ] as const
 
-/** The severity band a loss figure falls into, e.g. "Clear" or "Degraded". */
+/** The severity band a loss figure falls into, e.g. "Clear" or "Severe". */
 export function getPacketLossLabel(lossPercent: number | string): string {
   return getPacketLossColorInfo(lossPercent).label
 }
 
 // Latency reuses the severity ramp, so "amber" means the same degree of
-// trouble whether it is describing loss or round-trip time.
+// trouble whether it is describing loss or round-trip time. It skips the
+// purple and magenta bands, which are reserved for loss.
 const LATENCY_PALETTE = {
   excellent: { oklch: 'var(--signal-perfect)', hex: '#5dc879' }, // <=50ms
   good: { oklch: 'var(--signal-perfect)', hex: '#5dc879' }, // 51-100ms
   fair: { oklch: 'var(--signal-minor)', hex: '#e3c04a' }, // 101-200ms
-  poor: { oklch: 'var(--signal-high)', hex: '#e2453c' }, // >200ms
+  poor: { oklch: 'var(--signal-critical)', hex: '#e2453c' }, // >200ms
 } as const
 
 /**

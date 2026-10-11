@@ -21,6 +21,8 @@
   --color-signal-minor: var(--signal-minor);
   --color-signal-moderate: var(--signal-moderate);
   --color-signal-high: var(--signal-high);
+  --color-signal-severe: var(--signal-severe);
+  --color-signal-critical: var(--signal-critical);
   --color-signal-none: var(--signal-none);
   --color-trace: var(--trace);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -87,7 +89,9 @@
   --signal-perfect: oklch(0.58 0.15 150);
   --signal-minor: oklch(0.68 0.15 85);
   --signal-moderate: oklch(0.60 0.18 50);
-  --signal-high: oklch(0.53 0.22 25);
+  --signal-high: oklch(0.46 0.24 305);
+  --signal-severe: oklch(0.54 0.24 352);
+  --signal-critical: oklch(0.53 0.22 25);
   --signal-none: oklch(0.65 0.02 250);
   --trace: oklch(0.30 0.02 250);
   --background: oklch(1 0 0);
@@ -166,16 +170,22 @@
   /* Signal palette. These are the packet-loss severity colours, promoted to
      first-class tokens: in this app colour *is* the data, so it belongs in the
      theme rather than hardcoded per component. */
-  /* Severity escalates monotonically: hue sweeps green -> amber -> orange ->
-     red, and chroma climbs from Minor onwards, so a failing path shouts louder
-     than a merely degraded one. An earlier ramp ran green -> cyan -> magenta ->
-     red, where cyan read calmer than the green it was supposed to be worse
-     than. Clear sits at the same chroma as Minor rather than below it: a
-     healthy path should look actively healthy, not merely un-alarming. */
+  /* Severity runs green -> yellow -> orange, then purple -> magenta -> red.
+     Red is kept for the worst band because that is also the colour of a
+     target that has stopped answering. The two bands below it borrow purple
+     and magenta rather than more shades of orange: six bands squeezed between
+     green and red left the warm ones too close to tell apart on a thin line.
+     Purple warms through magenta into red, so the top three still read as
+     escalating. An earlier ramp ran green -> cyan -> magenta -> red, where
+     cyan read calmer than the green it was supposed to be worse than. Clear
+     sits at the same chroma as Minor rather than below it: a healthy path
+     should look actively healthy, not merely un-alarming. */
   --signal-perfect: oklch(0.75 0.15 150);
   --signal-minor: oklch(0.84 0.15 95);
   --signal-moderate: oklch(0.73 0.19 50);
-  --signal-high: oklch(0.63 0.23 25);
+  --signal-high: oklch(0.62 0.24 305);
+  --signal-severe: oklch(0.66 0.25 350);
+  --signal-critical: oklch(0.63 0.23 25);
   --signal-none: oklch(0.55 0.02 250);
   --trace: oklch(0.90 0.02 250);
 }

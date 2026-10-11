@@ -17,6 +17,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -28,6 +29,7 @@ import {
   DEFAULT_DNS_QUERY_NAME,
   DNS_RECORD_TYPES,
   parseAddressInput,
+  targetAddressLabel,
   validateProbeConfig,
 } from '@/lib/probe-config'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
@@ -37,9 +39,8 @@ import {
   Globe,
   Network,
   Plug,
-  FolderPlus,
   Wifi,
-  Search,
+  Check,
   Trash2,
 } from 'lucide-react'
 
@@ -112,11 +113,16 @@ interface TargetFormValues {
 
 // ─── Probe method ───────────────────────────────────────────────────────────
 
-const PROBE_METHODS: { value: ProbeType; label: string; icon: typeof Wifi }[] = [
-  { value: 'ping', label: 'Ping (ICMP)', icon: Wifi },
-  { value: 'tcp', label: 'TCP port', icon: Plug },
-  { value: 'http', label: 'HTTP(S)', icon: Globe },
-  { value: 'dns', label: 'DNS query', icon: Network },
+/**
+ * Each method with the question it answers. The names alone only help someone
+ * who already knows what ICMP is; the question is what a person actually came
+ * with, and all four are on show at once so they can be told apart.
+ */
+const PROBE_METHODS: { value: ProbeType; label: string; question: string; icon: typeof Wifi }[] = [
+  { value: 'ping', label: 'Ping (ICMP)', question: 'Is it up, and how fast does it reply?', icon: Wifi },
+  { value: 'tcp', label: 'TCP port', question: 'Is a service accepting connections?', icon: Plug },
+  { value: 'http', label: 'Web page (HTTP)', question: 'Does a page load as expected?', icon: Globe },
+  { value: 'dns', label: 'DNS lookup', question: 'Is DNS answering correctly?', icon: Network },
 ]
 
 /**
@@ -125,31 +131,53 @@ const PROBE_METHODS: { value: ProbeType; label: string; icon: typeof Wifi }[] = 
  */
 function ProbeMethodPicker({
   value,
+  suggested,
   onChange,
 }: {
   value: ProbeType
+  /** The method the address itself asked for, marked so the jump to it is explained. */
+  suggested: ProbeType | null
   onChange: (probeType: ProbeType) => void
 }) {
   return (
-    <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Probe method">
-      {PROBE_METHODS.map(method => (
-        <button
-          key={method.value}
-          type="button"
-          role="radio"
-          aria-checked={value === method.value}
-          onClick={() => onChange(method.value)}
-          className={cn(
-            'flex items-center justify-center gap-2 rounded-md border px-2.5 py-2 text-xs transition-colors cursor-pointer touch:py-2.5',
-            value === method.value
-              ? 'bg-primary text-primary-foreground border-primary'
-              : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-          )}
-        >
-          <method.icon className="h-3.5 w-3.5" />
-          {method.label}
-        </button>
-      ))}
+    <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="How to check it">
+      {PROBE_METHODS.map(method => {
+        const selected = value === method.value
+        return (
+          <button
+            key={method.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(method.value)}
+            className={cn(
+              'flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left outline-none transition-colors',
+              'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
+              selected ? 'border-primary bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/60'
+            )}
+          >
+            <span
+              className={cn(
+                'flex size-8 shrink-0 items-center justify-center rounded-md transition-colors',
+                selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              )}
+            >
+              <method.icon className="size-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-card-foreground">
+                {method.label}
+                {selected && suggested === method.value && (
+                  <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] leading-none text-primary">
+                    Detected
+                  </span>
+                )}
+              </span>
+              <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{method.question}</span>
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -159,22 +187,16 @@ function ProbeSummary({
   host,
   probeType,
   ipVersion,
-  config,
+  summary,
 }: {
   host: string
   probeType: ProbeType
   ipVersion: IpVersion
-  config: ProbeConfig
+  summary: string
 }) {
-  const summary = describeProbe(host, probeType, ipVersion, config)
-
-  // Nothing to describe until the address is something that can be probed.
-  // What is wrong with it is said under the address field.
-  if (!host || !summary) return null
-
   return (
-    <div className="flex items-start gap-2 text-xs text-muted-foreground">
-      <span className="flex shrink-0 items-center gap-1 pt-px">
+    <div className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+      <span className="flex shrink-0 items-center gap-1 pt-0.5">
         <TypeBadge type={targetTypeFor(host, probeType)} />
         {isDualStack(host, ipVersion)
           ? <DualStackBadge />
@@ -193,7 +215,7 @@ function ProbeSummary({
  * Every field used to look the same, so the only way to find out which ones
  * the form insisted on was to watch the button stay grey. Now the ones it
  * cannot do without carry a red asterisk, the ones that can be left alone say
- * "Optional", and a field with neither already holds a sensible value.
+ * "optional", and a field with neither already holds a sensible value.
  */
 function FieldLabel({
   htmlFor,
@@ -218,11 +240,7 @@ function FieldLabel({
           <span className="sr-only">(required)</span>
         </>
       )}
-      {optional && (
-        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal uppercase leading-none tracking-wider text-muted-foreground">
-          Optional
-        </span>
-      )}
+      {optional && <span className="text-xs font-normal text-muted-foreground">optional</span>}
     </Label>
   )
 }
@@ -231,6 +249,15 @@ function FieldLabel({
 function FieldError({ id, children }: { id: string; children: ReactNode }) {
   return (
     <p id={id} className="text-xs text-destructive">
+      {children}
+    </p>
+  )
+}
+
+/** What a field is for or what it accepts, under the field. */
+function FieldHint({ id, children }: { id?: string; children: ReactNode }) {
+  return (
+    <p id={id} className="text-xs leading-relaxed text-muted-foreground">
       {children}
     </p>
   )
@@ -403,64 +430,55 @@ function ProbeConfigFields({
 
 // ─── Shared fields ──────────────────────────────────────────────────────────
 
-/** One of a row of mutually exclusive choices. */
-const choice = (selected: boolean) =>
-  cn(
-    'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer touch:py-2.5',
-    selected
-      ? 'bg-primary text-primary-foreground border-primary'
-      : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
-  )
-
 const NEW_GROUP = '__custom__'
+/** The select cannot hold an empty value, so "no group" needs a name. */
+const NO_GROUP = '__none__'
 
-function GroupPicker({
+/**
+ * Which group the target sits in. A list rather than a row of buttons: with a
+ * dozen nested groups the buttons wrapped into a block taller than the rest of
+ * the form.
+ */
+function GroupSelect({
+  id,
+  newGroupInputId,
   group,
-  customGroup,
   availableGroups,
-  onGroupChange,
-  onCustomGroupChange,
+  onChange,
 }: {
+  id: string
+  /** The box that appears for a new group's name, which is where typing goes next. */
+  newGroupInputId: string
   group: string
-  customGroup: string
   availableGroups: string[]
-  onGroupChange: (group: string) => void
-  onCustomGroupChange: (name: string) => void
+  onChange: (group: string) => void
 }) {
   return (
     <div className="space-y-2">
-      <FieldLabel small>Group</FieldLabel>
-      <div className="flex flex-wrap gap-1.5">
-        <button type="button" onClick={() => onGroupChange('')} className={choice(group === '')}>
-          None
-        </button>
-        {availableGroups.map(name => (
-          <button key={name} type="button" onClick={() => onGroupChange(name)} className={choice(group === name)}>
-            {groupLabel(name)}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => onGroupChange(NEW_GROUP)}
-          className={cn(choice(group === NEW_GROUP), 'flex items-center gap-1')}
+      <FieldLabel htmlFor={id} small>Group</FieldLabel>
+      <Select value={group || NO_GROUP} onValueChange={value => onChange(value === NO_GROUP ? '' : value)}>
+        <SelectTrigger id={id} className={cn(FIELD_INPUT, 'w-full')}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent
+          className="bg-popover border-border"
+          // A closing list hands focus back to its button, which would take it
+          // from the name box that "New group…" has just opened.
+          onCloseAutoFocus={event => {
+            const input = group === NEW_GROUP ? document.getElementById(newGroupInputId) : null
+            if (!input) return
+            event.preventDefault()
+            input.focus()
+          }}
         >
-          <FolderPlus className="h-3 w-3" />
-          New
-        </button>
-      </div>
-      {group === NEW_GROUP && (
-        <Input
-          placeholder="New group name, or Home/Network for a group inside a group"
-          value={customGroup}
-          onChange={e => onCustomGroupChange(e.target.value)}
-          className="bg-input border-border text-foreground text-sm mt-1.5"
-          autoFocus
-        />
-      )}
-      <p className="text-[11px] text-muted-foreground">
-        Targets in a group can be compared on one chart. A <span className="font-mono">/</span> in
-        a new group&apos;s name puts it inside another: <span className="font-mono">Home/Network</span>.
-      </p>
+          <SelectItem value={NO_GROUP}>No group</SelectItem>
+          {availableGroups.map(name => (
+            <SelectItem key={name} value={name}>{groupLabel(name)}</SelectItem>
+          ))}
+          <SelectSeparator />
+          <SelectItem value={NEW_GROUP}>New group…</SelectItem>
+        </SelectContent>
+      </Select>
     </div>
   )
 }
@@ -474,61 +492,76 @@ const IP_VERSION_CHOICES: { value: IpVersion; label: string; hint: string }[] = 
 
 /**
  * Which address family a target is probed over. The same for every kind of
- * probe, and offered whenever the address is a name: an IP address belongs to
- * one family already, and that is said rather than offered.
+ * probe, and offered only while there is a choice to make: an IP address
+ * belongs to one family already, so for one the control is not there at all.
  */
 function IpVersionPicker({
-  host,
   value,
   onChange,
 }: {
-  host: string
   value: IpVersion
   onChange: (ipVersion: IpVersion) => void
 }) {
-  const kind = classifyHost(host)
   const selected = IP_VERSION_CHOICES.find(option => option.value === value) ?? IP_VERSION_CHOICES[0]
 
   return (
     <div className="space-y-2">
       <FieldLabel small>IP version</FieldLabel>
-      {kind === 'ipv4' || kind === 'ipv6' ? (
-        <p className="text-xs text-muted-foreground">
-          {kind === 'ipv6' ? 'IPv6' : 'IPv4'} only: the address is an {kind === 'ipv6' ? 'IPv6' : 'IPv4'} address. Enter a
-          hostname to choose, or to monitor both.
-        </p>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="radiogroup" aria-label="IP version">
-            {IP_VERSION_CHOICES.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={value === option.value}
-                onClick={() => onChange(option.value)}
-                className={choice(value === option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <p className="text-[11px] text-muted-foreground">{selected.hint}</p>
-        </>
-      )}
+      {/* One tray, so the four read as a single setting rather than four buttons. */}
+      <div
+        className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5 sm:grid-cols-4"
+        role="radiogroup"
+        aria-label="IP version"
+      >
+        {IP_VERSION_CHOICES.map(option => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={value === option.value}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'cursor-pointer rounded-md px-2 py-1.5 text-xs outline-none transition-colors touch:py-2.5',
+              'focus-visible:ring-[3px] focus-visible:ring-ring/50',
+              value === option.value
+                ? 'bg-primary font-medium text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <FieldHint>{selected.hint}</FieldHint>
     </div>
   )
 }
 
+/** `every` is how the interval reads in the sentence at the foot of the form. */
 const INTERVALS = [
-  { seconds: 30, label: '30 seconds' },
-  { seconds: 60, label: '1 minute' },
-  { seconds: 120, label: '2 minutes' },
-  { seconds: 300, label: '5 minutes' },
-  { seconds: 600, label: '10 minutes' },
-  { seconds: 1800, label: '30 minutes' },
-  { seconds: 3600, label: '1 hour' },
+  { seconds: 30, label: '30 seconds', every: 'every 30 seconds' },
+  { seconds: 60, label: '1 minute', every: 'every minute' },
+  { seconds: 120, label: '2 minutes', every: 'every 2 minutes' },
+  { seconds: 300, label: '5 minutes', every: 'every 5 minutes' },
+  { seconds: 600, label: '10 minutes', every: 'every 10 minutes' },
+  { seconds: 1800, label: '30 minutes', every: 'every 30 minutes' },
+  { seconds: 3600, label: '1 hour', every: 'every hour' },
 ]
+
+const RECAP_VERB: Record<ProbeType, string> = {
+  ping: 'Pings',
+  tcp: 'Connects to',
+  http: 'Requests',
+  dns: 'Looks up',
+}
+
+/** The whole target in a line, beside the button that creates it. */
+function recapFor(host: string, probeType: ProbeType, config: ProbeConfig, interval: number): string {
+  const every = INTERVALS.find(option => option.seconds === interval)?.every ?? `every ${interval} seconds`
+  // A DNS probe of a server asks it a question; of a name, it is the question.
+  const verb = probeType === 'dns' && classifyHost(host) !== 'hostname' ? 'Queries' : RECAP_VERB[probeType]
+  return `${verb} ${targetAddressLabel({ host, probeType, probeConfig: config })} ${every}`
+}
 
 function IntervalSelect({
   id,
@@ -543,7 +576,7 @@ function IntervalSelect({
     <div className="space-y-2">
       <FieldLabel htmlFor={id} small>Probe every</FieldLabel>
       <Select value={value.toString()} onValueChange={v => onChange(parseInt(v))}>
-        <SelectTrigger id={id} className={cn(FIELD_INPUT, 'w-44')}>
+        <SelectTrigger id={id} className={cn(FIELD_INPUT, 'w-full')}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent className="bg-popover border-border">
@@ -564,11 +597,18 @@ interface TargetFormProps {
   availableGroups: string[]
   submitLabel: string
   onSubmit: (values: TargetFormValues) => void
+  onCancel: () => void
 }
 
-type RequiredField = 'address' | 'port' | 'name'
+type RequiredField = 'address' | 'port'
 
-function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit }: TargetFormProps) {
+/**
+ * The form reads top to bottom as the questions someone adding a target has,
+ * in the order they have them: what, how, what to call it, and then the
+ * settings that already hold a sensible answer. Only the first has to be
+ * answered, so an address and Enter is a whole target.
+ */
+function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit, onCancel }: TargetFormProps) {
   const initialGroupIsNew = !!initial.group && !availableGroups.includes(initial.group)
 
   const [name, setName] = useState(initial.name)
@@ -577,6 +617,13 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
   // Once the method has been picked by hand, typing more of the address must
   // not quietly switch it back. An existing target's method was picked.
   const [probeChosen, setProbeChosen] = useState(initial.host !== '')
+  // The method the address asked for by being a URL, a host:port or a
+  // well-known resolver, so the card it jumped to can say why.
+  const [suggested, setSuggested] = useState<ProbeType | null>(null)
+  // Set once the part of the address that asked for a method has been moved
+  // out of the box. After that the box holds a bare host, which must not be
+  // read as a request to go back to ping.
+  const [settled, setSettled] = useState(false)
   const [ipVersion, setIpVersion] = useState<IpVersion>(initial.ipVersion)
   const [draft, setDraft] = useState<ConfigDraft>(() => draftFrom(initial.probeConfig))
   const [interval, setInterval] = useState(initial.interval)
@@ -585,7 +632,7 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
   // A required field is only called out once it has been left, or once the
   // form has been submitted: flagging an empty box before anyone has had the
   // chance to type in it is nagging, not help.
-  const [touched, setTouched] = useState<Record<RequiredField, boolean>>({ address: false, port: false, name: false })
+  const [touched, setTouched] = useState<Record<RequiredField, boolean>>({ address: false, port: false })
   const [attempted, setAttempted] = useState(false)
 
   // The address box takes whatever is pasted into it: a bare host, a URL, or
@@ -593,7 +640,8 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
   // copied into the settings fields below as it is typed.
   const parsed = parseAddressInput(address)
   const host = parsed.host
-  const isDomain = classifyHost(host) === 'hostname'
+  const hostKind = classifyHost(host)
+  const isDomain = hostKind === 'hostname'
 
   const handleAddressChange = (value: string) => {
     setAddress(value)
@@ -605,8 +653,17 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
     if (next.config.path) carried.path = next.config.path
     if (Object.keys(carried).length > 0) setDraft(current => ({ ...current, ...carried }))
 
-    if (!probeChosen) {
-      setProbeType(next.probeType ?? (isWellKnownResolver(next.host) ? 'dns' : 'ping'))
+    if (probeChosen) return
+
+    const implied = next.probeType ?? (isWellKnownResolver(next.host) ? 'dns' : null)
+    if (implied) {
+      setProbeType(implied)
+      setSuggested(implied)
+    } else if (!settled || value.trim() === '') {
+      // An emptied box is a fresh start, whatever was pasted into it before.
+      setProbeType('ping')
+      setSuggested(null)
+      setSettled(false)
     }
   }
 
@@ -617,11 +674,14 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
   // address to disagree with them.
   const handleAddressBlur = () => {
     if (address.trim() !== host) setAddress(host)
+    if (!probeChosen && parsed.probeType) setSettled(true)
     touch('address')
   }
 
   const validation = validateProbeConfig(probeType, host, configFrom(draft))
-  const hostValid = classifyHost(host) !== 'invalid'
+  const hostValid = hostKind !== 'invalid'
+  const config = validation.ok ? validation.config : {}
+  const effectiveIpVersion = isDomain ? ipVersion : 'auto'
 
   // What each required field still needs, if anything.
   const problems: Record<RequiredField, string | null> = {
@@ -629,14 +689,12 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
     port: probeType !== 'tcp' || validation.ok
       ? null
       : draft.port.trim() === '' ? 'Enter the port to connect to.' : validation.error,
-    name: name.trim() ? null : 'Give the target a name to show in the sidebar.',
   }
   const shown = (field: RequiredField) => (attempted || touched[field] ? problems[field] : null)
 
   const missing = [
     problems.address && (host ? 'a valid address' : 'an address'),
     problems.port && 'a port',
-    problems.name && 'a display name',
   ].filter((item): item is string => !!item)
 
   const isValid = missing.length === 0 && validation.ok
@@ -645,17 +703,19 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
     if (!isValid || !validation.ok) {
       // Say what is wrong and go to it, instead of a button that does nothing.
       setAttempted(true)
-      const first = (['address', 'port', 'name'] as const).find(field => problems[field])
+      const first = (['address', 'port'] as const).find(field => problems[field])
       if (first) document.getElementById(`${idPrefix}-${first}`)?.focus()
       return
     }
 
     onSubmit({
-      name: name.trim(),
+      // A target nobody named is called by its address, which is what the
+      // name box shows it will be.
+      name: name.trim() || host,
       host,
       probeType,
       // Only a domain has a choice of family; a literal already fixes its own.
-      ipVersion: isDomain ? ipVersion : 'auto',
+      ipVersion: effectiveIpVersion,
       probeConfig: validation.config,
       interval,
       group: group === NEW_GROUP ? normalizeGroupPath(customGroup) : group,
@@ -663,128 +723,177 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit 
   }
 
   const addressError = shown('address')
-  const nameError = shown('name')
+  // Nothing to describe until the address is something that can be probed.
+  // What is wrong with it is said under the address field.
+  const summary = host ? describeProbe(host, probeType, effectiveIpVersion, config) : ''
+  // A setting that is filled in but wrong. Shown only once the address is
+  // fine, and never for the port, which reports under its own field: two
+  // messages for one mistake is one too many.
+  const settingsError = hostValid && host && !validation.ok && probeType !== 'tcp' ? validation.error : null
+  const hasSettings = probeType !== 'ping'
 
   return (
     <form
-      className="space-y-4 pt-2"
+      className="flex min-h-0 flex-1 flex-col"
       noValidate
       onSubmit={event => { event.preventDefault(); handleSubmit() }}
     >
-      <p className="text-xs text-muted-foreground">
-        Fields marked <span className="text-sm leading-none text-destructive" aria-hidden="true">*</span>
-        <span className="sr-only">with an asterisk</span> are required. Everything else can be left as it is.
-      </p>
-
-      {/* Address — the most important field, first */}
-      <div className="space-y-2">
-        <FieldLabel htmlFor={`${idPrefix}-address`} required>Address</FieldLabel>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            id={`${idPrefix}-address`}
-            placeholder="192.168.1.1, example.com, host:5432, https://example.com/health"
-            value={address}
-            onChange={e => handleAddressChange(e.target.value)}
-            onBlur={handleAddressBlur}
-            aria-required="true"
-            aria-invalid={!!addressError}
-            aria-describedby={addressError ? `${idPrefix}-address-error` : undefined}
-            className="bg-input border-border text-foreground pl-9"
-            autoFocus={initial.host === ''}
-          />
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
+        {/* What. The one field that has to be filled in, and built to look it. */}
+        <div className="space-y-2">
+          <FieldLabel htmlFor={`${idPrefix}-address`}>What do you want to monitor?</FieldLabel>
+          <div className="relative">
+            <Input
+              id={`${idPrefix}-address`}
+              placeholder="example.com"
+              value={address}
+              onChange={e => handleAddressChange(e.target.value)}
+              onBlur={handleAddressBlur}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              aria-required="true"
+              aria-invalid={!!addressError}
+              aria-describedby={`${idPrefix}-address-${addressError ? 'error' : 'hint'}`}
+              className="h-12 border-border bg-input pr-10 font-mono text-base text-foreground md:text-base"
+              autoFocus={initial.host === ''}
+            />
+            {host && hostValid && (
+              <Check
+                className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-signal-perfect"
+                aria-hidden="true"
+              />
+            )}
+          </div>
+          {addressError ? (
+            <FieldError id={`${idPrefix}-address-error`}>{addressError}</FieldError>
+          ) : (
+            <FieldHint id={`${idPrefix}-address-hint`}>
+              A hostname, an IP address, <span className="font-mono">host:port</span> or a whole URL. Paste
+              whatever you have: a port or path is moved into the settings below.
+            </FieldHint>
+          )}
         </div>
-        {addressError && <FieldError id={`${idPrefix}-address-error`}>{addressError}</FieldError>}
+
+        {/* How, with the chosen method's own settings attached beneath it. */}
+        <div className="space-y-2">
+          <FieldLabel>How should it be checked?</FieldLabel>
+          <ProbeMethodPicker
+            value={probeType}
+            suggested={suggested}
+            onChange={value => { setProbeType(value); setProbeChosen(true); setSuggested(null) }}
+          />
+          {(hasSettings || summary) && (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3.5">
+              <ProbeConfigFields
+                idPrefix={idPrefix}
+                probeType={probeType}
+                host={host}
+                draft={draft}
+                portError={shown('port') ?? undefined}
+                onChange={changes => setDraft(current => ({ ...current, ...changes }))}
+                onPortBlur={() => touch('port')}
+              />
+              {settingsError && <p className="text-xs text-destructive">{settingsError}</p>}
+              {summary && (
+                <div className={cn(hasSettings && 'border-t border-border pt-3')}>
+                  <ProbeSummary host={host} probeType={probeType} ipVersion={effectiveIpVersion} summary={summary} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* What to call it. */}
+        <div className="space-y-2">
+          <FieldLabel htmlFor={`${idPrefix}-name`} optional>Name</FieldLabel>
+          <Input
+            id={`${idPrefix}-name`}
+            placeholder={host && hostValid ? host : 'e.g. Office router'}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            aria-describedby={`${idPrefix}-name-hint`}
+            className="border-border bg-input text-foreground"
+          />
+          <FieldHint id={`${idPrefix}-name-hint`}>Shown in the sidebar. Left blank, the address is used.</FieldHint>
+        </div>
+
+        {/* Everything from here down already holds a sensible answer. */}
+        <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+          <IntervalSelect id={`${idPrefix}-interval`} value={interval} onChange={setInterval} />
+          <GroupSelect
+            id={`${idPrefix}-group`}
+            newGroupInputId={`${idPrefix}-new-group`}
+            group={group}
+            availableGroups={availableGroups}
+            onChange={next => { setGroup(next); if (next !== NEW_GROUP) setCustomGroup('') }}
+          />
+          {group === NEW_GROUP && (
+            <div className="space-y-2 sm:col-span-2">
+              <Input
+                id={`${idPrefix}-new-group`}
+                placeholder="New group name"
+                aria-label="New group name"
+                value={customGroup}
+                onChange={e => setCustomGroup(e.target.value)}
+                className={FIELD_INPUT}
+              />
+              <FieldHint>
+                A <span className="font-mono">/</span> puts it inside another group:{' '}
+                <span className="font-mono">Home/Network</span>.
+              </FieldHint>
+            </div>
+          )}
+        </div>
+
+        {hostKind !== 'ipv4' && hostKind !== 'ipv6' && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
       </div>
 
-      {/* Probe method, and what it will measure for this address */}
-      <div className="space-y-2">
-        <FieldLabel>Monitor with</FieldLabel>
-        <ProbeMethodPicker
-          value={probeType}
-          onChange={value => { setProbeType(value); setProbeChosen(true) }}
-        />
-        <ProbeSummary
-          host={host}
-          probeType={probeType}
-          ipVersion={isDomain ? ipVersion : 'auto'}
-          config={validation.ok ? validation.config : {}}
-        />
-      </div>
-
-      <ProbeConfigFields
-        idPrefix={idPrefix}
-        probeType={probeType}
-        host={host}
-        draft={draft}
-        portError={shown('port') ?? undefined}
-        onChange={changes => setDraft(current => ({ ...current, ...changes }))}
-        onPortBlur={() => touch('port')}
-      />
-      {/* A setting that is filled in but wrong. Shown only once the address is
-          fine, and never for the port, which reports under its own field: two
-          messages for one mistake is one too many. */}
-      {hostValid && host && !validation.ok && probeType !== 'tcp' && (
-        <p className="text-xs text-destructive">{validation.error}</p>
-      )}
-
-      {/* Name */}
-      <div className="space-y-2">
-        <FieldLabel htmlFor={`${idPrefix}-name`} required>Display name</FieldLabel>
-        <Input
-          id={`${idPrefix}-name`}
-          placeholder="e.g., Production Server, Google DNS"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          onBlur={() => touch('name')}
-          aria-required="true"
-          aria-invalid={!!nameError}
-          aria-describedby={nameError ? `${idPrefix}-name-error` : undefined}
-          className="bg-input border-border text-foreground"
-        />
-        {nameError && <FieldError id={`${idPrefix}-name-error`}>{nameError}</FieldError>}
-      </div>
-
-      {/* Everything below has a default, and is set apart so that is obvious. */}
-      <div className="flex items-center gap-3 pt-1" role="presentation">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          Optional settings
-        </span>
-        <span className="h-px flex-1 bg-border" />
-      </div>
-
-      <IpVersionPicker host={host} value={ipVersion} onChange={setIpVersion} />
-
-      <GroupPicker
-        group={group}
-        customGroup={customGroup}
-        availableGroups={availableGroups}
-        onGroupChange={next => { setGroup(next); if (next !== NEW_GROUP) setCustomGroup('') }}
-        onCustomGroupChange={setCustomGroup}
-      />
-
-      <IntervalSelect id={`${idPrefix}-interval`} value={interval} onChange={setInterval} />
-
-      <div className="space-y-2 pt-1">
-        {/* Left enabled while something is missing: pressing it says what,
-            where a greyed-out button only says no. */}
-        <Button type="submit" className="w-full" aria-disabled={!isValid}>
-          {submitLabel}
-        </Button>
-        {missing.length > 0 && (
-          <p
-            className={cn('text-center text-xs', attempted ? 'text-destructive' : 'text-muted-foreground')}
-            role={attempted ? 'alert' : undefined}
-          >
-            Still needed: {missing.join(', ')}.
-          </p>
-        )}
+      {/* Outside the part that scrolls, so the button is on show however long
+          the settings above it get. */}
+      <div className="flex flex-col gap-3 border-t border-border bg-muted/20 px-5 py-3.5 sm:flex-row sm:items-center sm:px-6">
+        {/* What pressing the button will do, or what is stopping it. */}
+        <p
+          className={cn(
+            'min-w-0 flex-1 text-xs',
+            attempted && !isValid ? 'text-destructive' : 'text-muted-foreground'
+          )}
+          role={attempted && !isValid ? 'alert' : undefined}
+        >
+          {missing.length > 0 ? (
+            `Still needed: ${missing.join(', ')}.`
+          ) : !validation.ok ? (
+            validation.error
+          ) : (
+            <span className="block truncate" title={recapFor(host, probeType, config, interval)}>
+              {recapFor(host, probeType, config, interval)}
+            </span>
+          )}
+        </p>
+        <div className="flex shrink-0 gap-2">
+          <Button type="button" variant="outline" className="flex-1 sm:flex-none" onClick={onCancel}>
+            Cancel
+          </Button>
+          {/* Left enabled while something is missing: pressing it says what,
+              where a greyed-out button only says no. */}
+          <Button type="submit" className="flex-1 sm:flex-none" aria-disabled={!isValid}>
+            {submitLabel}
+          </Button>
+        </div>
       </div>
     </form>
   )
 }
 
 // ─── Add Target Dialog ──────────────────────────────────────────────────────
+
+/**
+ * The dialog as three stacked parts: a header and a footer that stay where
+ * they are, and the form's fields scrolling between them. The dialog's own
+ * padding and scrolling are turned off so each part can do its own.
+ */
+const DIALOG_SHELL = 'flex flex-col gap-0 overflow-hidden border-border bg-card p-0 sm:max-w-xl sm:p-0'
+const DIALOG_HEADER = 'border-b border-border px-5 py-4 text-left sm:px-6'
 
 const BLANK_TARGET: TargetFormValues = {
   name: '',
@@ -806,16 +915,16 @@ interface AddTargetDialogProps {
 export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGroups }: AddTargetDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border sm:max-w-md" suppressHydrationWarning>
-        <DialogHeader>
+      <DialogContent className={DIALOG_SHELL} suppressHydrationWarning>
+        <DialogHeader className={DIALOG_HEADER}>
           <DialogTitle className="text-card-foreground flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
               <Plus className="h-4 w-4 text-primary" />
             </div>
-            Add New Target
+            Add a target
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Add a server, port, website, or DNS target to monitor.
+            Only the address is needed. Everything else starts with a sensible default.
           </DialogDescription>
         </DialogHeader>
 
@@ -825,7 +934,8 @@ export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGrou
           idPrefix="add"
           initial={BLANK_TARGET}
           availableGroups={availableGroups}
-          submitLabel="Add Target"
+          submitLabel="Add target"
+          onCancel={() => onOpenChange(false)}
           onSubmit={values => {
             onAddTarget({
               ...values,
@@ -858,13 +968,13 @@ export function EditTargetDialog({ open, onOpenChange, target, onSave, available
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border sm:max-w-md" suppressHydrationWarning>
-        <DialogHeader>
+      <DialogContent className={DIALOG_SHELL} suppressHydrationWarning>
+        <DialogHeader className={DIALOG_HEADER}>
           <DialogTitle className="text-card-foreground flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+            <div className="h-8 w-8 shrink-0 rounded-lg bg-blue-500/10 flex items-center justify-center">
               <Pencil className="h-4 w-4 text-blue-500" />
             </div>
-            Edit Target
+            <span className="min-w-0 break-words pr-6">Edit {target.name}</span>
           </DialogTitle>
         </DialogHeader>
 
@@ -881,7 +991,8 @@ export function EditTargetDialog({ open, onOpenChange, target, onSave, available
             group: target.group || '',
           }}
           availableGroups={availableGroups}
-          submitLabel="Save Changes"
+          submitLabel="Save changes"
+          onCancel={() => onOpenChange(false)}
           onSubmit={values => {
             // The group is sent even when empty: that is how choosing "None"
             // takes the target out of its group.
