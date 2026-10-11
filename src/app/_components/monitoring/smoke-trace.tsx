@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useRef, memo } from 'react'
+import { useCallback, useMemo, useState, useRef, memo } from 'react'
 import {
   getPacketLossVar,
   isMeaningfulLoss,
@@ -8,7 +8,18 @@ import {
   NO_DATA_COLOR,
 } from '@/lib/packet-loss-colors'
 import type { DataPoint, TimeRange, TimeWindow } from '@/types/probe'
-import { BrushBox, BrushLabel, formatTick, latencyDomain, niceTicks, useChartBrush, useChartWidth } from './chart-brush'
+import {
+  BrushBox,
+  BrushLabel,
+  TimeAxis,
+  chartHeightFor,
+  holdInside,
+  latencyDomain,
+  niceTicks,
+  useChartBrush,
+  useChartWidth,
+  useOutsidePress,
+} from './chart-brush'
 
 /**
  * The smoke trace.
@@ -86,15 +97,18 @@ const LANE_GAP = 16
 export const SmokeTrace = memo(function SmokeTrace({
   data,
   timeRange,
-  height = 340,
+  height: fullHeight = 340,
   window: zoomWindow = null,
   onZoom,
   onResetZoom,
   noLossLabel = 'No packet loss in this window',
 }: SmokeTraceProps) {
   const [width, containerRef] = useChartWidth()
+  const height = chartHeightFor(width, fullHeight)
   const [hover, setHover] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const clearHover = useCallback(() => setHover(null), [])
+  useOutsidePress(svgRef, hover !== null, clearHover)
 
   const plotW = Math.max(120, width - PAD.left - PAD.right)
   const plotH = Math.max(140, height - PAD.top - PAD.bottom)
@@ -209,13 +223,12 @@ export const SmokeTrace = memo(function SmokeTrace({
   const canZoom = brush.enabled
   const selection = brush.selection
 
-  const handleMove = (event: React.PointerEvent<SVGSVGElement>) => {
+  /** The interval drawn nearest to a point on the screen. */
+  const nearestTo = (clientX: number): number | null => {
     const rect = svgRef.current?.getBoundingClientRect()
-    if (!rect || plotted.length === 0) return
+    if (!rect || plotted.length === 0) return null
 
-    if (brush.move(event)) return
-
-    const x = ((event.clientX - rect.left) / rect.width) * width
+    const x = ((clientX - rect.left) / rect.width) * width
     let nearest = 0
     let best = Infinity
     for (const p of plotted) {
@@ -225,14 +238,26 @@ export const SmokeTrace = memo(function SmokeTrace({
         nearest = p.index
       }
     }
-    setHover(nearest)
+    return nearest
+  }
+
+  const handleMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (plotted.length === 0 || brush.move(event)) return
+    setHover(nearestTo(event.clientX))
   }
 
   const endBrush = (event: React.PointerEvent<SVGSVGElement>, commit: boolean) => {
-    if (brush.end(event, commit)) setHover(null)
+    if (brush.end(event, commit)) {
+      setHover(null)
+      return
+    }
+    // A finger does not hover, so on a touchscreen a reading is asked for by
+    // tapping. It shows on release, not on the press: a press is also how a
+    // scroll of the page begins.
+    if (commit && event.pointerType === 'touch') setHover(nearestTo(event.clientX))
   }
 
-  const tooltipLeft = active ? Math.min(Math.max(active.x, 100), width - 100) : 0
+  const tooltipLeft = active ? holdInside(active.x, 100, width) : 0
 
   const spanMs = xMax - xMin
 
@@ -247,7 +272,9 @@ export const SmokeTrace = memo(function SmokeTrace({
         onPointerMove={handleMove}
         onPointerUp={event => endBrush(event, true)}
         onPointerCancel={event => endBrush(event, false)}
-        onPointerLeave={() => setHover(null)}
+        // A finger "leaves" the moment it lifts, which would close the reading
+        // its tap had just opened; that one is closed by pressing elsewhere.
+        onPointerLeave={event => { if (event.pointerType !== 'touch') setHover(null) }}
         onDoubleClick={() => { if (zoomWindow) onResetZoom?.() }}
         role="img"
         aria-label={`Latency and packet loss over the last ${timeRange}. Worst packet loss ${worstLoss.toFixed(1)} percent.`}
@@ -440,19 +467,7 @@ export const SmokeTrace = memo(function SmokeTrace({
           </text>
         )}
 
-        {/* Time axis */}
-        {[xMin, (xMin + xMax) / 2, xMax].map((t, i) => (
-          <text
-            key={`x-${i}`}
-            x={PAD.left + (i * plotW) / 2}
-            y={height - 8}
-            textAnchor={i === 0 ? 'start' : i === 2 ? 'end' : 'middle'}
-            className="fill-muted-foreground font-mono"
-            fontSize={10}
-          >
-            {formatTick(t, spanMs)}
-          </text>
-        ))}
+        <TimeAxis start={xMin} end={xMax} left={PAD.left} width={plotW} y={height - 8} />
 
         {/* The period being selected, across both panels: the loss lane is
             usually what prompted the zoom, so it has to be inside the box. */}
@@ -566,7 +581,12 @@ export const SmokeTrace = memo(function SmokeTrace({
         </span>
         {canZoom && (
           <span className="ml-auto text-muted-foreground/70">
-            {zoomWindow ? 'Drag to zoom further · double-click to reset' : 'Drag across the chart to zoom in'}
+            <span className="touch:hidden">
+              {zoomWindow ? 'Drag to zoom further · double-click to reset' : 'Drag across the chart to zoom in'}
+            </span>
+            <span className="hidden touch:inline">
+              {zoomWindow ? 'Tap for a reading · drag sideways to zoom further' : 'Tap for a reading · drag sideways to zoom in'}
+            </span>
           </span>
         )}
       </div>

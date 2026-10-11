@@ -255,18 +255,18 @@ export function ComparePanel({
   const hasMeasurements = rows.some(row => (row.statistics?.sampleCount ?? 0) > 0)
 
   return (
-    <section className="min-h-[26rem] rounded-xl border border-border bg-card p-5">
+    <section className="min-h-[26rem] rounded-xl border border-border bg-card p-4 @2xl/main:p-5">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-sm font-medium text-foreground">{title}</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
         </div>
         {zoom && (
-          <p className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+          <p className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted-foreground">
             <span>
               {formatWindowEdge(zoom.start)} – {formatWindowEdge(zoom.end)}
             </span>
-            <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={onResetZoom}>
+            <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] touch:h-8 touch:px-3" onClick={onResetZoom}>
               Reset zoom
             </Button>
           </p>
@@ -313,6 +313,10 @@ export function ComparePanel({
             {/* The legend. Smokeping prints each line's figures beside its
                 colour; here that is a table, so the lines can be compared by
                 number as well as by eye. */}
+            {/* The columns a narrow pane has no room for are left out, least
+                telling first, so that the ones that remain fit without the
+                table having to be scrolled sideways: the extremes go first,
+                then the two that say again what the median and the loss do. */}
             <div className="mt-4 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -320,11 +324,11 @@ export function ComparePanel({
                     <th className="pb-1.5 pr-4 font-medium">Line</th>
                     <th className="pb-1.5 pr-4 text-right font-medium">Now</th>
                     <th className="pb-1.5 pr-4 text-right font-medium">Median</th>
-                    <th className="pb-1.5 pr-4 text-right font-medium">Avg</th>
-                    <th className="hidden pb-1.5 pr-4 text-right font-medium md:table-cell">Min</th>
-                    <th className="hidden pb-1.5 pr-4 text-right font-medium md:table-cell">Max</th>
-                    <th className="pb-1.5 pr-4 text-right font-medium">Loss</th>
-                    <th className="pb-1.5 text-right font-medium">Uptime</th>
+                    <th className="hidden pb-1.5 pr-4 text-right font-medium @lg/main:table-cell">Avg</th>
+                    <th className="hidden pb-1.5 pr-4 text-right font-medium @3xl/main:table-cell">Min</th>
+                    <th className="hidden pb-1.5 pr-4 text-right font-medium @3xl/main:table-cell">Max</th>
+                    <th className="pb-1.5 text-right font-medium @lg/main:pr-4">Loss</th>
+                    <th className="hidden pb-1.5 text-right font-medium @lg/main:table-cell">Uptime</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -371,13 +375,13 @@ export function ComparePanel({
                               <span className="min-w-0 truncate font-medium text-foreground">{line.label}</span>
                             )}
                             {showAddress && (
-                              <span className="hidden min-w-0 truncate font-mono text-[11px] text-muted-foreground lg:inline">
+                              <span className="hidden min-w-0 truncate font-mono text-[11px] text-muted-foreground @4xl/main:inline">
                                 {targetAddressLabel(target)}
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="py-1.5 pr-4 text-right font-mono">
+                        <td className="whitespace-nowrap py-1.5 pr-4 text-right font-mono">
                           {!now ? (
                             <span className="text-muted-foreground/60">—</span>
                           ) : nowValue === null ? (
@@ -387,22 +391,22 @@ export function ComparePanel({
                           )}
                         </td>
                         <td className="py-1.5 pr-4 text-right font-mono">{ms(statistics?.medianLatency)}</td>
-                        <td className="py-1.5 pr-4 text-right font-mono text-muted-foreground">
+                        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground @lg/main:table-cell">
                           {ms(statistics?.avgLatency)}
                         </td>
-                        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground md:table-cell">
+                        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground @3xl/main:table-cell">
                           {ms(statistics?.minLatency)}
                         </td>
-                        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground md:table-cell">
+                        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground @3xl/main:table-cell">
                           {ms(statistics?.maxLatency)}
                         </td>
                         <td
-                          className="py-1.5 pr-4 text-right font-mono"
+                          className="py-1.5 text-right font-mono @lg/main:pr-4"
                           style={statistics && isMeaningfulLoss(loss) ? { color: getPacketLossVar(loss) } : undefined}
                         >
                           {statistics ? `${loss.toFixed(loss > 0 && loss < 10 ? 1 : 0)}%` : '—'}
                         </td>
-                        <td className="py-1.5 text-right font-mono text-muted-foreground">
+                        <td className="hidden py-1.5 text-right font-mono text-muted-foreground @lg/main:table-cell">
                           {statistics ? `${statistics.uptime.toFixed(statistics.uptime < 100 ? 1 : 0)}%` : '—'}
                         </td>
                       </tr>
@@ -412,7 +416,14 @@ export function ComparePanel({
               </table>
               <p className="mt-3 text-[11px] text-muted-foreground/70">
                 Latency columns are in milliseconds, over the period shown.{' '}
-                {zoom ? 'Drag to zoom further · double-click the chart to reset.' : 'Drag across the chart to zoom in.'}
+                <span className="touch:hidden">
+                  {zoom ? 'Drag to zoom further · double-click the chart to reset.' : 'Drag across the chart to zoom in.'}
+                </span>
+                <span className="hidden touch:inline">
+                  {zoom
+                    ? 'Tap the chart for readings · drag sideways to zoom further.'
+                    : 'Tap the chart for readings · drag sideways to zoom in.'}
+                </span>
               </p>
             </div>
           </ErrorBoundary>

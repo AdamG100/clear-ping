@@ -1,9 +1,20 @@
 'use client'
 
-import { useMemo, useState, useRef, memo } from 'react'
+import { useCallback, useMemo, useState, useRef, memo } from 'react'
 import { getPacketLossVar, isMeaningfulLoss } from '@/lib/packet-loss-colors'
 import type { DataPoint } from '@/types/probe'
-import { BrushBox, BrushLabel, formatTick, latencyDomain, niceTicks, useChartBrush, useChartWidth } from './chart-brush'
+import {
+  BrushBox,
+  BrushLabel,
+  TimeAxis,
+  chartHeightFor,
+  holdInside,
+  latencyDomain,
+  niceTicks,
+  useChartBrush,
+  useChartWidth,
+  useOutsidePress,
+} from './chart-brush'
 
 /**
  * Several targets on one chart: Smokeping's multi-host graph.
@@ -122,14 +133,17 @@ export const CompareTrace = memo(function CompareTrace({
   end,
   zoomed = false,
   highlighted = null,
-  height = 340,
+  height: fullHeight = 340,
   onZoom,
   onResetZoom,
 }: CompareTraceProps) {
   const [width, containerRef] = useChartWidth()
+  const height = chartHeightFor(width, fullHeight)
   // The moment under the pointer, as an x position in chart units.
   const [hoverX, setHoverX] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const clearHover = useCallback(() => setHoverX(null), [])
+  useOutsidePress(svgRef, hoverX !== null, clearHover)
 
   // Strips thin out as lines are added, so two lines get a readable lane and
   // twenty do not push the chart off the screen.
@@ -188,13 +202,28 @@ export const CompareTrace = memo(function CompareTrace({
   })
   const selection = brush.selection
 
+  /** A point on the screen as an x position in chart units, or null outside the plot. */
+  const plotX = (clientX: number): number | null => {
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect) return null
+    const x = ((clientX - rect.left) / rect.width) * width
+    return x >= PAD.left && x <= PAD.left + plotW ? x : null
+  }
+
   const handleMove = (event: React.PointerEvent<SVGSVGElement>) => {
     if (brush.move(event)) return
+    setHoverX(plotX(event.clientX))
+  }
 
-    const rect = svgRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const x = ((event.clientX - rect.left) / rect.width) * width
-    setHoverX(x >= PAD.left && x <= PAD.left + plotW ? x : null)
+  const handleUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (brush.end(event, true)) {
+      setHoverX(null)
+      return
+    }
+    // A finger does not hover, so on a touchscreen the readings are asked for
+    // by tapping. They show on release, not on the press: a press is also how
+    // a scroll of the page begins.
+    if (event.pointerType === 'touch') setHoverX(plotX(event.clientX))
   }
 
   // Lines probe at their own intervals, so each is read on its own rather
@@ -206,7 +235,7 @@ export const CompareTrace = memo(function CompareTrace({
 
   const spanMs = end - start
   const hoverTime = hoverX === null ? null : start + ((hoverX - PAD.left) / plotW) * spanMs
-  const tooltipLeft = hoverX === null ? 0 : Math.min(Math.max(hoverX, 130), width - 130)
+  const tooltipLeft = hoverX === null ? 0 : holdInside(hoverX, 130, width)
   const dimmed = (key: string) => highlighted !== null && highlighted !== key
 
   return (
@@ -218,9 +247,11 @@ export const CompareTrace = memo(function CompareTrace({
         height={totalHeight}
         onPointerDown={brush.start}
         onPointerMove={handleMove}
-        onPointerUp={event => { if (brush.end(event, true)) setHoverX(null) }}
+        onPointerUp={handleUp}
         onPointerCancel={event => brush.end(event, false)}
-        onPointerLeave={() => setHoverX(null)}
+        // A finger "leaves" the moment it lifts, which would close the readings
+        // its tap had just opened; those are closed by pressing elsewhere.
+        onPointerLeave={event => { if (event.pointerType !== 'touch') setHoverX(null) }}
         onDoubleClick={() => { if (zoomed) onResetZoom?.() }}
         role="img"
         aria-label={`Median latency of ${lines.length} series on one chart: ${lines.map(line => line.label).join(', ')}.`}
@@ -317,19 +348,7 @@ export const CompareTrace = memo(function CompareTrace({
           )
         })}
 
-        {/* Time axis */}
-        {[start, (start + end) / 2, end].map((t, i) => (
-          <text
-            key={`x-${i}`}
-            x={PAD.left + (i * plotW) / 2}
-            y={totalHeight - 8}
-            textAnchor={i === 0 ? 'start' : i === 2 ? 'end' : 'middle'}
-            className="fill-muted-foreground font-mono"
-            fontSize={10}
-          >
-            {formatTick(t, spanMs)}
-          </text>
-        ))}
+        <TimeAxis start={start} end={end} left={PAD.left} width={plotW} y={totalHeight - 8} />
 
         {selection && <BrushBox selection={selection} top={PAD.top} bottom={lossBottom} />}
 

@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { alertTitle, describeCondition, isDiscordWebhook, parseMentionIds } from '@/lib/alert-delivery'
 import { groupDepth, groupName } from '@/lib/group-path'
 import { buildSidebarLayout, groupsInOrder, targetsWithin } from '@/lib/sidebar-layout'
+import { PANE, PANE_TITLE } from './pane-layout'
 import type { Alert, AlertDestination, AlertMetric, AlertTargetState, GroupOrder, Target } from '@/types/probe'
 import { ALERT_DESTINATION_LABELS, ALERT_METRIC_LABELS } from '@/types/probe'
 
@@ -200,7 +201,7 @@ function TargetChecklist({
           return (
             <div key={group}>
               <label
-                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-muted/50"
+                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-muted/50 touch:py-2"
                 style={{ paddingLeft: 4 + depth * 16 }}
               >
                 <Checkbox
@@ -223,7 +224,7 @@ function TargetChecklist({
                 return (
                   <label
                     key={id}
-                    className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-muted/50"
+                    className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-muted/50 touch:py-2"
                     style={{ paddingLeft: 20 + depth * 16 }}
                   >
                     <Checkbox
@@ -350,7 +351,7 @@ function AlertForm({
                 type="button"
                 onClick={() => applyPreset(preset)}
                 className={cn(
-                  'cursor-pointer rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+                  'cursor-pointer rounded-md border px-2.5 py-1.5 text-xs transition-colors touch:py-2.5',
                   active
                     ? 'border-primary bg-primary text-primary-foreground'
                     : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted'
@@ -434,7 +435,7 @@ function AlertForm({
               aria-checked={destination === option}
               onClick={() => setDestination(option)}
               className={cn(
-                'cursor-pointer rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+                'cursor-pointer rounded-md border px-2.5 py-1.5 text-xs transition-colors touch:py-2.5',
                 destination === option
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted'
@@ -637,10 +638,10 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
   ).length
 
   return (
-    <div className="p-6 space-y-6">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Alerts</h1>
+    <div className={PANE}>
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-1 basis-64">
+          <h1 className={PANE_TITLE}>Alerts</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
             <span>Get told when a path breaks, instead of finding out here.</span>
             {firingCount > 0 && (
@@ -683,13 +684,17 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
               <li
                 key={alert.id}
                 className={cn(
-                  'rounded-xl border bg-card px-5 py-4',
+                  'rounded-xl border bg-card px-4 py-4 @2xl/main:px-5',
                   isFiring ? 'border-destructive/50' : 'border-border',
                   !alert.enabled && 'opacity-60'
                 )}
               >
                 <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                  <div className="min-w-0 flex-1">
+                  {/* A width to start from, so that where there is not room
+                      for it beside the buttons they go underneath. Without
+                      one the text gave way instead, down to a column a few
+                      words wide. */}
+                  <div className="min-w-0 flex-1 basis-64">
                     <div className="flex flex-wrap items-center gap-2">
                       <span
                         className={cn(
@@ -719,7 +724,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
 
                   <div className="flex shrink-0 items-center gap-1">
                     {alert.destination !== 'none' && alert.webhookUrl && (
-                      <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={busy} onClick={() => sendTest(alert)}>
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-xs touch:h-9 touch:px-3" disabled={busy} onClick={() => sendTest(alert)}>
                         <Send className="mr-1.5 h-3 w-3" />
                         Send test
                       </Button>
@@ -728,7 +733,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                       type="button"
                       onClick={() => toggle(alert)}
                       disabled={busy}
-                      className="cursor-pointer rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                      className="cursor-pointer rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 touch:p-2.5"
                       aria-label={alert.enabled ? `Mute ${title}` : `Unmute ${title}`}
                       title={alert.enabled ? 'Mute: stop judging and sending this alert' : 'Unmute'}
                     >
@@ -738,7 +743,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                       type="button"
                       onClick={() => setEditing(alert)}
                       disabled={busy}
-                      className="cursor-pointer rounded p-1.5 transition-colors hover:bg-blue-500/20 disabled:opacity-40"
+                      className="cursor-pointer rounded p-1.5 transition-colors hover:bg-blue-500/20 disabled:opacity-40 touch:p-2.5"
                       aria-label={`Edit ${title}`}
                     >
                       <Pencil className="h-3.5 w-3.5 text-blue-500" />
@@ -747,7 +752,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                       <Button
                         variant="destructive"
                         size="sm"
-                        className="h-7 px-2 text-xs"
+                        className="h-7 px-2 text-xs touch:h-9 touch:px-3"
                         onClick={() => remove(alert)}
                         onBlur={() => setConfirmingId(null)}
                         autoFocus
@@ -759,7 +764,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                         type="button"
                         onClick={() => remove(alert)}
                         disabled={busy}
-                        className="cursor-pointer rounded p-1.5 transition-colors hover:bg-destructive/20 disabled:opacity-40"
+                        className="cursor-pointer rounded p-1.5 transition-colors hover:bg-destructive/20 disabled:opacity-40 touch:p-2.5"
                         aria-label={`Delete ${title}`}
                       >
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -780,7 +785,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                           type="button"
                           onClick={() => onSelectTarget(entry.targetId)}
                           title={`Open ${target.name}`}
-                          className="cursor-pointer rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-destructive/20"
+                          className="cursor-pointer rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-destructive/20 touch:px-3 touch:py-1.5"
                         >
                           {target.name}
                         </button>
@@ -795,7 +800,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
       )}
 
       <Dialog open={editing !== null} onOpenChange={open => { if (!open) setEditing(null) }}>
-        <DialogContent className="bg-card border-border sm:max-w-xl max-h-[90vh] overflow-y-auto" suppressHydrationWarning>
+        <DialogContent className="bg-card border-border sm:max-w-xl" suppressHydrationWarning>
           {editing !== null && (
             <>
               <DialogHeader>

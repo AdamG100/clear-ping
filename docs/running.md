@@ -70,6 +70,41 @@ matches the machine. 32-bit ARM is not supported.
 file, set up to sit behind Traefik. Copy it to `compose.yaml` and change the
 hostname and network to yours.
 
+## Installing it as an app
+
+ClearPing can be installed to a phone's home screen, or as a desktop app, and
+then opens in a window of its own without the browser around it.
+
+- **Android (Chrome):** open ClearPing, then menu → *Add to Home screen* →
+  *Install*.
+- **iPhone and iPad (Safari):** open ClearPing, then *Share* → *Add to Home
+  Screen*.
+- **Desktop (Chrome, Edge):** the install icon at the end of the address bar.
+
+**Android and desktop need HTTPS.** Browsers only offer to install a site, and
+only run the part that works offline, on a secure address: `https://`, or
+`localhost` on the machine itself. Reached as `http://192.168.1.10:3000` the
+app works exactly as it does in a tab, but there is no *Install*, only a plain
+shortcut. Put it behind a reverse proxy with a certificate
+(`compose.example.yaml` does this with Traefik) or a tunnel that provides one.
+iOS adds it to the home screen over plain HTTP as well.
+
+Installed, the app still needs the server: every reading is fetched live, and
+none are kept on the device. When the server cannot be reached it says so on a
+page of its own, and reloads by itself once the server answers.
+
+What makes it installable, for anyone changing it:
+
+- `src/app/manifest.ts` is the name, colours and icons, served as
+  `/manifest.webmanifest`.
+- `public/icons/` holds the icons. The two `.svg` files are the drawings the
+  `.png` files were made from; `icon-maskable` has the margin Android needs to
+  crop it to the launcher's shape.
+- `public/sw.js` is the service worker and `public/offline.html` the page it
+  shows. It caches that page and nothing else, on purpose: a stored copy of
+  the dashboard would show old readings as if they were current. It is only
+  started in a production build.
+
 ## Upgrading
 
 Pull the new image and recreate the container. Nothing else is needed:

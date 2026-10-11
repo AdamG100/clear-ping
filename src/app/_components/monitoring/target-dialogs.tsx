@@ -140,7 +140,7 @@ function ProbeMethodPicker({
           aria-checked={value === method.value}
           onClick={() => onChange(method.value)}
           className={cn(
-            'flex items-center justify-center gap-2 rounded-md border px-2.5 py-2 text-xs transition-colors cursor-pointer',
+            'flex items-center justify-center gap-2 rounded-md border px-2.5 py-2 text-xs transition-colors cursor-pointer touch:py-2.5',
             value === method.value
               ? 'bg-primary text-primary-foreground border-primary'
               : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
@@ -288,11 +288,13 @@ function ProbeConfigFields({
   if (probeType === 'http') {
     return (
       <div className="space-y-3">
-        <div className="grid grid-cols-[7rem_6rem_1fr] gap-3">
+        {/* Three across leaves the path a few letters wide in a dialog the
+            width of a phone, so there it has the second line to itself. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[7rem_6rem_1fr]">
           <div className="space-y-2">
             <FieldLabel htmlFor={`${idPrefix}-scheme`} small>Scheme</FieldLabel>
             <Select value={draft.scheme} onValueChange={(v: 'http' | 'https') => onChange({ scheme: v })}>
-              <SelectTrigger id={`${idPrefix}-scheme`} className={FIELD_INPUT}>
+              <SelectTrigger id={`${idPrefix}-scheme`} className={cn(FIELD_INPUT, 'w-full')}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-popover border-border">
@@ -312,7 +314,7 @@ function ProbeConfigFields({
               className={FIELD_INPUT}
             />
           </div>
-          <div className="space-y-2">
+          <div className="col-span-2 space-y-2 sm:col-span-1">
             <FieldLabel htmlFor={`${idPrefix}-path`} small>Path</FieldLabel>
             <Input
               id={`${idPrefix}-path`}
@@ -323,7 +325,7 @@ function ProbeConfigFields({
             />
           </div>
         </div>
-        <div className="grid grid-cols-[9rem_1fr] gap-3">
+        <div className="grid gap-3 sm:grid-cols-[9rem_1fr]">
           <div className="space-y-2">
             <FieldLabel htmlFor={`${idPrefix}-status`} small optional>Expect status</FieldLabel>
             <Input
@@ -371,7 +373,7 @@ function ProbeConfigFields({
           <div className="space-y-2">
             <FieldLabel htmlFor={`${idPrefix}-record`} small>Record</FieldLabel>
             <Select value={draft.recordType} onValueChange={(v: DnsRecordType) => onChange({ recordType: v })}>
-              <SelectTrigger id={`${idPrefix}-record`} className={FIELD_INPUT}>
+              <SelectTrigger id={`${idPrefix}-record`} className={cn(FIELD_INPUT, 'w-full')}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-popover border-border">
@@ -404,7 +406,7 @@ function ProbeConfigFields({
 /** One of a row of mutually exclusive choices. */
 const choice = (selected: boolean) =>
   cn(
-    'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer',
+    'text-xs px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer touch:py-2.5',
     selected
       ? 'bg-primary text-primary-foreground border-primary'
       : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
@@ -497,7 +499,7 @@ function IpVersionPicker({
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="IP version">
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="radiogroup" aria-label="IP version">
             {IP_VERSION_CHOICES.map(option => (
               <button
                 key={option.value}
@@ -804,7 +806,7 @@ interface AddTargetDialogProps {
 export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGroups }: AddTargetDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border sm:max-w-md max-h-[90vh] overflow-y-auto" suppressHydrationWarning>
+      <DialogContent className="bg-card border-border sm:max-w-md" suppressHydrationWarning>
         <DialogHeader>
           <DialogTitle className="text-card-foreground flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -856,7 +858,7 @@ export function EditTargetDialog({ open, onOpenChange, target, onSave, available
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border sm:max-w-md max-h-[90vh] overflow-y-auto" suppressHydrationWarning>
+      <DialogContent className="bg-card border-border sm:max-w-md" suppressHydrationWarning>
         <DialogHeader>
           <DialogTitle className="text-card-foreground flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center">

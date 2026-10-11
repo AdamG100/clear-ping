@@ -16,6 +16,9 @@ import type {
 } from '@/types/probe'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
 import { Sidebar } from './sidebar'
+import { MobileTopBar } from './mobile-top-bar'
+import { useSidebarDrawer } from './use-sidebar-drawer'
+import { PANE, PANE_ACTION, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
 import StatsCards from './stats-cards'
 import { TimeRangeSelector } from './time-range-selector'
 import { SmokeTrace } from './smoke-trace'
@@ -463,7 +466,7 @@ function TargetAlerts({
   const watching = alerts.filter(alert => alert.targets.some(entry => entry.targetId === targetId))
 
   return (
-    <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-5 py-4">
+    <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-4 py-4 @2xl/main:px-5">
       <h2 className="text-sm font-medium text-foreground">Alerts</h2>
       {watching.length === 0 ? (
         <p className="text-xs text-muted-foreground">No alert is watching this target.</p>
@@ -494,7 +497,7 @@ function TargetAlerts({
           })}
         </ul>
       )}
-      <Button variant="outline" size="sm" className="ml-auto h-7 px-2 text-xs" onClick={onManage}>
+      <Button variant="outline" size="sm" className="ml-auto h-7 px-2 text-xs touch:h-9 touch:px-3" onClick={onManage}>
         Manage alerts
       </Button>
     </section>
@@ -507,6 +510,9 @@ export function Dashboard() {
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
   // The alerts screen takes the place of a target or a group in the main pane.
   const [showingAlerts, setShowingAlerts] = useState(false)
+  // On a narrow screen the sidebar is a drawer over the page. Choosing
+  // anything in it is the reason it was opened, so every choice closes it.
+  const { open: sidebarOpen, show: showSidebar, hide: hideSidebar } = useSidebarDrawer()
   const [timeRange, setTimeRange] = useState<TimeRange>('1h')
   // A period picked out by dragging across the chart. It narrows the range
   // rather than replacing it, and is dropped whenever the range or the target
@@ -540,18 +546,25 @@ export function Dashboard() {
     setShowingAlerts(false)
     setZoom(null)
     setFamilyView('both')
+    hideSidebar()
     if (typeof window === 'undefined') return
     localStorage.removeItem('selectedGroup')
     if (id) localStorage.setItem('selectedTargetId', id)
     else localStorage.removeItem('selectedTargetId')
-  }, [])
+  }, [hideSidebar])
 
   const selectGroup = useCallback((groupName: string) => {
     setSelectedGroupState(groupName)
     setShowingAlerts(false)
     setZoom(null)
+    hideSidebar()
     if (typeof window !== 'undefined') localStorage.setItem('selectedGroup', groupName)
-  }, [])
+  }, [hideSidebar])
+
+  const openAlerts = useCallback(() => {
+    setShowingAlerts(true)
+    hideSidebar()
+  }, [hideSidebar])
 
   // A group on screen keeps being on screen under its new name.
   const handleMoveGroup = useCallback(async (from: string, to: string) => {
@@ -769,8 +782,12 @@ export function Dashboard() {
   const hasMeasurements = !!statistics && statistics.sampleCount > 0
 
   return (
-    <div className="flex h-screen bg-background">
+    // `dvh`, not `vh`: on a phone `vh` is the height with the browser's bars
+    // tucked away, so the bottom of the page sat underneath them.
+    <div className="flex h-dvh bg-background">
       <Sidebar
+        open={sidebarOpen}
+        onClose={hideSidebar}
         targets={transformedTargets}
         selectedTargetId={groupTargets || showingAlerts ? null : selectedTargetId}
         onSelectTarget={setSelectedTargetId}
@@ -778,7 +795,7 @@ export function Dashboard() {
         onSelectGroup={selectGroup}
         onMoveGroup={handleMoveGroup}
         alertsOpen={showingAlerts}
-        onOpenAlerts={() => setShowingAlerts(true)}
+        onOpenAlerts={openAlerts}
         firingAlerts={firingAlerts}
         onAddTarget={addTarget}
         onUpdateTarget={updateTarget}
@@ -791,14 +808,27 @@ export function Dashboard() {
         loading={!isLoaded}
       />
 
+      {/* Behind an open drawer the page cannot be used, by pointer or by
+          keyboard, until the drawer is closed. */}
+      <div className="flex min-w-0 flex-1 flex-col" inert={sidebarOpen}>
+      <MobileTopBar
+        sidebarOpen={sidebarOpen}
+        onOpenSidebar={showSidebar}
+        alertsOpen={showingAlerts}
+        onOpenAlerts={openAlerts}
+        firingAlerts={firingAlerts}
+      />
+
       {/* The gutter is kept whether or not the page is long enough to scroll.
           Otherwise the scrollbar arriving with the last panels narrows the
-          pane, and everything in it, charts included, shifts sideways. */}
-      <main className="flex-1 overflow-auto scrollbar-gutter-stable">
+          pane, and everything in it, charts included, shifts sideways.
+          The pane is a container: what is inside is laid out from the pane's
+          own width, not the screen's (see pane-layout.ts). */}
+      <main className="@container/main flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable pb-(--safe-bottom) pr-(--safe-right) max-lg:pl-(--safe-left) lg:pt-(--safe-top)">
         {showLoadingState ? (
           <PaneSkeleton />
         ) : showEmptyState ? (
-          <div className="flex h-full items-center justify-center">
+          <div className="flex h-full items-center justify-center p-6">
             <div className="text-center">
               <svg viewBox="0 0 120 40" className="mx-auto mb-5 h-10 w-32" fill="none" aria-hidden="true">
                 <path
@@ -850,15 +880,15 @@ export function Dashboard() {
           ) : groupTargets ? (
           <motion.div
             key={`group:${selectedGroup}`}
-            className="p-6 space-y-6"
+            className={PANE}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
             transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
           >
-            <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-foreground">{groupLabel(selectedGroup ?? '')}</h1>
+            <header className={PANE_HEADER}>
+              <div className="min-w-0">
+                <h1 className={PANE_TITLE}>{groupLabel(selectedGroup ?? '')}</h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                   <span>
                     {groupTargets.length} target{groupTargets.length === 1 ? '' : 's'} on one chart
@@ -868,17 +898,17 @@ export function Dashboard() {
                   </span>
                 </p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className={PANE_ACTIONS}>
                 <TimeRangeSelector value={timeRange} onChange={handleTimeRangeChange} />
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={reloadTargets}
-                  className="shrink-0"
+                  className={PANE_ACTION}
                   aria-label="Refresh measurements"
                 >
                   <RefreshCw className="h-4 w-4" />
-                  <span className="ml-2 hidden sm:inline">Refresh</span>
+                  <span className="ml-2">Refresh</span>
                 </Button>
               </div>
             </header>
@@ -902,15 +932,15 @@ export function Dashboard() {
           ) : selectedTarget ? (
           <motion.div
             key={selectedTarget.id}
-            className="p-6 space-y-6"
+            className={PANE}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
             transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
           >
-            <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            <header className={PANE_HEADER}>
+              <div className="min-w-0">
+                <h1 className={PANE_TITLE}>
                   {selectedTarget.name}
                 </h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -918,7 +948,7 @@ export function Dashboard() {
                   {/* Where a domain pointed on its last probe: the address the
                       readings below were actually taken against. */}
                   {selectedTarget.resolvedAddress && (
-                    <span className="font-mono text-muted-foreground/70">
+                    <span className="break-all font-mono text-muted-foreground/70">
                       <span aria-hidden="true">→ </span>
                       <span className="sr-only">resolves to </span>
                       {selectedTarget.resolvedAddress}
@@ -939,14 +969,14 @@ export function Dashboard() {
                   )}
                 </p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className={PANE_ACTIONS}>
                 <TimeRangeSelector value={timeRange} onChange={handleTimeRangeChange} busy={pending} />
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleProbe}
                   disabled={probing}
-                  className="shrink-0"
+                  className={PANE_ACTION}
                 >
                   {probing ? 'Probing…' : 'Probe now'}
                 </Button>
@@ -955,11 +985,11 @@ export function Dashboard() {
                   size="sm"
                   onClick={handleRefresh}
                   disabled={refreshing}
-                  className="shrink-0"
+                  className={PANE_ACTION}
                   aria-label="Refresh measurements"
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                  <span className="ml-2 hidden sm:inline">Refresh</span>
+                  <span className="ml-2">Refresh</span>
                 </Button>
               </div>
             </header>
@@ -980,7 +1010,7 @@ export function Dashboard() {
               // events are suppressed so a tooltip cannot be opened on data
               // that is about to be replaced.
               className={
-                'space-y-6 transition-opacity duration-200 motion-reduce:transition-none ' +
+                'space-y-4 transition-opacity duration-200 motion-reduce:transition-none @2xl/main:space-y-6 ' +
                 (pending && !showSpinner ? 'opacity-50 pointer-events-none' : 'opacity-100')
               }
               aria-busy={pending}
@@ -1032,9 +1062,9 @@ export function Dashboard() {
               {/* Fixed minimum height: the trace and the empty-state message
                   occupy the same space, so swapping between them cannot make
                   the page jump. */}
-              <section className="min-h-[26rem] rounded-xl border border-border bg-card p-5">
+              <section className="min-h-[26rem] rounded-xl border border-border bg-card p-4 @2xl/main:p-5">
                 <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-                  <div>
+                  <div className="min-w-0">
                     <h2 className="text-sm font-medium text-foreground">{vocabulary.chartTitle}</h2>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       Each band holds more of the {vocabulary.unit} than the one inside it. Dense means
@@ -1045,11 +1075,11 @@ export function Dashboard() {
                     // Shown from the moment of the drag, not once the data
                     // lands: it is also the way back out of a period that
                     // turns out to hold no measurements.
-                    <p className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+                    <p className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted-foreground">
                       <span>
                         {formatWindowEdge(zoom.start)} – {formatWindowEdge(zoom.end)}
                       </span>
-                      <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={handleResetZoom}>
+                      <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] touch:h-8 touch:px-3" onClick={handleResetZoom}>
                         Reset zoom
                       </Button>
                     </p>
@@ -1111,7 +1141,7 @@ export function Dashboard() {
                 <TargetAlerts
                   alerts={alerts}
                   targetId={selectedTarget.id}
-                  onManage={() => setShowingAlerts(true)}
+                  onManage={openAlerts}
                 />
             </div>
           </motion.div>
@@ -1120,6 +1150,7 @@ export function Dashboard() {
           </MotionConfig>
         )}
       </main>
+      </div>
     </div>
   )
 }

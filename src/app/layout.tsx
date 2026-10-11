@@ -1,7 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Instrument_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
+import { THEME_COLOR } from "@/lib/app-theme";
+import { ServiceWorker } from "./_components/service-worker";
 
 // Instrument Sans: a slightly condensed technical grotesque — reads like
 // equipment labelling rather than another product-dashboard Inter.
@@ -24,6 +26,35 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "ClearPing — Network Monitoring",
   description: "Smokeping-style latency and packet loss monitoring",
+  // Installed to a phone's home screen (see manifest.ts): the name under the
+  // icon, and on iOS, which reads these instead of the manifest, the icon.
+  // The status bar is left as iOS draws it. The translucent style puts white
+  // text over the page, which is unreadable on the light theme.
+  applicationName: "ClearPing",
+  appleWebApp: { capable: true, title: "ClearPing", statusBarStyle: "default" },
+  icons: { apple: "/icons/apple-touch-icon.png" },
+  // A phone takes any run of digits and dots for a telephone number and makes
+  // a link of it. Most of what this app shows is IP addresses.
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Drawn out to the edges of the screen, under a notch and the home
+  // indicator, with the page keeping its own contents clear of them (the
+  // `--safe-*` values in globals.css). Left to the browser, a phone on its
+  // side gets a blank bar down each edge.
+  viewportFit: "cover",
+  // The page shrinks to what is left above an on-screen keyboard, so a dialog
+  // stays centred in what can be seen and its last field can be scrolled to.
+  interactiveWidget: "resizes-content",
+  // The colour of the browser's own bars, and of the installed app's, matched
+  // to the bar across the top of the page so the two read as one.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: THEME_COLOR.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_COLOR.dark },
+  ],
 };
 
 export default function RootLayout({
@@ -51,6 +82,7 @@ export default function RootLayout({
         className={`${instrumentSans.variable} ${plexMono.variable} antialiased bg-background text-foreground`}
       >
         <ToastProvider>{children}</ToastProvider>
+        <ServiceWorker />
       </body>
     </html>
   );

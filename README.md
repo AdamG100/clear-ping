@@ -27,6 +27,9 @@ looks different from one that is unstable.
   fires, which is the only time the route through a failure can be captured.
 - **Certificate expiry.** HTTPS targets record when their certificate runs
   out, and an alert can watch for it.
+- **Phone to wall display.** The layout follows the screen, from a phone held
+  upright to an ultrawide monitor, and it installs to a home screen as an app
+  on Android and iOS.
 - **Nothing else to run.** One process, one SQLite file, no external database.
 
 ## Screenshots
@@ -89,7 +92,12 @@ the form has defaults. A target is probed every five minutes unless you change
 its interval.
 
 Each row in the sidebar shows the target's state, its address and a trace of
-its recent readings. Hovering a row reveals pause, edit and delete.
+its recent readings. Hovering a row reveals pause, edit and delete; on a
+touchscreen they are behind the ⋮ button at the end of the row.
+
+On a phone or a narrow window the sidebar is a drawer: the ☰ button at the top
+left opens it. Tapping a chart shows the reading at that point, and dragging
+sideways across it zooms in.
 
 A **paused** target is not probed. Its row and its status light go grey, its
 page stops passing judgement on readings nobody has taken since, and it is
@@ -197,6 +205,6 @@ SQLite.
 
 ## Documentation
 
-- [docs/running.md](docs/running.md): running it, Docker, upgrading, configuration
+- [docs/running.md](docs/running.md): running it, Docker, installing it as an app, upgrading, configuration
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
 - [docs/alerting.md](docs/alerting.md): alerts, Discord, webhooks

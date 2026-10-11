@@ -96,9 +96,12 @@ function HopTable({ trace }: { trace: Traceroute }) {
     const isDeadEnd = dead !== null && hop.hop >= dead
 
     return (
-      <tr key={hop.hop} className={cn('border-t border-border/50', isDeadEnd && 'bg-destructive/5')}>
+      <tr key={hop.hop} className={cn('border-t border-border/50 align-top', isDeadEnd && 'bg-destructive/5')}>
         <td className="py-1.5 pr-3 text-right font-mono text-muted-foreground">{hop.hop}</td>
-        <td className="max-w-64 truncate py-1.5 pr-4" title={hop.hostname ?? undefined}>
+        {/* Cut short on one line where the table is wide. Where it is narrow
+            the name wraps instead: a name cut to a dozen letters says nothing,
+            and there is no hovering over it on a phone to read the rest. */}
+        <td className="py-1.5 pr-4 break-all @2xl/main:max-w-64 @2xl/main:truncate" title={hop.hostname ?? undefined}>
           {hop.hostname ? (
             <span className="text-foreground">{hop.hostname}</span>
           ) : isAwaitingName(hop) ? (
@@ -107,25 +110,31 @@ function HopTable({ trace }: { trace: Traceroute }) {
             // A router that stays silent while later hops answer is forwarding
             // traffic and declining to reply; calling it the fault is the
             // classic misreading of a traceroute, so say what it is.
-            <span className="text-muted-foreground">does not answer probes, still forwarding</span>
+            <span className="break-normal text-muted-foreground">does not answer probes, still forwarding</span>
           ) : (
-            <span className="text-muted-foreground/60">—</span>
+            // Only where the name has a column to itself: above the address, a
+            // dash for "no name" is a line of nothing.
+            <span className="hidden text-muted-foreground/60 @2xl/main:inline">—</span>
           )}
+          {/* The address, under the name while it has no column of its own. */}
+          <span className="block font-mono text-[11px] text-muted-foreground @2xl/main:hidden">
+            {hop.address ?? 'no reply'}
+          </span>
         </td>
-        <td className="py-1.5 pr-4 font-mono text-muted-foreground">
+        <td className="hidden py-1.5 pr-4 font-mono text-muted-foreground @2xl/main:table-cell">
           {hop.address ?? <span className="text-muted-foreground/60">no reply</span>}
         </td>
         <td className={cn('py-1.5 pr-4 text-right font-mono', loss > 0 ? 'text-destructive' : 'text-muted-foreground')}>
           {loss.toFixed(0)}%
         </td>
-        <td className="py-1.5 pr-4 text-right font-mono">{average === null ? '—' : ms(average)}</td>
-        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground md:table-cell">
+        <td className="py-1.5 text-right font-mono @md/main:pr-4">{average === null ? '—' : ms(average)}</td>
+        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground @3xl/main:table-cell">
           {silent ? '—' : ms(Math.min(...hop.rtts))}
         </td>
-        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground md:table-cell">
+        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground @3xl/main:table-cell">
           {silent ? '—' : ms(Math.max(...hop.rtts))}
         </td>
-        <td className="w-1/4 min-w-24 py-1.5">
+        <td className="hidden w-1/4 min-w-20 py-1.5 align-middle @md/main:table-cell">
           <LatencyBar hop={hop} scale={scale} />
         </td>
       </tr>
@@ -133,18 +142,22 @@ function HopTable({ trace }: { trace: Traceroute }) {
   }
 
   return (
+    // Columns come and go with the width of the main pane (see
+    // pane-layout.ts), so that on a phone the table fits the screen instead of
+    // scrolling sideways inside its card: first the bars, which draw what the
+    // average already says, then the address moves in under the name.
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground/70">
             <th className="pb-1.5 pr-3 text-right font-medium">Hop</th>
             <th className="pb-1.5 pr-4 font-medium">Name</th>
-            <th className="pb-1.5 pr-4 font-medium">IP</th>
+            <th className="hidden pb-1.5 pr-4 font-medium @2xl/main:table-cell">IP</th>
             <th className="pb-1.5 pr-4 text-right font-medium">Loss</th>
-            <th className="pb-1.5 pr-4 text-right font-medium">Avg ms</th>
-            <th className="hidden pb-1.5 pr-4 text-right font-medium md:table-cell">Min</th>
-            <th className="hidden pb-1.5 pr-4 text-right font-medium md:table-cell">Max</th>
-            <th className="pb-1.5 text-right font-mono font-normal normal-case tracking-normal">
+            <th className="whitespace-nowrap pb-1.5 text-right font-medium @md/main:pr-4">Avg ms</th>
+            <th className="hidden pb-1.5 pr-4 text-right font-medium @3xl/main:table-cell">Min</th>
+            <th className="hidden pb-1.5 pr-4 text-right font-medium @3xl/main:table-cell">Max</th>
+            <th className="hidden whitespace-nowrap pb-1.5 text-right font-mono font-normal normal-case tracking-normal @md/main:table-cell">
               0 – {ms(scale)} ms
             </th>
           </tr>
@@ -228,7 +241,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
 
   return (
     <section className="rounded-xl border border-border bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-5 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-4 @2xl/main:px-5">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h2 className="text-sm font-medium text-foreground">Route</h2>
           <p className="text-xs text-muted-foreground">
@@ -241,7 +254,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
         </Button>
       </div>
 
-      <div className="px-5 pb-4 pt-3">
+      <div className="px-4 pb-4 pt-3 @2xl/main:px-5">
         {loading ? (
           <div className="h-8 w-56 animate-pulse rounded bg-muted/50" />
         ) : traces.length === 0 ? (
@@ -262,7 +275,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
                     type="button"
                     onClick={() => setChosenId(open ? null : item.id)}
                     aria-expanded={open}
-                    className="flex w-full cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left text-xs"
+                    className="flex w-full cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left text-xs touch:py-3"
                   >
                     {open
                       ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -283,7 +296,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
                     <span className={cn(summary.tone === 'bad' ? 'text-destructive' : 'text-foreground')}>
                       {summary.text}
                     </span>
-                    <span className="ml-auto font-mono text-[11px] text-muted-foreground">{item.address}</span>
+                    <span className="ml-auto break-all font-mono text-[11px] text-muted-foreground">{item.address}</span>
                   </button>
 
                   <AnimatePresence initial={false}>

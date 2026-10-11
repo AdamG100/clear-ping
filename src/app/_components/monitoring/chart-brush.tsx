@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
 
 /**
@@ -39,6 +39,48 @@ export function useChartWidth(fallback = 880) {
   return [width, containerRef] as const
 }
 
+/** Narrower than this, a chart is on a phone held upright. */
+const NARROW_CHART_PX = 480
+
+/**
+ * How tall to draw a chart that is `width` wide. At its full height on a phone
+ * a chart is taller than it is wide and fills the screen by itself, with the
+ * readings it belongs to scrolled out of sight above it.
+ */
+export function chartHeightFor(width: number, full: number) {
+  return width < NARROW_CHART_PX ? Math.min(full, 280) : full
+}
+
+/**
+ * Where to centre a label `halfWidth` wide either side so that it stays inside
+ * a chart `chartWidth` wide. On a chart too narrow to hold it at all, the
+ * middle: it overhangs both edges equally instead of one of them entirely.
+ */
+export function holdInside(centre: number, halfWidth: number, chartWidth: number) {
+  if (chartWidth <= halfWidth * 2) return chartWidth / 2
+  return Math.min(Math.max(centre, halfWidth), chartWidth - halfWidth)
+}
+
+/**
+ * Call `onPress` when something outside `ref` is pressed.
+ *
+ * A reading brought up by tapping a chart has no pointer to move away and
+ * close it, the way a mouse does, so it stays until something else is pressed.
+ * `onPress` should be stable (a `useCallback`), or this re-subscribes on every
+ * render.
+ */
+export function useOutsidePress(ref: RefObject<Element | null>, active: boolean, onPress: () => void) {
+  useEffect(() => {
+    if (!active) return
+
+    const handle = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) onPress()
+    }
+    document.addEventListener('pointerdown', handle)
+    return () => document.removeEventListener('pointerdown', handle)
+  }, [ref, active, onPress])
+}
+
 /**
  * Label a point on the time axis at a precision that suits the span on screen.
  * Chosen from the span rather than the selected range, because zooming can put
@@ -57,6 +99,56 @@ export function formatTick(value: number, spanMs: number) {
     minute: '2-digit',
     second: spanMs < 10 * 60 * 1000 ? '2-digit' : undefined,
   })
+}
+
+/** The width of one character of an axis label, which is set in 10px mono. */
+const AXIS_CHARACTER_PX = 6
+
+/**
+ * The labels under a chart: where its period starts, its middle, and its end.
+ *
+ * The middle one is left out where the three would run into each other, which
+ * is a phone showing a zoom that crosses midnight: each label then carries a
+ * date as well as a time, and three of those are wider than the plot.
+ */
+export function TimeAxis({
+  start,
+  end,
+  left,
+  width,
+  y,
+}: {
+  /** The period drawn across the plot, in epoch milliseconds. */
+  start: number
+  end: number
+  /** Where the plot starts and how wide it is, in chart units. */
+  left: number
+  width: number
+  y: number
+}) {
+  const spanMs = end - start
+  const labels = [start, (start + end) / 2, end].map(time => formatTick(time, spanMs))
+  const widest = Math.max(...labels.map(label => label.length)) * AXIS_CHARACTER_PX
+  const roomForThree = widest * 3 + 24 <= width
+
+  return (
+    <>
+      {labels.map((label, i) =>
+        i === 1 && !roomForThree ? null : (
+          <text
+            key={i}
+            x={left + (i * width) / 2}
+            y={y}
+            textAnchor={i === 0 ? 'start' : i === 2 ? 'end' : 'middle'}
+            className="fill-muted-foreground font-mono"
+            fontSize={10}
+          >
+            {label}
+          </text>
+        )
+      )}
+    </>
+  )
 }
 
 /** One end of a zoomed period, with the date: a zoom is often into yesterday. */
@@ -229,7 +321,7 @@ export function BrushLabel({
   /** The span of the whole axis, which sets how precisely the ends are written. */
   spanMs: number
 }) {
-  const centre = Math.min(Math.max(selection.left + selection.width / 2, 110), chartWidth - 110)
+  const centre = holdInside(selection.left + selection.width / 2, 110, chartWidth)
 
   return (
     <div

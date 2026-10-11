@@ -16,8 +16,11 @@ const RANGES: TimeRange[] = ['1h', '3h', '6h', '24h', '7d']
 
 export function TimeRangeSelector({ value, onChange, busy = false }: TimeRangeSelectorProps) {
   return (
+    // Sized from the main pane it sits in (see pane-layout.ts). Where the pane
+    // is narrow the control takes the full width and its tabs share it; with
+    // more room it is as wide as its tabs.
     <div
-      className="relative flex items-center gap-1 bg-secondary rounded-lg p-1"
+      className="relative flex w-full items-center gap-1 rounded-lg bg-secondary p-1 @xl/main:w-auto"
       role="tablist"
       aria-label="Time range"
     >
@@ -29,9 +32,10 @@ export function TimeRangeSelector({ value, onChange, busy = false }: TimeRangeSe
             type="button"
             role="tab"
             aria-selected={selected}
+            aria-label={TIME_RANGE_CONFIG[range].label}
             onClick={() => onChange(range)}
             className={cn(
-              'relative px-3 py-1.5 text-sm font-medium rounded-md cursor-pointer',
+              'relative flex-1 cursor-pointer rounded-md px-2 py-1.5 text-sm font-medium @xl/main:flex-none @xl/main:px-3',
               'transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               selected ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             )}
@@ -45,7 +49,11 @@ export function TimeRangeSelector({ value, onChange, busy = false }: TimeRangeSe
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               />
             )}
-            <span className="relative z-10 whitespace-nowrap">
+            {/* "24 Hours" five times over is wider than a phone, and wide
+                enough to crowd the page's title off its line on a small
+                laptop. Until the pane has room for it, the short form. */}
+            <span className="relative z-10 whitespace-nowrap @5xl/main:hidden">{range}</span>
+            <span className="relative z-10 hidden whitespace-nowrap @5xl/main:inline">
               {TIME_RANGE_CONFIG[range].label}
             </span>
           </button>

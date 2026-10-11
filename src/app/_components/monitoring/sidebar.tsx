@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import { cn } from '@/lib/utils'
 import type { Target, GroupOrder, SparklinePoint } from '@/types/probe'
+import { BrandMark } from './brand-mark'
 import { Sparkline } from './sparkline'
 import { SidebarSkeleton } from './skeleton'
 import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-dialogs'
@@ -42,11 +43,19 @@ import {
   Play,
   ChartLine,
   Bell,
+  MoreVertical,
+  X,
 } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface SidebarProps {
+  /**
+   * On a narrow screen the sidebar is a drawer over the page, and this is
+   * whether it is out. Beside the page, on a wide screen, it means nothing.
+   */
+  open?: boolean
+  onClose?: () => void
   targets: Target[]
   selectedTargetId: string | null
   onSelectTarget: (id: string) => void
@@ -173,6 +182,26 @@ function TargetRow({
   const address = targetAddressLabel(target)
   const dualStack = isDualStack(target.host, target.ipVersion)
   const usesIpv6 = addressFamilyFor(target.host, target.ipVersion) === 6
+  // On a touchscreen: whether the row's actions are set out underneath it.
+  const [actionsOpen, setActionsOpen] = useState(false)
+
+  const actions = [
+    {
+      label: paused ? 'Resume' : 'Pause',
+      icon: paused ? Play : Pause,
+      tone: 'text-muted-foreground',
+      hover: 'hover:bg-muted',
+      run: () => onTogglePaused?.(target),
+    },
+    { label: 'Edit', icon: Pencil, tone: 'text-blue-500', hover: 'hover:bg-blue-500/20', run: () => onEditTarget?.(target) },
+    {
+      label: 'Delete',
+      icon: Trash2,
+      tone: 'text-destructive',
+      hover: 'hover:bg-destructive/20',
+      run: () => onDeleteTarget?.(target.id),
+    },
+  ]
 
   return (
     // Selecting a target has to work from the keyboard, so the row is a real
@@ -183,6 +212,10 @@ function TargetRow({
       aria-current={selected}
       onClick={() => onSelectTarget?.(target.id)}
       onKeyDown={e => {
+        // Only a key pressed on the row itself. One pressed on a button
+        // inside it is that button's, and taking it here selected the target
+        // instead of pausing, editing or deleting it.
+        if (e.target !== e.currentTarget) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onSelectTarget?.(target.id)
@@ -208,12 +241,19 @@ function TargetRow({
         <button
           type="button"
           tabIndex={floating ? -1 : undefined}
-          onPointerDown={e => onHandlePointerDown?.(target.id, e)}
+          onPointerDown={e => {
+            // The drag measures the row as it picks it up, and the copy that
+            // follows the finger has no actions under it: put them away first.
+            if (actionsOpen) flushSync(() => setActionsOpen(false))
+            onHandlePointerDown?.(target.id, e)
+          }}
           className={cn(
-            'p-0.5 cursor-grab active:cursor-grabbing transition-colors touch-none shrink-0',
+            'p-0.5 cursor-grab active:cursor-grabbing transition-colors touch-none shrink-0 touch:px-1 touch:py-2',
+            // Hovering is what shows the handle, so where nothing can hover
+            // it is simply shown.
             floating
               ? 'text-muted-foreground/70'
-              : 'text-muted-foreground/0 group-hover/target:text-muted-foreground/40 hover:text-muted-foreground/70!'
+              : 'text-muted-foreground/0 group-hover/target:text-muted-foreground/40 hover:text-muted-foreground/70! touch:text-muted-foreground/40'
           )}
           aria-label={`Drag to reorder ${target.name}`}
           onClick={e => e.stopPropagation()}
@@ -277,38 +317,52 @@ function TargetRow({
 
         {/* Reserves its width at all times, so revealing the controls never
             reflows the row or pushes the last button out of bounds. */}
-        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100">
-          <button
-            type="button"
-            tabIndex={floating ? -1 : undefined}
-            onClick={e => { e.stopPropagation(); onTogglePaused?.(target) }}
-            className="cursor-pointer rounded p-0.5 transition-colors hover:bg-muted"
-            aria-label={paused ? `Resume ${target.name}` : `Pause ${target.name}`}
-          >
-            {paused
-              ? <Play className="h-3.5 w-3.5 text-muted-foreground" />
-              : <Pause className="h-3.5 w-3.5 text-muted-foreground" />}
-          </button>
-          <button
-            type="button"
-            tabIndex={floating ? -1 : undefined}
-            onClick={e => { e.stopPropagation(); onEditTarget?.(target) }}
-            className="cursor-pointer rounded p-0.5 transition-colors hover:bg-blue-500/20"
-            aria-label={`Edit ${target.name}`}
-          >
-            <Pencil className="h-3.5 w-3.5 text-blue-500" />
-          </button>
-          <button
-            type="button"
-            tabIndex={floating ? -1 : undefined}
-            onClick={e => { e.stopPropagation(); onDeleteTarget?.(target.id) }}
-            className="cursor-pointer rounded p-0.5 transition-colors hover:bg-destructive/20"
-            aria-label={`Delete ${target.name}`}
-          >
-            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-          </button>
+        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100 touch:hidden">
+          {actions.map(action => (
+            <button
+              key={action.label}
+              type="button"
+              tabIndex={floating ? -1 : undefined}
+              onClick={e => { e.stopPropagation(); action.run() }}
+              className={cn('cursor-pointer rounded p-0.5 transition-colors', action.hover)}
+              aria-label={`${action.label} ${target.name}`}
+            >
+              <action.icon className={cn('h-3.5 w-3.5', action.tone)} />
+            </button>
+          ))}
         </div>
+
+        {/* A touchscreen has no hover to reveal those three, and side by side
+            at that size a finger aiming for edit lands on delete. There they
+            are one button, which sets them out underneath at a size that can
+            be pressed. */}
+        <button
+          type="button"
+          tabIndex={floating ? -1 : undefined}
+          onClick={e => { e.stopPropagation(); setActionsOpen(open => !open) }}
+          aria-expanded={actionsOpen}
+          aria-label={`Actions for ${target.name}`}
+          className="hidden shrink-0 cursor-pointer rounded p-2 text-muted-foreground touch:block"
+        >
+          <MoreVertical className="h-4 w-4" />
+        </button>
       </div>
+
+      {actionsOpen && !floating && (
+        <div className="relative mt-1.5 hidden gap-1.5 touch:flex">
+          {actions.map(action => (
+            <button
+              key={action.label}
+              type="button"
+              onClick={e => { e.stopPropagation(); setActionsOpen(false); action.run() }}
+              className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-sidebar-border bg-sidebar px-2 py-2 text-xs font-medium text-sidebar-foreground"
+            >
+              <action.icon className={cn('h-3.5 w-3.5', action.tone)} />
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -529,7 +583,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
           <button
             type="button"
             onPointerDown={(e) => dragControls.start(e)}
-            className="p-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground transition-colors touch-none"
+            className="p-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground transition-colors touch-none touch:px-1 touch:py-2"
             aria-label={`Drag to reorder ${name}`}
           >
             <GripVertical className="h-3.5 w-3.5" />
@@ -557,7 +611,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
             <button
               type="button"
               onClick={() => onEditGroup(group)}
-              className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-blue-500/20 focus-visible:opacity-100 group-hover/header:opacity-100"
+              className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-blue-500/20 focus-visible:opacity-100 group-hover/header:opacity-100 touch:p-2 touch:opacity-100"
               aria-label={`Rename or move ${name}`}
               title="Rename this group or move it inside another"
             >
@@ -580,7 +634,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               aria-label={`Compare the targets in ${name} on one chart`}
               title="Show every target in this group on one chart"
               className={cn(
-                'ml-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium leading-none transition-colors',
+                'ml-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium leading-none transition-colors touch:py-2',
                 isCompared
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-primary/40 bg-primary/10 text-primary hover:border-primary/70 hover:bg-primary/20'
@@ -686,6 +740,8 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
 // ─── Main Sidebar Component ─────────────────────────────────────────────────
 
 export function Sidebar({
+  open = false,
+  onClose,
   targets,
   selectedTargetId,
   onSelectTarget,
@@ -717,6 +773,13 @@ export function Sidebar({
   const [showSearch, setShowSearch] = useState(false)
   const [isGroupDragging, setIsGroupDragging] = useState(false)
   const listRef = useRef<HTMLElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+
+  // Opened as a drawer, the keyboard goes with it: focus left on the button
+  // that opened it would be on a page that can no longer be used.
+  useEffect(() => {
+    if (open) closeRef.current?.focus()
+  }, [open])
 
   const targetsById = useMemo(() => new Map(targets.map(t => [t.id, t])), [targets])
 
@@ -828,25 +891,37 @@ export function Sidebar({
   const deletingTarget = deletingId ? targetsById.get(deletingId) ?? null : null
 
   return (
-    <aside className="flex h-full w-80 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+    <>
+    {/* What is behind the drawer, dimmed. Pressing it puts the drawer away. */}
+    <div
+      aria-hidden="true"
+      onClick={onClose}
+      className={cn(
+        'fixed inset-0 z-30 bg-black/50 transition-opacity duration-200 lg:hidden',
+        open ? 'opacity-100' : 'pointer-events-none opacity-0'
+      )}
+    />
+    <aside
+      id="sidebar"
+      className={cn(
+        'flex h-full w-80 shrink-0 flex-col border-r border-sidebar-border bg-sidebar pt-(--safe-top) pl-(--safe-left)',
+        // Under `lg` there is no room to keep it beside the page, so it is a
+        // drawer that slides over it. Hidden as well as moved off screen when
+        // it is shut, or its buttons could still be tabbed to and read out.
+        'max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:w-[min(22rem,calc(100vw-2.5rem))] max-lg:shadow-2xl',
+        // Hiding waits for the slide out to finish. Showing must not wait for
+        // anything: the drawer takes the keyboard's focus as it opens, and
+        // nothing that is still hidden can be given it.
+        'max-lg:duration-200',
+        open
+          ? 'max-lg:transition-[translate]'
+          : 'max-lg:invisible max-lg:-translate-x-full max-lg:transition-[translate,visibility]'
+      )}
+    >
       {/* Header */}
       <div className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-2 mb-3">
-          {/* The mark is a miniature trace: the thing the product makes. */}
-          <span
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-sidebar-border bg-sidebar-accent"
-            aria-hidden="true"
-          >
-            <svg viewBox="0 0 20 14" className="h-4 w-5" fill="none">
-              <path
-                d="M1 9 L4 8 L7 10 L10 3 L13 7 L16 6 L19 6.5"
-                stroke="var(--signal-perfect)"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
+          <BrandMark />
           <div>
             <h1 className="text-sm font-semibold tracking-tight text-sidebar-foreground">
               ClearPing
@@ -855,6 +930,15 @@ export function Sidebar({
               Path monitor
             </p>
           </div>
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            className="-mr-1.5 ml-auto flex size-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
+            aria-label="Close targets"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* As tall as it is with the search button in it, which only appears
@@ -892,7 +976,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => { setShowSearch(!showSearch); if (showSearch) setSearchQuery('') }}
-              className="ml-auto p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer"
+              className="ml-auto p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer touch:-my-1.5 touch:p-2.5"
               aria-label="Search targets"
             >
               <Search className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1057,7 +1141,7 @@ export function Sidebar({
       </MotionConfig>
 
       {/* Footer actions */}
-      <div className="flex gap-2 border-t border-sidebar-border p-3">
+      <div className="flex gap-2 border-t border-sidebar-border p-3 pb-[calc(0.75rem+var(--safe-bottom))]">
         {onOpenAlerts && (
           <Button
             variant={alertsOpen ? 'secondary' : 'outline'}
@@ -1121,5 +1205,6 @@ export function Sidebar({
         onPause={onTogglePaused}
       />
     </aside>
+    </>
   )
 }

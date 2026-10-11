@@ -41,7 +41,7 @@ function PhaseBar({ phases }: { phases: Phase[] }) {
   if (total <= 0) return null
 
   return (
-    <div className="min-w-56 flex-1">
+    <div className="min-w-0 flex-1 basis-56">
       <div className="flex h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
         {phases.map(phase => (
           <span
@@ -98,7 +98,7 @@ export function ProbeDetailsPanel({ probeType, latest, label }: ProbeDetailsPane
   if (!failure && !hasBody) return null
 
   return (
-    <section className="rounded-xl border border-border bg-card px-5 py-4">
+    <section className="rounded-xl border border-border bg-card px-4 py-4 @2xl/main:px-5">
       {label && (
         <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{label}</p>
       )}

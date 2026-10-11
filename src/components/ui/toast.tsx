@@ -77,8 +77,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {/* Above dialogs, which share z-50 and are added to the page later: a
           failure reported while one was open came up underneath its backdrop,
           dimmed to the point of going unnoticed. */}
+      {/* The width of the screen, less a margin, on a phone. As a fixed width
+          anchored to the right it was wider than a phone and hung off the
+          left edge of it. */}
       <div
-        className="pointer-events-none fixed bottom-4 right-4 z-60 flex w-full max-w-sm flex-col gap-2"
+        className="pointer-events-none fixed bottom-[calc(1rem+var(--safe-bottom))] left-[calc(1rem+var(--safe-left))] right-[calc(1rem+var(--safe-right))] z-60 flex flex-col gap-2 sm:left-auto sm:w-full sm:max-w-sm"
         role="region"
         aria-label="Notifications"
       >

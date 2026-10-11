@@ -1,5 +1,9 @@
 'use client'
 
+import { cn } from '@/lib/utils'
+import { PANE, PANE_HEADER } from './pane-layout'
+import { STAT_GRID, STAT_GRID_LEAD } from './stats-cards'
+
 /**
  * Placeholders shaped like the content they stand in for.
  *
@@ -15,16 +19,24 @@ function Block({ className = '' }: { className?: string }) {
 
 export function ReadoutSkeleton() {
   return (
-    <div className="grid gap-6 lg:grid-cols-3" aria-hidden="true">
+    // The same grid and the same boxes as the cards these stand in for, down
+    // to how the four figures fold at each width.
+    <div className={STAT_GRID} aria-hidden="true">
       {[0, 1, 2].map(i => (
-        <div key={i} className="rounded-xl border border-border/50 bg-card p-6">
+        <div
+          key={i}
+          className={cn(
+            '@container/card rounded-xl border border-border/50 bg-card p-4 @2xl/main:p-6',
+            i === 0 && STAT_GRID_LEAD
+          )}
+        >
           <div className="flex items-center gap-3">
             <Block className="h-10 w-10 rounded-lg" />
             <Block className="h-4 w-24" />
           </div>
-          <Block className="mt-6 h-9 w-32" />
+          <Block className="mt-4 h-9 w-32 @2xl/main:mt-6" />
           <Block className="mt-2 h-3 w-40" />
-          <div className="mt-6 grid grid-cols-4 gap-4 border-t border-border/50 pt-4">
+          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border/50 pt-4 @2xs/card:grid-cols-4 @2xl/main:mt-6">
             {/* As tall as a label over a figure, so the cards do not grow when
                 the figures arrive and push the chart down the page. */}
             {[0, 1, 2, 3].map(j => (
@@ -51,14 +63,14 @@ export function ReadoutSkeleton() {
  */
 export function PaneSkeleton() {
   return (
-    <div className="space-y-6 p-6" role="status" aria-busy="true">
+    <div className={PANE} role="status" aria-busy="true">
       <span className="sr-only">Loading</span>
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center" aria-hidden="true">
+      <div className={PANE_HEADER} aria-hidden="true">
         <div>
-          <Block className="h-8 w-56" />
-          <Block className="mt-1 h-5 w-72" />
+          <Block className="h-7 w-56 max-w-full @2xl/main:h-8" />
+          <Block className="mt-1 h-5 w-72 max-w-full" />
         </div>
-        <Block className="h-10 w-72 rounded-lg" />
+        <Block className="h-10 w-full rounded-lg @xl/main:w-72" />
       </div>
 
       {/* A group's page has no readouts. Which kind of page was left open is
@@ -68,7 +80,7 @@ export function PaneSkeleton() {
         <ReadoutSkeleton />
       </div>
 
-      <section className="min-h-[26rem] rounded-xl border border-border bg-card p-5" aria-hidden="true">
+      <section className="min-h-[26rem] rounded-xl border border-border bg-card p-4 @2xl/main:p-5" aria-hidden="true">
         <div className="mb-4">
           <Block className="h-5 w-40" />
           <Block className="mt-0.5 h-4 w-80 max-w-full" />

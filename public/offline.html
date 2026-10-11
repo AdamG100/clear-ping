@@ -1,0 +1,178 @@
+<!doctype html>
+<!--
+  Shown by the service worker (sw.js) in place of any page that could not be
+  fetched. It is kept on the device and has to work with nothing else to hand,
+  so everything it needs is in this file: no stylesheet, script or image of
+  the app's is loaded. The colours are copies of the tokens in
+  src/app/globals.css.
+
+  When this file changes, change the cache name in sw.js as well.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a1016" />
+    <title>ClearPing: cannot reach the server</title>
+    <script>
+      // The same choice of theme as the app makes, from the same place.
+      (function () {
+        var theme
+        try {
+          theme = localStorage.getItem('theme')
+        } catch (e) {}
+        if (!theme) theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+        document.documentElement.classList.toggle('dark', theme !== 'light')
+      })()
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+        --background: #ffffff;
+        --foreground: #0a0a0a;
+        --muted: #737373;
+        --border: #e5e5e5;
+        --button: #171717;
+        --button-text: #fafafa;
+        --signal: #1b9247;
+      }
+      .dark {
+        color-scheme: dark;
+        --background: #0a1016;
+        --foreground: #eff2f5;
+        --muted: #95a0ab;
+        --border: rgb(149 160 171 / 0.2);
+        --button: #74cde2;
+        --button-text: #0a1016;
+        --signal: #5dc879;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: max(1.5rem, env(safe-area-inset-top)) max(1.5rem, env(safe-area-inset-right))
+          max(1.5rem, env(safe-area-inset-bottom)) max(1.5rem, env(safe-area-inset-left));
+        background: var(--background);
+        color: var(--foreground);
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-align: center;
+      }
+      main {
+        max-width: 22rem;
+      }
+      svg {
+        width: 8rem;
+        height: 2.5rem;
+        margin-bottom: 1.25rem;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1.125rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      p {
+        margin: 0;
+        font-size: 0.875rem;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+      button {
+        margin-top: 1.5rem;
+        min-height: 2.75rem;
+        padding: 0 1.25rem;
+        border: 0;
+        border-radius: 0.5rem;
+        background: var(--button);
+        color: var(--button-text);
+        font: inherit;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      button:focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 2px;
+      }
+      #status {
+        margin-top: 0.75rem;
+        min-height: 1.25rem;
+        font-size: 0.75rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- A trace that stops: the line the app draws, with the readings missing. -->
+      <svg viewBox="0 0 120 40" fill="none" aria-hidden="true">
+        <path
+          d="M2 28 L14 26 L26 30 L38 12 L50 22 L62 18"
+          stroke="var(--signal)"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <path d="M70 20 L118 20" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="1 6" />
+      </svg>
+      <h1>Cannot reach ClearPing</h1>
+      <p>
+        The server is not answering. Check that this device is on a network that can reach it, and that ClearPing is
+        running.
+      </p>
+      <button type="button" id="retry">Try again</button>
+      <p id="status" role="status">This page reloads by itself when the server answers.</p>
+    </main>
+    <script>
+      ;(function () {
+        var RETRY_EVERY_MS = 10000
+        var status = document.getElementById('status')
+        var checking = false
+
+        // Asks the server something small before reloading. Reloading blind
+        // would only fetch this page again and flash for nothing.
+        function check(byHand) {
+          if (checking) return
+          checking = true
+          if (byHand) status.textContent = 'Trying…'
+
+          fetch('/api/scheduler/status', { cache: 'no-store' })
+            .then(function (response) {
+              if (response.ok) location.reload()
+              else throw new Error('not ready')
+            })
+            .catch(function () {
+              if (byHand) status.textContent = 'Still no answer. This page reloads by itself when there is one.'
+            })
+            .then(function () {
+              checking = false
+            })
+        }
+
+        document.getElementById('retry').addEventListener('click', function () {
+          check(true)
+        })
+        window.addEventListener('online', function () {
+          check(false)
+        })
+        // Nothing is asked while the app is in the background. Coming back to
+        // it is the moment to ask, without waiting out the rest of an interval.
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden) check(false)
+        })
+        setInterval(function () {
+          if (!document.hidden) check(false)
+        }, RETRY_EVERY_MS)
+      })()
+    </script>
+  </body>
+</html>

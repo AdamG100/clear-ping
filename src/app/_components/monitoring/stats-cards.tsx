@@ -109,6 +109,7 @@ interface StatCardProps {
   lastUpdated?: Date
   /** No pulsing ring: nothing is being measured, so nothing should look live. */
   still?: boolean
+  className?: string
 }
 
 function StatCard({
@@ -122,10 +123,15 @@ function StatCard({
   accentColor = "#4fd1c5",
   lastUpdated,
   still = false,
+  className,
 }: StatCardProps) {
   return (
+    // A container, so the four figures along the bottom can be laid out from
+    // the card's own width: it is narrowest on a mid-sized screen, three
+    // abreast, and wide again on a phone, where it has a row to itself.
     <div className={cn(
-      "group relative overflow-hidden rounded-xl border border-border/50 bg-card p-6 transition-all duration-300 hover:border-border hover:shadow-lg hover:shadow-primary/5"
+      "group @container/card relative overflow-hidden rounded-xl border border-border/50 bg-card p-4 transition-all duration-300 hover:border-border hover:shadow-lg hover:shadow-primary/5 @2xl/main:p-6",
+      className
     )}>
       {/* Subtle glow effect */}
       <div
@@ -135,10 +141,11 @@ function StatCard({
           style={{ backgroundColor: accentColor }}
       />
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="relative flex h-10 w-10 items-center justify-center rounded-lg">
+      {/* Header. The verdict drops under the title where the card is too
+          narrow for both, instead of squeezing the title onto three lines. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
             {/* Pulsing background ring (use opacity style so OKLCH works) */}
             {/* The pulse starts no brighter than the ring is at rest. At the
                 animation's usual strength the ring began each cycle as a
@@ -193,8 +200,8 @@ function StatCard({
       </div>
 
       {/* Main Value */}
-      <div className="mt-6">
-        <div className="flex items-center justify-between">
+      <div className="mt-4 @2xl/main:mt-6">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           {/* A period with no readings says so with a dash. It used to show a
               pulsing placeholder here, which is the sign for "loading" and
               never stopped: the cards are only drawn once loading is over. */}
@@ -218,8 +225,10 @@ function StatCard({
         <p className="mt-1 text-xs text-muted-foreground">{mainLabel}</p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="mt-6 grid grid-cols-4 gap-4 border-t border-border/50 pt-4">
+      {/* Stats Grid. Four across needs room for four figures the width of
+          "123.4 ms"; in a card without it they overlapped, so there they go
+          two by two. */}
+      <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border/50 pt-4 @2xs/card:grid-cols-4 @2xl/main:mt-6">
         {stats.map((stat, index) => (
           <StatItem key={index} label={stat.label} value={stat.value} variant={stat.variant} />
         ))}
@@ -227,6 +236,15 @@ function StatCard({
     </div>
   )
 }
+
+/**
+ * How the three cards are arranged, sized from the main pane (see
+ * pane-layout.ts). Shared with their placeholder, which has to hold the same
+ * shape or the page jumps when the figures arrive.
+ */
+export const STAT_GRID = "grid gap-4 @2xl/main:grid-cols-2 @2xl/main:gap-6 @5xl/main:grid-cols-3"
+/** The first of the three, which spans both columns while there are only two. */
+export const STAT_GRID_LEAD = "@2xl/main:col-span-2 @5xl/main:col-span-1"
 
 export interface CurrentReadings {
   latency: number | null
@@ -321,10 +339,14 @@ export default function StatsCards({
   const jitterAccentColor = !hasData || paused || jitter === null ? NO_DATA_COLOR : getLatencyColor(jitter)
 
   return (
-    <div className={cn("grid gap-6 lg:grid-cols-3", paused && "grayscale")}>
+    // One card to a row on a phone, three abreast where each still has room
+    // for its figures. Between the two, the latency card takes a row to itself
+    // and the other two share the next: three in two columns leaves a hole.
+    <div className={cn(STAT_GRID, paused && "grayscale")}>
       {/* RTT Card — the headline is a true median. It used to be the midrange,
           (min + max) / 2, which a single spike drags far from any reading. */}
       <StatCard
+        className={STAT_GRID_LEAD}
         title={vocabulary.latencyTitle}
         icon={<Gauge className="h-5 w-5" />}
         mainValue={ms(medianLatency)}
