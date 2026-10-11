@@ -95,8 +95,13 @@ Each row in the sidebar shows the target's state, its address and a trace of
 its recent readings. Hovering a row reveals pause, edit and delete; on a
 touchscreen they are behind the ⋮ button at the end of the row.
 
-On a phone or a narrow window the sidebar is a drawer: the ☰ button at the top
-left opens it. Tapping a chart shows the reading at that point, and dragging
+On a wide screen the button at the top of the sidebar collapses it to a rail
+of icons, to give the page its width, and the same button on the rail brings
+it back. The rail keeps one tile for each top-level group, lit by the state of
+everything inside it (red if anything in the group is down), along with the
+alerts count; clicking a tile opens that group's comparison chart. The choice
+is remembered. On a phone or a narrow window the sidebar is a drawer, opened
+by the ☰ button at the top left. Tapping a chart shows the reading at that point, and dragging
 sideways across it zooms in.
 
 A **paused** target is not probed. Its row and its status light go grey, its

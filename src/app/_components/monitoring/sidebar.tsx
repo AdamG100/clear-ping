@@ -14,7 +14,7 @@ import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { getPacketLossColor, isMeaningfulLoss, NO_DATA_COLOR } from '@/lib/packet-loss-colors'
+import { StatusIndicator } from './status-indicator'
 import { addressFamilyFor, isDualStack } from '@/lib/host'
 import { targetAddressLabel } from '@/lib/probe-config'
 import { groupLabel, groupName, rebaseGroupPath } from '@/lib/group-path'
@@ -30,7 +30,16 @@ import {
   type SidebarLayout,
 } from '@/lib/sidebar-layout'
 import { DRAG_SPRING, useTargetDrag, type ActiveTargetDrag } from './use-target-drag'
-import { Reorder, useDragControls, AnimatePresence, MotionConfig, motion, type MotionValue } from 'framer-motion'
+import {
+  Reorder,
+  useDragControls,
+  useReducedMotion,
+  AnimatePresence,
+  MotionConfig,
+  motion,
+  type MotionValue,
+  type TargetAndTransition,
+} from 'framer-motion'
 import {
   Plus,
   GripVertical,
@@ -44,8 +53,35 @@ import {
   ChartLine,
   Bell,
   MoreVertical,
+  PanelLeftClose,
   X,
 } from 'lucide-react'
+import { SidebarRail } from './sidebar-rail'
+import { SIDEBAR_COLLAPSE_BUTTON_ID } from './use-sidebar-drawer'
+
+// ─── Collapsing ─────────────────────────────────────────────────────────────
+
+/** The sidebar's two widths on a wide screen: `w-80`, and `w-14` as a rail. */
+const FULL_WIDTH = '320px'
+const RAIL_WIDTH = '56px'
+
+/**
+ * How the sidebar folds down to its rail and back.
+ *
+ * The width takes the whole of the time, quick off the mark and easing to a
+ * stop, with no overshoot: the page beside it is resized on every frame, and
+ * a width that bounced would bounce every chart on it. What is inside changes
+ * over within that time. Going down, the full contents are gone early and the
+ * rail arrives as the width settles; coming back, the rail goes at once and
+ * the contents follow the edge out.
+ */
+const COLLAPSE_TRANSITION = { duration: 0.34, ease: [0.32, 0.72, 0, 1] } as const
+const CONTENT_OUT = { duration: 0.16, ease: 'easeIn' } as const
+const CONTENT_IN = { duration: 0.26, delay: 0.08, ease: [0.2, 0, 0, 1] } as const
+const RAIL_IN = { duration: 0.2, delay: 0.14, ease: 'easeOut' } as const
+const RAIL_OUT = { duration: 0.1, ease: 'easeIn' } as const
+/** For anyone whose system asks for less motion: the same change, without the travel. */
+const INSTANT = { duration: 0 } as const
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +92,13 @@ interface SidebarProps {
    */
   open?: boolean
   onClose?: () => void
+  /**
+   * On a wide screen, where the sidebar sits beside the page: whether it is
+   * folded down to a rail of icons, and the two ways of changing that.
+   */
+  collapsed?: boolean
+  onCollapse?: () => void
+  onExpand?: () => void
   targets: Target[]
   selectedTargetId: string | null
   onSelectTarget: (id: string) => void
@@ -79,74 +122,6 @@ interface SidebarProps {
   onReorderTargets?: (updates: { id: string; sortOrder: number; group?: string }[]) => void
   /** The targets have not arrived yet: there is no list to show and nothing to count. */
   loading?: boolean
-}
-
-// ─── Status Indicator ───────────────────────────────────────────────────────
-
-/**
- * Status dot: online (coloured by packet loss), offline, awaiting its first
- * measurement, or paused.
- *
- * `isOnline` is `undefined` — not `false` — when nothing has been measured yet.
- * Collapsing those two cases showed a brand new target as though it were down.
- *
- * A paused target is grey whatever its last reading was. That reading is from
- * before it was paused, and a green or red light would be a claim about now.
- */
-function StatusIndicator({
-  isOnline,
-  packetLoss,
-  note,
-  paused = false,
-}: {
-  isOnline?: boolean
-  packetLoss?: number
-  /** Replaces the description: how each address family of a dual-stack target is doing. */
-  note?: string
-  paused?: boolean
-}) {
-  const pending = isOnline === undefined
-
-  let statusColor: string
-  let label: string
-
-  if (paused) {
-    statusColor = NO_DATA_COLOR
-    label = 'Paused'
-  } else if (pending) {
-    statusColor = NO_DATA_COLOR
-    label = 'Waiting for first measurement'
-  } else if (isOnline) {
-    statusColor = getPacketLossColor(packetLoss ?? 0)
-    label = isMeaningfulLoss(packetLoss)
-      ? `Online (${packetLoss!.toFixed(1)}% packet loss)`
-      : 'Online'
-  } else {
-    statusColor = getPacketLossColor(100)
-    label = 'Offline'
-  }
-
-  if (note && !pending && !paused) label = note
-
-  return (
-    <span className="relative inline-flex shrink-0" title={label}>
-      {/* The pulse only runs for a live target; a steady dot for offline and
-          pending states stops a dead target from looking like active traffic. */}
-      {isOnline && !paused && (
-        <span
-          className="absolute inline-flex h-2.5 w-2.5 rounded-full custom-ping"
-          style={{ backgroundColor: statusColor }}
-          aria-hidden="true"
-        />
-      )}
-      <span
-        className="relative inline-block h-2.5 w-2.5 rounded-full"
-        style={{ backgroundColor: statusColor }}
-        aria-hidden="true"
-      />
-      <span className="sr-only">{label}</span>
-    </span>
-  )
 }
 
 // ─── Target Row ─────────────────────────────────────────────────────────────
@@ -224,19 +199,14 @@ function TargetRow({
       className={cn(
         'relative w-full text-left px-2 py-2 rounded-md transition-colors group/target cursor-pointer',
         'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        floating && selected && 'bg-sidebar-accent'
+        // The selected row is simply the one that is lit. The highlight used
+        // to be one shared element that slid from the old row to the new one,
+        // which read as something chasing the click down the list, and went
+        // astray altogether when the list itself was moving: a group
+        // collapsing, or the drawer sliding shut on a phone.
+        selected && 'bg-sidebar-accent'
       )}
     >
-      {/* One highlight shared by every row: selecting another target slides
-          it there instead of switching one background off and another on. */}
-      {selected && !floating && (
-        <motion.span
-          layoutId="selected-target"
-          aria-hidden="true"
-          className="absolute inset-0 rounded-md bg-sidebar-accent"
-          transition={DRAG_SPRING}
-        />
-      )}
       <div className="relative flex items-center gap-1.5">
         <button
           type="button"
@@ -742,6 +712,9 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
 export function Sidebar({
   open = false,
   onClose,
+  collapsed = false,
+  onCollapse,
+  onExpand,
   targets,
   selectedTargetId,
   onSelectTarget,
@@ -774,6 +747,7 @@ export function Sidebar({
   const [isGroupDragging, setIsGroupDragging] = useState(false)
   const listRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
+  const reduceMotion = useReducedMotion()
 
   // Opened as a drawer, the keyboard goes with it: focus left on the button
   // that opened it would be on a page that can no longer be used.
@@ -901,10 +875,23 @@ export function Sidebar({
         open ? 'opacity-100' : 'pointer-events-none opacity-0'
       )}
     />
-    <aside
+    <motion.aside
       id="sidebar"
+      // Beside the page it can be collapsed to a rail of icons, which gives
+      // the page its width. What is animated is the width itself, as a
+      // variable that only the wide layout reads: under `lg` the same element
+      // is the drawer, whose width is not this one's to set.
+      initial={false}
+      animate={{ '--sidebar-width': collapsed ? RAIL_WIDTH : FULL_WIDTH } as TargetAndTransition}
+      transition={reduceMotion ? INSTANT : COLLAPSE_TRANSITION}
       className={cn(
         'flex h-full w-80 shrink-0 flex-col border-r border-sidebar-border bg-sidebar pt-(--safe-top) pl-(--safe-left)',
+        // Clipped while it is wide, so that as it narrows its contents are
+        // cut off at the edge instead of being squeezed.
+        'lg:relative lg:w-[var(--sidebar-width,20rem)] lg:overflow-hidden',
+        // Collapsed from the first paint, when it was left that way: see
+        // `sidebar-collapsed` in globals.css.
+        'lg:sidebar-collapsed:w-14',
         // Under `lg` there is no room to keep it beside the page, so it is a
         // drawer that slides over it. Hidden as well as moved off screen when
         // it is shut, or its buttons could still be tabbed to and read out.
@@ -918,6 +905,18 @@ export function Sidebar({
           : 'max-lg:invisible max-lg:-translate-x-full max-lg:transition-[translate,visibility]'
       )}
     >
+      {/* Everything the sidebar shows at full width. Collapsing fades it out
+          where it stands, at the width it was: it is kept, not taken away, so
+          the list comes back scrolled to where it was left. Inert while it is
+          faded, so nothing in it can be pressed, tabbed to or read out from
+          under the rail that has taken its place. */}
+      <motion.div
+        initial={false}
+        animate={collapsed ? { opacity: 0, x: -16 } : { opacity: 1, x: 0 }}
+        transition={reduceMotion ? INSTANT : collapsed ? CONTENT_OUT : CONTENT_IN}
+        inert={collapsed}
+        className="flex min-h-0 flex-1 flex-col lg:min-w-[calc(20rem-1px)] lg:sidebar-collapsed:hidden"
+      >
       {/* Header */}
       <div className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-2 mb-3">
@@ -939,6 +938,18 @@ export function Sidebar({
           >
             <X className="h-4 w-4" />
           </button>
+          {onCollapse && (
+            <button
+              id={SIDEBAR_COLLAPSE_BUTTON_ID}
+              type="button"
+              onClick={onCollapse}
+              className="-mr-1.5 ml-auto hidden size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {/* As tall as it is with the search button in it, which only appears
@@ -1014,7 +1025,11 @@ export function Sidebar({
             make every row wider than the sidebar and push the pause, edit and
             delete buttons out past its edge. As a block, rows are held to the
             sidebar's width and long addresses are cut short instead. */}
-        <ScrollArea className="flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
+        {/* `min-h-0`: without it the list will not be made shorter than its
+            rows, so where they do not all fit (a phone, a phone on its side)
+            it ran off the bottom of the screen, took the buttons under it
+            along, and had nothing to scroll. */}
+        <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:overscroll-contain [&_[data-slot=scroll-area-viewport]>div]:block!">
           <nav
             ref={listRef}
             // While a row is in the air the list must not react to the pointer
@@ -1172,6 +1187,35 @@ export function Sidebar({
           Add Target
         </Button>
       </div>
+      </motion.div>
+
+      {/* The rail comes in over the left edge as the full width fades, and
+          goes as it returns. */}
+      <AnimatePresence initial={false}>
+        {collapsed && (
+          <motion.div
+            key="rail"
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0, transition: reduceMotion ? INSTANT : RAIL_IN }}
+            exit={{ opacity: 0, transition: reduceMotion ? INSTANT : RAIL_OUT }}
+            className="absolute inset-y-0 left-0 flex w-14 flex-col pt-(--safe-top)"
+          >
+            <SidebarRail
+              layout={savedLayout}
+              targetsById={targetsById}
+              selectedTargetId={selectedTargetId}
+              selectedGroup={selectedGroup}
+              onSelectTarget={onSelectTarget}
+              onSelectGroup={onSelectGroup}
+              onExpand={onExpand}
+              alertsOpen={alertsOpen}
+              onOpenAlerts={onOpenAlerts}
+              firingAlerts={firingAlerts}
+              onAddTarget={() => setIsAddOpen(true)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Add Target Dialog */}
       <AddTargetDialog
@@ -1204,7 +1248,7 @@ export function Sidebar({
         onConfirm={id => { setDeletingId(null); onDeleteTarget(id) }}
         onPause={onTogglePaused}
       />
-    </aside>
+    </motion.aside>
     </>
   )
 }

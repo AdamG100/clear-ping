@@ -75,17 +75,22 @@ hostname and network to yours.
 ClearPing can be installed to a phone's home screen, or as a desktop app, and
 then opens in a window of its own without the browser around it.
 
-- **Android (Chrome):** open ClearPing, then menu → *Add to Home screen* →
-  *Install*.
-- **iPhone and iPad (Safari):** open ClearPing, then *Share* → *Add to Home
-  Screen*.
+On a phone or tablet it offers this itself, in a card along the bottom of the
+screen, the first time it is opened. Dismissed, the card does not come back on
+that device; the browser's own menu still installs it:
+
+- **Android (Chrome):** the card's *Install* button, or menu → *Add to Home
+  screen* → *Install*.
+- **iPhone and iPad (Safari):** *Share* → *Add to Home Screen*. iOS gives a
+  page no way to do this for you, so there the card says where to tap.
 - **Desktop (Chrome, Edge):** the install icon at the end of the address bar.
+  No card is shown.
 
 **Android and desktop need HTTPS.** Browsers only offer to install a site, and
 only run the part that works offline, on a secure address: `https://`, or
 `localhost` on the machine itself. Reached as `http://192.168.1.10:3000` the
 app works exactly as it does in a tab, but there is no *Install*, only a plain
-shortcut. Put it behind a reverse proxy with a certificate
+shortcut, and on Android the card says so instead of offering. Put it behind a reverse proxy with a certificate
 (`compose.example.yaml` does this with Traefik) or a tunnel that provides one.
 iOS adds it to the home screen over plain HTTP as well.
 
@@ -100,6 +105,9 @@ What makes it installable, for anyone changing it:
 - `public/icons/` holds the icons. The two `.svg` files are the drawings the
   `.png` files were made from; `icon-maskable` has the margin Android needs to
   crop it to the launcher's shape.
+- `src/app/_components/install-prompt.tsx` is the card, and
+  `use-install-prompt.ts` beside it decides whether there is anything to
+  offer on the device in hand.
 - `public/sw.js` is the service worker and `public/offline.html` the page it
   shows. It caches that page and nothing else, on purpose: a stored copy of
   the dashboard would show old readings as if they were current. It is only

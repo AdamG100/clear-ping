@@ -9,10 +9,15 @@
  */
 
 /**
- * The frame of a page: tighter on a phone, and held to a readable width on a
- * very wide monitor, where a chart stretched across all of it is a ribbon.
+ * The frame of a page: tighter on a phone, and the full width of the pane on
+ * a desktop monitor, where a chart is a timeline and more width is more of it
+ * to read. The limit is 2560px, wide enough that a 1440p monitor is filled
+ * edge to edge with the sidebar open or collapsed. It only comes into play
+ * past that, on an ultrawide or a 4K screen at full scale, where a chart
+ * stretched across all of it is a ribbon. At 1600px it boxed the page in on
+ * ordinary desktop monitors.
  */
-export const PANE = 'mx-auto w-full max-w-[100rem] space-y-4 p-4 @2xl/main:space-y-6 @2xl/main:p-6'
+export const PANE = 'mx-auto w-full max-w-[160rem] space-y-4 p-4 @2xl/main:space-y-6 @2xl/main:p-6'
 
 /** A page's title and its controls: stacked until there is room for both on one line. */
 export const PANE_HEADER =

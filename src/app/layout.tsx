@@ -3,6 +3,7 @@ import { Instrument_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { THEME_COLOR } from "@/lib/app-theme";
+import { InstallPrompt } from "./_components/install-prompt";
 import { ServiceWorker } from "./_components/service-worker";
 
 // Instrument Sans: a slightly condensed technical grotesque — reads like
@@ -72,9 +73,21 @@ export default function RootLayout({
           // renders in the default theme and then snaps, which is worse than
           // the flash it is meant to prevent. It also notes whether a group
           // was left open rather than a target, so the loading placeholder
-          // can take the right shape (see `.skeleton-target-only`).
+          // can take the right shape (see `.skeleton-target-only`), and
+          // whether the sidebar was collapsed, so it is not drawn and then
+          // taken away (see `sidebar-collapsed` in globals.css).
           dangerouslySetInnerHTML={{
-            __html: `(function(){var d=document.documentElement;try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}d.classList.toggle('dark',t!=='light');if(localStorage.getItem('selectedGroup'))d.dataset.view='group';}catch(e){d.classList.add('dark');}})();`,
+            __html: `(function(){var d=document.documentElement;try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}d.classList.toggle('dark',t!=='light');if(localStorage.getItem('selectedGroup'))d.dataset.view='group';if(localStorage.getItem('sidebarCollapsed'))d.dataset.sidebar='collapsed';}catch(e){d.classList.add('dark');}})();`,
+          }}
+        />
+        <script
+          // Keeps the browser's offer to install the app (Android), which it
+          // makes once and may make before any of the page's own code has
+          // loaded. Holding it is also what stops Chrome showing a bar of its
+          // own, so the offer is made in one place: `InstallPrompt` below,
+          // which is told through the event that there is something to show.
+          dangerouslySetInnerHTML={{
+            __html: `(function(){function c(){window.dispatchEvent(new Event('installpromptchange'))}window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__installPrompt=e;c()});window.addEventListener('appinstalled',function(){window.__installPrompt=null;c()})})();`,
           }}
         />
       </head>
@@ -82,6 +95,7 @@ export default function RootLayout({
         className={`${instrumentSans.variable} ${plexMono.variable} antialiased bg-background text-foreground`}
       >
         <ToastProvider>{children}</ToastProvider>
+        <InstallPrompt />
         <ServiceWorker />
       </body>
     </html>

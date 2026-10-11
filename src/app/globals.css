@@ -205,6 +205,16 @@
   }
 }
 
+/* The sidebar collapsed to its rail on a wide screen, for the first paint
+   only. Whether it was left collapsed is known in the browser and not on the
+   server, so the page arrives drawn at full width; the script in the document
+   head marks the document before anything is painted, and these rules hold
+   the sidebar at the rail's width until the components have caught up. The
+   mark is taken off the first time the sidebar is expanded (see
+   use-sidebar-drawer.ts), because while it is there nothing can animate the
+   width it pins. */
+@custom-variant sidebar-collapsed (&:is(html[data-sidebar='collapsed'] *));
+
 /* The loading placeholder for the main pane is drawn before the page knows
    whether a target or a group was left open. The script in the document head
    does know, and marks the document, so the parts only a target's page has can

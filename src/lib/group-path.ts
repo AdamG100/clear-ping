@@ -38,6 +38,17 @@ export function groupName(group: string): string {
   return splitGroupPath(group).at(-1) ?? ''
 }
 
+/**
+ * Two letters to stand for a group where there is no room for its name: the
+ * first letters of its first two words, or of a single word, its first two.
+ * `DNS Servers` is `DS`, `Home` is `HO`.
+ */
+export function groupInitials(group: string): string {
+  const words = groupName(group).split(/[\s\-_.,:&()]+/).filter(Boolean)
+  const letters = words.length > 1 ? [...words[0]][0] + [...words[1]][0] : [...(words[0] ?? '')].slice(0, 2).join('')
+  return letters.toUpperCase()
+}
+
 export function groupDepth(group: string): number {
   return Math.max(0, splitGroupPath(group).length - 1)
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   groupDepth,
+  groupInitials,
   groupLabel,
   groupName,
   groupWithAncestors,
@@ -78,5 +79,26 @@ describe('rebaseGroupPath', () => {
   it('leaves groups outside the branch alone', () => {
     expect(rebaseGroupPath('Labs', 'Lab', 'Home/Lab')).toBe('Labs')
     expect(rebaseGroupPath('Office', 'Lab', 'Home/Lab')).toBe('Office')
+  })
+})
+
+describe('groupInitials', () => {
+  it('takes the first letter of each of the first two words', () => {
+    expect(groupInitials('DNS Servers')).toBe('DS')
+    expect(groupInitials('home network switches')).toBe('HN')
+    expect(groupInitials('Rack-2')).toBe('R2')
+  })
+
+  it('takes two letters of a single word', () => {
+    expect(groupInitials('Home')).toBe('HO')
+    expect(groupInitials('X')).toBe('X')
+  })
+
+  it('stands for the group itself, not the groups it sits inside', () => {
+    expect(groupInitials('Home/Network')).toBe('NE')
+  })
+
+  it('has nothing to give for no group', () => {
+    expect(groupInitials('')).toBe('')
   })
 })

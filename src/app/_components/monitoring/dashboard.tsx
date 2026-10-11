@@ -512,7 +512,15 @@ export function Dashboard() {
   const [showingAlerts, setShowingAlerts] = useState(false)
   // On a narrow screen the sidebar is a drawer over the page. Choosing
   // anything in it is the reason it was opened, so every choice closes it.
-  const { open: sidebarOpen, show: showSidebar, hide: hideSidebar } = useSidebarDrawer()
+  // On a wide one it sits beside the page and can be collapsed to a rail of icons.
+  const {
+    open: sidebarOpen,
+    show: showSidebar,
+    hide: hideSidebar,
+    collapsed: sidebarCollapsed,
+    collapse: collapseSidebar,
+    expand: expandSidebar,
+  } = useSidebarDrawer()
   const [timeRange, setTimeRange] = useState<TimeRange>('1h')
   // A period picked out by dragging across the chart. It narrows the range
   // rather than replacing it, and is dropped whenever the range or the target
@@ -788,6 +796,9 @@ export function Dashboard() {
       <Sidebar
         open={sidebarOpen}
         onClose={hideSidebar}
+        collapsed={sidebarCollapsed}
+        onCollapse={collapseSidebar}
+        onExpand={expandSidebar}
         targets={transformedTargets}
         selectedTargetId={groupTargets || showingAlerts ? null : selectedTargetId}
         onSelectTarget={setSelectedTargetId}
