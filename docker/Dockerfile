@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# ClearPing: the web app and the probe scheduler in one container.
+# ClearPing: the web app, the probe scheduler and Apprise in one container.
 #
 # Build from the repository root, which is the build context:
 #
@@ -26,6 +26,8 @@
 
 ARG NODE_VERSION=24
 ARG DEBIAN_RELEASE=trixie
+# What sends the alerts: https://github.com/caronc/apprise
+ARG APPRISE_VERSION=2.0.1
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS deps
@@ -83,11 +85,24 @@ RUN found="$(find .next/standalone .next/static public -path '*/node_modules' -p
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS runtime
+ARG APPRISE_VERSION
 
-# The programs the probes run. Nothing else is needed at run time.
+# The programs the probes run, and Python for Apprise. Nothing else is needed
+# at run time.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends iputils-ping traceroute \
+ && apt-get install -y --no-install-recommends iputils-ping traceroute python3 python3-venv \
  && rm -rf /var/lib/apt/lists/*
+
+# Apprise, which alerts are sent with, in an environment of its own: Debian
+# does not let pip install into the system's Python, and its own apprise
+# package is a release behind. `all-plugins` brings the packages that some of
+# its services need on top of the rest (MQTT, XMPP, Growl, SMPP, web push and
+# the like), so that every service that can work from a container does. All
+# of them come as wheels for both architectures, so there is nothing to compile.
+RUN python3 -m venv /opt/apprise \
+ && /opt/apprise/bin/pip install --no-cache-dir "apprise[all-plugins]==${APPRISE_VERSION}" \
+ && ln -s /opt/apprise/bin/apprise /usr/local/bin/apprise \
+ && apprise --version
 
 # HOSTNAME is what the server binds to. Docker sets it to the container's id,
 # which would leave the app listening where the published port cannot reach.

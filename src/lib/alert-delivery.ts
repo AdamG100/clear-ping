@@ -3,10 +3,11 @@ import { ALERT_METRIC_LABELS } from '@/types/probe';
 import { groupLabel } from './group-path';
 
 /**
- * What an alert says and how it is worded for wherever it is sent.
+ * What an alert says, and the URLs it is sent to.
  *
  * Nothing here touches the database or the network, so the browser can use the
- * same wording as the webhook and the payloads can be tested as plain values.
+ * same wording and the same checks as the server, and a notification can be
+ * tested as a plain value. Sending one is apprise.ts.
  */
 
 /** A condition in a few words: what the list of alerts calls one with no name. */
@@ -29,72 +30,98 @@ function formatObserved(metric: AlertMetric, observed: number | null): string {
   return `${rounded}${ALERT_METRIC_LABELS[metric].unit}`;
 }
 
-// ─── Discord ────────────────────────────────────────────────────────────────
+// ─── Where it is sent ───────────────────────────────────────────────────────
 
-const DISCORD_HOSTS = new Set(['discord.com', 'discordapp.com', 'ptb.discord.com', 'canary.discord.com']);
-
-/**
- * Whether a URL is a Discord webhook that wants Discord's own payload.
- *
- * Used to suggest a destination and to question one that looks wrong, never to
- * decide the format: that is the alert's `destination`. Discord also serves
- * each webhook at `…/slack` and `…/github`, which expect those services'
- * formats instead, so those do not count.
- */
-export function isDiscordWebhook(url: string | undefined | null): boolean {
-  if (!url) return false;
-  try {
-    const parsed = new URL(url);
-    return DISCORD_HOSTS.has(parsed.hostname.toLowerCase()) && /^\/api(\/v\d+)?\/webhooks\/\d+\/[^/]+\/?$/.test(parsed.pathname);
-  } catch {
-    return false;
-  }
-}
-
-const SNOWFLAKE = /^\d{15,22}$/;
+const NOTIFY_URL = /^[a-z][a-z0-9+.-]*:\/\/\S+$/i;
 
 /**
- * Read role or user ids from whatever was typed or sent.
+ * Read notification URLs from whatever was typed or sent.
  *
- * Takes a list, or text with the ids separated by commas or spaces, and takes
- * each id bare or as the mention Discord copies (`<@&123…>`, `<@123…>`).
- * Returns null if anything in it is not an id: a typo must be reported, not
- * dropped, or the alert would quietly mention fewer people than intended.
+ * Takes a list, or text with the URLs on separate lines. Only that each one is
+ * a URL is checked here; whether Apprise has a service by that name, and
+ * whether the rest of it makes sense to that service, is for Apprise to say.
+ * Returns null if anything in it is not a URL: a typo must be reported, not
+ * dropped, or the alert would quietly be sent to fewer places than intended.
  */
-export function parseMentionIds(input: unknown): string[] | null {
+export function parseNotifyUrls(input: unknown): string[] | null {
   const tokens = Array.isArray(input)
     ? input.map(String)
     : typeof input === 'string'
-      ? input.split(/[\s,]+/)
+      ? input.split(/\s+/)
       : input === undefined || input === null
         ? []
         : null;
   if (!tokens) return null;
 
-  const ids: string[] = [];
+  const urls: string[] = [];
   for (const token of tokens) {
-    const id = token.trim().replace(/^<@[&!]?/, '').replace(/>$/, '');
-    if (id === '') continue;
-    if (!SNOWFLAKE.test(id)) return null;
-    if (!ids.includes(id)) ids.push(id);
+    const url = token.trim();
+    if (url === '') continue;
+    if (!NOTIFY_URL.test(url)) return null;
+    if (!urls.includes(url)) urls.push(url);
   }
-  return ids;
+  return urls;
 }
 
-// Discord's own limits; a field past its limit makes it reject the whole post.
-const EMBED_TITLE_MAX = 256;
-const EMBED_FIELD_MAX = 1024;
-const MENTIONS_MAX = 100;
+/**
+ * A notification URL in a word, for the list of alerts: the service as Apprise
+ * spells it (`discord`, `mailto`), or the host of a web address Apprise knows
+ * a service by. Never more of the URL than that: the rest of it is what lets
+ * anyone holding it post to the channel.
+ */
+export function notifyUrlLabel(url: string): string {
+  const scheme = url.slice(0, Math.max(0, url.indexOf('://'))).toLowerCase();
+  if (scheme !== 'http' && scheme !== 'https') return scheme;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return scheme;
+  }
+}
 
-const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+// ─── What it says ───────────────────────────────────────────────────────────
 
-const COLOR_FIRING = 0xe5484d;
-const COLOR_RESOLVED = 0x30a46c;
+/**
+ * One alert transition, worded once for every service there is.
+ *
+ * The body is HTML because that is the one format Apprise can turn into each
+ * of the others: it goes to an email or to Telegram as it stands, becomes
+ * Markdown for Discord or Slack, and plain text for an SMS or a JSON webhook.
+ * Markdown would not do: Apprise has no way of turning that into plain text,
+ * so the asterisks would be read out to everything that takes none.
+ *
+ * The title is plain text. Apprise escapes it for whichever service it is
+ * going to, and folds it into the body of one that has no titles.
+ */
+export interface AlertNotification {
+  title: string;
+  body: string;
+  /** Apprise's notification type, which is what colours it: red or green. */
+  type: 'failure' | 'success';
+}
 
-interface PayloadOptions {
+interface NotificationOptions {
   /** A message sent from the "Send test" button rather than by a real probe. */
   test?: boolean;
 }
+
+// Apprise's own limit for a title, on a service that sets none of its own.
+const TITLE_MAX = 250;
+
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/**
+ * `@everyone` and `@here`, broken so that they are only text.
+ *
+ * Discord and others notify a whole channel for those wherever they appear in
+ * a message, and a target is named by whoever added it. A zero-width space
+ * after the `@` reads the same and pings nobody.
+ */
+const defuse = (text: string) => text.replace(/@(?=everyone|here)/gi, '@​');
+
+/** Text from a target or an alert, made safe to put in the body. */
+const html = (text: string) =>
+  defuse(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function headline(event: AlertEvent): string {
   if (event.transition === 'resolved') return `${event.targetName} has recovered`;
@@ -110,80 +137,31 @@ function headline(event: AlertEvent): string {
 }
 
 function explanation(event: AlertEvent): string {
-  const condition = describeCondition(event.rule);
+  const condition = `<b>${html(describeCondition(event.rule))}</b>`;
   const probes = event.rule.consecutiveProbes;
 
   if (event.transition === 'firing') {
-    return probes === 1 ? `**${condition}** on the latest probe.` : `**${condition}** for ${probes} probes in a row.`;
+    return probes === 1 ? `${condition} on the latest probe.` : `${condition} for ${probes} probes in a row.`;
   }
   return probes === 1
-    ? `**${condition}** no longer holds.`
-    : `**${condition}** has been clear for ${probes} probes in a row.`;
+    ? `${condition} no longer holds.`
+    : `${condition} has been clear for ${probes} probes in a row.`;
 }
 
-/**
- * The body Discord is sent: one embed, coloured by whether the alert fired or
- * resolved.
- *
- * The roles and users to mention go in `content`, because Discord does not
- * notify anyone for a mention inside an embed. `allowed_mentions` names
- * exactly those ids, so nothing else in the message can ping anybody: a target
- * called `@everyone` stays text. Only a firing alert mentions; hearing that it
- * recovered is not worth a second notification.
- */
-export function discordPayload(event: AlertEvent, options: PayloadOptions = {}) {
-  const firing = event.transition === 'firing';
-  const roles = firing ? (event.rule.mentionRoleIds ?? []).slice(0, MENTIONS_MAX) : [];
-  const users = firing ? (event.rule.mentionUserIds ?? []).slice(0, MENTIONS_MAX) : [];
-  const mentions = [...roles.map(id => `<@&${id}>`), ...users.map(id => `<@${id}>`)].join(' ');
-
-  const fields = [
-    { name: 'Address', value: event.targetHost, inline: true },
-    { name: 'Now', value: formatObserved(event.metric, event.observed), inline: true },
-    { name: 'Alert', value: alertTitle(event.rule), inline: true },
+/** What to send for an alert firing or clearing on one target. */
+export function notificationFor(event: AlertEvent, options: NotificationOptions = {}): AlertNotification {
+  const details = [
+    ['Address', event.targetHost],
+    ['Now', formatObserved(event.metric, event.observed)],
+    ['Alert', alertTitle(event.rule)],
   ];
-  if (event.targetGroup) fields.push({ name: 'Group', value: groupLabel(event.targetGroup), inline: true });
+  if (event.targetGroup) details.push(['Group', groupLabel(event.targetGroup)]);
 
   return {
-    username: 'ClearPing',
-    ...(mentions ? { content: mentions } : {}),
-    allowed_mentions: { parse: [] as string[], roles, users },
-    embeds: [
-      {
-        title: clip(`${options.test ? 'Test: ' : ''}${headline(event)}`, EMBED_TITLE_MAX),
-        description: explanation(event),
-        color: firing ? COLOR_FIRING : COLOR_RESOLVED,
-        fields: fields.map(field => ({ ...field, value: clip(field.value, EMBED_FIELD_MAX) })),
-        footer: { text: firing ? 'ClearPing · firing' : 'ClearPing · resolved' },
-        timestamp: event.at.toISOString(),
-      },
-    ],
+    title: clip(defuse(`${options.test ? 'Test: ' : ''}${headline(event)}`), TITLE_MAX),
+    body:
+      `<p>${explanation(event)}</p>` +
+      `<ul>${details.map(([name, value]) => `<li><b>${name}:</b> ${html(value)}</li>`).join('')}</ul>`,
+    type: event.transition === 'firing' ? 'failure' : 'success',
   };
-}
-
-// ─── Everything else ────────────────────────────────────────────────────────
-
-/** The body any other webhook is sent. `text` is a ready-made one-line summary. */
-export function webhookPayload(event: AlertEvent, options: PayloadOptions = {}) {
-  const summary =
-    event.transition === 'firing'
-      ? `${event.targetName} (${event.targetHost}): ${event.metric} is ${event.observed ?? 'unknown'}, past threshold ${event.threshold}`
-      : `${event.targetName} (${event.targetHost}): ${event.metric} recovered`;
-
-  return {
-    status: event.transition,
-    alert: { id: event.rule.id, name: alertTitle(event.rule) },
-    target: { name: event.targetName, host: event.targetHost, group: event.targetGroup ?? null },
-    metric: event.metric,
-    observed: event.observed,
-    threshold: event.threshold,
-    at: event.at.toISOString(),
-    text: options.test ? `Test: ${summary}` : summary,
-    ...(options.test ? { test: true } : {}),
-  };
-}
-
-/** The body to send for an alert, in the format its destination takes. */
-export function payloadFor(event: AlertEvent, options: PayloadOptions = {}) {
-  return event.rule.destination === 'discord' ? discordPayload(event, options) : webhookPayload(event, options);
 }

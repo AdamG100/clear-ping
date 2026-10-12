@@ -324,19 +324,6 @@ export type AlertMetric = 'packetLoss' | 'latency' | 'jitter' | 'unreachable' | 
 export type AlertState = 'ok' | 'firing';
 
 /**
- * Where an alert is sent. Chosen, not worked out from the URL: each kind is
- * sent in its own format and has its own settings, and there will be more of
- * them. `none` is an alert that is only shown in the app.
- */
-export type AlertDestination = 'none' | 'discord' | 'webhook';
-
-export const ALERT_DESTINATION_LABELS: Record<AlertDestination, string> = {
-  none: 'Only show it here',
-  discord: 'Discord',
-  webhook: 'Webhook',
-};
-
-/**
  * What an alert watches for and where it says so.
  *
  * `consecutiveProbes` is what separates an alert from a nuisance: a single
@@ -351,15 +338,13 @@ export interface AlertSettings {
   /** Threshold value; ignored for the 'unreachable' metric. */
   threshold: number;
   consecutiveProbes: number;
-  destination: AlertDestination;
   /**
-   * Posted to when the alert fires and when it resolves: an embed for
-   * `discord`, a plain JSON payload for `webhook`.
+   * Where it is sent when it fires and when it resolves: Apprise URLs, one for
+   * each service to notify (`discord://…`, `mailto://…`, `json://…`). What
+   * kind of service each one is, and how to word a message for it, is
+   * Apprise's business. Empty for an alert that is only shown in the app.
    */
-  webhookUrl?: string;
-  /** discord: role and user ids to mention when the alert fires. */
-  mentionRoleIds?: string[];
-  mentionUserIds?: string[];
+  notifyUrls: string[];
 }
 
 /** How one target currently stands against an alert it is ticked for. */

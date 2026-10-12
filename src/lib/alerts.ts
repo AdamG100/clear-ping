@@ -1,11 +1,11 @@
 import { randomUUID } from 'crypto';
 import { getDatabase } from './database';
-import { isDiscordWebhook, parseMentionIds, payloadFor } from './alert-delivery';
-import type { Alert, AlertDestination, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
-import { ALERT_DESTINATION_LABELS, ALERT_METRIC_LABELS } from '@/types/probe';
+import { notificationFor, parseNotifyUrls } from './alert-delivery';
+import { sendNotification, type DeliveryResult } from './apprise';
+import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
+import { ALERT_METRIC_LABELS } from '@/types/probe';
 
 export const ALERT_METRICS = Object.keys(ALERT_METRIC_LABELS) as AlertMetric[];
-export const ALERT_DESTINATIONS = Object.keys(ALERT_DESTINATION_LABELS) as AlertDestination[];
 
 /**
  * Alerts, and how each target stands against the ones it is ticked for.
@@ -20,10 +20,7 @@ interface AlertRow {
   metric: AlertMetric;
   threshold: number;
   consecutive_probes: number;
-  destination: AlertDestination;
-  webhook_url: string | null;
-  mention_role_ids: string | null;
-  mention_user_ids: string | null;
+  notify_urls: string | null;
   enabled: number;
   created_at: number;
 }
@@ -37,7 +34,7 @@ interface AlertTargetRow {
   last_resolved_at: number | null;
 }
 
-function parseIds(value: string | null): string[] {
+function parseUrls(value: string | null): string[] {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
@@ -54,10 +51,7 @@ function settingsFromRow(row: AlertRow): AlertSettings & { id: string; enabled: 
     metric: row.metric,
     threshold: row.threshold,
     consecutiveProbes: row.consecutive_probes,
-    destination: row.destination,
-    webhookUrl: row.webhook_url ?? undefined,
-    mentionRoleIds: parseIds(row.mention_role_ids),
-    mentionUserIds: parseIds(row.mention_user_ids),
+    notifyUrls: parseUrls(row.notify_urls),
     enabled: row.enabled === 1,
     createdAt: new Date(row.created_at),
   };
@@ -165,45 +159,14 @@ export function parseAlertInput(
     input.consecutiveProbes = consecutiveProbes;
   }
 
-  if (given('webhookUrl')) {
-    const webhookUrl = typeof body.webhookUrl === 'string' ? body.webhookUrl.trim() : '';
-    if (webhookUrl && !/^https?:\/\//i.test(webhookUrl)) {
-      return fail('Webhook URL must start with http:// or https://');
+  if (given('notifyUrls') || !partial) {
+    // None is an alert that is only shown in the app, and an empty list is
+    // how an edit stops one being sent.
+    const notifyUrls = parseNotifyUrls(body.notifyUrls);
+    if (!notifyUrls) {
+      return fail('notifyUrls must be Apprise URLs, such as discord://… or mailto://…, as a list or one to a line');
     }
-    // Empty is how an edit takes the webhook away.
-    input.webhookUrl = webhookUrl;
-  }
-
-  if (given('destination')) {
-    if (!ALERT_DESTINATIONS.includes(body.destination as AlertDestination)) {
-      return fail(`Invalid destination. Expected one of: ${ALERT_DESTINATIONS.join(', ')}`);
-    }
-    input.destination = body.destination as AlertDestination;
-  } else if (!partial) {
-    // Not said, which is what anything written before there was a choice
-    // sends: the URL is the only clue there is.
-    input.destination = !input.webhookUrl ? 'none' : isDiscordWebhook(input.webhookUrl) ? 'discord' : 'webhook';
-  }
-
-  if (input.destination === 'none') {
-    input.webhookUrl = '';
-  } else if (input.destination !== undefined && (input.webhookUrl === '' || (!partial && !input.webhookUrl))) {
-    // An edit may change the destination and leave the URL as it is; a new
-    // alert has no URL to leave.
-    return fail(`Give the webhook URL to send to, or choose "${ALERT_DESTINATION_LABELS.none}"`);
-  }
-
-  for (const [field, what] of [['mentionRoleIds', 'Role'], ['mentionUserIds', 'User']] as const) {
-    if (!given(field)) continue;
-    const ids = parseMentionIds(body[field]);
-    if (!ids) return fail(`${what} IDs must be Discord IDs: numbers, separated by commas or spaces`);
-    input[field] = ids;
-  }
-  // Mentions mean something only to Discord, and must not linger on an alert
-  // that has stopped going there.
-  if (input.destination !== undefined && input.destination !== 'discord') {
-    input.mentionRoleIds = [];
-    input.mentionUserIds = [];
+    input.notifyUrls = notifyUrls;
   }
 
   if (given('targetIds') || !partial) {
@@ -230,18 +193,15 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
 
   await run(
     `INSERT INTO alerts
-      (id, name, metric, threshold, consecutive_probes, destination, webhook_url, mention_role_ids, mention_user_ids, enabled, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, name, metric, threshold, consecutive_probes, notify_urls, enabled, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.name ?? '',
       input.metric,
       input.threshold,
       input.consecutiveProbes,
-      input.destination,
-      input.webhookUrl || null,
-      JSON.stringify(input.mentionRoleIds ?? []),
-      JSON.stringify(input.mentionUserIds ?? []),
+      JSON.stringify(input.notifyUrls),
       input.enabled === false ? 0 : 1,
       Date.now(),
     ]
@@ -266,10 +226,7 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
   if (changes.metric !== undefined) set('metric', changes.metric);
   if (changes.threshold !== undefined) set('threshold', changes.threshold);
   if (changes.consecutiveProbes !== undefined) set('consecutive_probes', changes.consecutiveProbes);
-  if (changes.destination !== undefined) set('destination', changes.destination);
-  if (changes.webhookUrl !== undefined) set('webhook_url', changes.webhookUrl || null);
-  if (changes.mentionRoleIds !== undefined) set('mention_role_ids', JSON.stringify(changes.mentionRoleIds));
-  if (changes.mentionUserIds !== undefined) set('mention_user_ids', JSON.stringify(changes.mentionUserIds));
+  if (changes.notifyUrls !== undefined) set('notify_urls', JSON.stringify(changes.notifyUrls));
   if (changes.enabled !== undefined) set('enabled', changes.enabled ? 1 : 0);
 
   if (fields.length > 0) {
@@ -446,62 +403,36 @@ export async function evaluateAlerts(
 
 // ─── Telling someone ────────────────────────────────────────────────────────
 
-export interface DeliveryResult {
-  ok: boolean;
-  /** Why it was not delivered, in words fit to show the person who set it up. */
-  detail?: string;
-}
+export type { DeliveryResult };
 
-/** POST an alert transition to its webhook and say how that went. */
+/** Send an alert transition to each of its notification URLs and say how that went. */
 export async function deliverAlert(event: AlertEvent, options: { test?: boolean } = {}): Promise<DeliveryResult> {
-  const url = event.rule.webhookUrl;
-  if (!url || event.rule.destination === 'none') return { ok: false, detail: 'This alert is not sent anywhere' };
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
+  const urls = event.rule.notifyUrls;
+  if (urls.length === 0) return { ok: false, detail: 'This alert is not sent anywhere' };
 
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payloadFor(event, options)),
-      signal: controller.signal,
-    });
-
-    if (response.ok) return { ok: true };
-
-    // Discord explains a rejected post in its body; pass that on.
-    const body = (await response.text().catch(() => '')).slice(0, 300);
-    const service = event.rule.destination === 'discord' ? 'Discord' : 'The webhook';
-    return { ok: false, detail: `${service} answered ${response.status}${body ? `: ${body}` : ''}` };
+    return await sendNotification(urls, notificationFor(event, options));
   } catch (error) {
-    return {
-      ok: false,
-      detail: controller.signal.aborted
-        ? 'The webhook did not answer within 10 seconds'
-        : `Could not reach the webhook: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  } finally {
-    clearTimeout(timer);
+    return { ok: false, detail: `Could not run Apprise: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
 /**
  * Deliver an alert transition from the prober.
  *
- * Failures are logged and swallowed: a webhook that is down must not take the
+ * Failures are logged and swallowed: a service that is down must not take the
  * prober with it or delay the next probe.
  */
 export async function dispatchAlert(event: AlertEvent): Promise<void> {
-  if (!event.rule.webhookUrl) return;
+  if (event.rule.notifyUrls.length === 0) return;
 
   const result = await deliverAlert(event);
   if (!result.ok) console.error(`[Alerts] Delivery failed for ${event.targetName}: ${result.detail}`);
 }
 
 /**
- * Send an alert's webhook a sample of what it would send for real, so that a
- * mistyped URL or role id is found now rather than during an outage.
+ * Send an alert's notification URLs a sample of what they would be sent for
+ * real, so that a mistyped one is found now rather than during an outage.
  */
 export async function sendTestAlert(alert: Alert, target?: Pick<Target, 'id' | 'name' | 'host' | 'group'>): Promise<DeliveryResult> {
   const sample: Record<AlertMetric, number> = {

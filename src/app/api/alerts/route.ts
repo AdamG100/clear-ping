@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAlert, getAlerts, parseAlertInput, type AlertInput } from '@/lib/alerts';
+import { checkNotifyUrls } from '@/lib/apprise';
 import { initializeServer } from '@/lib/init';
 
 /** GET /api/alerts - Every alert, with the state of each target it is ticked for */
@@ -15,10 +16,10 @@ export async function GET() {
 
 /**
  * POST /api/alerts - Create an alert
- * Body: { name?, metric, threshold, consecutiveProbes, destination?, webhookUrl?, mentionRoleIds?, mentionUserIds?, targetIds }
+ * Body: { name?, metric, threshold, consecutiveProbes, notifyUrls?, targetIds }
  *
- * `destination` is `none`, `discord` or `webhook`. Left out, it is taken from
- * the URL: a Discord webhook URL means `discord`.
+ * `notifyUrls` is the Apprise URLs to send it to: any service Apprise has, and
+ * as many as wanted. Left out or empty, the alert is only shown in the app.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -26,6 +27,9 @@ export async function POST(request: NextRequest) {
 
     const parsed = parseAlertInput(await request.json());
     if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+
+    const usable = await checkNotifyUrls(parsed.input.notifyUrls ?? []);
+    if (!usable.ok) return NextResponse.json({ error: usable.detail }, { status: 400 });
 
     // Not partial, so everything an alert needs has been checked to be there.
     const alert = await createAlert(parsed.input as AlertInput);

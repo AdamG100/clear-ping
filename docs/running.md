@@ -9,6 +9,17 @@ npm run dev      # or: npm run build && npm start
 The probe scheduler starts with the server via `src/instrumentation.ts`, so
 probing begins at boot rather than waiting for someone to open the page.
 
+Alerts are sent by [Apprise](https://github.com/caronc/apprise), a Python
+program that has to be installed for any to go out:
+
+```bash
+pip install "apprise[all-plugins]"
+```
+
+If that leaves `apprise` somewhere that is not on the `PATH`, point
+`CLEARPING_APPRISE_BIN` at it. Everything else works without it, and the Docker
+image comes with it. See [alerting.md](alerting.md).
+
 ## Separate prober (recommended for anything you rely on)
 
 Run the prober as its own process and point the web app at the same database:
@@ -34,8 +45,8 @@ writes while the UI reads without either blocking the other.
 
 ## Docker
 
-The image runs the web app and the scheduler in one container, with `ping` and
-`traceroute` installed.
+The image runs the web app and the scheduler in one container, with `ping`,
+`traceroute` and Apprise installed.
 
 ```bash
 # from the repository root
@@ -148,7 +159,9 @@ How that works, for when it matters:
   database is newer than it understands. It will not see things that only
   exist in the newer shape. Alerts made on the Alerts screen are an example:
   an image from before that screen looks for alerts where they used to be
-  kept, and finds the ones you had then.
+  kept, and finds the ones you had then. In the same way, an image from before
+  alerts were sent by Apprise sends each alert where it was going at the time
+  of the upgrade, and knows nothing of notification URLs added since.
 
 For anyone changing the schema: add a function to the list at the bottom of
 `src/lib/migrations.ts`. Entries already in the list are never edited, since
@@ -165,6 +178,7 @@ See `.env.example`. All settings are optional.
 | `CLEARPING_DB_PATH` | `./data/clearping.db` | Database location |
 | `CLEARPING_RETENTION_DAYS` | `90` | Measurement retention; `0` keeps everything |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes |
+| `CLEARPING_APPRISE_BIN` | `apprise` | The Apprise program that sends alerts, when it is not on the `PATH` |
 
 ## Development
 
@@ -177,4 +191,6 @@ npm run lint
 The tests cover the parts where a silent mistake is most costly: `ping` output
 parsing for all three platforms, the statistics queries, the chart series
 builder, and the alert state machine. They use a temporary SQLite file and a
-local HTTP server; nothing touches the network or your real database.
+local HTTP server; nothing touches the network or your real database. The tests
+that send a notification through the real Apprise, to that local server, run
+when Apprise is installed and are skipped when it is not.

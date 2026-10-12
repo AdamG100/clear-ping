@@ -8,7 +8,7 @@ const rule = (over: Partial<AlertRule> = {}): AlertRule => ({
   metric: 'packetLoss',
   threshold: 5,
   consecutiveProbes: 3,
-  destination: 'none',
+  notifyUrls: [],
   enabled: true,
   state: 'ok',
   streak: 0,

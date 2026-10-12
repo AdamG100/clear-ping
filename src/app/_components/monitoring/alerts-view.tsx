@@ -21,12 +21,12 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
-import { alertTitle, describeCondition, isDiscordWebhook, parseMentionIds } from '@/lib/alert-delivery'
+import { alertTitle, describeCondition, notifyUrlLabel, parseNotifyUrls } from '@/lib/alert-delivery'
 import { groupDepth, groupName } from '@/lib/group-path'
 import { buildSidebarLayout, groupsInOrder, targetsWithin } from '@/lib/sidebar-layout'
 import { PANE, PANE_TITLE } from './pane-layout'
-import type { Alert, AlertDestination, AlertMetric, AlertTargetState, GroupOrder, Target } from '@/types/probe'
-import { ALERT_DESTINATION_LABELS, ALERT_METRIC_LABELS } from '@/types/probe'
+import type { Alert, AlertMetric, AlertTargetState, GroupOrder, Target } from '@/types/probe'
+import { ALERT_METRIC_LABELS } from '@/types/probe'
 
 /**
  * Every alert in one place.
@@ -74,28 +74,14 @@ const DEFAULT_THRESHOLD: Record<AlertMetric, string> = {
   certExpiry: '14',
 }
 
-function deliveryLabel(alert: Pick<AlertResponse, 'destination' | 'mentionRoleIds' | 'mentionUserIds'>): string {
-  if (alert.destination === 'none') return 'Shown here only'
-  if (alert.destination !== 'discord') return ALERT_DESTINATION_LABELS[alert.destination]
-
-  const mentions = (alert.mentionRoleIds?.length ?? 0) + (alert.mentionUserIds?.length ?? 0)
-  return mentions > 0 ? `Discord, mentioning ${mentions}` : 'Discord'
+/** Where an alert goes, by the names of the services and never by their URLs. */
+function deliveryLabel(alert: Pick<AlertResponse, 'notifyUrls'>): string {
+  if (alert.notifyUrls.length === 0) return 'Shown here only'
+  return `Sent to ${[...new Set(alert.notifyUrls.map(notifyUrlLabel))].join(', ')}`
 }
 
-/**
- * What is asked for, and said, about each place an alert can be sent. A new
- * kind of destination is a new entry here and its own fields in the form.
- */
-const DESTINATIONS: Record<Exclude<AlertDestination, 'none'>, { placeholder: string; hint: string }> = {
-  discord: {
-    placeholder: 'https://discord.com/api/webhooks/…',
-    hint: 'Posted to the channel as an embed: red when the alert fires, green when it clears.',
-  },
-  webhook: {
-    placeholder: 'https://hooks.example.com/…',
-    hint: 'Sent a JSON payload when the alert fires and when it clears.',
-  },
-}
+/** Every service Apprise can send to, and how the URL for each is written. */
+const APPRISE_SERVICES = 'https://appriseit.com/services/'
 
 // ─── Target checklist ───────────────────────────────────────────────────────
 
@@ -254,10 +240,7 @@ interface AlertPayload {
   metric: AlertMetric
   threshold: number
   consecutiveProbes: number
-  destination: AlertDestination
-  webhookUrl: string
-  mentionRoleIds: string[]
-  mentionUserIds: string[]
+  notifyUrls: string[]
   targetIds: string[]
 }
 
@@ -283,18 +266,11 @@ function AlertForm({
   const [metric, setMetric] = useState<AlertMetric>(alert?.metric ?? 'unreachable')
   const [threshold, setThreshold] = useState(alert ? String(alert.threshold) : DEFAULT_THRESHOLD.unreachable)
   const [consecutiveProbes, setConsecutiveProbes] = useState(String(alert?.consecutiveProbes ?? 3))
-  const [destination, setDestination] = useState<AlertDestination>(alert?.destination ?? 'none')
-  const [webhookUrl, setWebhookUrl] = useState(alert?.webhookUrl ?? '')
-  const [roleIds, setRoleIds] = useState((alert?.mentionRoleIds ?? []).join(', '))
-  const [userIds, setUserIds] = useState((alert?.mentionUserIds ?? []).join(', '))
+  const [notifyUrls, setNotifyUrls] = useState((alert?.notifyUrls ?? []).join('\n'))
   const [selected, setSelected] = useState(() => new Set(alert?.targets.map(entry => entry.targetId) ?? []))
   const [attempted, setAttempted] = useState(false)
 
-  const url = webhookUrl.trim()
-  const discord = destination === 'discord'
-  const sending = destination !== 'none'
-  const roles = parseMentionIds(roleIds)
-  const users = parseMentionIds(userIds)
+  const urls = parseNotifyUrls(notifyUrls)
   const probes = Number(consecutiveProbes)
   const limit = Number(threshold)
 
@@ -302,10 +278,7 @@ function AlertForm({
     metric !== 'unreachable' && (threshold.trim() === '' || !Number.isFinite(limit) || limit < 0) &&
       'The threshold must be a number, zero or more.',
     (!Number.isInteger(probes) || probes < 1 || probes > 100) && 'The number of probes must be between 1 and 100.',
-    sending && url === '' && `Paste the webhook URL to send to, or choose "${ALERT_DESTINATION_LABELS.none}".`,
-    sending && url !== '' && !/^https?:\/\//i.test(url) && 'The webhook URL must start with http:// or https://.',
-    discord && !roles && 'Role IDs must be numbers, separated by commas or spaces.',
-    discord && !users && 'User IDs must be numbers, separated by commas or spaces.',
+    !urls && 'Each notification URL must be an Apprise URL, such as discord://… or mailto://…, on a line of its own.',
     selected.size === 0 && 'Tick at least one target for the alert to watch.',
   ].filter((problem): problem is string => !!problem)
 
@@ -325,11 +298,7 @@ function AlertForm({
       metric,
       threshold: metric === 'unreachable' ? 0 : limit,
       consecutiveProbes: probes,
-      destination,
-      webhookUrl: sending ? url : '',
-      // Kept only for Discord: nothing else understands them.
-      mentionRoleIds: discord ? roles ?? [] : [],
-      mentionUserIds: discord ? users ?? [] : [],
+      notifyUrls: urls ?? [],
       targetIds: [...selected],
     })
   }
@@ -426,85 +395,48 @@ function AlertForm({
       {/* Delivery */}
       <div className="space-y-3">
         <p className={SECTION_LABEL}>Send it to</p>
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Where the alert is sent">
-          {(Object.keys(ALERT_DESTINATION_LABELS) as AlertDestination[]).map(option => (
-            <button
-              key={option}
-              type="button"
-              role="radio"
-              aria-checked={destination === option}
-              onClick={() => setDestination(option)}
-              className={cn(
-                'cursor-pointer rounded-md border px-2.5 py-1.5 text-xs transition-colors touch:py-2.5',
-                destination === option
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted'
-              )}
-            >
-              {ALERT_DESTINATION_LABELS[option]}
-            </button>
-          ))}
-        </div>
-
-        {destination === 'none' ? (
-          <p className="text-[11px] text-muted-foreground">
-            Nothing is sent. A firing alert is shown on this screen and counted beside the Alerts button.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            <Label htmlFor="alert-webhook" className={FIELD_LABEL}>
-              {discord ? 'Discord webhook URL' : 'Webhook URL'}
-            </Label>
-            <Input
-              id="alert-webhook"
-              placeholder={DESTINATIONS[destination].placeholder}
-              value={webhookUrl}
-              onChange={e => setWebhookUrl(e.target.value)}
-              className={cn(FIELD_INPUT, 'font-mono text-xs')}
-            />
-            <p className="text-[11px] text-muted-foreground">{DESTINATIONS[destination].hint}</p>
-            {/* Said, not enforced: a relay that takes Discord's format is a
-                fair thing to point this at. */}
-            {url !== '' && discord !== isDiscordWebhook(url) && (
-              <p className="text-[11px] text-amber-500">
-                {discord
-                  ? 'This does not look like a Discord webhook URL. It will be sent Discord’s format all the same.'
-                  : 'This looks like a Discord webhook URL. Choose Discord above to post an embed there.'}
-              </p>
+        <div className="space-y-1.5">
+          <Label htmlFor="alert-notify-urls" className={FIELD_LABEL}>Notification URLs (optional)</Label>
+          {/* A box of lines rather than one field: an alert can go to several
+              places at once, and each is one URL. */}
+          <textarea
+            id="alert-notify-urls"
+            rows={3}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            placeholder={'discord://webhook_id/webhook_token\nmailto://user:password@gmail.com'}
+            value={notifyUrls}
+            onChange={e => setNotifyUrls(e.target.value)}
+            aria-invalid={!urls}
+            aria-describedby="alert-notify-urls-hint"
+            className={cn(
+              'w-full min-w-0 resize-y rounded-md border border-border bg-input px-3 py-2 font-mono text-xs text-foreground',
+              'placeholder:text-muted-foreground outline-none transition-[color,box-shadow]',
+              'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
+              'aria-invalid:border-destructive'
             )}
-          </div>
-        )}
-
-        {discord && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="alert-roles" className={FIELD_LABEL}>Role IDs to mention (optional)</Label>
-              <Input
-                id="alert-roles"
-                placeholder="123456789012345678"
-                value={roleIds}
-                onChange={e => setRoleIds(e.target.value)}
-                aria-invalid={!roles}
-                className={cn(FIELD_INPUT, 'font-mono text-xs')}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="alert-users" className={FIELD_LABEL}>User IDs to mention (optional)</Label>
-              <Input
-                id="alert-users"
-                placeholder="123456789012345678"
-                value={userIds}
-                onChange={e => setUserIds(e.target.value)}
-                aria-invalid={!users}
-                className={cn(FIELD_INPUT, 'font-mono text-xs')}
-              />
-            </div>
-            <p className="text-[11px] text-muted-foreground sm:col-span-2">
-              Mentioned when the alert fires, not when it clears. Separate several with commas. To copy an ID,
-              turn on Developer Mode in Discord, then right-click the role or user.
-            </p>
-          </div>
-        )}
+          />
+          <p id="alert-notify-urls-hint" className="text-[11px] text-muted-foreground">
+            {urls?.length === 0 ? (
+              <>Left empty, nothing is sent: a firing alert is shown on this screen and counted beside the Alerts button. </>
+            ) : (
+              <>Each one is sent a message when the alert fires and when it clears. </>
+            )}
+            One{' '}
+            <a
+              href={APPRISE_SERVICES}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              Apprise URL
+            </a>{' '}
+            to a line, for any service Apprise supports: Discord, Slack, Telegram, email, ntfy, Teams and the rest.
+            A plain webhook is <code className="font-mono">json://</code> or{' '}
+            <code className="font-mono">jsons://</code> in place of http:// or https://.
+          </p>
+        </div>
       </div>
 
       {/* Targets */}
@@ -622,7 +554,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
       const response = await fetch(`/api/alerts/${alert.id}/test`, { method: 'POST' })
       const result = await response.json().catch(() => ({}))
       if (response.ok && result.ok) {
-        notify({ tone: 'success', title: 'Test sent', detail: 'Check the channel the webhook posts to.' })
+        notify({ tone: 'success', title: 'Test sent', detail: 'Check wherever its notification URLs deliver to.' })
       } else {
         reportError('The test was not delivered', result.detail ?? result.error ?? `Server responded ${response.status}`)
       }
@@ -723,7 +655,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1">
-                    {alert.destination !== 'none' && alert.webhookUrl && (
+                    {alert.notifyUrls.length > 0 && (
                       <Button variant="outline" size="sm" className="h-7 px-2 text-xs touch:h-9 touch:px-3" disabled={busy} onClick={() => sendTest(alert)}>
                         <Send className="mr-1.5 h-3 w-3" />
                         Send test

@@ -432,7 +432,8 @@ src/
 │   ├── traceroute.ts       # Running and storing traceroutes
 │   ├── traceroute-parse.ts # Traceroute output parsing (platform-specific, tested)
 │   ├── alerts.ts           # Alerts: storage, judging a probe, delivery
-│   ├── alert-delivery.ts   # What an alert says: the Discord embed and the webhook payload
+│   ├── alert-delivery.ts   # What an alert says, and the notification URLs it is sent to
+│   ├── apprise.ts          # Sending a notification, by running Apprise
 │   ├── group-path.ts       # Nested groups as paths
 │   ├── migrations.ts       # Schema changes applied when the database is opened
 │   ├── metrics.ts          # Shared statistics (median, jitter)

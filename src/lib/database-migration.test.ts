@@ -72,6 +72,7 @@ const LEGACY_SCHEMA = `
   INSERT INTO alert_rules VALUES ('r1', 'old-ping', 'packetLoss', 5, 3, 'https://hooks.example/x', 1, 'firing', 2, 111, NULL, 999);
   INSERT INTO alert_rules VALUES ('r2', 'old-dns', 'packetLoss', 5, 3, 'https://hooks.example/x', 1, 'ok', 1, NULL, 222, 1500);
   INSERT INTO alert_rules VALUES ('r3', 'old-dns', 'latency', 200, 3, NULL, 0, 'ok', 0, NULL, NULL, 1600);
+  INSERT INTO alert_rules VALUES ('r4', 'old-lab', 'unreachable', 0, 3, 'https://discord.com/api/webhooks/123456789012345678/tok-EN_1', 1, 'ok', 0, NULL, NULL, 1700);
 `
 
 function execFile(file: string, sql: string) {
@@ -86,7 +87,7 @@ await execFile(dbFile, LEGACY_SCHEMA)
 
 const database = await import('./database')
 const alerts = await import('./alerts')
-const { SCHEMA_VERSION } = await import('./migrations')
+const { SCHEMA_VERSION, legacyNotifyUrls } = await import('./migrations')
 
 function all<T>(sql: string): Promise<T[]> {
   return database.getDatabase().then(
@@ -136,27 +137,37 @@ describe('opening a database left by an old version', () => {
 
   it('turns rules set per target into alerts, one for each distinct rule', async () => {
     const migrated = await alerts.getAlerts()
-    expect(migrated).toHaveLength(2)
+    expect(migrated).toHaveLength(3)
 
     // The same rule on two targets is one alert ticked for both.
     const loss = migrated.find(alert => alert.metric === 'packetLoss')!
-    expect(loss).toMatchObject({
-      threshold: 5,
-      consecutiveProbes: 3,
-      // Carried over with the destination its URL was being sent as.
-      destination: 'webhook',
-      webhookUrl: 'https://hooks.example/x',
-      enabled: true,
-      mentionRoleIds: [],
-      mentionUserIds: [],
-    })
+    expect(loss).toMatchObject({ threshold: 5, consecutiveProbes: 3, enabled: true })
     expect(loss.createdAt.getTime()).toBe(999)
     expect(loss.targets.map(entry => entry.targetId).sort()).toEqual(['old-dns', 'old-ping'])
 
     const muted = migrated.find(alert => alert.metric === 'latency')!
-    expect(muted).toMatchObject({ threshold: 200, enabled: false, destination: 'none' })
-    expect(muted.webhookUrl).toBeUndefined()
+    expect(muted).toMatchObject({ threshold: 200, enabled: false })
     expect(muted.targets.map(entry => entry.targetId)).toEqual(['old-dns'])
+  })
+
+  it('gives each alert the Apprise URL that reaches where it was already sent', async () => {
+    const migrated = await alerts.getAlerts()
+    const urlsOf = (metric: string) => migrated.find(alert => alert.metric === metric)!.notifyUrls
+
+    // A webhook becomes Apprise's JSON service, and a Discord webhook Discord's
+    // own, posted as the embed it used to be.
+    expect(urlsOf('packetLoss')).toEqual(['jsons://hooks.example/x?format=text'])
+    expect(urlsOf('unreachable')).toEqual(['discord://123456789012345678/tok-EN_1/?format=markdown'])
+    // One that was sent nowhere still is.
+    expect(urlsOf('latency')).toEqual([])
+  })
+
+  it('leaves what an older version would send by where it would look for it', async () => {
+    expect(await all('SELECT destination, webhook_url FROM alerts ORDER BY created_at')).toEqual([
+      { destination: 'webhook', webhook_url: 'https://hooks.example/x' },
+      { destination: 'none', webhook_url: null },
+      { destination: 'discord', webhook_url: 'https://discord.com/api/webhooks/123456789012345678/tok-EN_1' },
+    ])
   })
 
   it('keeps each target’s state, so a rule that was firing does not fire again', async () => {
@@ -170,7 +181,9 @@ describe('opening a database left by an old version', () => {
   })
 
   it('leaves the old rules where an older version would look for them', async () => {
-    expect(await all('SELECT id FROM alert_rules ORDER BY id')).toEqual([{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }])
+    expect(await all('SELECT id FROM alert_rules ORDER BY id')).toEqual([
+      { id: 'r1' }, { id: 'r2' }, { id: 'r3' }, { id: 'r4' },
+    ])
   })
 
   it('leaves no dangling references and turns foreign keys back on', async () => {
@@ -209,7 +222,7 @@ describe('opening a database left by an old version', () => {
       metric: 'certExpiry',
       threshold: 14,
       consecutiveProbes: 1,
-      destination: 'none',
+      notifyUrls: [],
       targetIds: ['new-http'],
     })
     expect(alert.metric).toBe('certExpiry')
@@ -255,5 +268,48 @@ describe('opening a database left by an old version', () => {
     })
     const latest = await database.getLatestMeasurementForAllTargets()
     expect(latest['new-tcp'].details).toEqual({ statusCode: 200, certExpiresAt: 123456 })
+  })
+})
+
+describe('the Apprise URL for where an alert used to be sent', () => {
+  const DISCORD = 'https://discord.com/api/webhooks/123456789012345678/tok-EN_1'
+  const ROLE = '111111111111111111'
+  const USER = '222222222222222222'
+
+  it('keeps a Discord alert an embed, mentioning who it mentioned', () => {
+    expect(legacyNotifyUrls('discord', DISCORD)).toEqual(['discord://123456789012345678/tok-EN_1/?format=markdown'])
+
+    const [url] = legacyNotifyUrls('discord', DISCORD, [ROLE], [USER])
+    expect(new URL(url).searchParams.get('ping')).toBe(`<@&${ROLE}>,<@${USER}>`)
+    expect(url.startsWith('discord://123456789012345678/tok-EN_1/?format=markdown&ping=')).toBe(true)
+  })
+
+  it('finds the webhook on any of Discord’s hosts and API versions, and keeps its thread', () => {
+    expect(legacyNotifyUrls('discord', 'https://canary.discord.com/api/v10/webhooks/123/abc?wait=true&thread_id=99'))
+      .toEqual(['discord://123/abc/?format=markdown&thread=99'])
+    // The Slack-compatible endpoint of a Discord webhook was sent plain text.
+    expect(legacyNotifyUrls('webhook', `${DISCORD}/slack`)).toEqual(['discord://123456789012345678/tok-EN_1/'])
+  })
+
+  it('turns any other address into Apprise’s JSON service, query and login included', () => {
+    expect(legacyNotifyUrls('webhook', 'https://hooks.example.com/a/b')).toEqual([
+      'jsons://hooks.example.com/a/b?format=text',
+    ])
+    expect(legacyNotifyUrls('webhook', 'http://user:pass@10.0.0.5:8080/hook?token=abc&format=x')).toEqual([
+      'json://user:pass@10.0.0.5:8080/hook?-token=abc&-format=x&format=text',
+    ])
+    // Set to Discord but pointed at something else: all that can be sent there is JSON.
+    expect(legacyNotifyUrls('discord', 'https://relay.example.com/x')).toEqual(['jsons://relay.example.com/x?format=text'])
+  })
+
+  it('leaves a Slack webhook as it is, since Apprise knows it by that address', () => {
+    const slack = 'https://hooks.slack.com/services/T000/B000/XXXX'
+    expect(legacyNotifyUrls('webhook', slack)).toEqual([slack])
+  })
+
+  it('gives an alert that was sent nowhere no URLs', () => {
+    expect(legacyNotifyUrls('none', DISCORD)).toEqual([])
+    expect(legacyNotifyUrls('webhook', null)).toEqual([])
+    expect(legacyNotifyUrls('webhook', '')).toEqual([])
   })
 })

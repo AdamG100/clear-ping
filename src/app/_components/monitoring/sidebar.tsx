@@ -83,6 +83,31 @@ const RAIL_OUT = { duration: 0.1, ease: 'easeIn' } as const
 /** For anyone whose system asks for less motion: the same change, without the travel. */
 const INSTANT = { duration: 0 } as const
 
+// ─── Folded groups ──────────────────────────────────────────────────────────
+
+/** Where it is remembered which groups were left folded away. */
+const COLLAPSED_GROUPS_KEY = 'collapsedGroups'
+
+function readCollapsedGroups(): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) ?? '[]')
+    if (!Array.isArray(stored)) return new Set()
+    return new Set(stored.filter((group): group is string => typeof group === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+function saveCollapsedGroups(groups: Set<string>) {
+  try {
+    if (groups.size > 0) localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...groups]))
+    else localStorage.removeItem(COLLAPSED_GROUPS_KEY)
+  } catch {
+    // Not remembered for next time; it still changes now.
+  }
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface SidebarProps {
@@ -741,7 +766,10 @@ export function Sidebar({
   // closes by itself if the target goes away underneath it.
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [editingGroup, setEditingGroup] = useState<string | null>(null)
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  // Read once, lazily, from what was left last time. Nothing is drawn from it
+  // until the targets have loaded, so the server knowing none of it is no
+  // mismatch.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(readCollapsedGroups)
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
   const [isGroupDragging, setIsGroupDragging] = useState(false)
@@ -832,18 +860,19 @@ export function Sidebar({
   }
 
   const toggleCollapse = useCallback((group: string) => {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev)
-      if (next.has(group)) next.delete(group)
-      else next.add(group)
-      return next
-    })
-  }, [])
+    const next = new Set(collapsedGroups)
+    if (next.has(group)) next.delete(group)
+    else next.add(group)
+    setCollapsedGroups(next)
+    saveCollapsedGroups(next)
+  }, [collapsedGroups])
 
   const handleMoveGroup = (from: string, to: string) => {
     setEditingGroup(null)
     // A group that was folded away stays folded under its new name.
-    setCollapsedGroups(prev => new Set([...prev].map(group => rebaseGroupPath(group, from, to))))
+    const moved = new Set([...collapsedGroups].map(group => rebaseGroupPath(group, from, to)))
+    setCollapsedGroups(moved)
+    saveCollapsedGroups(moved)
     onMoveGroup?.(from, to)
   }
 

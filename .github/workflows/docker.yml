@@ -100,6 +100,15 @@ jobs:
 
           docker exec clearping sh -c 'command -v ping && command -v traceroute'
 
+          # Alerts are sent by Apprise, as the user the app runs as. A dry run
+          # sends nothing, and fails if Apprise cannot load the service. MQTT
+          # is one of the services that need a package beyond Apprise's own,
+          # so this also says the extra packages made it into the image.
+          if ! docker exec -e APPRISE_URLS='mqtt://127.0.0.1/topic' clearping apprise --dry-run; then
+            echo "::error::Apprise does not run inside the container, or is missing its optional services"
+            exit 1
+          fi
+
           id=$(curl -fsS -X POST http://localhost:3000/api/targets \
             -H 'Content-Type: application/json' \
             -d '{"name":"loopback","host":"127.0.0.1","probeType":"ping","interval":300}' | jq -r .id)

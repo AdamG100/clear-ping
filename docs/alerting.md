@@ -9,7 +9,8 @@ Open **Alerts** at the bottom of the sidebar and choose **New alert**. An alert
 is three things:
 
 1. **A condition**: what to watch for, and for how many probes in a row.
-2. **Where to send it**: Discord, a webhook, or nowhere but the Alerts screen.
+2. **Where to send it**: any service [Apprise](https://github.com/caronc/apprise)
+   can notify, as many of them as you like, or nowhere but the Alerts screen.
 3. **The targets it watches**: tick them. Ticking a group ticks every target
    in it and in the groups inside it.
 
@@ -60,62 +61,106 @@ With the default of 3 and a 5-minute interval, an alert fires after roughly
 
 ## Where an alert is sent
 
-The destination is chosen on the alert, not worked out from the URL. Each kind
-is sent in its own format.
+Alerts are sent by [Apprise](https://github.com/caronc/apprise), which knows how
+to post to well over a hundred services: Discord, Slack, Telegram, Teams,
+Matrix, email, ntfy, Gotify, Pushover, PagerDuty, SMS gateways, MQTT, a plain
+JSON webhook, and the rest. There is no list of kinds to choose from here, and
+nothing to wait for when Apprise gains a service: whatever it can notify, an
+alert can be sent to.
 
-Use **Send test** on an alert to post a sample message, marked as a test, and
-find a mistyped URL or ID now rather than during an outage. It changes nothing
-about the alert's state.
+Each service is named by a URL. Put one on each line of **Notification URLs**,
+as many as the alert should go to:
 
-### Discord
-
-Create a webhook in Discord (channel settings, Integrations, Webhooks), copy its
-URL and paste it in. Each time the alert fires or clears on a target, one embed
-is posted to the channel:
-
-- red when it fires, green when it clears
-- the target's name and what is wrong in the title
-- its address, the current reading, the alert's name and the target's group as
-  fields
-- the time of the probe as the embed's timestamp
-
-**Mentions.** Give the alert role IDs, user IDs or both, separated by commas,
-and they are mentioned when the alert fires. To copy an ID, turn on Developer
-Mode in Discord (User Settings, Advanced), then right-click the role or user and
-choose Copy ID. A mention pasted as Discord writes it (`<@&123...>`) works too.
-
-- Mentions are sent when an alert **fires**, not when it clears.
-- Only the IDs you listed can be mentioned. Nothing else in the message can
-  ping anyone, so a target named `@everyone` is only text.
-
-### Webhook
-
-Any other URL receives a JSON POST on both transitions:
-
-```json
-{
-  "status": "firing",
-  "alert": { "id": "5f0c...", "name": "Packet loss above 10%" },
-  "target": { "name": "Router", "host": "192.168.1.1", "group": "Home/Network" },
-  "metric": "packetLoss",
-  "observed": 42.5,
-  "threshold": 10,
-  "at": "2026-08-19T22:41:43.911Z",
-  "text": "Router (192.168.1.1): packetLoss is 42.5, past threshold 10"
-}
+```
+discord://webhook_id/webhook_token
+tgram://bot_token/chat_id
+mailtos://user:password@smtp.example.com?to=oncall@example.com
+ntfy://ntfy.sh/my-topic
 ```
 
-`status` is `firing` or `resolved`. The `text` field is a ready-made summary,
-which is what a Slack-compatible endpoint reads, and most alerting services
-accept the payload directly. A test message also carries `"test": true`.
+[Apprise's list of services](https://appriseit.com/services/) says how the URL
+for each one is written and what options it takes, and its
+[URL builder](https://appriseit.com/tools/url-builder/) will put one together
+for you. A few things worth knowing:
 
-### Only show it here
+- **Some web addresses work as they are.** Apprise recognises the webhook
+  address that Discord, Slack and a few others hand out, so a
+  `https://discord.com/api/webhooks/…` URL can be pasted in unchanged.
+- **Any other webhook is `json://`.** A plain `https://` address is not a
+  service. To POST JSON to an endpoint of your own, write it as
+  `jsons://host/path` (`json://` for plain HTTP). `xml://` and `form://` do the
+  same in those formats.
+- **The URLs are checked when the alert is saved.** One that Apprise cannot
+  make sense of is refused there and then, with Apprise's reason.
+- **They are secrets.** Anyone holding one can post to that channel. The list of
+  alerts shows only the name of each service, never the URL.
 
-Nothing is sent. The alert still fires and clears, and shows on the Alerts
-screen and in the count on the Alerts button.
+Leave the box empty and nothing is sent. The alert still fires and clears, and
+shows on the Alerts screen and in the count on the Alerts button.
 
-Delivery failures are logged and swallowed: a webhook that is down must never
+Use **Send test** on an alert to send a sample message, marked as a test, and
+find a mistyped URL now rather than during an outage. It changes nothing about
+the alert's state, and if a service refuses the message it says why.
+
+Delivery failures are logged and swallowed: a service that is down must never
 stop the prober from measuring.
+
+### What is sent
+
+Each time the alert fires or clears on a target, one message goes to every URL:
+
+- a title saying what happened: `Router: packet loss is too high`, or
+  `Router has recovered`
+- the condition and how long it has held, then the target's address, the
+  current reading, the alert's name and the target's group
+- Apprise's `failure` type when it fires and `success` when it clears, which
+  services that have colours or icons show as red and green
+
+The message is written once and Apprise turns it into what each service takes:
+rich text for an email or Telegram, Markdown for Discord or Slack, plain text
+for an SMS or ntfy. Where a service takes more than one format, the URL can say
+which with `?format=text`, `?format=markdown` or `?format=html`.
+
+Two examples of what that is for:
+
+- **Discord as an embed.** Discord gets a plain message by default. Add
+  `?format=markdown` and it is posted as an embed, coloured by whether the
+  alert fired or cleared.
+- **A JSON endpoint that wants plain text.** `jsons://host/path?format=text`.
+  The body it receives is Apprise's:
+
+  ```json
+  {
+    "version": "1.0",
+    "title": "Router: packet loss is too high",
+    "message": "Packet loss above 5% for 3 probes in a row.\n- Address: 192.168.1.1\n- Now: 42.5%\n- Alert: Packet loss above 5%\n- Group: Home / Network",
+    "attachments": [],
+    "type": "failure"
+  }
+  ```
+
+  A query parameter of the endpoint's own is written with a `-` in front
+  (`?-token=abc`), and a header with a `+`.
+
+**Mentions** belong to the URL too, in whatever way the service does them. For
+Discord that is `?ping=`, with role and user IDs:
+`discord://id/token/?format=markdown&ping=<@%26123…>,<@456…>` (`%26` is the `&`
+of a role mention). They are mentioned on every message sent to that URL, when
+the alert clears as well as when it fires. A target or an alert that happens to
+be called `@everyone` or `@here` is only ever text.
+
+### Where Apprise comes from
+
+The Docker image has Apprise installed, with the extra packages some of its
+services need, so every service that can work from inside a container does.
+The exceptions are the ones that pop a notification up on the desktop of the
+machine they run on (`dbus://`, `glib://`, `gnome://`, `macosx://`,
+`windows://`), which have no desktop to reach there.
+
+Running from source, install it yourself: `pip install "apprise[all-plugins]"`.
+If the `apprise` program is not on the `PATH`, name it with
+`CLEARPING_APPRISE_BIN`. Without it alerts still fire and clear and show in the
+app; sending one, or a test, says that Apprise is missing.
 
 ## Behaviour worth knowing
 
@@ -134,13 +179,31 @@ stop the prober from measuring.
 - **Alerts are judged after the measurement is stored**, and alerting failures
   cannot prevent a measurement being recorded.
 
-## Alerts made before there was an Alerts screen
+## Alerts made by an earlier version
 
-Earlier versions set alerts on each target's own page. Those are carried over
-automatically the first time a newer version starts: rules that said the same
-thing on different targets become one alert ticked for all of them, each target
-keeps its state (so one that was firing does not announce itself again), and
-each is sent the way its URL was already being sent.
+Alerts used to be sent by ClearPing itself, to Discord or to a webhook. The
+first time a version with Apprise starts, each of those is given the Apprise
+URL that reaches the same place:
+
+- **A Discord alert** becomes a `discord://` URL with `format=markdown`, so it
+  is still an embed, and with its roles and users in `ping`. One difference:
+  they are now mentioned when the alert clears as well as when it fires.
+- **A Slack webhook** is kept as it is, since Apprise knows Slack by that
+  address.
+- **Any other webhook** becomes `jsons://…?format=text` (or `json://`). The
+  endpoint is the same, but **what it receives has changed**: Apprise's JSON,
+  shown above, in place of the payload with `status`, `metric`, `observed` and
+  `text`. Anything that read those fields needs to read `title`, `message` and
+  `type` instead. If the endpoint belonged to a chat service that was reading
+  `text` (Mattermost, Rocket.Chat and the like), swap the URL for that
+  service's own Apprise URL.
+
+Use **Send test** on each alert after upgrading to see that it still arrives.
+
+Before that, alerts were set on each target's own page. Those are carried over
+too: rules that said the same thing on different targets become one alert
+ticked for all of them, and each target keeps its state, so one that was
+firing does not announce itself again.
 
 ## API
 
@@ -150,8 +213,10 @@ each is sent the way its URL was already being sent.
 | `POST /api/alerts` | Create one |
 | `PATCH /api/alerts/:id` | Change one; `targetIds` replaces the ticked set, `enabled` mutes |
 | `DELETE /api/alerts/:id` | Delete one |
-| `POST /api/alerts/:id/test` | Send its destination a test message |
+| `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 
 An alert is created with `metric`, `threshold`, `consecutiveProbes`,
-`targetIds`, and optionally `name`, `destination` (`none`, `discord` or
-`webhook`), `webhookUrl`, `mentionRoleIds` and `mentionUserIds`.
+`targetIds`, and optionally `name` and `notifyUrls`: the Apprise URLs to send it
+to, as a list or as text with one to a line. An empty list is an alert that is
+only shown in the app. A URL Apprise cannot use is refused with a `400` and
+Apprise's reason.

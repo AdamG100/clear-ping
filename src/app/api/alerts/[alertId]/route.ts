@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteAlert, parseAlertInput, updateAlert } from '@/lib/alerts';
+import { checkNotifyUrls } from '@/lib/apprise';
 import { initializeServer } from '@/lib/init';
 
 /**
@@ -18,6 +19,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (Object.keys(parsed.input).length === 0) {
       return NextResponse.json({ error: 'No supported fields to update' }, { status: 400 });
     }
+
+    const usable = await checkNotifyUrls(parsed.input.notifyUrls ?? []);
+    if (!usable.ok) return NextResponse.json({ error: usable.detail }, { status: 400 });
 
     const alert = await updateAlert(alertId, parsed.input);
     if (!alert) return NextResponse.json({ error: 'Alert not found' }, { status: 404 });

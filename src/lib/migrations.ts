@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto';
 import type sqlite3 from 'sqlite3';
-import { isDiscordWebhook } from './alert-delivery';
 import { normalizeGroupPath } from './group-path';
 
 type Database = sqlite3.Database;
@@ -175,6 +174,23 @@ async function sharedAlerts(database: Database): Promise<void> {
   }
 }
 
+const DISCORD_HOSTS = new Set(['discord.com', 'discordapp.com', 'ptb.discord.com', 'canary.discord.com']);
+const DISCORD_WEBHOOK_PATH = /^\/api(?:\/v\d+)?\/webhooks\/(\d+)\/([^/]+)/;
+
+/**
+ * Whether a URL is a Discord webhook that wants Discord's own payload. Discord
+ * also serves each webhook at `…/slack` and `…/github`, which expect those
+ * services' formats instead, so those do not count.
+ */
+function isDiscordWebhook(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return DISCORD_HOSTS.has(parsed.hostname.toLowerCase()) && /^\/api(\/v\d+)?\/webhooks\/\d+\/[^/]+\/?$/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Where an alert is sent became something it says, rather than something read
  * off its URL each time it fires. Alerts that already have a URL are given the
@@ -196,11 +212,122 @@ async function alertDestinations(database: Database): Promise<void> {
   }
 }
 
+function storedIds(value: string | null): string[] {
+  try {
+    const parsed = JSON.parse(value ?? '[]');
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The Apprise URL that reaches wherever an alert was already being sent.
+ *
+ * - A Discord webhook becomes `discord://`. One that was posted as an embed is
+ *   asked for as an embed still (`format=markdown`), and the roles and users
+ *   it mentioned go in `ping`.
+ * - A Slack webhook is left as it is: Apprise knows Slack by that address.
+ * - Any other address becomes `json://`, or `jsons://` for HTTPS, which is
+ *   Apprise's name for POSTing JSON to an endpoint. What arrives there is
+ *   Apprise's JSON and not the payload this app used to build; that payload
+ *   has nothing to carry it any more.
+ */
+export function legacyNotifyUrls(
+  destination: string,
+  webhookUrl: string | null,
+  roleIds: string[] = [],
+  userIds: string[] = []
+): string[] {
+  if (destination === 'none' || !webhookUrl) return [];
+
+  let parsed: URL;
+  try {
+    parsed = new URL(webhookUrl);
+  } catch {
+    // Nothing could be sent to it before either. Kept, so that "Send test"
+    // has something to complain about.
+    return [webhookUrl];
+  }
+
+  const host = parsed.hostname.toLowerCase();
+
+  const discord = DISCORD_HOSTS.has(host) ? DISCORD_WEBHOOK_PATH.exec(parsed.pathname) : null;
+  if (discord) {
+    const params = new URLSearchParams();
+    if (destination === 'discord') {
+      params.set('format', 'markdown');
+      const ping = [...roleIds.map(id => `<@&${id}>`), ...userIds.map(id => `<@${id}>`)];
+      if (ping.length > 0) params.set('ping', ping.join(','));
+    }
+    const thread = parsed.searchParams.get('thread_id');
+    if (thread) params.set('thread', thread);
+
+    const query = params.toString();
+    return [`discord://${discord[1]}/${discord[2]}/${query ? `?${query}` : ''}`];
+  }
+
+  if (host === 'hooks.slack.com') return [webhookUrl];
+
+  if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    const params = new URLSearchParams();
+    // A `-` in front of a name is how Apprise is told that it belongs in the
+    // endpoint's own query string, and is not a setting of Apprise's.
+    for (const [name, value] of parsed.searchParams) params.append(`-${name}`, value);
+    // The summary this endpoint used to be sent was plain text.
+    params.set('format', 'text');
+
+    const login = parsed.username ? `${parsed.username}${parsed.password ? `:${parsed.password}` : ''}@` : '';
+    const scheme = parsed.protocol === 'https:' ? 'jsons' : 'json';
+    return [`${scheme}://${login}${parsed.host}${parsed.pathname}?${params}`];
+  }
+
+  return [webhookUrl];
+}
+
+/**
+ * Alerts stopped having kinds.
+ *
+ * An alert used to be for Discord or for a webhook, and this app built the
+ * message for each. It now holds Apprise URLs, as many as it should be sent
+ * to, and Apprise does the sending, to any service it knows. Alerts that were
+ * being sent somewhere are given the URL that sends them to the same place.
+ *
+ * `destination`, `webhook_url` and the two columns of mentions are left where
+ * they are. Nothing reads them any more, but an older image started against
+ * this database still finds where its alerts were going.
+ */
+async function appriseNotifications(database: Database): Promise<void> {
+  await run(database, `ALTER TABLE alerts ADD COLUMN notify_urls TEXT NOT NULL DEFAULT '[]'`);
+
+  const sent = await all<{
+    id: string;
+    destination: string;
+    webhook_url: string;
+    mention_role_ids: string | null;
+    mention_user_ids: string | null;
+  }>(
+    database,
+    `SELECT id, destination, webhook_url, mention_role_ids, mention_user_ids FROM alerts
+     WHERE destination != 'none' AND webhook_url IS NOT NULL AND webhook_url != ''`
+  );
+  for (const alert of sent) {
+    const urls = legacyNotifyUrls(
+      alert.destination,
+      alert.webhook_url,
+      storedIds(alert.mention_role_ids),
+      storedIds(alert.mention_user_ids)
+    );
+    await run(database, 'UPDATE alerts SET notify_urls = ? WHERE id = ?', [JSON.stringify(urls), alert.id]);
+  }
+}
+
 /** In the order they shipped. A migration's version is its position, from 1. */
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
   { name: 'alert destinations', up: alertDestinations },
+  { name: 'apprise notifications', up: appriseNotifications },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

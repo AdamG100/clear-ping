@@ -21,8 +21,9 @@ looks different from one that is unstable.
 - **Comparison charts.** Put every target in a group on one chart to see
   whether a slowdown hit one of them or all of them.
 - **Alerts.** One screen for all of them: make an alert, tick the targets it
-  watches, and send it to Discord as an embed (with optional role and user
-  mentions) or to any webhook as JSON.
+  watches, and send it to any service [Apprise](https://github.com/caronc/apprise)
+  can notify: Discord, Slack, Telegram, email, ntfy, a webhook and over a
+  hundred more.
 - **Traceroute.** On demand, and automatically at the moment a loss alert
   fires, which is the only time the route through a failure can be captured.
 - **Certificate expiry.** HTTPS targets record when their certificate runs
@@ -46,7 +47,7 @@ Alerts, each watching the targets ticked for it:
 
 An alert being edited: the condition, where it is sent, and the targets:
 
-![The alert editor, set to post to Discord](docs/screenshots/alert-editor.jpg)
+![The alert editor](docs/screenshots/alert-editor.jpg)
 
 ## Quick start
 
@@ -136,17 +137,26 @@ jitter, or a certificate about to expire), a number of probes in a row it must
 hold for, somewhere to send it, and the targets it watches. Tick single targets
 or whole groups. Each ticked target fires and clears on its own.
 
-Where it is sent is chosen on the alert:
+Where it is sent is a list of [Apprise](https://github.com/caronc/apprise) URLs
+on the alert, one for each service to notify:
 
-- **Discord**: paste a Discord webhook URL. Each change is posted as an embed,
-  red when the alert fires and green when it clears. Role IDs and user IDs can
-  be added, and are mentioned when the alert fires.
-- **Webhook**: any other URL receives a JSON payload.
-- **Only show it here**: nothing is sent.
+```
+discord://webhook_id/webhook_token
+tgram://bot_token/chat_id
+mailtos://user:password@smtp.example.com?to=oncall@example.com
+jsons://hooks.example.com/my-endpoint
+```
 
-**Send test** posts a sample message so a wrong URL or ID is found before it
-matters. Details, the payload format and the finer points are in
+Any service Apprise supports can be used, and an alert can go to several at
+once. The message is written once and Apprise turns it into what each service
+takes. With no URLs nothing is sent, and the alert is only shown in the app.
+
+**Send test** sends a sample message so a wrong URL is found before it
+matters. Details, what the message says and the finer points are in
 [docs/alerting.md](docs/alerting.md).
+
+The Docker image includes Apprise. Running from source, install it with
+`pip install "apprise[all-plugins]"`.
 
 ## Upgrading
 
@@ -190,7 +200,7 @@ Everything the interface does goes through these.
 | `GET /api/compare` | The same period of several targets (`?targets=id,id`) |
 | `GET`, `POST /api/alerts` | Every alert; make one |
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
-| `POST /api/alerts/:id/test` | Send its destination a test message |
+| `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
 
 ## Development
@@ -212,4 +222,4 @@ SQLite.
 
 - [docs/running.md](docs/running.md): running it, Docker, installing it as an app, upgrading, configuration
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
-- [docs/alerting.md](docs/alerting.md): alerts, Discord, webhooks
+- [docs/alerting.md](docs/alerting.md): alerts, and sending them with Apprise
