@@ -8,8 +8,14 @@ import { ServiceWorker } from "./_components/service-worker";
 
 // Instrument Sans: a slightly condensed technical grotesque — reads like
 // equipment labelling rather than another product-dashboard Inter.
+//
+// The two faces are handed to the stylesheet under names of their own, and
+// globals.css makes them Tailwind's `--font-sans` and `--font-mono`. Named
+// `--font-sans` here, the theme's `--font-sans: var(--font-sans)` defined the
+// variable as itself, which is no value at all: the page fell back to the
+// system's font and this one was never so much as downloaded.
 const instrumentSans = Instrument_Sans({
-  variable: "--font-sans",
+  variable: "--font-instrument-sans",
   subsets: ["latin"],
   display: "swap",
 });
@@ -18,7 +24,7 @@ const instrumentSans = Instrument_Sans({
 // the mono face carries all of them, with tabular figures so digits do not
 // shift as values change.
 const plexMono = IBM_Plex_Mono({
-  variable: "--font-mono",
+  variable: "--font-plex-mono",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
   display: "swap",
@@ -66,7 +72,10 @@ export default function RootLayout({
   return (
     // suppressHydrationWarning: the inline script below sets the theme class
     // before React hydrates, so the server and client markup differ by design.
-    <html lang="en" suppressHydrationWarning>
+    // The fonts are named on the root element, not on <body>: that is where
+    // the theme's variables are worked out, and what the page's own font is
+    // taken from.
+    <html lang="en" className={`${instrumentSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
       <head>
         <script
           // Applies the saved theme before first paint. Without this the page
@@ -91,9 +100,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body
-        className={`${instrumentSans.variable} ${plexMono.variable} antialiased bg-background text-foreground`}
-      >
+      <body className="antialiased bg-background text-foreground">
         <ToastProvider>{children}</ToastProvider>
         <InstallPrompt />
         <ServiceWorker />

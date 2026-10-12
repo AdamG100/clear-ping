@@ -174,7 +174,14 @@ describe('parseWindow', () => {
   it('rejects a window that is inverted, too narrow or too wide', () => {
     expect(parseWindow(String(base + MINUTE), String(base), now)).toBeNull()
     expect(parseWindow(String(base), String(base + 1000), now)).toBeNull()
-    expect(parseWindow(String(base - 40 * 24 * 60 * MINUTE), String(base), now)).toBeNull()
+    expect(parseWindow(String(base - 91 * 24 * 60 * MINUTE), String(base), now)).toBeNull()
+  })
+
+  it('accepts a window as wide as the longest time range', () => {
+    expect(parseWindow(String(base - 90 * 24 * 60 * MINUTE), String(base), now)).toEqual({
+      start: base - 90 * 24 * 60 * MINUTE,
+      end: base,
+    })
   })
 })
 

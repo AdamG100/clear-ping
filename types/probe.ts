@@ -2,7 +2,7 @@ export type ProbeType = 'ping' | 'dns' | 'tcp' | 'http';
 
 export type ProbeStatus = 'active' | 'paused' | 'error';
 
-export type TimeRange = '1h' | '3h' | '6h' | '24h' | '7d' | '30d';
+export type TimeRange = '1h' | '3h' | '6h' | '12h' | '24h' | '2d' | '7d' | '30d' | '90d';
 
 export type TargetType = 'ip' | 'domain' | 'dns' | 'tcp' | 'http';
 
@@ -303,20 +303,23 @@ export interface Traceroute {
 }
 
 /**
- * Single source of truth for each time range: how far back it reaches and how
- * wide the chart buckets are. The dashboard derives its query window and its
- * bucketing from this, so the axis, the fetch and the statistics always agree.
+ * Each time range a chart can be set to, shortest first: what it is called and
+ * how far back it reaches. How finely a range is drawn is not set here: the
+ * server works that out from the length of the period (see `bucketWidthFor`).
+ *
+ * The longest is the 90 days that measurements are kept for unless
+ * CLEARPING_RETENTION_DAYS says otherwise.
  */
-export const TIME_RANGE_CONFIG: Record<
-  TimeRange,
-  { label: string; hours: number; bucketMinutes: number }
-> = {
-  '1h': { label: '1 Hour', hours: 1, bucketMinutes: 1 },
-  '3h': { label: '3 Hours', hours: 3, bucketMinutes: 3 },
-  '6h': { label: '6 Hours', hours: 6, bucketMinutes: 5 },
-  '24h': { label: '24 Hours', hours: 24, bucketMinutes: 15 },
-  '7d': { label: '1 Week', hours: 168, bucketMinutes: 60 },
-  '30d': { label: '30 Days', hours: 720, bucketMinutes: 240 },
+export const TIME_RANGE_CONFIG: Record<TimeRange, { label: string; hours: number }> = {
+  '1h': { label: '1 Hour', hours: 1 },
+  '3h': { label: '3 Hours', hours: 3 },
+  '6h': { label: '6 Hours', hours: 6 },
+  '12h': { label: '12 Hours', hours: 12 },
+  '24h': { label: '24 Hours', hours: 24 },
+  '2d': { label: '2 Days', hours: 48 },
+  '7d': { label: '1 Week', hours: 168 },
+  '30d': { label: '30 Days', hours: 720 },
+  '90d': { label: '90 Days', hours: 2160 },
 };
 
 export type AlertMetric = 'packetLoss' | 'latency' | 'jitter' | 'unreachable' | 'certExpiry';

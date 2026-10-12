@@ -15,8 +15,10 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
+  /* The two faces loaded in layout.tsx, each with what to use until it has
+     arrived or where it cannot be fetched at all. */
+  --font-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --color-signal-perfect: var(--signal-perfect);
   --color-signal-minor: var(--signal-minor);
   --color-signal-moderate: var(--signal-moderate);

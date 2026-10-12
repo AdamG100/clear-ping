@@ -24,9 +24,9 @@ export const PANE_HEADER =
   'flex flex-col gap-4 @4xl/main:flex-row @4xl/main:items-center @4xl/main:justify-between'
 
 /** The controls beside a title. Too narrow for one line, they wrap and the buttons share the second. */
-export const PANE_ACTIONS = 'flex flex-wrap items-center gap-2 @xl/main:flex-nowrap @xl/main:gap-3'
+export const PANE_ACTIONS = 'flex flex-wrap items-center gap-2 @3xl/main:flex-nowrap @3xl/main:gap-3'
 
 /** A button among those controls: half of the wrapped line, or its own width once they fit on one. */
-export const PANE_ACTION = 'flex-1 shrink-0 @xl/main:flex-none'
+export const PANE_ACTION = 'flex-1 shrink-0 @3xl/main:flex-none'
 
 export const PANE_TITLE = 'break-words text-xl font-semibold tracking-tight text-foreground @2xl/main:text-2xl'

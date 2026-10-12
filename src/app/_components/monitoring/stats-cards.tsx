@@ -46,7 +46,8 @@ function RelativeTime({ timestamp }: { timestamp: Date }) {
       transition={{ duration: 0.1 }}
     >
       <Clock className="h-4 w-4" />
-      <span className="font-medium">{relativeTime}</span>
+      {/* A time, in the face every other time on the page is set in. */}
+      <span className="font-mono text-xs font-medium">{relativeTime}</span>
     </motion.div>
   )
 }
@@ -209,7 +210,11 @@ function StatCard({
             <motion.p
               key={mainValue}
               className={cn(
-                "text-3xl font-bold tracking-tight",
+                // The reading the card is for, in the mono face like the four
+                // under it: its digits keep their width as the value changes,
+                // so the figure does not shuffle sideways on every probe.
+                // Semibold is the heaviest weight of that face that is loaded.
+                "font-mono text-3xl font-semibold tracking-tight",
                 mainValue === "—" ? "text-muted-foreground/50" : "text-foreground"
               )}
               initial={{ opacity: 0, y: 10 }}

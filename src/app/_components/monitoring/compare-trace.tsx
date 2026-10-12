@@ -7,6 +7,7 @@ import {
   BrushBox,
   BrushLabel,
   TimeAxis,
+  TimeGrid,
   chartHeightFor,
   holdInside,
   latencyDomain,
@@ -284,6 +285,7 @@ export const CompareTrace = memo(function CompareTrace({
         <text x={4} y={PAD.top - 3} className="fill-muted-foreground/70 font-mono" fontSize={9}>
           ms
         </text>
+        <TimeGrid start={start} end={end} left={PAD.left} width={plotW} top={PAD.top} bottom={lossBottom} />
 
         {/* One median line per series. The highlighted one is drawn last, so
             it sits on top of the lines it crosses. */}

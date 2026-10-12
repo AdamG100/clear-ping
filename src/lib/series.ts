@@ -6,7 +6,9 @@ export const MAX_CHART_POINTS = 400
 /** Narrowest window worth asking for: below this there is at most one probe. */
 export const MIN_WINDOW_MS = 60_000
 
-const MAX_WINDOW_MS = 31 * 24 * 60 * 60 * 1000
+/** The widest window served: the longest time range, and a zoom within it. */
+const MAX_WINDOW_HOURS = 90 * 24
+const MAX_WINDOW_MS = MAX_WINDOW_HOURS * 60 * 60 * 1000
 
 /**
  * Read an explicit `start`/`end` window from request parameters.
@@ -45,7 +47,7 @@ export function windowFromQuery(
   // An unparseable `hours` used to produce a NaN window, which queried
   // `timestamp >= NaN` and silently returned nothing.
   const parsedHours = Number(searchParams.get('hours') ?? 24)
-  const hours = Number.isFinite(parsedHours) ? Math.min(24 * 31, Math.max(1, parsedHours)) : 24
+  const hours = Number.isFinite(parsedHours) ? Math.min(MAX_WINDOW_HOURS, Math.max(1, parsedHours)) : 24
 
   const parsedMaxPoints = Number(searchParams.get('maxPoints') ?? MAX_CHART_POINTS)
   const maxPoints = Number.isFinite(parsedMaxPoints)

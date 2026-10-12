@@ -1080,7 +1080,7 @@ export function Sidebar({
                       <span className="text-xs font-semibold text-sidebar-foreground uppercase tracking-wider truncate">
                         {groupLabel(group)}
                       </span>
-                      <span className="text-[10px] text-muted-foreground tabular-nums bg-muted/50 px-1.5 py-0.5 rounded-full ml-auto">
+                      <span className="font-mono text-[10px] text-muted-foreground tabular-nums bg-muted/50 px-1.5 py-0.5 rounded-full ml-auto">
                         {matches.length}
                       </span>
                     </div>

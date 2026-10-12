@@ -12,6 +12,7 @@ import {
   BrushBox,
   BrushLabel,
   TimeAxis,
+  TimeGrid,
   chartHeightFor,
   holdInside,
   latencyDomain,
@@ -36,6 +37,12 @@ import {
  *             median, so density shows where packets actually landed.
  *   Loss    — its own 0-100% lane, because loss is a different quantity and a
  *             position on a millisecond axis would mean nothing.
+ *
+ * It is drawn the way Smokeping draws it: each interval is a column of its
+ * own, flat across the top, with its median a short dash in the colour of its
+ * loss. Nothing is joined to its neighbour. A line sloping from one reading to
+ * the next would be drawing latencies that were never measured, and it is the
+ * steps that make a sudden change look sudden.
  *
  * Intervals that lost packets are also striped across the latency panel, so
  * loss is visible without looking away from the trace you are reading.
@@ -64,6 +71,9 @@ interface SmokeTraceProps {
 
 interface Plotted {
   x: number
+  /** The edges of this interval's column. */
+  left: number
+  right: number
   /** Pixel positions; null where the interval has no reading. */
   median: number | null
   low: number | null
@@ -93,6 +103,10 @@ const PAD = { top: 14, right: 16, bottom: 26, left: 54 }
 /** Fixed height, so the loss lane reads the same at every chart size. */
 const LOSS_LANE = 56
 const LANE_GAP = 16
+/** How wide a column is when it is the only one, and so has no neighbour to measure against. */
+const LONE_COLUMN = 12
+/** Narrower than this, a column of loss is too thin to find. */
+const MIN_LOSS_WIDTH = 3
 
 export const SmokeTrace = memo(function SmokeTrace({
   data,
@@ -117,7 +131,7 @@ export const SmokeTrace = memo(function SmokeTrace({
   const lossTop = traceBottom + LANE_GAP
   const lossBottom = lossTop + LOSS_LANE
 
-  const { plotted, yTicks, yMin, yMax, xMin, xMax, barWidth, worstLoss } = useMemo(() => {
+  const { plotted, yTicks, yMin, yMax, xMin, xMax, worstLoss } = useMemo(() => {
     const values: number[] = []
 
     for (const point of data) {
@@ -137,6 +151,16 @@ export const SmokeTrace = memo(function SmokeTrace({
     const yFor = (v: number) =>
       PAD.top + (hi === lo ? traceH / 2 : (1 - (v - lo) / (hi - lo)) * traceH)
 
+    // Readings come one to an interval, evenly spaced, so the gap between two
+    // neighbours is the width of a column.
+    const xs = times.map(xFor)
+    let column = Infinity
+    for (let i = 1; i < xs.length; i++) {
+      const gap = xs[i] - xs[i - 1]
+      if (gap > 0 && gap < column) column = gap
+    }
+    if (!Number.isFinite(column)) column = LONE_COLUMN
+
     const rows: Plotted[] = data.map((point, i) => {
       // The trace line is the median. Using the mean put the line outside its
       // own quartile band on any skewed distribution: one 18ms straggler among
@@ -147,7 +171,11 @@ export const SmokeTrace = memo(function SmokeTrace({
         v === null || v === undefined || !Number.isFinite(v) ? null : yFor(v)
 
       return {
-        x: xFor(point.timestamp.getTime()),
+        x: xs[i],
+        // The first and last intervals sit on the edges of the plot, and
+        // keep the half of their column that is inside it.
+        left: Math.max(PAD.left, xs[i] - column / 2),
+        right: Math.min(PAD.left + plotW, xs[i] + column / 2),
         median: at(median),
         low: at(point.minLatency),
         high: at(point.maxLatency),
@@ -162,7 +190,6 @@ export const SmokeTrace = memo(function SmokeTrace({
       }
     })
 
-    const spacing = rows.length > 1 ? plotW / (rows.length - 1) : plotW
     return {
       plotted: rows,
       yTicks: niceTicks(lo, hi),
@@ -170,7 +197,6 @@ export const SmokeTrace = memo(function SmokeTrace({
       yMax: hi,
       xMin: tMin,
       xMax: tMax,
-      barWidth: Math.min(14, Math.max(3, spacing * 0.65)),
       worstLoss: rows.reduce((max, r) => Math.max(max, r.loss), 0),
     }
   }, [data, plotW, traceH, zoomWindow])
@@ -194,16 +220,44 @@ export const SmokeTrace = memo(function SmokeTrace({
     return out
   }, [plotted])
 
+  /**
+   * One band of the smoke across a run of readings, as columns: along the tops
+   * from left to right, stepping at each column's edge, and back along the
+   * bottoms. One outline for the whole run rather than a rectangle for each
+   * column, so that no seam shows where two columns meet.
+   */
   const bandPath = (
     run: Plotted[],
     lower: (typeof SMOKE_BANDS)[number]['lower'],
     upper: (typeof SMOKE_BANDS)[number]['upper']
   ) => {
-    const usable = run.filter(p => p[lower] !== null && p[upper] !== null)
-    if (usable.length < 2) return null
-    const top = usable.map(p => `${p.x},${p[upper] as number}`).join(' L ')
-    const bottom = [...usable].reverse().map(p => `${p.x},${p[lower] as number}`).join(' L ')
-    return `M ${top} L ${bottom} Z`
+    let d = ''
+    let piece: Plotted[] = []
+
+    const close = () => {
+      if (piece.length === 0) return
+      d += `M ${piece[0].left},${piece[0][upper]}`
+      for (const p of piece) d += ` V ${p[upper]} H ${p.right}`
+      for (const p of [...piece].reverse()) d += ` V ${p[lower]} H ${p.left}`
+      d += ' Z '
+      piece = []
+    }
+
+    for (const p of run) {
+      // Rows from before the percentiles were stored have a median and no
+      // band; the band stops there and starts again after them.
+      if (p[lower] === null || p[upper] === null) close()
+      else piece.push(p)
+    }
+    close()
+
+    return d || null
+  }
+
+  /** Where a column of loss is drawn: its interval's, widened if that is too thin to find. */
+  const lossColumn = (p: Plotted) => {
+    const width = Math.max(MIN_LOSS_WIDTH, p.right - p.left)
+    return { x: (p.left + p.right) / 2 - width / 2, width }
   }
 
   const active = hover !== null ? plotted[hover] : null
@@ -288,9 +342,8 @@ export const SmokeTrace = memo(function SmokeTrace({
         {lossy.map(p => (
           <rect
             key={`stripe-${p.index}`}
-            x={p.x - barWidth / 2}
+            {...lossColumn(p)}
             y={PAD.top}
-            width={barWidth}
             height={traceH}
             fill={p.color}
             opacity={0.07 + (p.loss / 100) * 0.16}
@@ -332,6 +385,8 @@ export const SmokeTrace = memo(function SmokeTrace({
           ms
         </text>
 
+        <TimeGrid start={xMin} end={xMax} left={PAD.left} width={plotW} top={PAD.top} bottom={lossBottom} />
+
         {/* The smoke: nested percentile bands, faintest at the extremes and
             densest around the middle. Overlaying them builds up opacity where
             the packets actually clustered, which is what gives a Smokeping
@@ -348,28 +403,22 @@ export const SmokeTrace = memo(function SmokeTrace({
           )}
         </g>
 
-        {/* Layer 3 — the median, one segment per interval so colour changes
-            exactly where loss changes */}
-        {runs.map((run, runIndex) =>
-          run.slice(1).map((p, i) => (
+        {/* The median: a dash across each interval's column, in the colour of
+            that interval's loss. Not joined to the next one, so the colour
+            changes exactly where the loss does and a jump stays a jump. */}
+        {plotted.map(p =>
+          p.median === null ? null : (
             <line
-              key={`seg-${runIndex}-${i}`}
-              x1={run[i].x}
-              y1={run[i].median as number}
-              x2={p.x}
-              y2={p.median as number}
+              key={`median-${p.index}`}
+              x1={p.left}
+              x2={p.right}
+              y1={p.median}
+              y2={p.median}
               stroke={p.color}
               strokeWidth={2}
-              strokeLinecap="round"
             />
-          ))
+          )
         )}
-
-        {runs
-          .filter(run => run.length === 1)
-          .map((run, i) => (
-            <circle key={`solo-${i}`} cx={run[0].x} cy={run[0].median as number} r={2.5} fill={run[0].color} />
-          ))}
 
         {/* ── Packet loss lane ────────────────────────────────────────────── */}
         <rect
@@ -432,12 +481,10 @@ export const SmokeTrace = memo(function SmokeTrace({
           return (
             <rect
               key={`loss-${p.index}`}
-              x={p.x - barWidth / 2}
+              {...lossColumn(p)}
               y={lossBottom - h}
-              width={barWidth}
               height={h}
               fill={p.color}
-              rx={1}
             />
           )
         })}

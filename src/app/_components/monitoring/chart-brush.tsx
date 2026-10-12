@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
+import { timeTicks } from '@/lib/time-ticks'
 
 /**
  * What the time charts share: how wide they are drawn, how the axes are
@@ -104,49 +105,77 @@ export function formatTick(value: number, spanMs: number) {
 /** The width of one character of an axis label, which is set in 10px mono. */
 const AXIS_CHARACTER_PX = 6
 
-/**
- * The labels under a chart: where its period starts, its middle, and its end.
- *
- * The middle one is left out where the three would run into each other, which
- * is a phone showing a zoom that crosses midnight: each label then carries a
- * date as well as a time, and three of those are wider than the plot.
- */
-export function TimeAxis({
-  start,
-  end,
-  left,
-  width,
-  y,
-}: {
+interface TimeSpan {
   /** The period drawn across the plot, in epoch milliseconds. */
   start: number
   end: number
   /** Where the plot starts and how wide it is, in chart units. */
   left: number
   width: number
-  y: number
-}) {
-  const spanMs = end - start
-  const labels = [start, (start + end) / 2, end].map(time => formatTick(time, spanMs))
-  const widest = Math.max(...labels.map(label => label.length)) * AXIS_CHARACTER_PX
-  const roomForThree = widest * 3 + 24 <= width
+}
 
+/** The marks along a chart's time axis, each with where it falls across the plot. */
+function ticksAcross({ start, end, left, width }: TimeSpan) {
+  // A single reading is a period with no length, drawn in the middle of the
+  // plot. It has no round times in it, but it does have a time.
+  if (end === start) return [{ time: start, label: formatTick(start, 0), x: left + width / 2 }]
+
+  return timeTicks(start, end, width).map(tick => ({
+    ...tick,
+    x: left + ((tick.time - start) / (end - start)) * width,
+  }))
+}
+
+/**
+ * A line down the plot at each mark on the time axis, as on a Smokeping graph:
+ * when something happened is read by counting along from a round time, not by
+ * guessing at a fraction of the width. Drawn before the readings, so that it
+ * sits behind them.
+ */
+export function TimeGrid({ top, bottom, ...span }: TimeSpan & { top: number; bottom: number }) {
+  return (
+    <g className="text-border" pointerEvents="none">
+      {ticksAcross(span).map(tick => (
+        <line
+          key={tick.time}
+          x1={tick.x}
+          x2={tick.x}
+          y1={top}
+          y2={bottom}
+          stroke="currentColor"
+          strokeWidth={1}
+          strokeDasharray="2 4"
+        />
+      ))}
+    </g>
+  )
+}
+
+/**
+ * The labels under a chart: one at each round time across its period, as many
+ * as there is room for. See `timeTicks` for how they are chosen.
+ */
+export function TimeAxis({ y, ...span }: TimeSpan & { y: number }) {
   return (
     <>
-      {labels.map((label, i) =>
-        i === 1 && !roomForThree ? null : (
+      {ticksAcross(span).map(tick => {
+        // A mark at either end of the plot would centre its label half off the
+        // chart. It is held just inside instead, which the margins have room for.
+        const half = (tick.label.length * AXIS_CHARACTER_PX) / 2
+        const x = Math.min(Math.max(tick.x, span.left - 30 + half), span.left + span.width + 12 - half)
+        return (
           <text
-            key={i}
-            x={left + (i * width) / 2}
+            key={tick.time}
+            x={x}
             y={y}
-            textAnchor={i === 0 ? 'start' : i === 2 ? 'end' : 'middle'}
+            textAnchor="middle"
             className="fill-muted-foreground font-mono"
             fontSize={10}
           >
-            {label}
+            {tick.label}
           </text>
         )
-      )}
+      })}
     </>
   )
 }
