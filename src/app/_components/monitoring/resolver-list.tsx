@@ -168,7 +168,7 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
                         type="button"
                         role="radio"
                         aria-checked={row.protocol === protocol}
-                        title={DNS_PROTOCOL_NAME[protocol]}
+                        data-tip={DNS_PROTOCOL_NAME[protocol]}
                         onClick={() => setRow(index, withProtocol(row, protocol))}
                         className={cn(
                           'cursor-pointer rounded-md px-2 py-1.5 text-xs outline-none transition-colors touch:py-2.5',
@@ -216,7 +216,7 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
                   type="button"
                   onClick={() => removeRow(index)}
                   aria-label={`Remove ${resolverLabel(row) || position}`}
-                  title="Remove this resolver"
+                  data-tip="Remove this resolver"
                   className="shrink-0 cursor-pointer rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground touch:p-2.5"
                 >
                   <X className="h-3.5 w-3.5" />

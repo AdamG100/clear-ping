@@ -49,7 +49,7 @@ export function StatusIndicator({
   if (note && !pending && !paused) label = note
 
   return (
-    <span className="relative inline-flex shrink-0" title={bare ? undefined : label}>
+    <span className="relative inline-flex shrink-0" data-tip={bare ? undefined : label}>
       {/* The pulse only runs for a live target; a steady dot for offline and
           pending states stops a dead target from looking like active traffic. */}
       {isOnline && !paused && (

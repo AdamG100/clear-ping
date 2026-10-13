@@ -520,7 +520,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                       disabled={busy}
                       className="cursor-pointer rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 touch:p-2.5"
                       aria-label={alert.enabled ? `Mute ${title}` : `Unmute ${title}`}
-                      title={alert.enabled ? 'Mute: stop judging and sending this alert' : 'Unmute'}
+                      data-tip={alert.enabled ? 'Mute: stop judging and sending this alert' : 'Unmute'}
                     >
                       {alert.enabled ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
                     </button>
@@ -569,7 +569,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                           key={entry.targetId}
                           type="button"
                           onClick={() => onSelectTarget(entry.targetId)}
-                          title={`Open ${target.name}`}
+                          data-tip={`Open ${target.name}`}
                           className="cursor-pointer rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-destructive/20 touch:px-3 touch:py-1.5"
                         >
                           {target.name}

@@ -162,7 +162,7 @@ function ResolverTable({
                       <span className="whitespace-nowrap font-medium text-foreground">{readingName(reading, resolvers)}</span>
                       <span
                         className="rounded border border-border px-1 py-px text-[10px] leading-none text-muted-foreground"
-                        title={DNS_PROTOCOL_NAME[reading.protocol]}
+                        data-tip={DNS_PROTOCOL_NAME[reading.protocol]}
                       >
                         {DNS_PROTOCOL_LABEL[reading.protocol]}
                       </span>

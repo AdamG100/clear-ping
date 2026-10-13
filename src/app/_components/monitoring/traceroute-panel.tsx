@@ -191,7 +191,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
                     hop.hostname ? 'text-foreground' : 'font-mono text-foreground',
                     state === 'destination' && 'font-medium'
                   )}
-                  title={hop.hostname ?? hop.address}
+                  data-tip={hop.hostname ?? hop.address}
                 >
                   {hop.hostname ?? hop.address}
                 </span>
@@ -422,7 +422,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
               onBlur={() => setConfirming(current => (current === 'older' ? null : current))}
               disabled={deleting}
               className="h-8"
-              title="Delete every route but the newest"
+              data-tip="Delete every route but the newest"
             >
               <Trash2 className="mr-2 h-3.5 w-3.5" />
               {confirming === 'older' ? `Delete ${olderCount}?` : `Delete ${olderCount} older`}
@@ -514,7 +514,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
                           disabled={deleting}
                           className="shrink-0 cursor-pointer rounded p-1.5 transition-colors hover:bg-destructive/20 disabled:opacity-40 touch:p-2.5"
                           aria-label={`Delete the route taken ${time}`}
-                          title="Delete this route"
+                          data-tip="Delete this route"
                         >
                           <Trash2 className="h-3.5 w-3.5 text-destructive" />
                         </button>

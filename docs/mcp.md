@@ -26,10 +26,40 @@ your installation and what to do with it.
 claude mcp add --transport http clearping http://clearping.lan:3000/api/mcp
 ```
 
-**The Claude apps and claude.ai.** Settings, Connectors, Add custom connector,
-and paste the address. These connect from Anthropic's servers and not from your
-computer, so the address has to be reachable from the internet. A ClearPing on a
-home or office network is not; use Claude Code for one of those. A custom
+**Claude Desktop, for a ClearPing on your own network.** Claude Desktop starts
+programs on the computer it runs on and talks to those, so it is given a small
+bridge, [mcp-remote](https://github.com/geelen/mcp-remote), that passes
+everything on to ClearPing. The bridge runs on your computer, and so reaches
+whatever your computer can: `192.168…`, `clearping.lan`, `localhost`.
+
+1. In Claude Desktop: Settings, Developer, Edit Config. That opens
+   `claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows,
+   `~/Library/Application Support/Claude/` on a Mac).
+2. Add ClearPing to it. If the file already lists servers, add only the
+   `clearping` part inside its `mcpServers`:
+
+   ```json
+   {
+     "mcpServers": {
+       "clearping": {
+         "command": "npx",
+         "args": ["-y", "mcp-remote", "http://clearping.lan:3000/api/mcp", "--allow-http"]
+       }
+     }
+   }
+   ```
+
+3. Save, quit Claude Desktop altogether, and open it again.
+
+The computer needs Node.js 18 or newer, which is where `npx` comes from; the
+bridge is fetched the first time it is used. `--allow-http` is what lets it
+use an address that is not HTTPS, and is not needed for one that is.
+
+**claude.ai, and connectors in the Claude apps.** Settings, Connectors, Add
+custom connector, and paste the address. A connector added this way connects
+from Anthropic's servers and not from your computer, so the address has to be
+reachable from the internet. A ClearPing on a home or office network is not;
+use Claude Desktop as above, or Claude Code, for one of those. A custom
 connector also has no field for a token like ClearPing's, so it cannot connect
 to one that asks for a token.
 
@@ -157,6 +187,19 @@ long random value and send it with every request:
 ```bash
 claude mcp add --transport http clearping https://clearping.example.com/api/mcp \
   --header "Authorization: Bearer your-token"
+```
+
+For Claude Desktop the token goes in the bridge's settings. The header is
+written without a space after the colon, and its value kept in `env`, because
+Claude Desktop on Windows splits an argument at its spaces:
+
+```json
+"clearping": {
+  "command": "npx",
+  "args": ["-y", "mcp-remote", "http://clearping.lan:3000/api/mcp", "--allow-http",
+           "--header", "Authorization:${AUTH_HEADER}"],
+  "env": { "AUTH_HEADER": "Bearer your-token" }
+}
 ```
 
 A request without it is refused, reading included. The dialog in the sidebar

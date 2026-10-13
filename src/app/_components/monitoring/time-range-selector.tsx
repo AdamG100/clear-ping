@@ -58,7 +58,7 @@ export function TimeRangeSelector({ value, onChange, busy = false }: TimeRangeSe
                 role="tab"
                 aria-selected={selected}
                 aria-label={TIME_RANGE_CONFIG[range].label}
-                title={TIME_RANGE_CONFIG[range].label}
+                data-tip={TIME_RANGE_CONFIG[range].label}
                 onClick={() => onChange(range)}
                 className={cn(
                   'relative flex-1 cursor-pointer rounded-md px-2 py-1.5 font-mono text-xs font-medium touch:py-2.5',

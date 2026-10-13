@@ -389,7 +389,7 @@ export function ComparePanel({
                                 onFocus={() => setHighlighted(line.key)}
                                 onBlur={() => setHighlighted(null)}
                                 className="min-w-0 cursor-pointer truncate text-left font-medium text-foreground underline-offset-2 hover:underline"
-                                title={`Open ${target.name}`}
+                                data-tip={`Open ${target.name}`}
                               >
                                 {line.label}
                               </button>

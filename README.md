@@ -221,6 +221,10 @@ command:
 claude mcp add --transport http clearping http://your-clearping:3000/api/mcp
 ```
 
+Claude Desktop reaches a ClearPing on your own network through a few lines in
+its configuration file, which the dialog writes out for you; see
+[docs/mcp.md](docs/mcp.md).
+
 Then ask it in your own words:
 
 - *Gather the logs from the last week so I can report this to my ISP, as a PDF.*

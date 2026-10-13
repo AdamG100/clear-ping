@@ -973,7 +973,7 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
           ) : !validation.ok ? (
             validation.error
           ) : (
-            <span className="block truncate" title={recapFor(host, probeType, config, interval)}>
+            <span className="block truncate" data-tip={recapFor(host, probeType, config, interval)}>
               {recapFor(host, probeType, config, interval)}
             </span>
           )}

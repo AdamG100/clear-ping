@@ -322,7 +322,7 @@ function TargetRow({
                 along with where a domain last resolved to. */}
             <span
               className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
-              title={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address}
+              data-tip={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address}
             >
               {address}
             </span>
@@ -649,7 +649,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               onClick={() => onAddGroupInside(group)}
               className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/header:opacity-100 touch:p-2 touch:opacity-100"
               aria-label={`New group inside ${name}`}
-              title="New group inside this one"
+              data-tip="New group inside this one"
             >
               <FolderPlus className="h-3 w-3 text-muted-foreground" />
             </button>
@@ -663,7 +663,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               onClick={() => onEditGroup(group)}
               className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-blue-500/20 focus-visible:opacity-100 group-hover/header:opacity-100 touch:p-2 touch:opacity-100"
               aria-label={`Rename, move or delete ${name}`}
-              title="Rename this group, move it inside another, or delete it"
+              data-tip="Rename this group, move it inside another, or delete it"
             >
               <Pencil className="h-3 w-3 text-blue-500" />
             </button>
@@ -682,7 +682,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               onClick={() => onCompare(group)}
               aria-pressed={isCompared}
               aria-label={`Compare the targets in ${name} on one chart`}
-              title="Show every target in this group on one chart"
+              data-tip="Show every target in this group on one chart"
               className={cn(
                 'ml-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium leading-none transition-colors touch:py-2',
                 isCompared
@@ -709,7 +709,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
             >
               <div
                 className="px-2 pb-2"
-                title={`${name}: mean latency across its ${memberIds.length} target${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}
+                data-tip={`${name}: mean latency across its ${memberIds.length} target${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}
               >
                 <Sparkline points={groupTrace} width={240} height={22} stretch />
               </div>
@@ -1117,7 +1117,7 @@ export function Sidebar({
               onClick={onCollapse}
               className="-mr-1.5 ml-auto hidden size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex"
               aria-label="Collapse sidebar"
-              title="Collapse sidebar"
+              data-tip="Collapse sidebar"
             >
               <PanelLeftClose className="h-4 w-4" />
             </button>
@@ -1164,7 +1164,7 @@ export function Sidebar({
                 onClick={() => setIsBulkDeleteOpen(true)}
                 className="p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer touch:-my-1.5 touch:p-2.5"
                 aria-label="Delete several targets"
-                title="Delete several targets"
+                data-tip="Delete several targets"
               >
                 <ListX className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
@@ -1175,7 +1175,7 @@ export function Sidebar({
                 onClick={() => { setShowSearch(!showSearch); if (showSearch) setSearchQuery('') }}
                 className="p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer touch:-my-1.5 touch:p-2.5"
                 aria-label="Search targets"
-                title="Search targets"
+                data-tip="Search targets"
               >
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
@@ -1409,7 +1409,7 @@ export function Sidebar({
           size="icon-sm"
           onClick={() => setIsShareOpen(true)}
           aria-label="Share or import targets"
-          title="Share or import targets"
+          data-tip="Share or import targets"
           suppressHydrationWarning
         >
           <Share2 className="h-4 w-4" />

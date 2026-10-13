@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Instrument_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
+import { Tooltips } from "@/components/ui/tooltips";
 import { THEME_COLOR } from "@/lib/app-theme";
 import { InstallPrompt } from "./_components/install-prompt";
 import { ServiceWorker } from "./_components/service-worker";
@@ -102,6 +103,7 @@ export default function RootLayout({
       </head>
       <body className="antialiased bg-background text-foreground">
         <ToastProvider>{children}</ToastProvider>
+        <Tooltips />
         <InstallPrompt />
         <ServiceWorker />
       </body>

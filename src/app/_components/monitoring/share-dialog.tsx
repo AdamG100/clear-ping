@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, use, useMemo, useRef, useState } from 'react'
+import { Suspense, use, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Copy, Download, Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -43,6 +43,9 @@ const TABS: { value: Tab; label: string; icon: typeof Share2 }[] = [
 const FIELD_LABEL = 'text-xs text-card-foreground'
 const HINT = 'text-[11px] leading-relaxed text-muted-foreground'
 
+/** How long the button says it has copied before it offers to again. */
+const COPIED_FOR_MS = 2000
+
 function plural(count: number): string {
   return `${count} target${count === 1 ? '' : 's'}`
 }
@@ -56,6 +59,14 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
   // `manual` once copying has been tried and the browser would not do it.
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'manual'>('idle')
   const linkRef = useRef<HTMLInputElement>(null)
+
+  // "Copied" answers the press. Left there, it reads as a state the button is
+  // in, and says nothing the next time it is pressed.
+  useEffect(() => {
+    if (copyState !== 'copied') return
+    const back = setTimeout(() => setCopyState('idle'), COPIED_FOR_MS)
+    return () => clearTimeout(back)
+  }, [copyState])
 
   if (targets.length === 0) {
     return <p className="text-xs text-muted-foreground">There are no targets to share yet. Add one from the sidebar first.</p>
