@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import type sqlite3 from 'sqlite3';
-import { normalizeGroupPath } from './group-path';
+import { groupWithAncestors, normalizeGroupPath } from './group-path';
 
 type Database = sqlite3.Database;
 
@@ -322,12 +322,37 @@ async function appriseNotifications(database: Database): Promise<void> {
   }
 }
 
+/**
+ * Groups became things in their own right.
+ *
+ * A group used to be nothing but a name some target carried. It could not be
+ * made before there was a target to put in it, and it was gone the moment its
+ * last target left. `target_groups` lists the groups that exist, whether or
+ * not anything is in them. Every group in use is entered, along with the
+ * groups it sits inside, so none of them disappears the next time it is
+ * emptied.
+ */
+async function keptGroups(database: Database): Promise<void> {
+  await run(database, 'CREATE TABLE target_groups (group_name TEXT PRIMARY KEY)');
+
+  const inUse = await all<{ group_name: string }>(
+    database,
+    `SELECT DISTINCT group_name FROM targets WHERE group_name IS NOT NULL AND group_name != ''`
+  );
+  for (const { group_name: group } of inUse) {
+    for (const path of groupWithAncestors(group)) {
+      await run(database, 'INSERT OR IGNORE INTO target_groups (group_name) VALUES (?)', [path]);
+    }
+  }
+}
+
 /** In the order they shipped. A migration's version is its position, from 1. */
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
   { name: 'alert destinations', up: alertDestinations },
   { name: 'apprise notifications', up: appriseNotifications },
+  { name: 'kept groups', up: keptGroups },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

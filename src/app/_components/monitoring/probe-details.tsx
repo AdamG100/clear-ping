@@ -1,5 +1,7 @@
 import { cn } from '@/lib/utils'
-import type { LatestMeasurement, ProbeDetails, ProbeType } from '@/types/probe'
+import { DNS_PROTOCOL_LABEL, DNS_PROTOCOL_NAME, readingName } from '@/lib/dns-resolvers'
+import { resolversThatDiffer } from '@/lib/dns-resolver-series'
+import type { DnsResolver, DnsResolverReading, LatestMeasurement, ProbeDetails, ProbeType } from '@/types/probe'
 
 /**
  * What the latest probe learned beyond its timings.
@@ -19,6 +21,10 @@ interface ProbeDetailsPanelProps {
   latest: Omit<LatestMeasurement, 'byFamily'> | undefined
   /** Names which probe this is, where a target has more than one. */
   label?: string
+  /** dns: the resolvers the target asks now, which is what their readings are named from. */
+  resolverList?: readonly DnsResolver[]
+  /** dns: what the resolvers were asked, to be said above what they answered: "the A record of example.com". */
+  question?: string
 }
 
 interface Phase {
@@ -84,16 +90,176 @@ function Certificate({ expiresAt, asOf }: { expiresAt: number; asOf: Date }) {
   )
 }
 
-export function ProbeDetailsPanel({ probeType, latest, label }: ProbeDetailsPanelProps) {
+const SECTION_LABEL = 'text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70'
+
+/**
+ * The same lookup as each resolver answered it: how long each took, and what
+ * each said. This is the reason to ask more than one. A record changed an
+ * hour ago, a resolver that is slow tonight, one that refuses a name the
+ * others serve: all of them are a row here that does not look like the rest.
+ */
+function ResolverTable({
+  readings,
+  resolvers,
+  question,
+  asOf,
+}: {
+  readings: DnsResolverReading[]
+  resolvers: readonly DnsResolver[]
+  question?: string
+  asOf: Date
+}) {
+  const differing = resolversThatDiffer(readings)
+  // The bars share one scale, so the slowest resolver is the full width.
+  const slowest = Math.max(1, ...readings.map(reading => reading.latency ?? 0))
+  const sent = readings.find(reading => reading.sent)?.sent
+  const encrypted = readings.some(reading => reading.connectMs !== undefined)
+  const time = asOf.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+  return (
+    <div className="min-w-0 basis-full">
+      <p className={SECTION_LABEL}>
+        Latest probe, resolver by resolver
+        {differing.size > 0 && (
+          <span className="ml-2 normal-case tracking-normal text-signal-moderate">they do not all agree</span>
+        )}
+      </p>
+      {/* What the rows are rows of, before any of them is read. */}
+      <p className="mt-1 text-xs text-muted-foreground">
+        At {time} each resolver was sent {sent ? `${sent} queries` : 'the same queries'}
+        {question && <> for {question}</>}, all at the same moment.
+      </p>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground/70">
+              <th className="pb-1.5 pr-4 font-medium">Resolver</th>
+              <th className="whitespace-nowrap pb-1.5 pr-4 text-right font-medium">Query time</th>
+              <th className="hidden w-[18%] pb-1.5 pr-4 @2xl/main:table-cell" />
+              <th className="pb-1.5 pr-4 text-right font-medium">Answered</th>
+              <th className="hidden pb-1.5 pr-4 text-right font-medium @lg/main:table-cell">Connect</th>
+              <th className="pb-1.5 font-medium">Answer</th>
+            </tr>
+          </thead>
+          <tbody>
+            {readings.map(reading => {
+              const failed = reading.latency === null
+              const differs = differing.has(reading.label)
+              // Out of how many, where that was kept; as a share where it was not.
+              const answered = reading.sent
+                ? `${Math.round(reading.sent * (1 - reading.loss / 100))} of ${reading.sent}`
+                : `${(100 - reading.loss).toFixed(0)}%`
+
+              return (
+                <tr key={reading.label} className={cn('border-t border-border/50 align-top', failed && 'bg-destructive/5')}>
+                  <td className="py-1.5 pr-4">
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={cn('h-1.5 w-1.5 shrink-0 rounded-full', failed ? 'bg-destructive' : reading.loss > 0 ? 'bg-signal-moderate' : 'bg-signal-perfect')}
+                        aria-hidden="true"
+                      />
+                      {/* By the name it has now, and without the protocol: the badge says that. */}
+                      <span className="whitespace-nowrap font-medium text-foreground">{readingName(reading, resolvers)}</span>
+                      <span
+                        className="rounded border border-border px-1 py-px text-[10px] leading-none text-muted-foreground"
+                        title={DNS_PROTOCOL_NAME[reading.protocol]}
+                      >
+                        {DNS_PROTOCOL_LABEL[reading.protocol]}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap py-1.5 pr-4 text-right font-mono text-foreground">
+                    {reading.latency === null ? <span className="text-destructive">no answer</span> : `${reading.latency.toFixed(1)} ms`}
+                  </td>
+                  <td className="hidden py-1.5 pr-4 align-middle @2xl/main:table-cell">
+                    {reading.latency !== null && (
+                      <span className="block h-1.5 rounded-full bg-muted/40" aria-hidden="true">
+                        <span
+                          className="block h-full min-w-1 rounded-full bg-trace/70"
+                          style={{ width: `${(reading.latency / slowest) * 100}%` }}
+                        />
+                      </span>
+                    )}
+                  </td>
+                  <td className={cn('whitespace-nowrap py-1.5 pr-4 text-right font-mono', reading.loss > 0 ? 'text-destructive' : 'text-muted-foreground')}>
+                    {answered}
+                  </td>
+                  <td className="hidden whitespace-nowrap py-1.5 pr-4 text-right font-mono text-muted-foreground @lg/main:table-cell">
+                    {reading.connectMs === undefined ? '—' : `${reading.connectMs.toFixed(0)} ms`}
+                  </td>
+                  {/* Wide enough to be read: on a phone the table is scrolled
+                      sideways to it, instead of the answer being broken into
+                      a column three characters across. */}
+                  <td className="min-w-48 py-1.5">
+                    {reading.answers && reading.answers.length > 0 && (
+                      <span className={cn('break-all font-mono', differs ? 'text-signal-moderate' : 'text-foreground')}>
+                        {reading.answers.join(', ')}
+                        {differs && <span className="ml-2 font-sans text-[10px] font-medium">differs</span>}
+                      </span>
+                    )}
+                    {reading.error && (
+                      <span className="block break-all text-destructive">{reading.error}</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <dl className="mt-3 space-y-1 text-[11px] leading-relaxed text-muted-foreground/80">
+        <div>
+          <dt className="inline font-medium text-muted-foreground">Query time </dt>
+          <dd className="inline">is the average of the queries that were answered, from sending one to its answer arriving.</dd>
+        </div>
+        <div>
+          <dt className="inline font-medium text-muted-foreground">Answered </dt>
+          <dd className="inline">
+            is how many of those queries came back with an answer that could be used. One that timed out, came back as
+            an error, or gave something other than the expected answer does not count. Nothing here is a lost packet:
+            a DNS probe counts questions and answers.
+          </dd>
+        </div>
+        {encrypted && (
+          <div>
+            <dt className="inline font-medium text-muted-foreground">Connect </dt>
+            <dd className="inline">
+              is how long the encrypted connection (DoT, DoH) took to open. It is opened once a probe and is not part
+              of the query time; plain DNS has none.
+            </dd>
+          </div>
+        )}
+        {differing.size > 0 && (
+          <div>
+            <dt className="inline font-medium text-signal-moderate">Differs </dt>
+            <dd className="inline">
+              marks an answer that is not the one most of them gave. That is usual for a name served by region, and
+              worth a look for a record that was changed lately.
+            </dd>
+          </div>
+        )}
+      </dl>
+    </div>
+  )
+}
+
+export function ProbeDetailsPanel({ probeType, latest, label, resolverList = [], question }: ProbeDetailsPanelProps) {
   if (!latest) return null
 
   const details = latest.details ?? {}
   const failure = !latest.success ? latest.errorMessage : undefined
   const phases = phasesOf(details)
-  const answers = probeType === 'dns' ? details.answers ?? [] : []
+  const resolvers = probeType === 'dns' ? details.resolvers ?? [] : []
+  // With a row for each resolver saying what it answered, one answer picked
+  // out above them would be a second copy of the first row.
+  const answers = probeType === 'dns' && resolvers.length === 0 ? details.answers ?? [] : []
 
   const hasBody =
-    details.statusCode !== undefined || phases.length > 0 || details.certExpiresAt !== undefined || answers.length > 0
+    details.statusCode !== undefined ||
+    phases.length > 0 ||
+    details.certExpiresAt !== undefined ||
+    answers.length > 0 ||
+    resolvers.length > 0
 
   if (!failure && !hasBody) return null
 
@@ -130,6 +296,10 @@ export function ProbeDetailsPanel({ probeType, latest, label }: ProbeDetailsPane
           )}
 
           <PhaseBar phases={phases} />
+
+          {resolvers.length > 0 && (
+            <ResolverTable readings={resolvers} resolvers={resolverList} question={question} asOf={latest.timestamp} />
+          )}
         </div>
       )}
     </section>

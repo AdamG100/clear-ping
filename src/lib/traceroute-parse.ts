@@ -106,6 +106,26 @@ export function traceReached(hops: TracerouteHop[], address: string): boolean {
   return !!last?.address && normalize(last.address) === normalize(address)
 }
 
+/**
+ * The traces worth keeping when the old ones are cleared out: the newest to
+ * each address family. `newestFirst` is in the order they are listed.
+ *
+ * One per family, not just the newest of all, because a target probed over
+ * both is traced over each, a moment apart. Keeping only the very newest
+ * would throw away half of the latest look at it.
+ */
+export function newestPerFamily<T extends { address: string }>(newestFirst: T[]): T[] {
+  const seen = new Set<string>()
+  return newestFirst.filter(trace => {
+    // A trace that never resolved its name has no family; those count as one kind.
+    const host = classifyHost(trace.address)
+    const kind = host === 'ipv4' || host === 'ipv6' ? host : 'unresolved'
+    if (seen.has(kind)) return false
+    seen.add(kind)
+    return true
+  })
+}
+
 /** Share of a hop's packets that got no reply, 0-100. */
 export function hopLoss(hop: TracerouteHop): number {
   return hop.sent === 0 ? 0 : ((hop.sent - hop.rtts.length) / hop.sent) * 100

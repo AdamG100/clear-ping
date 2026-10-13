@@ -6,12 +6,12 @@ import {
   groupsInOrder,
   locateTarget,
   moveTarget,
-  pruneEmptyGroups,
   reorderSubgroups,
   subgroups,
   targetOrderUpdates,
   targetsWithin,
   withGroup,
+  withoutEmptyGroup,
   type SidebarLayout,
 } from './sidebar-layout'
 
@@ -168,7 +168,26 @@ describe('reorderSubgroups', () => {
   })
 })
 
-describe('withGroup and pruneEmptyGroups', () => {
+describe('groups with nothing in them', () => {
+  it('lays out a group that holds no target, and the groups it sits inside', () => {
+    const built = buildSidebarLayout([target('a', 'DNS', 0)], [], ['DNS', 'Home/Network/Switches', 'Spare'])
+    expect(built.groups).toEqual(['DNS', 'Home', 'Spare'])
+    expect(built.children).toEqual({ Home: ['Home/Network'], 'Home/Network': ['Home/Network/Switches'] })
+    expect(built.items).toEqual({ DNS: ['a'], Home: [], 'Home/Network': [], 'Home/Network/Switches': [], Spare: [] })
+    expect(targetsWithin(built, 'Home')).toEqual([])
+  })
+
+  it('places an empty group among its neighbours by its saved position', () => {
+    const built = buildSidebarLayout([target('a', 'DNS', 0)], [{ groupName: 'Spare', sortOrder: 0 }, { groupName: 'DNS', sortOrder: 1 }], ['Spare'])
+    expect(built.groups).toEqual(['Spare', 'DNS'])
+  })
+
+  it('leaves them out when it is not told which groups there are', () => {
+    expect(buildSidebarLayout([target('a', 'DNS', 0)], []).groups).toEqual(['DNS'])
+  })
+})
+
+describe('withGroup and withoutEmptyGroup', () => {
   it('adds an empty group once, at the end', () => {
     const added = withGroup(layout, UNGROUPED)
     expect(added.groups).toEqual(['DNS', 'Web', UNGROUPED])
@@ -176,38 +195,29 @@ describe('withGroup and pruneEmptyGroups', () => {
     expect(withGroup(added, UNGROUPED)).toBe(added)
   })
 
-  it('removes groups that were emptied and keeps the rest untouched', () => {
+  it('takes the offered group away again when nothing was dropped on it', () => {
+    const offered = withGroup(layout, UNGROUPED)
+    expect(withoutEmptyGroup(offered, UNGROUPED)).toEqual(layout)
+  })
+
+  it('leaves it where something was dropped on it, and when it was never there', () => {
+    const dropped = moveTarget(withGroup(layout, UNGROUPED), 'a', { group: UNGROUPED, index: 0 })
+    expect(withoutEmptyGroup(dropped, UNGROUPED)).toBe(dropped)
+    expect(withoutEmptyGroup(layout, UNGROUPED)).toBe(layout)
+  })
+
+  it('takes away nothing else: a group somebody made stays when it is emptied', () => {
     const emptied = moveTarget(moveTarget(layout, 'x', { group: 'DNS', index: 0 }), 'y', { group: 'DNS', index: 0 })
-    expect(pruneEmptyGroups(withGroup(emptied, UNGROUPED))).toEqual({
-      groups: ['DNS'],
+    expect(withoutEmptyGroup(withGroup(emptied, UNGROUPED), UNGROUPED)).toEqual({
+      groups: ['DNS', 'Web'],
       children: {},
-      items: { DNS: ['y', 'x', 'a', 'b', 'c'] },
+      items: { DNS: ['y', 'x', 'a', 'b', 'c'], Web: [] },
     })
-    expect(pruneEmptyGroups(layout)).toBe(layout)
   })
 
-  it('keeps a group that holds nothing itself but has a group inside that does', () => {
+  it('leaves a group that holds nothing itself but has a group inside it', () => {
     const moved = moveTarget(nested, 'door', { group: 'Web', index: 0 })
-    expect(pruneEmptyGroups(moved)).toBe(moved)
-  })
-
-  it('removes an emptied group along with the groups that only existed to hold it', () => {
-    const only: SidebarLayout = {
-      groups: ['Home', 'Web'],
-      children: { Home: ['Home/Network'], 'Home/Network': ['Home/Network/Switches'] },
-      items: { Home: [], 'Home/Network': [], 'Home/Network/Switches': ['sw'], Web: ['x'] },
-    }
-    expect(pruneEmptyGroups(moveTarget(only, 'sw', { group: 'Web', index: 0 }))).toEqual({
-      groups: ['Web'],
-      children: {},
-      items: { Web: ['sw', 'x'] },
-    })
-  })
-
-  it('removes one emptied group from among its siblings', () => {
-    const pruned = pruneEmptyGroups(moveTarget(nested, 'pi', { group: 'Home', index: 0 }))
-    expect(pruned.children).toEqual({ Home: ['Home/Network'], 'Home/Network': ['Home/Network/Switches'] })
-    expect('Home/Lab' in pruned.items).toBe(false)
+    expect(withoutEmptyGroup(moved, 'Home')).toBe(moved)
   })
 })
 
@@ -246,9 +256,9 @@ describe('targetOrderUpdates', () => {
     expect(targetOrderUpdates(moved, 'a', 'DNS')).toContainEqual({ id: 'a', sortOrder: 0, group: '' })
   })
 
-  it('copes with the source group having been pruned away', () => {
+  it('copes with the source group having been left empty, or taken away', () => {
     const single: SidebarLayout = { groups: ['Solo', 'Web'], children: {}, items: { Solo: ['s'], Web: ['x'] } }
-    const moved = pruneEmptyGroups(moveTarget(single, 's', { group: 'Web', index: 1 }))
+    const moved = withoutEmptyGroup(moveTarget(single, 's', { group: 'Web', index: 1 }), 'Solo')
     expect(targetOrderUpdates(moved, 's', 'Solo')).toEqual([
       { id: 'x', sortOrder: 0 },
       { id: 's', sortOrder: 1, group: 'Web' },

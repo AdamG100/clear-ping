@@ -5,6 +5,8 @@ import {
   isDualStack,
   isIpVersion,
   isIpv6,
+  isLocalHost,
+  isPrivateAddress,
   isValidHost,
   isWellKnownResolver,
   normalizeHost,
@@ -156,5 +158,43 @@ describe('isWellKnownResolver', () => {
 
   it('does not claim an arbitrary address', () => {
     expect(isWellKnownResolver('192.168.1.1')).toBe(false)
+  })
+})
+
+describe('isPrivateAddress', () => {
+  it('knows an address inside a private network from one outside it', () => {
+    for (const inside of ['192.168.1.1', '10.0.0.1', '172.16.5.4', '172.31.255.254', '127.0.0.1', '169.254.1.1', 'fe80::1', 'fd12:3456::1', '::1']) {
+      expect(isPrivateAddress(inside), inside).toBe(true)
+    }
+    // The ISP's own shared range is the ISP's side of the line.
+    for (const outside of ['1.1.1.1', '172.32.0.1', '100.64.0.1', '192.169.1.1', '2606:4700:4700::1111', 'example.com', '']) {
+      expect(isPrivateAddress(outside), outside).toBe(false)
+    }
+  })
+})
+
+describe('isLocalHost', () => {
+  it('takes this machine and a private address as local, with or without a port', () => {
+    for (const local of ['localhost', 'localhost:3000', '127.0.0.1:3000', '192.168.1.20:3000', '10.1.2.3', '[::1]:3000', '[fd12:3456::1]', 'fe80::1']) {
+      expect(isLocalHost(local), local).toBe(true)
+    }
+  })
+
+  it('takes a name that only means anything on its own network as local', () => {
+    for (const local of ['clearping', 'clearping:3000', 'nas.lan:3000', 'pi.local', 'monitor.home.arpa', 'box.internal', 'app.localhost', 'CLEARPING.LAN']) {
+      expect(isLocalHost(local), local).toBe(true)
+    }
+  })
+
+  it('takes the addresses an overlay network hands out as local', () => {
+    expect(isLocalHost('100.101.102.103:3000')).toBe(true)
+    expect(isLocalHost('100.63.0.1')).toBe(false)
+    expect(isLocalHost('100.128.0.1')).toBe(false)
+  })
+
+  it('takes anything out across the internet as not', () => {
+    for (const remote of ['clearping.example.com', 'clearping.example.com:3000', '203.0.113.5:3000', '[2606:4700:4700::1111]:443', 'evil.lan.example.com', 'not a host', '']) {
+      expect(isLocalHost(remote), remote).toBe(false)
+    }
   })
 })

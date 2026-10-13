@@ -11,6 +11,9 @@ looks different from one that is unstable.
 
 - **Four kinds of probe.** ICMP ping, TCP connect, HTTP(S) request and DNS
   query. Paste a host, `host:port` or a URL and the right one is picked.
+- **One DNS lookup, several resolvers.** A DNS target can ask Cloudflare,
+  Google, Quad9 or any resolver of your own on every probe, over plain DNS,
+  DNS over TLS or DNS over HTTPS, and shows what each answered and how fast.
 - **Latency as a distribution.** Each probe sends several packets; the chart
   shows where they clustered and how far the outliers reached, with packet loss
   on its own strip underneath.
@@ -20,6 +23,9 @@ looks different from one that is unstable.
   between them, and collapse a group to one trace for everything in it.
 - **Comparison charts.** Put every target in a group on one chart to see
   whether a slowdown hit one of them or all of them.
+- **Share links.** Tick some targets, or all of them, and get a link that
+  holds them. Someone else pastes it into their ClearPing and chooses which
+  to add.
 - **Alerts.** One screen for all of them: make an alert, tick the targets it
   watches, and send it to any service [Apprise](https://github.com/caronc/apprise)
   can notify: Discord, Slack, Telegram, email, ntfy, a webhook and over a
@@ -28,6 +34,10 @@ looks different from one that is unstable.
   fires, which is the only time the route through a failure can be captured.
 - **Certificate expiry.** HTTPS targets record when their certificate runs
   out, and an alert can watch for it.
+- **Ask an AI assistant.** ClearPing is an MCP server as well. Give Claude,
+  or any assistant that speaks MCP, its address and say "gather the logs so I
+  can report this to my ISP": it gets every outage with its times, what kept
+  working meanwhile and the traceroutes, and writes the report.
 - **Phone to wall display.** The layout follows the screen, from a phone held
   upright to an ultrawide monitor, and it installs to a home screen as an app
   on Android and iOS.
@@ -48,6 +58,14 @@ Alerts, each watching the targets ticked for it:
 An alert being edited: the condition, where it is sent, and the targets:
 
 ![The alert editor](docs/screenshots/alert-editor.jpg)
+
+Sharing: tick the targets to send, and get a link that holds them:
+
+![The share dialog, with a link made for nine of twelve targets](docs/screenshots/share.jpg)
+
+A new group being put inside another:
+
+![The new group dialog, placing a group inside Home / Network](docs/screenshots/new-group.jpg)
 
 ## Quick start
 
@@ -93,8 +111,13 @@ the form has defaults. A target is probed every five minutes unless you change
 its interval.
 
 Each row in the sidebar shows the target's state, its address and a trace of
-its recent readings. Hovering a row reveals pause, edit and delete; on a
-touchscreen they are behind the ⋮ button at the end of the row.
+its recent readings. Hovering a row reveals pause, edit, duplicate and delete;
+on a touchscreen they are behind the ⋮ button at the end of the row.
+
+**Duplicate** opens the add form already filled in from that target, for the
+second port on a host or the same check against the next server along. Change
+what is different and add it: it is a new target with no history, placed under
+the one it was copied from.
 
 On a wide screen the button at the top of the sidebar collapses it to a rail
 of icons, to give the page its width, and the same button on the rail brings
@@ -105,27 +128,57 @@ is remembered. On a phone or a narrow window the sidebar is a drawer, opened
 by the ☰ button at the top left. Tapping a chart shows the reading at that point, and dragging
 sideways across it zooms in.
 
+To clear out several targets at once, use the list button at the top of the
+sidebar, beside the search. Tick the ones to go, singly or a whole group at a
+time, and delete them together. Nothing starts ticked and the button asks
+twice: a target's whole history goes with it.
+
 A **paused** target is not probed. Its row and its status light go grey, its
 page stops passing judgement on readings nobody has taken since, and it is
 counted as paused rather than as online or offline. Its history is kept.
 
 ### Groups
 
-A target's group is chosen when it is added or edited. Typing a new group name
-with a `/` in it nests it: `Home/Network` is a group `Network` inside a group
-`Home`.
+**New group** at the foot of the list makes a group: give it a name and, if it
+belongs inside another, pick which. It starts empty, ready to be filled.
 
-- Drag a target by its handle onto any group, at any depth.
+- The folder button on a group's header makes a new group inside that one.
+  Groups nest to any depth.
+- Drag a target by its handle onto any group, at any depth. An empty group also
+  offers to add a target straight into it.
+- A target's group can be chosen when it is added or edited too. **New group…**
+  in that list makes one on the spot.
 - Drag a group by its handle to reorder it among its neighbours.
-- The pencil on a group's header renames it or moves it inside another group,
-  taking everything in it along.
+- The pencil on a group's header renames it, moves it inside another group
+  taking everything in it along, or deletes it. Deleting a group keeps what was
+  in it: its targets and the groups inside it move up a level.
 - Collapse a group and it shows one trace for the whole group: the mean
   latency of its targets, marked wherever any of them lost packets.
 - **Compare** on a group's header puts all its targets, including those in the
   groups inside it, on one chart.
 
-A group exists while there is a target somewhere in it; move the last one out
-and it is gone.
+A group stays until it is deleted, whether or not anything is in it.
+
+### Sharing
+
+The share button beside **Add Target** makes a link out of your targets, for
+someone else's ClearPing to import.
+
+- **Share**: tick the targets to send, single ones or whole groups (they all
+  start ticked), and create the link.
+- **Import**: paste a link. You are shown what is in it and choose what to add.
+  Targets you already monitor are marked and start unticked.
+
+The link is the list itself. Nothing is stored for it and the two
+installations never talk to each other, so it works between machines that
+cannot reach one another. It carries each target's name, address, probe
+settings, interval and group. It carries none of their history and no alerts,
+whose notification URLs usually have a password in them. Anyone who has the
+link can read what is in it, so send it as you would the list.
+
+Opening a link in a browser brings up the import on the ClearPing the link was
+made on, which is what you want when both of you use the same one. For a
+different one, paste it under Import there.
 
 ### Alerts
 
@@ -158,6 +211,35 @@ matters. Details, what the message says and the finer points are in
 The Docker image includes Apprise. Running from source, install it with
 `pip install "apprise[all-plugins]"`.
 
+### An AI assistant
+
+**Connect an AI assistant**, at the foot of the sidebar, gives the address to
+hand to an assistant and what to do with it. For Claude Code that is one
+command:
+
+```bash
+claude mcp add --transport http clearping http://your-clearping:3000/api/mcp
+```
+
+Then ask it in your own words:
+
+- *Gather the logs from the last week so I can report this to my ISP, as a PDF.*
+- *Which targets had outages yesterday, and what kept working while they were down?*
+- *Is my connection worse in the evenings?*
+
+As it comes it can only read: nothing an assistant does changes a target or
+sends anything, and alerts are never shown to it. Set `CLEARPING_MCP_TOKEN`
+and an assistant that sends the token can also add targets, change them, pause
+them and probe one now (*add my router and 1.1.1.1 as ping targets, in a group
+called Network*), though never delete one. A token is only taken over HTTPS or
+from ClearPing's own network, never in the clear across the internet. What it
+can be asked, what the report contains and how the token works are in
+[docs/mcp.md](docs/mcp.md).
+
+A report is as good as what is monitored. Add your router as a target as well
+as addresses beyond it, and the data can show whether a fault was inside your
+network or outside it.
+
 ## Upgrading
 
 Pull the new image and recreate the container:
@@ -182,6 +264,8 @@ All optional. With Docker, pass them with `-e`.
 | `CLEARPING_DB_PATH` | `./data/clearping.db` (`/data/clearping.db` in the image) | Where the database is kept |
 | `CLEARPING_RETENTION_DAYS` | `90` | Days of measurements to keep; `0` keeps everything |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes, for when `npm run probe` runs as its own process |
+| `CLEARPING_MCP_TOKEN` | unset | A token an AI assistant has to send to connect, which also lets it add and change targets. Without one the MCP address is as open as the rest of the app and can only read |
+| `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes the token over plain HTTP from anywhere, for when a VPN or tunnel does the encrypting. Otherwise it is taken only over HTTPS or from ClearPing's own network |
 
 ## API
 
@@ -189,19 +273,25 @@ Everything the interface does goes through these.
 
 | | |
 |---|---|
-| `GET /api/targets` | Every target; `?packetLoss=true` adds latest readings, recent traces and group order |
+| `GET /api/targets` | Every target; `?packetLoss=true` adds latest readings, recent traces, the groups and their order |
 | `POST /api/targets` | Add a target |
+| `POST /api/targets/import` | Add several at once (`{ targets: [...] }`); all are checked first, and none is added if one is wrong |
+| `DELETE /api/targets` | Delete several at once (`{ ids: [...] }`), each with its history |
 | `GET`, `PATCH`, `DELETE /api/targets/:id` | Read, change (including pause and group) or delete one |
 | `POST /api/targets/:id/probe` | Probe it now |
 | `GET /api/targets/:id/measurements` | Its readings, bucketed for a chart (`?hours=` or `?start=&end=`) |
 | `GET`, `POST /api/targets/:id/traceroute` | Its saved routes; trace it now |
+| `DELETE /api/targets/:id/traceroute` | Delete one saved route (`?trace=id`) or all but the newest (`?older=1`) |
 | `PUT /api/targets/reorder` | Save the order of targets or of groups |
+| `POST /api/groups` | Make a group (`{ group }`, a path such as `Home/Network`) |
 | `PUT /api/groups` | Rename a group or move it inside another (`{ from, to }`) |
-| `GET /api/compare` | The same period of several targets (`?targets=id,id`) |
+| `DELETE /api/groups` | Delete a group (`{ group }`); what was in it moves up a level |
+| `GET /api/compare` | The same period of several targets (`?targets=id,id`); `&split=resolver` gives a DNS target's resolvers a line each (`&family=4` or `6` for one side of a target on both) |
 | `GET`, `POST /api/alerts` | Every alert; make one |
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
+| `POST /api/mcp` | The MCP server an AI assistant connects to; `GET /api/mcp/info` says whether it asks for a token |
 
 ## Development
 
@@ -223,3 +313,4 @@ SQLite.
 - [docs/running.md](docs/running.md): running it, Docker, installing it as an app, upgrading, configuration
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
 - [docs/alerting.md](docs/alerting.md): alerts, and sending them with Apprise
+- [docs/mcp.md](docs/mcp.md): connecting an AI assistant, and the report for an ISP

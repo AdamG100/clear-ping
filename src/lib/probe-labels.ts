@@ -1,6 +1,7 @@
 import type { IpVersion, ProbeConfig, ProbeType } from '@/types/probe'
+import { resolverLabel } from './dns-resolvers'
 import { classifyHost } from './host'
-import { DEFAULT_DNS_QUERY_NAME, httpUrlFor } from './probe-config'
+import { DEFAULT_DNS_QUERY_NAME, httpUrlFor, isAddressRecord, nameRecordType } from './probe-config'
 
 /**
  * The words used for a target's readings, by probe type.
@@ -145,6 +146,17 @@ export function describeProbe(
       const expected = config.expectedAnswer
         ? ` Fails unless the answer includes ${config.expectedAnswer}.`
         : ''
+      if (isName && config.resolvers && config.resolvers.length > 0) {
+        const through = config.resolvers.map(resolverLabel).join(', ')
+        const each = config.resolvers.length > 1 ? ' Each is asked on every probe and timed by itself, so they can be told apart.' : ''
+        // Which kind of address is the IP version's to say, and both of them
+        // is two lookups a probe.
+        const record = nameRecordType(config.recordType, ipVersion)
+        const records = ipVersion === 'both' && isAddressRecord(record)
+          ? 'A and the AAAA record of this name, charted as two lines'
+          : `${record} record of this name`
+        return `Asks ${through} for the ${records}.${each}${expected} No ping is sent.`
+      }
       if (isName) {
         return `Looks this name up through the system resolver and times the answer.${expected} No ping is sent.${family}`
       }

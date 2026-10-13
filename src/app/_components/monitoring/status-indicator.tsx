@@ -15,12 +15,15 @@ export function StatusIndicator({
   packetLoss,
   note,
   paused = false,
+  bare = false,
 }: {
   isOnline?: boolean
   packetLoss?: number
   /** Replaces the description: how each address family of a dual-stack target is doing. */
   note?: string
   paused?: boolean
+  /** No tooltip of its own, for where what it sits on already says the same. */
+  bare?: boolean
 }) {
   const pending = isOnline === undefined
 
@@ -46,7 +49,7 @@ export function StatusIndicator({
   if (note && !pending && !paused) label = note
 
   return (
-    <span className="relative inline-flex shrink-0" title={label}>
+    <span className="relative inline-flex shrink-0" title={bare ? undefined : label}>
       {/* The pulse only runs for a live target; a steady dot for offline and
           pending states stops a dead target from looking like active traffic. */}
       {isOnline && !paused && (

@@ -165,3 +165,54 @@ const WELL_KNOWN_RESOLVERS = new Set([
 export function isWellKnownResolver(host: string): boolean {
   return WELL_KNOWN_RESOLVERS.has(normalizeHost(host).toLowerCase())
 }
+
+/**
+ * Whether an address is inside a private network: the router, a switch, a
+ * server down the hall. A report that has one of these in it can tell a fault
+ * in the building from a fault beyond it, and one that has none cannot.
+ */
+export function isPrivateAddress(address: string): boolean {
+  const kind = classifyHost(address)
+  if (kind === 'ipv4') {
+    const [a, b] = address.split('.').map(Number)
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)
+  }
+  if (kind === 'ipv6') {
+    const lower = address.toLowerCase()
+    return lower === '::1' || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower)
+  }
+  return false
+}
+
+/** Names that only mean anything on the network they are used on. */
+const LOCAL_SUFFIXES = ['.localhost', '.local', '.lan', '.home', '.internal', '.home.arpa', '.test']
+
+/**
+ * Whether what a client connected to, as it wrote it (`host`, `host:port`,
+ * `[v6]:port`), is somewhere on its own network and not out across the
+ * internet: this machine, a private address, a name with no dots in it or one
+ * that ends the way only local names do.
+ *
+ * Carrier-grade addresses (100.64.0.0/10) count as well. They are not
+ * reachable from the internet either, and are what an overlay network such as
+ * Tailscale hands out, which encrypts what crosses it.
+ */
+export function isLocalHost(hostWithPort: string): boolean {
+  const written = hostWithPort.trim().toLowerCase()
+  const bracketed = /^\[(.+)\](?::\d+)?$/.exec(written)
+  // Colons more than once and no brackets is a bare IPv6 address, which has no port on it.
+  const host = bracketed ? bracketed[1] : written.split(':').length > 2 ? written : written.replace(/:\d+$/, '')
+
+  const kind = classifyHost(host)
+  if (kind === 'invalid') return false
+  if (kind === 'hostname') {
+    return host === 'localhost' || !host.includes('.') || LOCAL_SUFFIXES.some(suffix => host.endsWith(suffix))
+  }
+  if (isPrivateAddress(host)) return true
+
+  if (kind === 'ipv4') {
+    const [a, b] = host.split('.').map(Number)
+    return a === 100 && b >= 64 && b <= 127
+  }
+  return false
+}

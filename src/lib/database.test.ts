@@ -11,6 +11,7 @@ const {
   initDatabase,
   createTarget,
   deleteTarget,
+  deleteTargets,
   updateTarget,
   getTargetById,
   setResolvedAddress,
@@ -195,6 +196,28 @@ describe('updateTarget / deleteTarget', () => {
 
     const after = await getMeasurements(TARGET, new Date(base - 60_000), new Date(base + 60 * 60_000))
     expect(after).toHaveLength(0)
+  })
+
+  it('deletes several at once, with their measurements, and leaves the rest', async () => {
+    const window = [new Date(base - 60_000), new Date(base + 60_000)] as const
+    for (const id of ['bulk-a', 'bulk-b', 'bulk-kept']) {
+      await createTarget({ id, name: id, host: '198.51.100.9', probeType: 'ping', interval: 300, status: 'active' })
+      await storeMeasurement({ id: `m-${id}`, targetId: id, timestamp: new Date(base), latency: 5, packetLoss: 0, jitter: 1, success: true })
+    }
+
+    // One that is not there is passed over, not counted, and stops nothing.
+    expect(await deleteTargets(['bulk-a', 'never-was', 'bulk-b'])).toBe(2)
+
+    expect(await getTargetById('bulk-a')).toBeNull()
+    expect(await getTargetById('bulk-b')).toBeNull()
+    expect(await getMeasurements('bulk-a', ...window)).toHaveLength(0)
+    expect(await getMeasurements('bulk-b', ...window)).toHaveLength(0)
+
+    expect(await getTargetById('bulk-kept')).not.toBeNull()
+    expect(await getMeasurements('bulk-kept', ...window)).toHaveLength(1)
+
+    expect(await deleteTargets([])).toBe(0)
+    expect(await deleteTargets(['bulk-kept'])).toBe(1)
   })
 })
 

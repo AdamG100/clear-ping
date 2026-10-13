@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   httpUrlFor,
   isProbeType,
+  nameRecordType,
   parseAddressInput,
   targetAddressLabel,
   validateProbeConfig,
@@ -112,6 +113,78 @@ describe('validateProbeConfig', () => {
     expect(
       validateProbeConfig('dns', 'example.com', { queryName: 'other.example', recordType: 'TXT', expectedAnswer: '192.0.2.1' })
     ).toEqual({ ok: true, config: { expectedAnswer: '192.0.2.1' } })
+  })
+
+  it('lets a DNS name target say which resolvers to ask, and then what kind of record', () => {
+    expect(
+      validateProbeConfig('dns', 'example.com', {
+        resolvers: [{ protocol: 'udp', server: ' 1.1.1.1' }, { protocol: 'doh', server: 'dns.google' }, { protocol: 'dot', server: 'dns.quad9.net' }],
+        recordType: 'MX',
+        expectedAnswer: 'mx.example.com',
+        queryName: 'other.example',
+      })
+    ).toEqual({
+      ok: true,
+      config: {
+        resolvers: [
+          { protocol: 'udp', server: '1.1.1.1' },
+          { protocol: 'doh', server: 'https://dns.google/dns-query' },
+          { protocol: 'dot', server: 'dns.quad9.net' },
+        ],
+        recordType: 'MX',
+        expectedAnswer: 'mx.example.com',
+      },
+    })
+  })
+
+  it('stores nothing for the system resolver alone, which is what a name target has anyway', () => {
+    expect(validateProbeConfig('dns', 'example.com', { resolvers: [{ protocol: 'system' }], recordType: 'TXT' })).toEqual({
+      ok: true,
+      config: {},
+    })
+    expect(validateProbeConfig('dns', 'example.com', { resolvers: [] })).toEqual({ ok: true, config: {} })
+  })
+
+  it('keeps the system resolver in a list with others, but only to be asked for addresses', () => {
+    const resolvers = [{ protocol: 'system' }, { protocol: 'udp', server: '9.9.9.9' }]
+
+    expect(validateProbeConfig('dns', 'example.com', { resolvers, recordType: 'AAAA' })).toEqual({
+      ok: true,
+      config: { resolvers, recordType: 'AAAA' },
+    })
+    expect(validateProbeConfig('dns', 'example.com', { resolvers })).toEqual({ ok: true, config: { resolvers } })
+
+    const refused = validateProbeConfig('dns', 'example.com', { resolvers, recordType: 'TXT' })
+    expect(refused.ok).toBe(false)
+    expect(!refused.ok && refused.error).toContain('only looks up addresses')
+  })
+
+  it('asks a name’s resolvers for the address of the IP version the target is on', () => {
+    // The form saves A with every list, so a saved A must not pin IPv6 to IPv4.
+    expect(nameRecordType('A', 'ipv6')).toBe('AAAA')
+    expect(nameRecordType('AAAA', 'ipv4')).toBe('A')
+    expect(nameRecordType(undefined, 'ipv6')).toBe('AAAA')
+    // Left to itself, or to both (which is run as one of each), the version
+    // leaves the record as it was chosen.
+    expect(nameRecordType(undefined)).toBe('A')
+    expect(nameRecordType('AAAA', 'auto')).toBe('AAAA')
+    expect(nameRecordType('A', 'both')).toBe('A')
+    // Anything that is not an address has no version to follow.
+    expect(nameRecordType('MX', 'ipv6')).toBe('MX')
+    expect(nameRecordType('TXT', 'both')).toBe('TXT')
+  })
+
+  it('refuses a resolver that is wrong, saying which', () => {
+    const refused = validateProbeConfig('dns', 'example.com', {
+      resolvers: [{ protocol: 'udp', server: '1.1.1.1' }, { protocol: 'udp', server: 'not-an-address' }],
+    })
+    expect(refused.ok).toBe(false)
+    expect(!refused.ok && refused.error).toContain('Resolver 2')
+    expect(validateProbeConfig('dns', 'example.com', { resolvers: [{ protocol: 'udp', server: '1.1.1.1' }], recordType: 'SRV' })).toMatchObject({ ok: false })
+  })
+
+  it('ignores resolvers on a target that is itself a server to ask', () => {
+    expect(validateProbeConfig('dns', '1.1.1.1', { resolvers: [{ protocol: 'udp', server: '9.9.9.9' }] })).toEqual({ ok: true, config: {} })
   })
 
   it('strips settings that belong to a different probe', () => {

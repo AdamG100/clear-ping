@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   firstDeadHop,
   hopLoss,
+  newestPerFamily,
   parseTraceroute,
   traceReached,
   tracerouteCommand,
@@ -103,6 +104,34 @@ describe('firstDeadHop', () => {
   it('has nothing to point at when the last hop answered but was not the target', () => {
     const hops = parseTraceroute(fixture.LINUX_ADMIN_PROHIBITED)
     expect(firstDeadHop(hops, false)).toBeNull()
+  })
+})
+
+describe('newestPerFamily', () => {
+  const trace = (id: string, address: string) => ({ id, address })
+  const ids = (traces: { id: string }[]) => traces.map(each => each.id)
+
+  it('keeps only the newest when every trace is over the one family', () => {
+    expect(ids(newestPerFamily([trace('c', '192.0.2.1'), trace('b', '192.0.2.1'), trace('a', '192.0.2.9')]))).toEqual(['c'])
+  })
+
+  it('keeps the newest to each family of a target traced over both', () => {
+    const listed = [
+      trace('v6-new', '2001:db8::1'),
+      trace('v4-new', '192.0.2.1'),
+      trace('v6-old', '2001:db8::1'),
+      trace('v4-old', '192.0.2.1'),
+    ]
+    expect(ids(newestPerFamily(listed))).toEqual(['v6-new', 'v4-new'])
+  })
+
+  it('counts traces that never resolved a name as a kind of their own', () => {
+    const listed = [trace('failed-new', 'gone.example.com'), trace('v4', '192.0.2.1'), trace('failed-old', 'gone.example.com')]
+    expect(ids(newestPerFamily(listed))).toEqual(['failed-new', 'v4'])
+  })
+
+  it('keeps nothing of nothing', () => {
+    expect(newestPerFamily([])).toEqual([])
   })
 })
 

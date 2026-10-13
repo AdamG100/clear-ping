@@ -1,10 +1,10 @@
 import path from 'path';
 import fs from 'fs';
 import sqlite3 from 'sqlite3';
-import { Target, ProbeMeasurement, TargetStatistics, GroupOrder, LatestMeasurement, FamilyReading, BucketedMeasurement, SparklinePoint, IpVersion, ProbeType, AddressFamily } from '@/types/probe';
+import { Target, ProbeMeasurement, TargetStatistics, GroupOrder, LatestMeasurement, FamilyReading, BucketedMeasurement, SparklinePoint, IpVersion, ProbeType, AddressFamily, DnsResolverReading, ProbeDetails } from '@/types/probe';
 import { addressFamilyFor, FAMILY_LABEL, isDualStack } from './host';
 import { median } from './metrics';
-import { isWithinGroup, normalizeGroupPath, parentGroup, rebaseGroupPath } from './group-path';
+import { groupWithAncestors, isWithinGroup, normalizeGroupPath, parentGroup, rebaseGroupPath } from './group-path';
 import { runMigrations } from './migrations';
 
 // Use sqlite3.Database type
@@ -53,6 +53,12 @@ function runSql(database: Database, sql: string, params: unknown[] = []): Promis
       if (err) reject(err);
       else resolve();
     });
+  });
+}
+
+function allSql<T>(database: Database, sql: string, params: unknown[] = []): Promise<T[]> {
+  return new Promise<T[]>((resolve, reject) => {
+    database.all(sql, params, (err, rows) => (err ? reject(err) : resolve((rows ?? []) as T[])));
   });
 }
 
@@ -523,6 +529,9 @@ export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt
   const now = Date.now();
   const group = normalizeGroupPath(target.group);
 
+  // A target named into a group nobody has made yet makes it.
+  await keepGroup(database, group);
+
   return new Promise<Target>((resolve, reject) => {
     database.run(`
       INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, sort_order, ip_version, probe_config, created_at, updated_at)
@@ -645,6 +654,8 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
 
   if (fields.length === 0) return false;
 
+  if (updates.group !== undefined) await keepGroup(database, updates.group);
+
   fields.push('updated_at = ?');
   values.push(now);
   values.push(id);
@@ -690,6 +701,19 @@ export async function deleteTarget(id: string): Promise<boolean> {
       resolve(this.changes > 0);
     });
   });
+}
+
+/**
+ * Delete several targets, each with everything recorded for it. Returns how
+ * many there were to delete: an id that is not a target's is passed over.
+ */
+export async function deleteTargets(ids: string[]): Promise<number> {
+  let deleted = 0;
+  // One after another: each is two statements that belong together.
+  for (const id of ids) {
+    if (await deleteTarget(id)) deleted++;
+  }
+  return deleted;
 }
 
 /**
@@ -794,6 +818,43 @@ export async function getMeasurements(
       resolve(measurements);
     });
   });
+}
+
+/** A probe as the search for incidents reads it, with the family it was taken over. */
+export interface StoredReading {
+  timestamp: number;
+  latency: number | null;
+  packetLoss: number;
+  success: boolean;
+  errorMessage?: string;
+  family?: AddressFamily;
+}
+
+/**
+ * A target's probes over a period, oldest first, with only what says whether
+ * each one worked. A month of a target probed every minute is tens of
+ * thousands of rows, read here for every target a report covers, so the
+ * columns a chart needs and this does not are left where they are.
+ */
+export async function getProbeReadings(targetId: string, startTime: Date, endTime: Date): Promise<StoredReading[]> {
+  const database = await getDatabase();
+
+  const rows = await allSql<Pick<MeasurementRow, 'timestamp' | 'latency' | 'packet_loss' | 'success' | 'error_message' | 'family'>>(
+    database,
+    `SELECT timestamp, latency, packet_loss, success, error_message, family FROM measurements
+     WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
+     ORDER BY timestamp ASC`,
+    [targetId, startTime.getTime(), endTime.getTime()]
+  );
+
+  return rows.map(row => ({
+    timestamp: row.timestamp,
+    latency: row.latency,
+    packetLoss: row.packet_loss,
+    success: row.success === 1,
+    errorMessage: row.error_message || undefined,
+    family: familyFromRow(row.family),
+  }));
 }
 
 /**
@@ -1043,12 +1104,91 @@ export async function saveGroupOrders(orders: GroupOrder[]): Promise<void> {
 }
 
 /**
+ * Enter a group among those that exist, along with each group it sits inside.
+ * Entering one that is already there changes nothing.
+ */
+async function keepGroup(database: Database, group: string | null | undefined): Promise<void> {
+  for (const path of groupWithAncestors(normalizeGroupPath(group))) {
+    await runSql(database, 'INSERT OR IGNORE INTO target_groups (group_name) VALUES (?)', [path]);
+  }
+}
+
+/**
+ * Every group there is, as paths, whether or not anything is in it.
+ *
+ * A group lasts until it is deleted. It used to exist only through the
+ * targets in it, which meant it could not be made first and filled later, and
+ * that moving its last target out quietly took the group with it.
+ */
+export async function getGroups(): Promise<string[]> {
+  const database = await getDatabase();
+  const rows = await allSql<{ group_name: string }>(database, 'SELECT group_name FROM target_groups ORDER BY group_name');
+  return rows.map(row => row.group_name);
+}
+
+/**
+ * Make a group, with nothing in it. Any group in its path that does not exist
+ * yet is made too. Returns the path as it is stored, or an empty one if there
+ * was no name in what was given.
+ */
+export async function createGroup(group: string): Promise<string> {
+  const database = await getDatabase();
+  const path = normalizeGroupPath(group);
+  await keepGroup(database, path);
+  return path;
+}
+
+/**
+ * Rewrite the front of every path at or under `source`, on targets and in the
+ * list of groups alike. An empty `destination` is the top level. Runs inside
+ * the caller's transaction.
+ */
+async function rebaseGroups(
+  database: Database,
+  source: string,
+  destination: string
+): Promise<{ targetsMoved: number; found: boolean }> {
+  // Matched here rather than with LIKE: a group name may hold `%` or `_`.
+  const inUse = (await allSql<{ group_name: string }>(database, 'SELECT DISTINCT group_name FROM targets'))
+    .map(row => row.group_name)
+    .filter(group => group && isWithinGroup(group, source));
+
+  let targetsMoved = 0;
+  for (const group of inUse) {
+    targetsMoved += await new Promise<number>((resolve, reject) => {
+      database.run(
+        'UPDATE targets SET group_name = ?, updated_at = ? WHERE group_name = ?',
+        [rebaseGroupPath(group, source, destination), Date.now(), group],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.changes);
+        }
+      );
+    });
+  }
+
+  const kept = (await allSql<{ group_name: string }>(database, 'SELECT group_name FROM target_groups'))
+    .map(row => row.group_name)
+    .filter(group => isWithinGroup(group, source));
+  // All taken out before any is put back: one group's new path may be
+  // another's old one.
+  for (const group of kept) {
+    await runSql(database, 'DELETE FROM target_groups WHERE group_name = ?', [group]);
+  }
+  for (const group of kept) {
+    await keepGroup(database, rebaseGroupPath(group, source, destination));
+  }
+
+  return { targetsMoved, found: inUse.length > 0 || kept.length > 0 };
+}
+
+/**
  * Rename a group, or move it inside another, taking everything beneath it
  * along. Returns how many targets ended up somewhere new.
  *
- * A group is nothing but the front of its targets' paths, so this rewrites
- * that front on every target under `from`. Moving onto a group that already
- * exists merges the two.
+ * Where a group sits is the front of its path, so this rewrites that front on
+ * everything under `from`. Moving onto a group that already exists merges the
+ * two.
  */
 export async function moveGroup(from: string, to: string): Promise<number> {
   const database = await getDatabase();
@@ -1059,37 +1199,15 @@ export async function moveGroup(from: string, to: string): Promise<number> {
     throw new Error('A group cannot be moved inside itself');
   }
 
-  const all = <T>(sql: string) =>
-    new Promise<T[]>((resolve, reject) => {
-      database.all(sql, [], (err, rows) => (err ? reject(err) : resolve((rows ?? []) as T[])));
-    });
-
   await runSql(database, 'BEGIN IMMEDIATE');
   try {
-    // Matched here rather than with LIKE: a group name may hold `%` or `_`.
-    const groups = (await all<{ group_name: string }>('SELECT DISTINCT group_name FROM targets'))
-      .map(row => row.group_name)
-      .filter(group => group && isWithinGroup(group, source));
-
-    let moved = 0;
-    for (const group of groups) {
-      moved += await new Promise<number>((resolve, reject) => {
-        database.run(
-          'UPDATE targets SET group_name = ?, updated_at = ? WHERE group_name = ?',
-          [rebaseGroupPath(group, source, destination), Date.now(), group],
-          function (err) {
-            if (err) reject(err);
-            else resolve(this.changes);
-          }
-        );
-      });
-    }
+    const { targetsMoved: moved } = await rebaseGroups(database, source, destination);
 
     // Saved positions follow their groups. The one for the group that moved is
     // only carried over if it is still among the same neighbours: a position
     // among one set of siblings means nothing among another.
     const sameParent = parentGroup(source) === parentGroup(destination);
-    const orders = (await all<GroupOrderRow>('SELECT * FROM group_orders'))
+    const orders = (await allSql<GroupOrderRow>(database, 'SELECT * FROM group_orders'))
       .filter(order => isWithinGroup(order.group_name, source));
     for (const order of orders) {
       await runSql(database, 'DELETE FROM group_orders WHERE group_name = ?', [order.group_name]);
@@ -1109,10 +1227,49 @@ export async function moveGroup(from: string, to: string): Promise<number> {
 }
 
 /**
+ * Delete a group and keep what was in it. Its targets, and the groups inside
+ * it, move up to the group it sat in, or to the top level if it sat in none.
+ * Returns whether there was such a group.
+ *
+ * Only the group goes. Taking the targets with it would take their whole
+ * history, and that is what deleting a target is for.
+ */
+export async function deleteGroup(group: string): Promise<boolean> {
+  const database = await getDatabase();
+  const source = normalizeGroupPath(group);
+  if (!source) return false;
+
+  await runSql(database, 'BEGIN IMMEDIATE');
+  try {
+    // Moving everything up one level leaves the group's own entry sitting on
+    // its parent's path, which is how the group itself comes to be gone.
+    const { found } = await rebaseGroups(database, source, parentGroup(source));
+
+    // Positions are not carried: they were among the groups inside this one,
+    // and mean nothing among the neighbours those groups have now.
+    const orders = (await allSql<GroupOrderRow>(database, 'SELECT * FROM group_orders'))
+      .filter(order => isWithinGroup(order.group_name, source));
+    for (const order of orders) {
+      await runSql(database, 'DELETE FROM group_orders WHERE group_name = ?', [order.group_name]);
+    }
+
+    await runSql(database, 'COMMIT');
+    return found;
+  } catch (error) {
+    await runSql(database, 'ROLLBACK').catch(() => {});
+    throw error;
+  }
+}
+
+/**
  * Update sort_order for multiple targets in a batch
  */
 export async function updateTargetSortOrders(updates: { id: string; sortOrder: number; group?: string }[]): Promise<void> {
   const database = await getDatabase();
+
+  for (const update of updates) {
+    if (update.group !== undefined) await keepGroup(database, update.group);
+  }
 
   const promises = updates.map((update) =>
     new Promise<void>((resolve, reject) => {
@@ -1236,6 +1393,38 @@ export async function getBucketedMeasurements(
         );
       }
     );
+  });
+}
+
+/**
+ * How each resolver of a DNS target did in every probe of a period, oldest
+ * first. Probes taken before the target had resolvers of its own, and so with
+ * nothing to say about them, are left out.
+ */
+export async function getResolverRounds(
+  targetId: string,
+  startTime: Date,
+  endTime: Date,
+  family?: AddressFamily
+): Promise<Array<{ timestamp: number; readings: DnsResolverReading[] }>> {
+  const database = await getDatabase();
+  // A target on both families asks for a different record over each, and the
+  // two are not one resolver's line.
+  const only = familyFilter(family);
+
+  const rows = await allSql<{ timestamp: number; details: string }>(
+    database,
+    // The text is looked for before any of it is parsed: on a target that has
+    // only lately been given resolvers most rows have none to read.
+    `SELECT timestamp, details FROM measurements
+     WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? ${only.clause} AND details LIKE '%"resolvers"%'
+     ORDER BY timestamp ASC`,
+    [targetId, startTime.getTime(), endTime.getTime(), ...only.params]
+  );
+
+  return rows.flatMap(row => {
+    const readings = parseJson<ProbeDetails>(row.details)?.resolvers;
+    return Array.isArray(readings) && readings.length > 0 ? [{ timestamp: row.timestamp, readings }] : [];
   });
 }
 

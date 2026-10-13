@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTargets, getBucketedMeasurements, getTargetStatistics } from '@/lib/database';
+import { getAllTargets, getBucketedMeasurements, getResolverRounds, getTargetStatistics } from '@/lib/database';
+import { resolverSeries } from '@/lib/dns-resolver-series';
 import { isDualStack } from '@/lib/host';
 import { initializeServer } from '@/lib/init';
 import { windowFromQuery } from '@/lib/series';
@@ -15,6 +16,10 @@ const MAX_TARGETS = 24;
  * lines can be drawn on one chart — Smokeping's multi-host graph. A target
  * probed over both address families contributes two series, one per family,
  * which is also how a single dual-stack target compares IPv4 with IPv6.
+ *
+ * With `split=resolver`, a DNS target that asks several resolvers contributes
+ * one series for each of them instead of one for all their queries together;
+ * `family=4` or `family=6` with it keeps to the lookups made over that family.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -39,27 +44,50 @@ export async function GET(request: NextRequest) {
     // exist, and which of them are split by family.
     const known = new Map((await getAllTargets()).map(target => [target.id, target]));
 
+    const byResolver = searchParams.get('split') === 'resolver';
+    // A target on both families asks its resolvers for a different record over
+    // each, so their lines are for one family or the other.
+    const familyParam = searchParams.get('family');
+    const ofFamily: AddressFamily | null = familyParam === '4' ? 4 : familyParam === '6' ? 6 : null;
+    const resolverLines: Promise<ComparisonSeries[]>[] = [];
+
     const wanted: Array<{ targetId: string; family: AddressFamily | null }> = [];
     for (const targetId of requested) {
       const target = known.get(targetId);
       if (!target) continue;
 
-      if (isDualStack(target.host, target.ipVersion)) {
+      const resolvers = target.probeType === 'dns' ? target.probeConfig?.resolvers ?? [] : [];
+      if (byResolver && resolvers.length > 0) {
+        resolverLines.push(
+          getResolverRounds(targetId, startTime, endTime, ofFamily ?? undefined).then(rounds =>
+            resolverSeries(targetId, rounds, window.bucketMs, resolvers).map(line => ({
+              targetId,
+              family: ofFamily,
+              resolver: line.label,
+              buckets: line.buckets,
+              statistics: line.statistics,
+            }))
+          )
+        );
+      } else if (isDualStack(target.host, target.ipVersion)) {
         wanted.push({ targetId, family: 4 }, { targetId, family: 6 });
       } else {
         wanted.push({ targetId, family: null });
       }
     }
 
-    const series: ComparisonSeries[] = await Promise.all(
-      wanted.map(async ({ targetId, family }) => {
-        const [buckets, statistics] = await Promise.all([
-          getBucketedMeasurements(targetId, startTime, endTime, window.bucketMs, family ?? undefined),
-          getTargetStatistics(targetId, startTime, endTime, family ?? undefined),
-        ]);
-        return { targetId, family, buckets, statistics };
-      })
-    );
+    const series: ComparisonSeries[] = [
+      ...(await Promise.all(
+        wanted.map(async ({ targetId, family }) => {
+          const [buckets, statistics] = await Promise.all([
+            getBucketedMeasurements(targetId, startTime, endTime, window.bucketMs, family ?? undefined),
+            getTargetStatistics(targetId, startTime, endTime, family ?? undefined),
+          ]);
+          return { targetId, family, buckets, statistics };
+        })
+      )),
+      ...(await Promise.all(resolverLines)).flat(),
+    ];
 
     return NextResponse.json({
       series,

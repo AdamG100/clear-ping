@@ -67,7 +67,7 @@ derived from the address and the probe method, and each kind is measured differe
 | **TCP** | `db.internal:5432` | Opens a connection to the port, times the handshake and closes it. 10 attempts per probe. |
 | **HTTP** | `https://example.com/health` | Makes the request and checks the answer. 3 requests per probe, each on a fresh connection. |
 | **DNS** (server) | `8.8.8.8` with the DNS method | Sends DNS queries straight to that server and times the answers. No ping. |
-| **DNS** (name) | `example.com` with the DNS method | Looks the name up through the system resolver and times the answer. No ping. |
+| **DNS** (name) | `example.com` with the DNS method | Looks the name up and times the answer: through the system resolver, or through each of the resolvers you list for it. No ping. |
 
 The address box accepts a URL or `host:port` and picks the method to match. Whatever
 the method, the host is resolved once per probe and the resolved address is shown
@@ -97,10 +97,71 @@ An alert can be set on the certificate running out (see [alerting.md](./alerting
 A **server** target can be told what to ask: the name to look up (default
 `example.com`) and the record type (A, AAAA, CNAME, MX, NS, TXT).
 
+A **name** target can be told who to ask. Left alone it uses the system resolver.
+Given a list of resolvers, it asks every one of them on each probe:
+
+- **Add resolver** adds a row. Each row is who to ask (Cloudflare, Google, Quad9,
+  OpenDNS, AdGuard, the system's own, or **Custom** for one of your own), how to
+  ask, and where it is. Picking a well-known one fills in where.
+- A **Custom** resolver can be given a name, and is then called by it; left
+  unnamed it is called by its address. How it is asked is the badge beside the
+  name (`DNS`, `DoT`, `DoH`), and is written after the name where there is no
+  badge, as on a chart's legend: `Office DoH`. Renaming one takes effect at
+  once, on the readings already taken as well, and its line on the chart carries
+  on as the same line.
+- **How to ask** is plain DNS (given by IP address), **DoT**, DNS over TLS (a
+  hostname or address, port 853 unless another is written after it), or **DoH**,
+  DNS over HTTPS (a URL; a bare name such as `dns.google` is taken to mean
+  `https://dns.google/dns-query`). The same provider can be listed more than
+  once, over different protocols, to compare them.
+- With a list, the **record type** can be chosen too, since the resolvers are
+  asked directly: the name's address, or its CNAME, MX, NS or TXT record. Which
+  address is the target's **IP version**, as for every other probe: A unless it
+  is set to *IPv6 only*, which asks for AAAA, or to *Both*, which asks for each
+  and charts them as two lines. A record that is not an address has no IP
+  version, so the setting is not offered for one.
+- The system resolver only ever hands back addresses, so it can stay in a list
+  that asks for an address and has to come off one that asks for anything else.
+- Up to eight resolvers. Five queries go to each, all of them at the same moment.
+
+The target's page then shows the latest probe resolver by resolver:
+
+| Column | What it is |
+|---|---|
+| *Query time* | The average of that resolver's queries that were answered, from sending one to its answer arriving. |
+| *Answered* | How many of its five queries came back with an answer that could be used. One that timed out, came back as an error, or gave something other than the expected answer does not count, and the reason is written in the row. Nothing here is a lost packet: a DNS probe counts questions and answers. |
+| *Connect* | For DoT and DoH, how long the encrypted connection took to open. It is opened once a probe and is not part of the query time. |
+| *Answer* | What it answered. One that is not the answer most of them gave is marked as differing, which is how a record that has changed at one resolver and not yet at another shows up. Differing is not failing: a name served by region is given different addresses by different resolvers all the time. |
+
+Underneath, **Query time by resolver** draws a line for each of them on one
+chart. A point is one probe, the average of the five queries it sent to that
+resolver, and a strip for each marks the probes in which it failed to answer. In
+its table, *Failed* is the share of the queries sent to that resolver that got no
+usable answer, and *Uptime* the share of probes in which it answered at least one.
+
+A target set to **Both** IP versions looks the name up twice a probe, the A
+record and the AAAA record, and everything above is there once for each: the
+comparison chart at the top has one line for IPv4 and one for IPv6, each of them
+all the resolvers together. Below it each family has a section of its own, IPv4
+and IPv6, holding its table and its chart by resolver. A section is folded away
+until it is opened, and its heading says how that family's latest probe went:
+the query time, how many of the queries were answered, and whether any resolver
+is not answering or the answers differ. Which sections were left open is
+remembered.
+
+The readings that are charted at the top, and that alerts are judged on, are all
+of the resolvers' queries together: five to each of three is fifteen, and one
+resolver going quiet is a third of them failed. A DoT or DoH connection is opened
+once per probe and every query sent down it, as a browser or an operating system
+does, so the query time is the query's and the handshake is reported separately.
+DoH is spoken over HTTP/2 where the resolver offers it, which some insist on.
+
 Either kind of DNS target can be given an **expected answer**. A reply then only
 counts if it includes that value, which turns "does this server answer" into "does
 my record still point where it should". TXT records match on a substring, so
-`v=spf1` matches an SPF record; everything else must match a whole record.
+`v=spf1` matches an SPF record; everything else must match a whole record. With a
+list of resolvers each one's answer is held to it separately, so the one resolver
+still serving the old record is the one that fails.
 
 Why a domain is resolved by the prober rather than handed to `ping`:
 
@@ -116,9 +177,9 @@ Why a domain is resolved by the prober rather than handed to `ping`:
 For DNS targets, "packet loss" is the share of queries that went unanswered. A
 server replying "no such name" has still answered, so that counts as a success
 when the target is a server; when the target is a name, failing to resolve is the
-failure being watched for. A name target goes through the operating system's
-resolver, cache included, so it measures what applications on this machine
-experience rather than one upstream server.
+failure being watched for. A name target with no resolvers of its own goes through
+the operating system's resolver, cache included, so it measures what applications
+on this machine experience rather than one upstream server.
 
 ### IPv4 and IPv6
 
@@ -161,27 +222,41 @@ Targets are arranged into groups in the sidebar, and a group can sit inside
 another to any depth: `Home`, with `Network` inside it, with `Wireless` inside
 that.
 
-- **Making one.** A target's group is chosen when it is added or edited. Pick an
-  existing group, or type a new one. A `/` in a new group's name puts it inside
-  another: `Home/Network` is a group `Network` inside a group `Home`, and both
-  are made if they are not there.
+- **Making one.** **New group** at the foot of the list asks for a name and
+  which group, if any, it goes inside. The folder button on a group's header
+  does the same with that group already chosen, which is how a group is put
+  inside another. A new group starts empty, and says so until something is in
+  it.
+- **Making one along with a target.** The group box in the add and edit forms
+  lists every group, and **New group…** at the bottom of it takes a name and
+  the group to put it inside.
 - **Moving targets.** Drag a target by its handle onto any group, at any depth,
-  or onto *Ungrouped* to take it out of its group.
+  or onto *Ungrouped* to take it out of its group. An empty group also offers
+  to add a target straight into it.
 - **Renaming and moving groups.** The pencil on a group's header renames it or
   puts it inside another group. Everything in it goes with it. Giving it the
   name of a group that already exists merges the two.
+- **Deleting one.** In the same dialog. Only the group goes: its targets, and
+  the groups inside it, move up to the group it sat in, or to the top level,
+  and keep their history. A group with anything in it asks first.
 - **Ordering.** Drag a group by its handle to reorder it among the groups beside
   it.
 - **Collapsing.** A collapsed group shows one trace for everything in it: the
   mean latency of its targets, marked wherever any of them lost packets. Paused
   targets are left out of it.
 
-A group exists only while there is a target somewhere in it. There is nothing to
-delete: move its last target out and it is gone.
+A group lasts until it is deleted, whether or not anything is in it. It used to
+exist only through its targets, and vanished when the last one was moved out;
+the groups in a database from before that changed are all kept when it is
+upgraded. A group with nothing in it is left off the collapsed sidebar's rail
+and out of the lists of targets to tick, where it would be a row with nothing
+to choose.
 
-A group's name cannot contain a `/`, since that is what separates a group from
-the one inside it. Groups made before nesting existed whose names had one in
-them become a group inside a group when the database is upgraded.
+A group is stored as its path, with a `/` between a group and the one inside
+it, so a name cannot contain one. Nothing in the app asks for a path to be
+typed, but the API takes them: `Home/Network` is `Network` inside `Home`.
+Groups made before nesting existed whose names had a `/` in them become a group
+inside a group when the database is upgraded.
 
 ## Comparing Targets
 
@@ -209,8 +284,10 @@ scale, so the ping will be a flat line at the bottom. Group like with like.
 ## Traceroute
 
 The chart shows that packets were lost; a traceroute shows where. Each target has a
-**Route** panel listing its recent traces hop by hop: name, address, loss and
-latency, in the style of PingPlotter.
+**Route** panel listing its recent traces. An open trace is drawn as the path
+it took: each hop a numbered stop on a line, with its name, address, loss and
+latency beside it, the target itself marked at the end, and the line broken
+from the point where replies stopped.
 
 - **Trace route** runs one on demand.
 - One is taken **automatically when a packet-loss or unreachable alert fires**, which
@@ -225,7 +302,12 @@ but will not reply to probes. It is labelled as such and is not the fault. The f
 is where replies stop and never resume.
 
 Uses the system `tracert` (Windows) or `traceroute` (Linux, macOS), which must be
-installed. Traces are kept for the same retention period as measurements.
+installed. Traces are kept for the same retention period as measurements, and can
+be deleted sooner: the bin on a trace deletes that one, and **Delete older**
+deletes all but the newest (the newest over each address family, for a target
+traced over both). Either takes a second press to confirm, since a trace taken
+while something was broken cannot be taken again once it has mended. The panel
+lists the newest ten and says how many are kept in all.
 
 ## How Packet Loss Is Measured
 

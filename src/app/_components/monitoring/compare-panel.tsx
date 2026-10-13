@@ -27,8 +27,9 @@ import { TraceSkeleton } from './skeleton'
  * A comparison chart with its legend: the lines, and under them a table that
  * says what each line is and how it did over the period.
  *
- * Used for a group of targets, and for the two address families of a single
- * target that is probed over both.
+ * Used for a group of targets, for the two address families of a single
+ * target that is probed over both, and for the resolvers of a DNS target that
+ * asks several.
  */
 
 /**
@@ -53,6 +54,8 @@ interface LoadedSeries {
   key: string
   targetId: string
   family: AddressFamily | null
+  /** The resolver this line is, when the lines are a DNS target's resolvers. */
+  resolver?: string
   points: DataPoint[]
   statistics: TargetStatistics | null
 }
@@ -86,11 +89,16 @@ function useComparison(
   timeRange: TimeRange,
   zoom: TimeWindow | null,
   refreshKey: number | undefined,
-  reportError: (title: string, error?: unknown) => void
+  reportError: (title: string, error?: unknown) => void,
+  split?: 'resolver',
+  splitFamily?: AddressFamily
 ) {
   // Which targets, and how often each is probed: everything about them that
   // the result depends on, as a value that only changes when one of those does.
   const owner = targets.map(target => `${target.id}:${target.interval}`).join(',')
+  // Resolvers' lines are named by the server from the target's list as it is
+  // now, so a resolver renamed or taken off is a reason to ask again.
+  const named = split ? JSON.stringify(targets.map(target => target.probeConfig?.resolvers ?? [])) : ''
 
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [pending, setPending] = useState(false)
@@ -105,7 +113,7 @@ function useComparison(
     }
 
     const requestId = ++requestIdRef.current
-    const cacheKey = `${owner}|${timeRange}|${zoom ? `${zoom.start}-${zoom.end}` : 'all'}`
+    const cacheKey = `${owner}|${split ?? ''}${splitFamily ?? ''}${named}|${timeRange}|${zoom ? `${zoom.start}-${zoom.end}` : 'all'}`
     const cached = cacheRef.current.get(cacheKey)
 
     if (cached) {
@@ -125,7 +133,8 @@ function useComparison(
       const period = zoom
         ? `start=${zoom.start}&end=${zoom.end}`
         : `hours=${TIME_RANGE_CONFIG[timeRange].hours}`
-      const response = await fetch(`/api/compare?targets=${[...intervals.keys()].join(',')}&${period}`)
+      const by = split ? `&split=${split}${splitFamily ? `&family=${splitFamily}` : ''}` : ''
+      const response = await fetch(`/api/compare?targets=${[...intervals.keys()].join(',')}&${period}${by}`)
       if (!response.ok) {
         reportError('Could not load the comparison', `Server responded ${response.status}`)
         return
@@ -138,9 +147,10 @@ function useComparison(
         end: result.end,
         window: zoom,
         series: result.series.map(item => ({
-          key: `${item.targetId}:${item.family ?? 'all'}`,
+          key: `${item.targetId}:${item.family ?? 'all'}:${item.resolver ?? ''}`,
           targetId: item.targetId,
           family: item.family,
+          resolver: item.resolver,
           points: buildSeries(item.buckets, intervals.get(item.targetId) ?? 300, result.bucketMs),
           statistics: item.statistics,
         })),
@@ -156,7 +166,7 @@ function useComparison(
     } finally {
       if (requestId === requestIdRef.current) setPending(false)
     }
-  }, [owner, timeRange, zoom, reportError])
+  }, [owner, timeRange, zoom, reportError, split, splitFamily, named])
 
   const loadRef = useRef(load)
   useEffect(() => {
@@ -165,7 +175,7 @@ function useComparison(
 
   useEffect(() => {
     loadRef.current()
-  }, [owner, timeRange, zoom, refreshKey])
+  }, [owner, timeRange, zoom, refreshKey, splitFamily, named])
 
   const current = snapshot !== null && snapshot.owner === owner ? snapshot : null
 
@@ -204,7 +214,15 @@ interface ComparePanelProps {
    * What a line is called. Defaults to the target's name, with the address
    * family added for a target that contributes one line per family.
    */
-  nameSeries?: (target: Target, family: AddressFamily | null) => string
+  nameSeries?: (target: Target, family: AddressFamily | null, resolver?: string) => string
+  /** Draw a DNS target's resolvers as a line each, where it asks several. */
+  split?: 'resolver'
+  /** With `split`, on a target probed over both families: which one's lookups. */
+  splitFamily?: AddressFamily
+  /** What the column of failures is called for these lines. "Loss" unless said. */
+  lossLabel?: string
+  /** What the figures in the table are figures of, where that needs saying. */
+  note?: string
   /** Whether each row also shows the target's address. */
   showAddress?: boolean
   /** When given, a row's name opens that target's own page. */
@@ -212,8 +230,8 @@ interface ComparePanelProps {
   reportError: (title: string, error?: unknown) => void
 }
 
-const defaultName = (target: Target, family: AddressFamily | null) =>
-  family ? `${target.name} · ${FAMILY_LABEL[family]}` : target.name
+const defaultName = (target: Target, family: AddressFamily | null, resolver?: string) =>
+  resolver ? `${target.name} · ${resolver}` : family ? `${target.name} · ${FAMILY_LABEL[family]}` : target.name
 
 export function ComparePanel({
   targets,
@@ -225,11 +243,15 @@ export function ComparePanel({
   title,
   description,
   nameSeries = defaultName,
+  split,
+  splitFamily,
+  lossLabel = 'Loss',
+  note,
   showAddress = true,
   onSelectTarget,
   reportError,
 }: ComparePanelProps) {
-  const { snapshot, pending, initialLoad } = useComparison(targets, timeRange, zoom, refreshKey, reportError)
+  const { snapshot, pending, initialLoad } = useComparison(targets, timeRange, zoom, refreshKey, reportError, split, splitFamily)
   const [highlighted, setHighlighted] = useState<string | null>(null)
 
   const rows = useMemo(() => {
@@ -242,7 +264,7 @@ export function ComparePanel({
 
       const line: CompareLine = {
         key: series.key,
-        label: nameSeries(target, series.family),
+        label: nameSeries(target, series.family, series.resolver),
         color: SERIES_COLORS[index % SERIES_COLORS.length],
         dashed: index >= SERIES_COLORS.length,
         points: series.points,
@@ -327,7 +349,7 @@ export function ComparePanel({
                     <th className="hidden pb-1.5 pr-4 text-right font-medium @lg/main:table-cell">Avg</th>
                     <th className="hidden pb-1.5 pr-4 text-right font-medium @3xl/main:table-cell">Min</th>
                     <th className="hidden pb-1.5 pr-4 text-right font-medium @3xl/main:table-cell">Max</th>
-                    <th className="pb-1.5 text-right font-medium @lg/main:pr-4">Loss</th>
+                    <th className="pb-1.5 text-right font-medium @lg/main:pr-4">{lossLabel}</th>
                     <th className="hidden pb-1.5 text-right font-medium @lg/main:table-cell">Uptime</th>
                   </tr>
                 </thead>
@@ -415,6 +437,7 @@ export function ComparePanel({
                 </tbody>
               </table>
               <p className="mt-3 text-[11px] text-muted-foreground/70">
+                {note && <>{note} </>}
                 Latency columns are in milliseconds, over the period shown.{' '}
                 <span className="touch:hidden">
                   {zoom ? 'Drag to zoom further · double-click the chart to reset.' : 'Drag across the chart to zoom in.'}

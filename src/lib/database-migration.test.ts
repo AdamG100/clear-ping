@@ -118,6 +118,10 @@ describe('opening a database left by an old version', () => {
     expect(targets[2].ipVersion).toBe('auto')
   })
 
+  it('enters every group in use, and the groups those sit inside, as a group in its own right', async () => {
+    expect(await database.getGroups()).toEqual(['Home', 'Home/Lab', 'LAN'])
+  })
+
   it('records how far the database has been brought', async () => {
     expect(await all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }])
   })

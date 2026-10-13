@@ -1,12 +1,15 @@
 /**
  * Groups nest by name: a target's group is a path such as `Home/Network`, and
  * the group `Home` is whatever that path, and any other starting with it,
- * implies. Nothing else records the tree, so a group still exists only through
- * the targets somewhere beneath it, and moving a whole branch is a matter of
- * rewriting the front of some paths.
+ * implies. The paths are all that records the tree, so moving a whole branch is
+ * a matter of rewriting the front of some of them. Which groups exist is kept
+ * as a list of such paths, so one can be there with no target in it.
  */
 
 export const GROUP_SEPARATOR = '/'
+
+/** Longer than any path anyone would read, and short enough to store and show. */
+export const MAX_GROUP_PATH_LENGTH = 200
 
 /** The names along a path, outermost first. Empty for no group. */
 export function splitGroupPath(group: string | null | undefined): string[] {

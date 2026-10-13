@@ -5,7 +5,7 @@ import type { ProbeIpVersion, Target, Traceroute, TracerouteHop } from '@/types/
 import { getDatabase } from './database';
 import { classifyHost, normalizeHost, probeRuns, type AddressFamily } from './host';
 import { resolveHost } from './resolve';
-import { parseTraceroute, traceReached, tracerouteCommand } from './traceroute-parse';
+import { newestPerFamily, parseTraceroute, traceReached, tracerouteCommand } from './traceroute-parse';
 
 /**
  * Running traceroutes and keeping them.
@@ -179,6 +179,61 @@ export async function getTraceroutes(targetId: string, limit = 10): Promise<Trac
       }
     );
   });
+}
+
+/** How many traces are kept for a target, including those too old to be listed. */
+export async function countTraceroutes(targetId: string): Promise<number> {
+  const db = await getDatabase();
+
+  return new Promise<number>((resolve, reject) => {
+    db.get('SELECT COUNT(*) AS total FROM traceroutes WHERE target_id = ?', [targetId], (err, row) => {
+      if (err) reject(err);
+      else resolve((row as { total: number } | undefined)?.total ?? 0);
+    });
+  });
+}
+
+/**
+ * Delete one trace. Returns whether it was there.
+ *
+ * Asked for by target as well as by id, so that an id from one target cannot
+ * delete a trace of another.
+ */
+export async function deleteTraceroute(targetId: string, traceId: string): Promise<boolean> {
+  const db = await getDatabase();
+
+  return new Promise<boolean>((resolve, reject) => {
+    db.run('DELETE FROM traceroutes WHERE target_id = ? AND id = ?', [targetId, traceId], function (err) {
+      if (err) reject(err);
+      else resolve(this.changes > 0);
+    });
+  });
+}
+
+/**
+ * Delete a target's old traces, leaving the newest to each address family.
+ * Returns the number removed.
+ */
+export async function deleteOlderTraceroutes(targetId: string): Promise<number> {
+  const db = await getDatabase();
+
+  const all = await new Promise<Pick<TracerouteRow, 'id' | 'address'>[]>((resolve, reject) => {
+    db.all(
+      'SELECT id, address FROM traceroutes WHERE target_id = ? ORDER BY timestamp DESC',
+      [targetId],
+      (err, rows) => (err ? reject(err) : resolve((rows ?? []) as Pick<TracerouteRow, 'id' | 'address'>[]))
+    );
+  });
+
+  const kept = new Set(newestPerFamily(all).map(trace => trace.id));
+  const old = all.filter(trace => !kept.has(trace.id));
+
+  for (const trace of old) {
+    await new Promise<void>((resolve, reject) => {
+      db.run('DELETE FROM traceroutes WHERE id = ?', [trace.id], err => (err ? reject(err) : resolve()));
+    });
+  }
+  return old.length;
 }
 
 /** Delete traces past the retention window. Returns the number removed. */

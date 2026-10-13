@@ -12,6 +12,7 @@ import type {
   GroupOrder,
   LatestMeasurement,
   SparklinePoint,
+  TargetDefinition,
   TimeWindow,
 } from '@/types/probe'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
@@ -27,7 +28,7 @@ import { buildSeries, MIN_WINDOW_MS } from '@/lib/series'
 import { addressFamilyFor, FAMILY_LABEL, isDualStack, targetTypeFor } from '@/lib/host'
 import { alertTitle } from '@/lib/alert-delivery'
 import { probeVocabulary } from '@/lib/probe-labels'
-import { targetAddressLabel } from '@/lib/probe-config'
+import { DNS_QUERIES_PER_PROBE, nameRecordType, targetAddressLabel } from '@/lib/probe-config'
 import { groupLabel, isWithinGroup, rebaseGroupPath } from '@/lib/group-path'
 import { buildSidebarLayout, targetsWithin } from '@/lib/sidebar-layout'
 import { cn } from '@/lib/utils'
@@ -37,9 +38,9 @@ import { AlertsView, type AlertResponse } from './alerts-view'
 import { ProbeDetailsPanel } from './probe-details'
 import { TraceroutePanel } from './traceroute-panel'
 import { ComparePanel } from './compare-panel'
+import { FamilySection } from './family-section'
 import { formatWindowEdge } from './chart-brush'
 import { Button } from '@/components/ui/button'
-import { RefreshCw } from 'lucide-react'
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 
 /** Content that replaces a placeholder fades in over it instead of cutting. */
@@ -55,6 +56,8 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
   const [targets, setTargets] = useState<Target[]>([])
   const [latest, setLatest] = useState<Record<string, LatestMeasurement>>({})
   const [series, setSeries] = useState<Record<string, SparklinePoint[]>>({})
+  // Every group there is, as paths: a group is there whether or not a target is in it.
+  const [groups, setGroups] = useState<string[]>([])
   const [groupOrders, setGroupOrders] = useState<GroupOrder[]>([])
   const [isLoaded, setIsLoaded] = useState(false)
 
@@ -86,6 +89,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         setLatest(parsed)
         setSeries(data.series || {})
 
+        setGroups(data.groups || [])
         if (data.groupOrders) {
           setGroupOrders(data.groupOrders)
         }
@@ -136,6 +140,25 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     return null
   }, [loadTargets, reportError])
 
+  const importTargets = useCallback(async (definitions: TargetDefinition[]): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/targets/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets: definitions }),
+      })
+      if (response.ok) {
+        await loadTargets()
+        return true
+      }
+      const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
+      reportError('Could not import the targets', error)
+    } catch (error) {
+      reportError('Could not import the targets', error)
+    }
+    return false
+  }, [loadTargets, reportError])
+
   const updateTarget = useCallback(async (id: string, updates: Partial<Target>) => {
     try {
       const response = await fetch(`/api/targets/${id}`, {
@@ -169,6 +192,26 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     } catch (error) {
       reportError('Could not delete target', error)
     }
+  }, [loadTargets, reportError])
+
+  const deleteTargets = useCallback(async (ids: string[]): Promise<number | null> => {
+    try {
+      const response = await fetch('/api/targets', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      if (response.ok) {
+        const { deleted } = await response.json()
+        await loadTargets()
+        return deleted
+      }
+      const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
+      reportError('Could not delete the targets', error)
+    } catch (error) {
+      reportError('Could not delete the targets', error)
+    }
+    return null
   }, [loadTargets, reportError])
 
   const reorderGroups = useCallback(async (orders: GroupOrder[]) => {
@@ -205,26 +248,42 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     }
   }, [reportError])
 
-  const moveGroup = useCallback(async (from: string, to: string): Promise<boolean> => {
+  /** Make a change to the groups themselves; true if it was made. */
+  const changeGroups = useCallback(async (method: 'POST' | 'PUT' | 'DELETE', body: object, failure: string): Promise<boolean> => {
     try {
       const response = await fetch('/api/groups', {
-        method: 'PUT',
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from, to }),
+        body: JSON.stringify(body),
       })
       if (response.ok) {
         await loadTargets()
         return true
       }
       const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
-      reportError('Could not move the group', error)
+      reportError(failure, error)
     } catch (error) {
-      reportError('Could not move the group', error)
+      reportError(failure, error)
     }
     return false
   }, [loadTargets, reportError])
 
-  return { targets, latest, series, groupOrders, addTarget, updateTarget, deleteTarget, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
+  const createGroup = useCallback(
+    (group: string) => changeGroups('POST', { group }, 'Could not create the group'),
+    [changeGroups]
+  )
+
+  const moveGroup = useCallback(
+    (from: string, to: string) => changeGroups('PUT', { from, to }, 'Could not move the group'),
+    [changeGroups]
+  )
+
+  const deleteGroup = useCallback(
+    (group: string) => changeGroups('DELETE', { group }, 'Could not delete the group'),
+    [changeGroups]
+  )
+
+  return { targets, latest, series, groups, groupOrders, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
 }
 
 function useAlerts(reportError: (title: string, error?: unknown) => void) {
@@ -284,7 +343,6 @@ function useTargetMeasurements(
   // *range* change is the point of this hook, but keeping it across a *target*
   // change would show one host's history under another host's name.
   const [snapshot, setSnapshot] = useState<(RangeSnapshot & { owner: string }) | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const [pending, setPending] = useState(false)
 
   // Keyed by target *and* range, so flicking between two targets is instant
@@ -302,7 +360,7 @@ function useTargetMeasurements(
   // otherwise land a slow earlier response on top of a fast later one.
   const requestIdRef = useRef(0)
 
-  const loadMeasurements = useCallback(async (isManualRefresh = false) => {
+  const loadMeasurements = useCallback(async () => {
     if (!targetId || !owner) {
       setSnapshot(null)
       setPending(false)
@@ -319,8 +377,6 @@ function useTargetMeasurements(
     } else {
       setPending(true)
     }
-
-    if (isManualRefresh) setRefreshing(true)
 
     try {
       const period = zoom
@@ -357,10 +413,7 @@ function useTargetMeasurements(
     } catch (error) {
       reportError('Could not load measurements', error)
     } finally {
-      if (requestId === requestIdRef.current) {
-        setPending(false)
-        setRefreshing(false)
-      }
+      if (requestId === requestIdRef.current) setPending(false)
     }
   }, [targetId, owner, family, timeRange, zoom, cacheKey, probeIntervalSeconds, reportError])
 
@@ -378,13 +431,11 @@ function useTargetMeasurements(
     statistics: isForCurrentTarget ? snapshot.statistics : null,
     /** The zoom window the points on screen belong to; null when unzoomed. */
     window: isForCurrentTarget ? snapshot.window : null,
-    refreshing,
     /** A fetch is in flight with nothing cached to show for this range. */
     pending,
     /** True only before the first result for the current target has arrived. */
     initialLoad: !isForCurrentTarget,
     reload: loadMeasurements,
-    manualReload: useCallback(() => loadMeasurements(true), [loadMeasurements]),
   }
 }
 
@@ -506,7 +557,7 @@ function TargetAlerts({
 
 export function Dashboard() {
   const { notify, reportError } = useToast()
-  const { targets, latest, series, groupOrders, addTarget, updateTarget, deleteTarget, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
+  const { targets, latest, series, groups, groupOrders, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
   // The alerts screen takes the place of a target or a group in the main pane.
   const [showingAlerts, setShowingAlerts] = useState(false)
@@ -613,6 +664,31 @@ export function Dashboard() {
   // has a certificate to watch.
   const usesHttps = selectedTarget?.probeType === 'http' && (selectedTarget.probeConfig?.scheme ?? 'https') === 'https'
   const methodLabel = selectedTarget?.probeType === 'http' ? (usesHttps ? 'HTTPS' : 'HTTP') : vocabulary.method
+  // A DNS target asking more than one resolver: besides the chart of all its
+  // queries together, each resolver gets a line of its own to be compared by.
+  const targetResolvers = useMemo(
+    () => (selectedTarget?.probeType === 'dns' ? selectedTarget.probeConfig?.resolvers ?? [] : []),
+    [selectedTarget]
+  )
+  const comparesResolvers = targetResolvers.length > 1
+  // The record those resolvers are asked for over one family, or over the
+  // only one there is. It is the IP version that chooses between A and AAAA.
+  const recordAsked = (family: AddressFamily | null) =>
+    nameRecordType(
+      selectedTarget?.probeConfig?.recordType,
+      family === 4 ? 'ipv4' : family === 6 ? 'ipv6' : selectedTarget?.ipVersion
+    )
+  const questionAsked = (family: AddressFamily | null) =>
+    selectedTarget && targetResolvers.length > 0 ? `the ${recordAsked(family)} record of ${selectedTarget.host}` : undefined
+  // One resolver's line on a chart of them: what each point is, and what the
+  // two figures that are not times are figures of.
+  const resolverChart = {
+    description:
+      `One line for each resolver, on a shared scale. A point is one probe: the average of the ${DNS_QUERIES_PER_PROBE} ` +
+      'queries that probe sent to that resolver. The strips underneath mark the probes in which it failed to answer some or all of them.',
+    note:
+      'Failed is the share of the queries sent to that resolver that got no usable answer. Uptime is the share of probes in which it answered at least one.',
+  }
 
   // The members of the group on screen, in sidebar order, including those of
   // the groups inside it; null when it is a target that is on screen (or the
@@ -629,7 +705,7 @@ export function Dashboard() {
   // A comparison loads its own data, so the single-series fetch stands down.
   const singleSeriesTargetId = groupTargets || comparingFamilies ? null : selectedTargetId
 
-  const { points, statistics, window: shownWindow, refreshing, pending, reload, manualReload, initialLoad } =
+  const { points, statistics, window: shownWindow, pending, reload, initialLoad } =
     useTargetMeasurements(singleSeriesTargetId, timeRange, selectedTarget?.interval ?? 300, reportError, zoom, shownFamily)
 
   const handleTimeRangeChange = useCallback((range: TimeRange) => {
@@ -666,10 +742,6 @@ export function Dashboard() {
     }, REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [])
-
-  const handleRefresh = useCallback(async () => {
-    await Promise.all([reloadTargets(), manualReload()])
-  }, [reloadTargets, manualReload])
 
   const handleProbe = useCallback(async () => {
     if (!selectedTargetId || probing) return
@@ -718,6 +790,35 @@ export function Dashboard() {
       })
     },
     [updateTarget, notify]
+  )
+
+  const handleImportTargets = useCallback(
+    async (definitions: TargetDefinition[]) => {
+      const added = await importTargets(definitions)
+      if (added) {
+        notify({
+          tone: 'success',
+          title: `Imported ${definitions.length} target${definitions.length === 1 ? '' : 's'}`,
+          detail: 'Their first readings will be in shortly.',
+        })
+      }
+      return added
+    },
+    [importTargets, notify]
+  )
+
+  const handleDeleteTargets = useCallback(
+    async (ids: string[]) => {
+      const deleted = await deleteTargets(ids)
+      if (deleted === null) return false
+      notify({
+        tone: 'info',
+        title: `Deleted ${deleted} target${deleted === 1 ? '' : 's'}`,
+        detail: 'Their history, alert rules and saved routes went with them.',
+      })
+      return true
+    },
+    [deleteTargets, notify]
   )
 
   const current = useMemo(() => currentReadings(points), [points])
@@ -809,12 +910,17 @@ export function Dashboard() {
         onOpenAlerts={openAlerts}
         firingAlerts={firingAlerts}
         onAddTarget={addTarget}
+        onImportTargets={handleImportTargets}
+        onDeleteTargets={handleDeleteTargets}
         onUpdateTarget={updateTarget}
         onDeleteTarget={deleteTarget}
         onTogglePaused={handleTogglePaused}
         series={series}
+        groups={groups}
         groupOrders={groupOrders}
         onReorderGroups={reorderGroups}
+        onCreateGroup={createGroup}
+        onDeleteGroup={deleteGroup}
         onReorderTargets={reorderTargets}
         loading={!isLoaded}
       />
@@ -911,16 +1017,6 @@ export function Dashboard() {
               </div>
               <div className={PANE_ACTIONS}>
                 <TimeRangeSelector value={timeRange} onChange={handleTimeRangeChange} />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={reloadTargets}
-                  className={PANE_ACTION}
-                  aria-label="Refresh measurements"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  <span className="ml-2">Refresh</span>
-                </Button>
               </div>
             </header>
 
@@ -991,17 +1087,6 @@ export function Dashboard() {
                 >
                   {probing ? 'Probing…' : 'Probe now'}
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRefresh}
-                  disabled={refreshing}
-                  className={PANE_ACTION}
-                  aria-label="Refresh measurements"
-                >
-                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                  <span className="ml-2">Refresh</span>
-                </Button>
               </div>
             </header>
 
@@ -1036,19 +1121,73 @@ export function Dashboard() {
                     onResetZoom={handleResetZoom}
                     refreshKey={lastUpdated?.getTime()}
                     title={`${vocabulary.latencyTitle}: IPv4 and IPv6`}
-                    description={`The same target over each address family, on a shared scale. The strips underneath mark when each one had ${vocabulary.lossTitle.toLowerCase()}.`}
+                    description={
+                      targetResolvers.length > 0
+                        // Two lines for a target that asks five resolvers needs
+                        // saying: each is all of them at once, not any one.
+                        ? `Every probe looks the name up twice: its ${recordAsked(4)} record is the IPv4 line and its ${recordAsked(6)} record the IPv6 line. ` +
+                          `Each line is ${targetResolvers.length === 1 ? 'the resolver' : `all ${targetResolvers.length} resolvers together`}: ` +
+                          `a point is the median of the ${targetResolvers.length * DNS_QUERIES_PER_PROBE} queries one probe sends for that record` +
+                          `${comparesResolvers ? `, ${DNS_QUERIES_PER_PROBE} to each resolver. Open a family below to see its resolvers one by one` : ''}. ` +
+                          'The strips underneath mark when some of those queries failed.'
+                        : `The same target over each address family, on a shared scale. The strips underneath mark when each one had ${vocabulary.lossTitle.toLowerCase()}.`
+                    }
+                    lossLabel={selectedTarget.probeType === 'dns' ? 'Failed' : undefined}
+                    note={
+                      selectedTarget.probeType === 'dns'
+                        ? 'Failed is the share of queries that got no usable answer. Uptime is the share of probes in which at least one query was answered.'
+                        : undefined
+                    }
                     nameSeries={(target, family) => (family ? FAMILY_LABEL[family] : target.name)}
                     showAddress={false}
                     reportError={reportError}
                   />
-                  {([4, 6] as const).map(family => (
-                    <ProbeDetailsPanel
-                      key={family}
-                      probeType={selectedTarget.probeType}
-                      latest={latest[selectedTarget.id]?.byFamily?.[family]}
-                      label={FAMILY_LABEL[family]}
-                    />
-                  ))}
+                  {([4, 6] as const).map(family => {
+                    const familyLatest = latest[selectedTarget.id]?.byFamily?.[family]
+                    // A table and a chart for each family is four boxes in a
+                    // row; each family's are kept in one box of its own, which
+                    // folds away. Any other probe has one small box a family.
+                    if (targetResolvers.length === 0) {
+                      return (
+                        <ProbeDetailsPanel
+                          key={family}
+                          probeType={selectedTarget.probeType}
+                          latest={familyLatest}
+                          label={FAMILY_LABEL[family]}
+                        />
+                      )
+                    }
+
+                    return (
+                    <FamilySection key={family} family={family} detail={`${recordAsked(family)} record`} latest={familyLatest}>
+                      <ProbeDetailsPanel
+                        probeType={selectedTarget.probeType}
+                        latest={familyLatest}
+                        resolverList={targetResolvers}
+                        question={questionAsked(family)}
+                      />
+                      {comparesResolvers && (
+                        <ComparePanel
+                          targets={[selectedTarget]}
+                          split="resolver"
+                          splitFamily={family}
+                          timeRange={timeRange}
+                          zoom={zoom}
+                          onZoom={handleZoom}
+                          onResetZoom={handleResetZoom}
+                          refreshKey={lastUpdated?.getTime()}
+                          title={`Query time by resolver: ${FAMILY_LABEL[family]}, ${recordAsked(family)} record`}
+                          description={resolverChart.description}
+                          lossLabel="Failed"
+                          note={resolverChart.note}
+                          nameSeries={(target, _family, resolver) => resolver ?? target.name}
+                          showAddress={false}
+                          reportError={reportError}
+                        />
+                      )}
+                    </FamilySection>
+                    )
+                  })}
                 </>
               ) : (
               <>
@@ -1068,7 +1207,12 @@ export function Dashboard() {
                 />
               )}
 
-              <ProbeDetailsPanel probeType={selectedTarget.probeType} latest={latestReading} />
+              <ProbeDetailsPanel
+                probeType={selectedTarget.probeType}
+                latest={latestReading}
+                resolverList={targetResolvers}
+                question={questionAsked(shownFamily)}
+              />
 
               {/* Fixed minimum height: the trace and the empty-state message
                   occupy the same space, so swapping between them cannot make
@@ -1080,6 +1224,8 @@ export function Dashboard() {
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       Each band holds more of the {vocabulary.unit} than the one inside it. Dense means
                       they arrived together; a wide haze means the path is unpredictable.
+                      {comparesResolvers &&
+                        ` This is all ${targetResolvers.length} resolvers' queries together; the chart underneath draws them one by one.`}
                     </p>
                   </div>
                   {zoom ? (
@@ -1138,6 +1284,26 @@ export function Dashboard() {
                     </div>
                   )}
                 </section>
+
+                {comparesResolvers && (
+                  <ComparePanel
+                    targets={[selectedTarget]}
+                    split="resolver"
+                    splitFamily={shownFamily ?? undefined}
+                    timeRange={timeRange}
+                    zoom={zoom}
+                    onZoom={handleZoom}
+                    onResetZoom={handleResetZoom}
+                    refreshKey={lastUpdated?.getTime()}
+                    title={`Query time by resolver: ${shownFamily ? `${FAMILY_LABEL[shownFamily]}, ` : ''}${recordAsked(shownFamily)} record`}
+                    description={resolverChart.description}
+                    lossLabel="Failed"
+                    note={resolverChart.note}
+                    nameSeries={(target, _family, resolver) => resolver ?? target.name}
+                    showAddress={false}
+                    reportError={reportError}
+                  />
+                )}
               </>
               )}
 

@@ -36,8 +36,23 @@ export interface TargetOrderUpdate {
 /** The group shown for targets that have none. Stored as an empty group name. */
 export const UNGROUPED = 'Ungrouped'
 
-export function buildSidebarLayout(targets: Target[], groupOrders: GroupOrder[]): SidebarLayout {
-  const byGroup: Record<string, Target[]> = {}
+/** As much of a target as arranging it takes. */
+type Arrangeable = Pick<Target, 'id' | 'group' | 'sortOrder'>
+
+/**
+ * `keptGroups` is every group there is. Left out, only the groups that have a
+ * target somewhere in them are laid out, which is what a list of targets to
+ * tick wants: an empty group there is a row with nothing to tick.
+ */
+export function buildSidebarLayout(
+  targets: Arrangeable[],
+  groupOrders: GroupOrder[],
+  keptGroups: string[] = []
+): SidebarLayout {
+  const byGroup: Record<string, Arrangeable[]> = {}
+  for (const group of keptGroups) {
+    for (const ancestor of groupWithAncestors(group)) byGroup[ancestor] ??= []
+  }
   for (const target of targets) {
     const group = normalizeGroupPath(target.group) || UNGROUPED
     ;(byGroup[group] ??= []).push(target)
@@ -137,30 +152,21 @@ export function withGroup(layout: SidebarLayout, group: string): SidebarLayout {
 }
 
 /**
- * Drop groups left with nothing in them or beneath them. A group exists only
- * through its targets, or those of a group inside it.
+ * Take a group back off the top level if nothing is in it: the opposite of
+ * `withGroup`. A group with something in it, or one that is not there, leaves
+ * the arrangement as it was.
+ *
+ * For Ungrouped, which is not a group anyone made but the place targets
+ * without one are listed, and so is only there while there are some. A real
+ * group stays when it is emptied.
  */
-export function pruneEmptyGroups(layout: SidebarLayout): SidebarLayout {
-  const kept = new Set<string>()
-  const holdsTargets = (group: string): boolean => {
-    // Every child is visited, not just the first that holds something.
-    const occupied = subgroups(layout, group).filter(holdsTargets)
-    const keep = (layout.items[group] ?? []).length > 0 || occupied.length > 0
-    if (keep) kept.add(group)
-    return keep
-  }
+export function withoutEmptyGroup(layout: SidebarLayout, group: string): SidebarLayout {
+  if (!layout.groups.includes(group)) return layout
+  if ((layout.items[group] ?? []).length > 0 || subgroups(layout, group).length > 0) return layout
 
-  const groups = layout.groups.filter(holdsTargets)
-  if (kept.size === Object.keys(layout.items).length) return layout
-
-  const items: Record<string, string[]> = {}
-  const children: Record<string, string[]> = {}
-  for (const group of kept) {
-    items[group] = layout.items[group]
-    const inside = (layout.children[group] ?? []).filter(child => kept.has(child))
-    if (inside.length > 0) children[group] = inside
-  }
-  return { groups, children, items }
+  const items = { ...layout.items }
+  delete items[group]
+  return { ...layout, groups: layout.groups.filter(other => other !== group), items }
 }
 
 /**

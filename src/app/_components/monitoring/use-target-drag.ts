@@ -8,8 +8,8 @@ import {
   UNGROUPED,
   locateTarget,
   moveTarget,
-  pruneEmptyGroups,
   withGroup,
+  withoutEmptyGroup,
   type SidebarLayout,
   type TargetSlot,
 } from '@/lib/sidebar-layout'
@@ -245,7 +245,7 @@ export function useTargetDrag({
     const changed = !!from && !!to && (from.group !== to.group || from.index !== to.index)
     // Putting back the original object, rather than an equal copy, is what
     // removes the temporary Ungrouped drop zone after a drag that went nowhere.
-    const final = changed ? pruneEmptyGroups(moved) : gesture.startLayout
+    const final = changed ? withoutEmptyGroup(moved, UNGROUPED) : gesture.startLayout
 
     flushSync(() => commit(final))
 

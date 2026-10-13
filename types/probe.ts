@@ -9,6 +9,53 @@ export type TargetType = 'ip' | 'domain' | 'dns' | 'tcp' | 'http';
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'NS' | 'TXT';
 
 /**
+ * How a resolver is asked. `system` is whatever this machine uses for every
+ * other lookup; `udp` is ordinary DNS to a server's address; `dot` is DNS
+ * over TLS and `doh` DNS over HTTPS, the two encrypted ways of asking.
+ */
+export type DnsProtocol = 'system' | 'udp' | 'dot' | 'doh';
+
+/** One resolver a DNS target's name is looked up through. */
+export interface DnsResolver {
+  protocol: DnsProtocol;
+  /**
+   * Where it is: an IP address for `udp`, a host (with an optional port) for
+   * `dot`, a URL for `doh`. Absent for `system`.
+   */
+  server?: string;
+  /**
+   * A name of the user's own for it, shown with the protocol after it. Absent
+   * for one that is called by its provider or by where it is.
+   */
+  name?: string;
+}
+
+/** How one resolver answered in one probe of a target that asks several. */
+export interface DnsResolverReading {
+  /**
+   * What the resolver was called when this was taken. A resolver can be
+   * renamed afterwards, so where it is still on the target's list it is shown
+   * by what it is called now; this is what is left for one that has gone.
+   */
+  label: string;
+  protocol: DnsProtocol;
+  /** Where it is. With the protocol, what says which resolver this was, whatever it is called. */
+  server?: string;
+  /** How many queries it was sent in this probe. */
+  sent?: number;
+  /** Mean time of the queries it answered; null if it answered none. */
+  latency: number | null;
+  /** Share of its queries that got no usable answer, 0-100. */
+  loss: number;
+  /** What it answered with. */
+  answers?: string[];
+  /** dot, doh: time to open the connection the queries were then sent over. */
+  connectMs?: number;
+  /** Why its last failed query failed. */
+  error?: string;
+}
+
+/**
  * Settings that only mean something to one kind of probe. Stored as a single
  * JSON value per target, so a probe that needs a new setting does not need a
  * new column. Fields a target's probe does not use are never stored.
@@ -26,10 +73,19 @@ export interface ProbeConfig {
   keyword?: string;
   /** dns, server targets: the name to ask the server for. */
   queryName?: string;
-  /** dns, server targets: the record type to ask for. */
+  /**
+   * dns: the record type to ask for, of a server target or of a name target's
+   * own resolvers. For a name, which of A and AAAA is asked for follows the
+   * target's IP version where that is set.
+   */
   recordType?: DnsRecordType;
   /** dns: a value the answer must include, such as the address a name should resolve to. */
   expectedAnswer?: string;
+  /**
+   * dns, name targets: the resolvers to look the name up through, each of them
+   * on every probe. Absent for the system resolver alone.
+   */
+  resolvers?: DnsResolver[];
 }
 
 /**
@@ -50,6 +106,8 @@ export interface ProbeDetails {
   certExpiresAt?: number;
   /** dns: the answer to the last query that got one. */
   answers?: string[];
+  /** dns, with several resolvers: how each of them did, in the order they are listed. */
+  resolvers?: DnsResolverReading[];
 }
 
 /** An explicit span of time, in epoch milliseconds: what a chart zoom selects. */
@@ -97,6 +155,22 @@ export interface Target {
   isNew?: boolean;
   /** How each address family is doing, for a target probed over both. */
   statusNote?: string;
+}
+
+/**
+ * Everything that makes a target what it is, and nothing that belongs to one
+ * installation: no id, no status, no history. It is what adding a target
+ * takes, and so also what a share link carries from one ClearPing to another.
+ */
+export interface TargetDefinition {
+  name: string;
+  host: string;
+  probeType: ProbeType;
+  ipVersion: IpVersion;
+  probeConfig: ProbeConfig;
+  interval: number; // seconds
+  /** The group it sits in, as a path; absent for none. */
+  group?: string;
 }
 
 export interface GroupOrder {
@@ -264,6 +338,8 @@ export interface ComparisonSeries {
   targetId: string;
   /** Null when the target is not split by family. */
   family: AddressFamily | null;
+  /** Set when the line is one resolver of a DNS target that asks several. */
+  resolver?: string;
   buckets: BucketedMeasurement[];
   statistics: TargetStatistics | null;
 }

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import type { DnsRecordType, IpVersion, ProbeConfig, ProbeType, Target } from '@/types/probe'
+import type { DnsRecordType, DnsResolver, IpVersion, ProbeConfig, ProbeType, Target } from '@/types/probe'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -23,19 +23,23 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { addressFamilyFor, classifyHost, isDualStack, isWellKnownResolver, targetTypeFor } from '@/lib/host'
-import { groupLabel, normalizeGroupPath } from '@/lib/group-path'
+import { groupLabel, joinGroupPath } from '@/lib/group-path'
 import { describeProbe } from '@/lib/probe-labels'
 import {
   DEFAULT_DNS_QUERY_NAME,
   DNS_RECORD_TYPES,
+  isAddressRecord,
+  nameRecordType,
   parseAddressInput,
   targetAddressLabel,
   validateProbeConfig,
 } from '@/lib/probe-config'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
+import { ResolverList } from './resolver-list'
 import {
   Plus,
   Pencil,
+  Copy,
   Globe,
   Network,
   Plug,
@@ -67,6 +71,8 @@ interface ConfigDraft {
   queryName: string
   recordType: DnsRecordType
   expectedAnswer: string
+  /** Empty for the system resolver alone. A row may be half typed, like any other field. */
+  resolvers: DnsResolver[]
 }
 
 function draftFrom(config: ProbeConfig = {}): ConfigDraft {
@@ -79,6 +85,7 @@ function draftFrom(config: ProbeConfig = {}): ConfigDraft {
     queryName: config.queryName ?? '',
     recordType: config.recordType ?? 'A',
     expectedAnswer: config.expectedAnswer ?? '',
+    resolvers: config.resolvers ?? [],
   }
 }
 
@@ -97,6 +104,7 @@ function configFrom(draft: ConfigDraft): Record<string, unknown> {
     queryName: draft.queryName,
     recordType: draft.recordType,
     expectedAnswer: draft.expectedAnswer,
+    resolvers: draft.resolvers,
   }
 }
 
@@ -267,6 +275,9 @@ function FieldHint({ id, children }: { id?: string; children: ReactNode }) {
 
 const FIELD_INPUT = 'bg-input border-border text-foreground h-9 text-sm'
 
+/** A name's address record, A or AAAA as its IP version has it, as one item of a list. */
+const ADDRESS_RECORD = 'address'
+
 /**
  * The settings only the chosen probe has. Nothing at all for a ping, which is
  * the point: the fields that appear are the ones that mean something.
@@ -275,6 +286,7 @@ function ProbeConfigFields({
   idPrefix,
   probeType,
   host,
+  ipVersion,
   draft,
   portError,
   onChange,
@@ -283,6 +295,8 @@ function ProbeConfigFields({
   idPrefix: string
   probeType: ProbeType
   host: string
+  /** Which of a name's two kinds of address a DNS lookup asks for. */
+  ipVersion: IpVersion
   draft: ConfigDraft
   /** Set when a TCP target's port is missing or wrong and it is time to say so. */
   portError?: string
@@ -379,51 +393,115 @@ function ProbeConfigFields({
     )
   }
 
-  // DNS. A server can be asked anything; a name is itself the question, so the
-  // only thing left to say about it is what the answer ought to be.
+  // DNS. A server can be asked anything. A name is itself the question, so
+  // what is left to say about it is who to ask, and what the answer ought to be.
   const isServer = classifyHost(host) !== 'hostname'
+  // Resolvers of its own choosing are asked directly, and so can be asked for
+  // any kind of record; the system resolver only ever hands back addresses.
+  const choosesRecord = !isServer && draft.resolvers.length > 0
+
+  const expectedAnswer = (
+    <div className="space-y-2">
+      <FieldLabel htmlFor={`${idPrefix}-answer`} small optional>
+        {isServer ? 'Answer must include' : choosesRecord ? 'Every answer must include' : 'Must resolve to'}
+      </FieldLabel>
+      <Input
+        id={`${idPrefix}-answer`}
+        placeholder={isServer || choosesRecord ? 'e.g., 203.0.113.10 or mx.example.com' : 'e.g., 203.0.113.10'}
+        value={draft.expectedAnswer}
+        onChange={e => onChange({ expectedAnswer: e.target.value })}
+        className={FIELD_INPUT}
+      />
+    </div>
+  )
+
+  const recordType = (
+    <div className="space-y-2">
+      <FieldLabel htmlFor={`${idPrefix}-record`} small>Record</FieldLabel>
+      <Select value={draft.recordType} onValueChange={(v: DnsRecordType) => onChange({ recordType: v })}>
+        <SelectTrigger id={`${idPrefix}-record`} className={cn(FIELD_INPUT, 'w-full')}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="bg-popover border-border">
+          {DNS_RECORD_TYPES.map(type => (
+            <SelectItem key={type} value={type}>{type}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+
+  if (!isServer) {
+    // A name has an address of each kind, and which is asked for is the IP
+    // version's to say, as it is for every other probe. So the two are one
+    // choice here, reading as whatever the IP version makes of it.
+    const asksForAddress = isAddressRecord(draft.recordType)
+    const addressRecord = nameRecordType(draft.recordType, ipVersion)
+    const nameRecord = (
+      <div className="space-y-2">
+        <FieldLabel htmlFor={`${idPrefix}-record`} small>Record</FieldLabel>
+        <Select
+          value={asksForAddress ? ADDRESS_RECORD : draft.recordType}
+          onValueChange={(v: DnsRecordType | typeof ADDRESS_RECORD) => {
+            if (v !== ADDRESS_RECORD) onChange({ recordType: v })
+            else if (!asksForAddress) onChange({ recordType: 'A' })
+          }}
+        >
+          <SelectTrigger id={`${idPrefix}-record`} className={cn(FIELD_INPUT, 'w-full')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-popover border-border">
+            <SelectItem value={ADDRESS_RECORD}>
+              {ipVersion === 'both' ? 'A + AAAA' : asksForAddress ? addressRecord : nameRecordType(undefined, ipVersion)}
+            </SelectItem>
+            {DNS_RECORD_TYPES.filter(type => !isAddressRecord(type)).map(type => (
+              <SelectItem key={type} value={type}>{type}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    )
+
+    return (
+      <div className="space-y-3">
+        <ResolverList idPrefix={idPrefix} resolvers={draft.resolvers} onChange={resolvers => onChange({ resolvers })} />
+        {choosesRecord ? (
+          <>
+            <div className="grid grid-cols-[8rem_1fr] gap-3">
+              {nameRecord}
+              {expectedAnswer}
+            </div>
+            {asksForAddress && (
+              <FieldHint>
+                {ipVersion === 'both'
+                  ? 'A is asked for and charted as the IPv4 line, AAAA as the IPv6 line. IP version, below, is what chooses between them.'
+                  : `Asks for the ${addressRecord} record. IP version, below, chooses between A and AAAA, or asks for both.`}
+              </FieldHint>
+            )}
+          </>
+        ) : (
+          expectedAnswer
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3">
-      {isServer && (
-        <div className="grid grid-cols-[1fr_7rem] gap-3">
-          <div className="space-y-2">
-            <FieldLabel htmlFor={`${idPrefix}-query`} small>Name to look up</FieldLabel>
-            <Input
-              id={`${idPrefix}-query`}
-              placeholder={DEFAULT_DNS_QUERY_NAME}
-              value={draft.queryName}
-              onChange={e => onChange({ queryName: e.target.value })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div className="space-y-2">
-            <FieldLabel htmlFor={`${idPrefix}-record`} small>Record</FieldLabel>
-            <Select value={draft.recordType} onValueChange={(v: DnsRecordType) => onChange({ recordType: v })}>
-              <SelectTrigger id={`${idPrefix}-record`} className={cn(FIELD_INPUT, 'w-full')}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-popover border-border">
-                {DNS_RECORD_TYPES.map(type => (
-                  <SelectItem key={type} value={type}>{type}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      <div className="grid grid-cols-[1fr_7rem] gap-3">
+        <div className="space-y-2">
+          <FieldLabel htmlFor={`${idPrefix}-query`} small>Name to look up</FieldLabel>
+          <Input
+            id={`${idPrefix}-query`}
+            placeholder={DEFAULT_DNS_QUERY_NAME}
+            value={draft.queryName}
+            onChange={e => onChange({ queryName: e.target.value })}
+            className={FIELD_INPUT}
+          />
         </div>
-      )}
-      <div className="space-y-2">
-        <FieldLabel htmlFor={`${idPrefix}-answer`} small optional>
-          {isServer ? 'Answer must include' : 'Must resolve to'}
-        </FieldLabel>
-        <Input
-          id={`${idPrefix}-answer`}
-          placeholder={isServer ? 'e.g., 203.0.113.10 or mx.example.com' : 'e.g., 203.0.113.10'}
-          value={draft.expectedAnswer}
-          onChange={e => onChange({ expectedAnswer: e.target.value })}
-          className={FIELD_INPUT}
-        />
+        {recordType}
       </div>
+      {expectedAnswer}
     </div>
   )
 }
@@ -628,7 +706,10 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
   const [draft, setDraft] = useState<ConfigDraft>(() => draftFrom(initial.probeConfig))
   const [interval, setInterval] = useState(initial.interval)
   const [group, setGroup] = useState(initialGroupIsNew ? NEW_GROUP : initial.group)
+  // A new group is a name and the group it goes inside, picked from a list.
   const [customGroup, setCustomGroup] = useState(initialGroupIsNew ? initial.group : '')
+  const [customParent, setCustomParent] = useState('')
+  const newGroupPath = joinGroupPath(customParent, customGroup)
   // A required field is only called out once it has been left, or once the
   // form has been submitted: flagging an empty box before anyone has had the
   // chance to type in it is nagging, not help.
@@ -681,7 +762,11 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
   const validation = validateProbeConfig(probeType, host, configFrom(draft))
   const hostValid = hostKind !== 'invalid'
   const config = validation.ok ? validation.config : {}
-  const effectiveIpVersion = isDomain ? ipVersion : 'auto'
+  // A record that is not an address has no IP version to be asked for over:
+  // set to both, the same question would be put twice and charted as two lines.
+  const asksNoAddress = probeType === 'dns' && draft.resolvers.length > 0 && !isAddressRecord(draft.recordType)
+  const hasIpVersion = isDomain && !asksNoAddress
+  const effectiveIpVersion = hasIpVersion ? ipVersion : 'auto'
 
   // What each required field still needs, if anything.
   const problems: Record<RequiredField, string | null> = {
@@ -718,7 +803,7 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
       ipVersion: effectiveIpVersion,
       probeConfig: validation.config,
       interval,
-      group: group === NEW_GROUP ? normalizeGroupPath(customGroup) : group,
+      group: group === NEW_GROUP ? newGroupPath : group,
     })
   }
 
@@ -789,6 +874,7 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
                 idPrefix={idPrefix}
                 probeType={probeType}
                 host={host}
+                ipVersion={isDomain ? ipVersion : 'auto'}
                 draft={draft}
                 portError={shown('port') ?? undefined}
                 onChange={changes => setDraft(current => ({ ...current, ...changes }))}
@@ -826,27 +912,49 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
             newGroupInputId={`${idPrefix}-new-group`}
             group={group}
             availableGroups={availableGroups}
-            onChange={next => { setGroup(next); if (next !== NEW_GROUP) setCustomGroup('') }}
+            onChange={next => { setGroup(next); if (next !== NEW_GROUP) { setCustomGroup(''); setCustomParent('') } }}
           />
           {group === NEW_GROUP && (
-            <div className="space-y-2 sm:col-span-2">
-              <Input
-                id={`${idPrefix}-new-group`}
-                placeholder="New group name"
-                aria-label="New group name"
-                value={customGroup}
-                onChange={e => setCustomGroup(e.target.value)}
-                className={FIELD_INPUT}
-              />
-              <FieldHint>
-                A <span className="font-mono">/</span> puts it inside another group:{' '}
-                <span className="font-mono">Home/Network</span>.
-              </FieldHint>
+            <div className="grid gap-x-4 gap-y-3 rounded-lg border border-border bg-muted/30 p-3.5 sm:col-span-2 sm:grid-cols-2">
+              <div className="space-y-2">
+                <FieldLabel htmlFor={`${idPrefix}-new-group`} small>New group&apos;s name</FieldLabel>
+                <Input
+                  id={`${idPrefix}-new-group`}
+                  placeholder="e.g. Network"
+                  value={customGroup}
+                  onChange={e => setCustomGroup(e.target.value)}
+                  className={FIELD_INPUT}
+                />
+              </div>
+              <div className="space-y-2">
+                <FieldLabel htmlFor={`${idPrefix}-new-group-parent`} small>Inside</FieldLabel>
+                <Select
+                  value={customParent || NO_GROUP}
+                  onValueChange={value => setCustomParent(value === NO_GROUP ? '' : value)}
+                >
+                  <SelectTrigger id={`${idPrefix}-new-group-parent`} className={cn(FIELD_INPUT, 'w-full')}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border">
+                    <SelectItem value={NO_GROUP}>Nothing (top level)</SelectItem>
+                    {availableGroups.map(name => (
+                      <SelectItem key={name} value={name}>{groupLabel(name)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="sm:col-span-2">
+                <FieldHint>
+                  {newGroupPath
+                    ? <>The target goes in <span className="font-medium text-foreground">{groupLabel(newGroupPath)}</span>, which is made along with it.</>
+                    : 'Name the group and it is made along with the target.'}
+                </FieldHint>
+              </div>
             </div>
           )}
         </div>
 
-        {hostKind !== 'ipv4' && hostKind !== 'ipv6' && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
+        {hostKind !== 'ipv4' && hostKind !== 'ipv6' && !asksNoAddress && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
       </div>
 
       {/* Outside the part that scrolls, so the button is on show however long
@@ -905,26 +1013,51 @@ const BLANK_TARGET: TargetFormValues = {
   group: '',
 }
 
+/** A target as the form holds it. */
+function formValuesOf(target: Target): TargetFormValues {
+  return {
+    name: target.name,
+    host: target.host,
+    probeType: target.probeType,
+    ipVersion: target.ipVersion ?? 'auto',
+    probeConfig: target.probeConfig ?? {},
+    interval: target.interval,
+    group: target.group || '',
+  }
+}
+
 interface AddTargetDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onAddTarget: (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => void
   availableGroups: string[]
+  /**
+   * A target to start the form from instead of a blank one: duplicating it.
+   * The second port on a host, or the same check against the next server
+   * along, is most of an existing target already.
+   */
+  template?: Target | null
+  /** The group a blank form starts in, when the target is being added to one. */
+  group?: string
 }
 
-export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGroups }: AddTargetDialogProps) {
+export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGroups, template = null, group = '' }: AddTargetDialogProps) {
+  const TitleIcon = template ? Copy : Plus
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={DIALOG_SHELL} suppressHydrationWarning>
         <DialogHeader className={DIALOG_HEADER}>
           <DialogTitle className="text-card-foreground flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Plus className="h-4 w-4 text-primary" />
+            <div className="h-8 w-8 shrink-0 rounded-lg bg-primary/10 flex items-center justify-center">
+              <TitleIcon className="h-4 w-4 text-primary" />
             </div>
-            Add a target
+            {template ? <span className="min-w-0 break-words pr-6">Duplicate {template.name}</span> : 'Add a target'}
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Only the address is needed. Everything else starts with a sensible default.
+            {template
+              ? 'A new target that starts with the same settings. Change what is different about this one. None of the history is copied.'
+              : 'Only the address is needed. Everything else starts with a sensible default.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -932,7 +1065,7 @@ export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGrou
             close, so every opening starts from a blank form without a reset. */}
         <TargetForm
           idPrefix="add"
-          initial={BLANK_TARGET}
+          initial={template ? { ...formValuesOf(template), name: `${template.name} copy` } : { ...BLANK_TARGET, group }}
           availableGroups={availableGroups}
           submitLabel="Add target"
           onCancel={() => onOpenChange(false)}
@@ -981,15 +1114,7 @@ export function EditTargetDialog({ open, onOpenChange, target, onSave, available
         <TargetForm
           key={target.id}
           idPrefix="edit"
-          initial={{
-            name: target.name,
-            host: target.host,
-            probeType: target.probeType,
-            ipVersion: target.ipVersion ?? 'auto',
-            probeConfig: target.probeConfig ?? {},
-            interval: target.interval,
-            group: target.group || '',
-          }}
+          initial={formValuesOf(target)}
           availableGroups={availableGroups}
           submitLabel="Save changes"
           onCancel={() => onOpenChange(false)}

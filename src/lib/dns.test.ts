@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { answersInclude, flattenAnswers } from './dns'
+import { answersInclude } from './dns'
+import { flattenAnswers } from './dns-transport'
 
 describe('flattenAnswers', () => {
   it('passes address and name records through', () => {

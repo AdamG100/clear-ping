@@ -1,4 +1,5 @@
-import type { DnsRecordType, ProbeConfig, ProbeType, Target } from '@/types/probe'
+import type { DnsRecordType, IpVersion, ProbeConfig, ProbeType, Target } from '@/types/probe'
+import { validateResolvers } from './dns-resolvers'
 import { classifyHost, isIpv6, normalizeHost } from './host'
 
 /**
@@ -23,6 +24,29 @@ export function isProbeType(value: unknown): value is ProbeType {
 }
 
 export const DEFAULT_DNS_QUERY_NAME = 'example.com'
+
+/** How many times a DNS probe puts its question, to each resolver it asks. */
+export const DNS_QUERIES_PER_PROBE = 5
+
+/** Whether a record is an address, the kind a name has one of for each IP version. */
+export function isAddressRecord(recordType: DnsRecordType): boolean {
+  return recordType === 'A' || recordType === 'AAAA'
+}
+
+/**
+ * The record a name target's own resolvers are asked for on one probe.
+ *
+ * Between the two kinds of address the target's IP version decides, as it does
+ * for every other probe: a target on IPv6 asks for AAAA, and one on both asks
+ * for each in turn. The record type only chooses between them where the
+ * version has been left to choose itself.
+ */
+export function nameRecordType(recordType: DnsRecordType | undefined, ipVersion: IpVersion = 'auto'): DnsRecordType {
+  if (recordType && !isAddressRecord(recordType)) return recordType
+  if (ipVersion === 'ipv6') return 'AAAA'
+  if (ipVersion === 'ipv4') return 'A'
+  return recordType ?? 'A'
+}
 
 const DEFAULT_PORT = { http: 80, https: 443 } as const
 
@@ -152,6 +176,32 @@ export function validateProbeConfig(probeType: ProbeType, host: string, raw: unk
             return { ok: false, error: `Record type must be one of: ${DNS_RECORD_TYPES.join(', ')}` }
           }
           config.recordType = input.recordType as DnsRecordType
+        }
+      }
+
+      // A name can be asked of resolvers of its own choosing instead of the
+      // system's, and then for any kind of record: those are queried directly,
+      // where the system resolver only ever hands back addresses.
+      if (!isServer) {
+        const resolvers = validateResolvers(input.resolvers)
+        if (!resolvers.ok) return resolvers
+
+        if (resolvers.resolvers.length > 0) {
+          config.resolvers = resolvers.resolvers
+          if (input.recordType !== undefined && input.recordType !== null) {
+            if (!DNS_RECORD_TYPES.includes(input.recordType as DnsRecordType)) {
+              return { ok: false, error: `Record type must be one of: ${DNS_RECORD_TYPES.join(', ')}` }
+            }
+            config.recordType = input.recordType as DnsRecordType
+          }
+
+          const asksForAddress = !config.recordType || isAddressRecord(config.recordType)
+          if (!asksForAddress && config.resolvers.some(resolver => resolver.protocol === 'system')) {
+            return {
+              ok: false,
+              error: `The system resolver only looks up addresses. Ask for an A or AAAA record, or take it off the list to ask for ${config.recordType}`,
+            }
+          }
         }
       }
 

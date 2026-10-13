@@ -17,6 +17,9 @@ const {
   saveGroupOrders,
   updateTargetSortOrders,
   moveGroup,
+  getGroups,
+  createGroup,
+  deleteGroup,
 } = await import('./database')
 const { SCHEMA_VERSION, schemaVersion } = await import('./migrations')
 
@@ -117,6 +120,84 @@ describe('moveGroup', () => {
     expect(await moveGroup('Nowhere', 'Somewhere')).toBe(0)
     expect(await moveGroup('Office', ' Office ')).toBe(0)
     expect(await moveGroup('', 'Office')).toBe(0)
+  })
+})
+
+describe('groups in their own right', () => {
+  it('makes a group with nothing in it, and the groups it sits inside', async () => {
+    expect(await createGroup(' Spare / Shelf ')).toBe('Spare/Shelf')
+    expect(await getGroups()).toEqual(expect.arrayContaining(['Spare', 'Spare/Shelf']))
+  })
+
+  it('makes nothing out of a name with nothing in it, or a group that is already there', async () => {
+    const before = await getGroups()
+    expect(await createGroup(' / ')).toBe('')
+    await createGroup('Spare/Shelf')
+    expect(await getGroups()).toEqual(before)
+  })
+
+  it('knows every group a target was put in, however it got there', async () => {
+    await add('typed', 'Typed/In')
+    await updateTarget('typed', { group: 'Edited/In' })
+    await updateTargetSortOrders([{ id: 'typed', sortOrder: 0, group: 'Dragged/In' }])
+    expect(await getGroups()).toEqual(
+      expect.arrayContaining(['Typed', 'Typed/In', 'Edited', 'Edited/In', 'Dragged', 'Dragged/In'])
+    )
+  })
+
+  it('keeps a group when its last target leaves', async () => {
+    await updateTarget('typed', { group: '' })
+    expect(await getGroups()).toContain('Dragged/In')
+  })
+
+  it('moves an empty group, and the empty groups inside it, like any other', async () => {
+    expect(await moveGroup('Spare', 'Office/Spare')).toBe(0)
+    const after = await getGroups()
+    expect(after).toEqual(expect.arrayContaining(['Office/Spare', 'Office/Spare/Shelf']))
+    expect(after).not.toContain('Spare')
+    expect(after).not.toContain('Spare/Shelf')
+  })
+
+  it('deletes a group and moves what was in it up to the group it sat in', async () => {
+    await add('shelved', 'Office/Spare')
+    await add('boxed', 'Office/Spare/Shelf/Box')
+    await saveGroupOrders([{ groupName: 'Office/Spare/Shelf', sortOrder: 2 }])
+
+    expect(await deleteGroup('Office/Spare')).toBe(true)
+
+    const after = await groups()
+    expect(after.shelved).toBe('Office')
+    expect(after.boxed).toBe('Office/Shelf/Box')
+
+    const kept = await getGroups()
+    expect(kept).toEqual(expect.arrayContaining(['Office', 'Office/Shelf', 'Office/Shelf/Box']))
+    expect(kept.filter(group => group === 'Office/Spare' || group.startsWith('Office/Spare/'))).toEqual([])
+    expect((await getGroupOrders()).map(order => order.groupName)).not.toContain('Office/Spare/Shelf')
+  })
+
+  it('leaves the targets of a deleted top-level group in no group, with their history', async () => {
+    await add('lone', 'Lonely')
+    await add('nested', 'Lonely/Inner')
+
+    expect(await deleteGroup('Lonely')).toBe(true)
+
+    const after = await groups()
+    expect(after.lone).toBe('')
+    expect(after.nested).toBe('Inner')
+    expect(await getGroups()).toContain('Inner')
+    expect(await getGroups()).not.toContain('Lonely')
+  })
+
+  it('leaves alone groups that only look similar to the one deleted', async () => {
+    await createGroup('Spares')
+    await createGroup('Spare')
+    expect(await deleteGroup('Spare')).toBe(true)
+    expect(await getGroups()).toContain('Spares')
+  })
+
+  it('says so when there is no such group to delete', async () => {
+    expect(await deleteGroup('Nowhere')).toBe(false)
+    expect(await deleteGroup('')).toBe(false)
   })
 })
 

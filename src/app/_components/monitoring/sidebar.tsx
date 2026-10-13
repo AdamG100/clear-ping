@@ -4,12 +4,16 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { cn } from '@/lib/utils'
-import type { Target, GroupOrder, SparklinePoint } from '@/types/probe'
+import type { Target, TargetDefinition, GroupOrder, SparklinePoint } from '@/types/probe'
 import { BrandMark } from './brand-mark'
 import { Sparkline } from './sparkline'
 import { SidebarSkeleton } from './skeleton'
 import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-dialogs'
-import { GroupDialog } from './group-dialog'
+import { GroupDialog, type GroupDialogTask } from './group-dialog'
+import { ShareDialog } from './share-dialog'
+import { McpDialog } from './mcp-dialog'
+import { DeleteTargetsDialog } from './delete-targets-dialog'
+import { useIncomingShareCode } from './use-incoming-share-code'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +21,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { StatusIndicator } from './status-indicator'
 import { addressFamilyFor, isDualStack } from '@/lib/host'
 import { targetAddressLabel } from '@/lib/probe-config'
-import { groupLabel, groupName, rebaseGroupPath } from '@/lib/group-path'
+import { groupLabel, groupName, groupWithAncestors, normalizeGroupPath, rebaseGroupPath } from '@/lib/group-path'
 import { combineSeries } from '@/lib/group-series'
 import {
   UNGROUPED,
@@ -44,6 +48,9 @@ import {
   Plus,
   GripVertical,
   Pencil,
+  Copy,
+  Share2,
+  FolderPlus,
   Trash2,
   ChevronDown,
   ChevronRight,
@@ -52,6 +59,8 @@ import {
   Play,
   ChartLine,
   Bell,
+  Bot,
+  ListX,
   MoreVertical,
   PanelLeftClose,
   X,
@@ -127,7 +136,12 @@ interface SidebarProps {
   targets: Target[]
   selectedTargetId: string | null
   onSelectTarget: (id: string) => void
-  onAddTarget: (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => void
+  /** Resolves to the target as it was created, or null if it was not. */
+  onAddTarget: (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => Promise<Target | null>
+  /** Add the targets out of a share link. Resolves to whether they were added. */
+  onImportTargets: (targets: TargetDefinition[]) => Promise<boolean>
+  /** Delete several at once. Resolves to whether they were deleted. */
+  onDeleteTargets: (ids: string[]) => Promise<boolean>
   onUpdateTarget: (id: string, updates: Partial<Target>) => void
   onDeleteTarget: (id: string) => void
   onTogglePaused: (target: Target) => void
@@ -135,8 +149,14 @@ interface SidebarProps {
   selectedGroup?: string | null
   onSelectGroup?: (groupName: string) => void
   series?: Record<string, SparklinePoint[]>
+  /** Every group there is, as paths, including the ones with nothing in them. */
+  groups?: string[]
   groupOrders?: GroupOrder[]
   onReorderGroups?: (groups: GroupOrder[]) => void
+  /** Make a group, with nothing in it yet. */
+  onCreateGroup?: (group: string) => void
+  /** Delete a group and keep what was in it. */
+  onDeleteGroup?: (group: string) => void
   /** Rename a group or move it inside another: its path changes from one to the other. */
   onMoveGroup?: (from: string, to: string) => void
   /** Whether the alerts screen is what the main pane is showing. */
@@ -162,6 +182,7 @@ interface TargetRowProps {
   floating?: boolean
   onSelectTarget?: (id: string) => void
   onEditTarget?: (target: Target) => void
+  onDuplicateTarget?: (target: Target) => void
   onDeleteTarget?: (id: string) => void
   onTogglePaused?: (target: Target) => void
   onHandlePointerDown?: (id: string, event: ReactPointerEvent<HTMLElement>) => void
@@ -174,6 +195,7 @@ function TargetRow({
   floating = false,
   onSelectTarget,
   onEditTarget,
+  onDuplicateTarget,
   onDeleteTarget,
   onTogglePaused,
   onHandlePointerDown,
@@ -194,6 +216,13 @@ function TargetRow({
       run: () => onTogglePaused?.(target),
     },
     { label: 'Edit', icon: Pencil, tone: 'text-blue-500', hover: 'hover:bg-blue-500/20', run: () => onEditTarget?.(target) },
+    {
+      label: 'Duplicate',
+      icon: Copy,
+      tone: 'text-muted-foreground',
+      hover: 'hover:bg-muted',
+      run: () => onDuplicateTarget?.(target),
+    },
     {
       label: 'Delete',
       icon: Trash2,
@@ -311,8 +340,11 @@ function TargetRow({
         </div>
 
         {/* Reserves its width at all times, so revealing the controls never
-            reflows the row or pushes the last button out of bounds. */}
-        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100 touch:hidden">
+            reflows the row or pushes the last button out of bounds. Two by
+            two, which the row's two lines have the height for: four in a line
+            took their width out of the address, and inside a nested group
+            that left an IP address cut short. */}
+        <div className="grid shrink-0 grid-cols-2 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100 touch:hidden">
           {actions.map(action => (
             <button
               key={action.label}
@@ -327,7 +359,7 @@ function TargetRow({
           ))}
         </div>
 
-        {/* A touchscreen has no hover to reveal those three, and side by side
+        {/* A touchscreen has no hover to reveal those four, and side by side
             at that size a finger aiming for edit lands on delete. There they
             are one button, which sets them out underneath at a size that can
             be pressed. */}
@@ -344,13 +376,14 @@ function TargetRow({
       </div>
 
       {actionsOpen && !floating && (
-        <div className="relative mt-1.5 hidden gap-1.5 touch:flex">
+        // Two by two: four across, with their names, is wider than a phone's drawer.
+        <div className="relative mt-1.5 hidden grid-cols-2 gap-1.5 touch:grid">
           {actions.map(action => (
             <button
               key={action.label}
               type="button"
               onClick={e => { e.stopPropagation(); setActionsOpen(false); action.run() }}
-              className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-sidebar-border bg-sidebar px-2 py-2 text-xs font-medium text-sidebar-foreground"
+              className="flex cursor-pointer items-center justify-center gap-1.5 rounded-md border border-sidebar-border bg-sidebar px-2 py-2 text-xs font-medium text-sidebar-foreground"
             >
               <action.icon className={cn('h-3.5 w-3.5', action.tone)} />
               {action.label}
@@ -469,11 +502,16 @@ interface GroupTreeProps {
   onToggleCollapse: (group: string) => void
   onCompare?: (group: string) => void
   onEditGroup?: (group: string) => void
+  /** Make a new group inside this one. */
+  onAddGroupInside?: (group: string) => void
+  /** Add a target straight into this group. */
+  onAddTargetTo: (group: string) => void
   onReorderSubgroups: (parent: string, ordered: string[]) => void
   onGroupDragStart: () => void
   onGroupDragEnd: (parent: string) => void
   onSelectTarget: (id: string) => void
   onEditTarget: (target: Target) => void
+  onDuplicateTarget: (target: Target) => void
   onDeleteTarget: (id: string) => void
   onTogglePaused: (target: Target) => void
   onHandlePointerDown: (id: string, event: ReactPointerEvent<HTMLElement>) => void
@@ -513,10 +551,13 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
     onToggleCollapse,
     onCompare,
     onEditGroup,
+    onAddGroupInside,
+    onAddTargetTo,
     onGroupDragStart,
     onGroupDragEnd,
     onSelectTarget,
     onEditTarget,
+    onDuplicateTarget,
     onDeleteTarget,
     onTogglePaused,
     onHandlePointerDown,
@@ -600,6 +641,20 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
             </span>
           </button>
 
+          {/* Nesting, as a button on the group that is to hold the new one:
+              no path to type, and no doubt about where it will land. */}
+          {onAddGroupInside && group !== UNGROUPED && (
+            <button
+              type="button"
+              onClick={() => onAddGroupInside(group)}
+              className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/header:opacity-100 touch:p-2 touch:opacity-100"
+              aria-label={`New group inside ${name}`}
+              title="New group inside this one"
+            >
+              <FolderPlus className="h-3 w-3 text-muted-foreground" />
+            </button>
+          )}
+
           {/* Ungrouped is where targets without a group are listed, not a
               group that can be renamed or put inside another. */}
           {onEditGroup && group !== UNGROUPED && (
@@ -607,8 +662,8 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               type="button"
               onClick={() => onEditGroup(group)}
               className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-blue-500/20 focus-visible:opacity-100 group-hover/header:opacity-100 touch:p-2 touch:opacity-100"
-              aria-label={`Rename or move ${name}`}
-              title="Rename this group or move it inside another"
+              aria-label={`Rename, move or delete ${name}`}
+              title="Rename this group, move it inside another, or delete it"
             >
               <Pencil className="h-3 w-3 text-blue-500" />
             </button>
@@ -687,23 +742,40 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
                       isDragSource={drag?.id === targetId}
                       onSelectTarget={onSelectTarget}
                       onEditTarget={onEditTarget}
+                      onDuplicateTarget={onDuplicateTarget}
                       onDeleteTarget={onDeleteTarget}
                       onTogglePaused={onTogglePaused}
                       onHandlePointerDown={onHandlePointerDown}
                     />
                   )
                 })}
-                {/* Only reachable mid-drag: a group whose last row was carried
-                    off, or the Ungrouped zone offered for the drag. Without
-                    something to aim at it would be a bare header. */}
+                {/* A group with nothing in it yet, or the Ungrouped zone
+                    offered for a drag. Mid-drag it is something to aim at;
+                    otherwise it says how the group gets filled, so a group
+                    that was just made is not a bare header. */}
                 {targetIds.length === 0 && (
                   <motion.li
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.15 }}
-                    className="flex h-11 list-none items-center justify-center rounded-md border border-dashed border-border text-[11px] text-muted-foreground"
+                    className="flex min-h-11 list-none flex-wrap items-center justify-center gap-x-1 rounded-md border border-dashed border-border px-2 py-1.5 text-center text-[11px] text-muted-foreground"
                   >
-                    {group === UNGROUPED ? 'Drop here to remove from its group' : 'Drop here'}
+                    {group === UNGROUPED ? (
+                      'Drop here to remove from its group'
+                    ) : drag ? (
+                      'Drop here'
+                    ) : (
+                      <>
+                        Empty. Drag a target here, or
+                        <button
+                          type="button"
+                          onClick={() => onAddTargetTo(group)}
+                          className="cursor-pointer font-medium text-primary underline-offset-2 hover:underline touch:py-1.5"
+                        >
+                          add one
+                        </button>
+                      </>
+                    )}
                   </motion.li>
                 )}
               </ul>
@@ -744,14 +816,19 @@ export function Sidebar({
   selectedTargetId,
   onSelectTarget,
   onAddTarget,
+  onImportTargets,
+  onDeleteTargets,
   onUpdateTarget,
   onDeleteTarget,
   onTogglePaused,
   selectedGroup = null,
   onSelectGroup,
   series,
+  groups = [],
   groupOrders = [],
   onReorderGroups,
+  onCreateGroup,
+  onDeleteGroup,
   onMoveGroup,
   alertsOpen = false,
   onOpenAlerts,
@@ -760,12 +837,22 @@ export function Sidebar({
   loading = false,
 }: SidebarProps) {
   const [isAddOpen, setIsAddOpen] = useState(false)
+  // The target the add dialog starts from, when it was opened to duplicate
+  // one. Left in place on close, so the dialog does not turn into a blank
+  // form on its way out, and cleared when it is next opened for a new target.
+  const [duplicating, setDuplicating] = useState<Target | null>(null)
+  // The group a new target starts in, when it was added from inside one.
+  const [addingTo, setAddingTo] = useState('')
+  const [isShareOpen, setIsShareOpen] = useState(false)
+  const [isMcpOpen, setIsMcpOpen] = useState(false)
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
+  const [incomingShareCode, clearIncomingShareCode] = useIncomingShareCode()
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [editingTarget, setEditingTarget] = useState<Target | null>(null)
   // Held by id, so the dialog always describes the target as it is now and
   // closes by itself if the target goes away underneath it.
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [editingGroup, setEditingGroup] = useState<string | null>(null)
+  const [groupTask, setGroupTask] = useState<GroupDialogTask | null>(null)
   // Read once, lazily, from what was left last time. Nothing is drawn from it
   // until the targets have loaded, so the server knowing none of it is no
   // mismatch.
@@ -786,7 +873,7 @@ export function Sidebar({
   const targetsById = useMemo(() => new Map(targets.map(t => [t.id, t])), [targets])
 
   // The arrangement the server knows about...
-  const savedLayout = useMemo(() => buildSidebarLayout(targets, groupOrders), [targets, groupOrders])
+  const savedLayout = useMemo(() => buildSidebarLayout(targets, groupOrders, groups), [targets, groupOrders, groups])
 
   // Every group a target could be put in, including ones that hold only other
   // groups, in the order the sidebar lists them.
@@ -867,8 +954,36 @@ export function Sidebar({
     saveCollapsedGroups(next)
   }, [collapsedGroups])
 
+  /** Fold a group away or open it up, and remember which. */
+  const setCollapsed = (next: Set<string>) => {
+    setCollapsedGroups(next)
+    saveCollapsedGroups(next)
+  }
+
+  const handleCreateGroup = (group: string) => {
+    setGroupTask(null)
+    // Made inside a group that is folded away, it would appear nowhere.
+    const hidden = groupWithAncestors(group).filter(ancestor => collapsedGroups.has(ancestor))
+    if (hidden.length > 0) setCollapsed(new Set([...collapsedGroups].filter(folded => !hidden.includes(folded))))
+    onCreateGroup?.(group)
+  }
+
+  const handleDeleteGroup = (group: string) => {
+    setGroupTask(null)
+    onDeleteGroup?.(group)
+  }
+
+  const openEditGroup = (group: string) => {
+    setGroupTask({
+      kind: 'edit',
+      group,
+      targets: targetsWithin(savedLayout, group).length,
+      groups: groupsInOrder(savedLayout, group).length,
+    })
+  }
+
   const handleMoveGroup = (from: string, to: string) => {
-    setEditingGroup(null)
+    setGroupTask(null)
     // A group that was folded away stays folded under its new name.
     const moved = new Set([...collapsedGroups].map(group => rebaseGroupPath(group, from, to)))
     setCollapsedGroups(moved)
@@ -879,6 +994,34 @@ export function Sidebar({
   const openEditDialog = (target: Target) => {
     setEditingTarget(target)
     setIsEditOpen(true)
+  }
+
+  const openAddDialog = (template: Target | null = null, group = '') => {
+    setDuplicating(template)
+    setAddingTo(group)
+    setIsAddOpen(true)
+  }
+
+  // A copy goes directly under what it was copied from, as long as it was
+  // left in the same group: at the far end of a long group it would look as
+  // though nothing had happened.
+  const addDuplicate = async (source: Target, copy: Parameters<SidebarProps['onAddTarget']>[0]) => {
+    const created = await onAddTarget(copy)
+    const group = normalizeGroupPath(source.group)
+    if (!created || normalizeGroupPath(created.group) !== group) return
+
+    const siblings = (savedLayout.items[group || UNGROUPED] ?? []).filter(id => id !== created.id)
+    const position = siblings.indexOf(source.id)
+    if (position === -1) return
+
+    const ordered = [...siblings.slice(0, position + 1), created.id, ...siblings.slice(position + 1)]
+    onReorderTargets?.(ordered.map((id, sortOrder) => ({ id, sortOrder })))
+  }
+
+  const closeShareDialog = () => {
+    setIsShareOpen(false)
+    // Dealt with, whichever way: a refresh should not bring the import back.
+    clearIncomingShareCode()
   }
 
   // Targets awaiting their first measurement are counted separately rather
@@ -1012,16 +1155,32 @@ export function Sidebar({
               <span className="text-muted-foreground">{pausedCount} paused</span>
             </div>
           )}
-          {targets.length > 4 && (
-            <button
-              type="button"
-              onClick={() => { setShowSearch(!showSearch); if (showSearch) setSearchQuery('') }}
-              className="ml-auto p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer touch:-my-1.5 touch:p-2.5"
-              aria-label="Search targets"
-            >
-              <Search className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          )}
+          <div className="ml-auto flex items-center gap-0.5">
+            {/* One target is deleted from its own row. This is for clearing
+                out several, so it is not there until there are several. */}
+            {targets.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setIsBulkDeleteOpen(true)}
+                className="p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer touch:-my-1.5 touch:p-2.5"
+                aria-label="Delete several targets"
+                title="Delete several targets"
+              >
+                <ListX className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            )}
+            {targets.length > 4 && (
+              <button
+                type="button"
+                onClick={() => { setShowSearch(!showSearch); if (showSearch) setSearchQuery('') }}
+                className="p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer touch:-my-1.5 touch:p-2.5"
+                aria-label="Search targets"
+                title="Search targets"
+              >
+                <Search className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            )}
+          </div>
         </div>
 
         <AnimatePresence>
@@ -1142,6 +1301,7 @@ export function Sidebar({
               </div>
             ) : (
               // Normal mode: draggable groups
+              <>
               <GroupList
                 parent=""
                 layout={layout}
@@ -1153,16 +1313,32 @@ export function Sidebar({
                 drag={drag.active}
                 onToggleCollapse={toggleCollapse}
                 onCompare={onSelectGroup}
-                onEditGroup={onMoveGroup ? setEditingGroup : undefined}
+                onEditGroup={onMoveGroup ? openEditGroup : undefined}
+                onAddGroupInside={onCreateGroup ? parent => setGroupTask({ kind: 'create', parent }) : undefined}
+                onAddTargetTo={group => openAddDialog(null, group)}
                 onReorderSubgroups={handleGroupReorder}
                 onGroupDragStart={handleGroupDragStart}
                 onGroupDragEnd={handleGroupDragEnd}
                 onSelectTarget={onSelectTarget}
                 onEditTarget={openEditDialog}
+                onDuplicateTarget={openAddDialog}
                 onDeleteTarget={setDeletingId}
                 onTogglePaused={onTogglePaused}
                 onHandlePointerDown={drag.onHandlePointerDown}
               />
+              {/* Where the next group would go, and so where the way to make
+                  one is. A group is made here first and filled afterwards. */}
+              {onCreateGroup && (
+                <button
+                  type="button"
+                  onClick={() => setGroupTask({ kind: 'create', parent: '' })}
+                  className="mt-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-sidebar-border px-2 py-2 text-xs text-muted-foreground transition-colors hover:border-sidebar-ring/50 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch:py-3"
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                  New group
+                </button>
+              )}
+              </>
             )}
           </nav>
         </ScrollArea>
@@ -1185,7 +1361,20 @@ export function Sidebar({
       </MotionConfig>
 
       {/* Footer actions */}
-      <div className="flex gap-2 border-t border-sidebar-border p-3 pb-[calc(0.75rem+var(--safe-bottom))]">
+      <div className="space-y-2 border-t border-sidebar-border p-3 pb-[calc(0.75rem+var(--safe-bottom))]">
+        {/* Said in words, with a line to itself: an icon among the others
+            would be one more thing nobody presses, and this is the only place
+            the app says an assistant can be connected to it at all. */}
+        <button
+          type="button"
+          onClick={() => setIsMcpOpen(true)}
+          className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-1.5 text-left text-xs text-muted-foreground outline-none transition-colors hover:border-ring/60 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 touch:py-2.5"
+        >
+          <Bot className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">Connect an AI assistant</span>
+          <span className="shrink-0 rounded border border-border px-1 py-px text-[10px] leading-none tracking-wider">MCP</span>
+        </button>
+        <div className="flex gap-2">
         {onOpenAlerts && (
           <Button
             variant={alertsOpen ? 'secondary' : 'outline'}
@@ -1209,12 +1398,23 @@ export function Sidebar({
         <Button
           className="min-w-0 flex-1"
           size="sm"
-          onClick={() => setIsAddOpen(true)}
+          onClick={() => openAddDialog()}
           suppressHydrationWarning
         >
           <Plus className="h-4 w-4 mr-2" />
           Add Target
         </Button>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          onClick={() => setIsShareOpen(true)}
+          aria-label="Share or import targets"
+          title="Share or import targets"
+          suppressHydrationWarning
+        >
+          <Share2 className="h-4 w-4" />
+        </Button>
+        </div>
       </div>
       </motion.div>
 
@@ -1240,7 +1440,9 @@ export function Sidebar({
               alertsOpen={alertsOpen}
               onOpenAlerts={onOpenAlerts}
               firingAlerts={firingAlerts}
-              onAddTarget={() => setIsAddOpen(true)}
+              onShare={() => setIsShareOpen(true)}
+              onConnectAssistant={() => setIsMcpOpen(true)}
+              onAddTarget={() => openAddDialog()}
             />
           </motion.div>
         )}
@@ -1250,8 +1452,10 @@ export function Sidebar({
       <AddTargetDialog
         open={isAddOpen}
         onOpenChange={setIsAddOpen}
-        onAddTarget={onAddTarget}
+        onAddTarget={target => (duplicating ? addDuplicate(duplicating, target) : onAddTarget(target))}
         availableGroups={availableGroups}
+        template={duplicating}
+        group={addingTo}
       />
 
       {/* Edit Target Dialog */}
@@ -1264,10 +1468,38 @@ export function Sidebar({
       />
 
       <GroupDialog
-        group={editingGroup}
+        task={groupTask}
         groups={availableGroups}
-        onCancel={() => setEditingGroup(null)}
-        onSave={handleMoveGroup}
+        onCancel={() => setGroupTask(null)}
+        onCreate={handleCreateGroup}
+        onMove={handleMoveGroup}
+        onDelete={handleDeleteGroup}
+      />
+
+      {/* Arriving by a share link opens it at the import, but not before the
+          targets have loaded: until then it cannot say which of the incoming
+          ones are already here. */}
+      <ShareDialog
+        open={isShareOpen || (incomingShareCode !== null && !loading)}
+        onOpenChange={open => { if (open) setIsShareOpen(true); else closeShareDialog() }}
+        existing={targets}
+        groupOrders={groupOrders}
+        incomingCode={incomingShareCode}
+        onImport={async imported => {
+          const added = await onImportTargets(imported)
+          if (added) closeShareDialog()
+          return added
+        }}
+      />
+
+      <McpDialog open={isMcpOpen} onOpenChange={setIsMcpOpen} />
+
+      <DeleteTargetsDialog
+        open={isBulkDeleteOpen}
+        onOpenChange={setIsBulkDeleteOpen}
+        targets={targets}
+        groupOrders={groupOrders}
+        onDelete={onDeleteTargets}
       />
 
       {/* Nothing is deleted from the row itself: the button there only asks. */}
