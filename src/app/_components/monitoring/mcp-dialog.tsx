@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { Bot, Check, ChevronRight, Copy } from 'lucide-react'
+import { Bot, Check, ChevronRight, Copy, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,8 +28,8 @@ import { cn } from '@/lib/utils'
 const FIELD_LABEL = 'text-xs text-card-foreground'
 const HINT = 'text-[11px] leading-relaxed text-muted-foreground'
 
-/** Stands in the command where the token goes: the page is never told the token itself. */
-const TOKEN_PLACEHOLDER = 'YOUR_TOKEN'
+/** Stands in the command where the key goes: the page is never told a key once it has been made. */
+const TOKEN_PLACEHOLDER = 'YOUR_KEY'
 
 type Client = 'claude-code' | 'claude-app' | 'other'
 
@@ -62,7 +62,7 @@ const WRITE_EXAMPLE = 'Add my router, my ISP\'s gateway and 1.1.1.1 as ping targ
 const COPIED_FOR_MS = 2000
 
 /** Something to be copied, shown whole, with a button that copies it. */
-function CopyField({ id, label, value, multiline = false }: { id: string; label: string; value: string; multiline?: boolean }) {
+export function CopyField({ id, label, value, multiline = false }: { id: string; label: string; value: string; multiline?: boolean }) {
   // `manual` once copying has been tried and the browser would not do it.
   const [state, setState] = useState<'idle' | 'copied' | 'manual'>('idle')
   const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
@@ -198,15 +198,14 @@ function Fold({
   )
 }
 
-function McpDialogBody() {
+function McpDialogBody({ onMakeKey }: { onMakeKey?: () => void }) {
   const [client, setClient] = useState<Client>('claude-code')
   // Open on the way that fits the address this page was reached at. One at a
   // time: opening the other puts this one away.
   const [reach, setReach] = useState<Reach | null>(() => (isLocalHost(window.location.host) ? 'local' : 'remote'))
   const toggleReach = (which: Reach) => setReach(reach === which ? null : which)
-  // Whether a token has to be sent with every request, which is also whether
-  // an assistant can change anything. Not known until asked, and taken as not
-  // needed if asking fails: the address is right either way.
+  // Whether a key has to be sent even to read. Not known until asked, and
+  // taken as not needed if asking fails: the address is right either way.
   const [info, setInfo] = useState({ tokenRequired: false, plainHttpAllowed: false })
   const { tokenRequired } = info
 
@@ -223,15 +222,15 @@ function McpDialogBody() {
 
   // The address this page was opened at, which is the one that is known to work from here.
   const url = `${window.location.origin}/api/mcp`
-  // A token is not taken in the clear from across the internet. Said here,
+  // A key is not taken in the clear from across the internet. Said here,
   // before it is tried, where the page itself was reached that way.
   const tokenWouldBeRefused =
-    tokenRequired && !info.plainHttpAllowed && window.location.protocol !== 'https:' && !isLocalHost(window.location.host)
+    !info.plainHttpAllowed && window.location.protocol !== 'https:' && !isLocalHost(window.location.host)
   const header = `Authorization: Bearer ${TOKEN_PLACEHOLDER}`
 
-  const command = `claude mcp add --transport http clearping ${url}${tokenRequired ? ` --header "${header}"` : ''}`
+  const command = `claude mcp add --transport http clearping ${url} --header "${header}"`
   const config = JSON.stringify(
-    { mcpServers: { clearping: { type: 'http', url, ...(tokenRequired ? { headers: { Authorization: `Bearer ${TOKEN_PLACEHOLDER}` } } : {}) } } },
+    { mcpServers: { clearping: { type: 'http', url, headers: { Authorization: `Bearer ${TOKEN_PLACEHOLDER}` } } } },
     null,
     2
   )
@@ -254,9 +253,10 @@ function McpDialogBody() {
             ...(url.startsWith('http://') ? ['--allow-http'] : []),
             // No space after the colon: Claude Desktop on Windows splits an
             // argument at its spaces. The value, which has one, goes in `env`.
-            ...(tokenRequired ? ['--header', 'Authorization:${AUTH_HEADER}'] : []),
+            '--header',
+            'Authorization:${AUTH_HEADER}',
           ],
-          ...(tokenRequired ? { env: { AUTH_HEADER: `Bearer ${TOKEN_PLACEHOLDER}` } } : {}),
+          env: { AUTH_HEADER: `Bearer ${TOKEN_PLACEHOLDER}` },
         },
       },
     },
@@ -284,9 +284,9 @@ function McpDialogBody() {
 
         {tokenWouldBeRefused && (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs leading-relaxed text-foreground" role="alert">
-            This address is not encrypted. ClearPing asks for a token here and will not take one over plain HTTP from
-            outside its own network, where anything on the way could read it. Put ClearPing behind HTTPS and open this
-            page at its <span className="font-mono">https://</span> address first.
+            This address is not encrypted. ClearPing will not take a key over plain HTTP from outside its own network,
+            where anything on the way could read it. Put ClearPing behind HTTPS and open this page at its{' '}
+            <span className="font-mono">https://</span> address first.
           </p>
         )}
 
@@ -352,13 +352,6 @@ function McpDialogBody() {
                     <li>Save, quit Claude Desktop altogether, and open it again.</li>
                   </ol>
                   <CopyField id="mcp-desktop-config" label="In claude_desktop_config.json" value={desktopConfig} multiline />
-                  {tokenRequired && (
-                    <p className={HINT}>
-                      This ClearPing asks for a token. Put the value of{' '}
-                      <span className="font-mono">CLEARPING_MCP_TOKEN</span> where it says{' '}
-                      <span className="font-mono">{TOKEN_PLACEHOLDER}</span>.
-                    </p>
-                  )}
                   <p className={HINT}>
                     This runs a small bridge, <span className="font-mono">mcp-remote</span>, on the computer Claude
                     Desktop is on, so whatever that computer can reach, Claude can: an address starting 192.168 or 10,
@@ -384,13 +377,11 @@ function McpDialogBody() {
                     where the address above can be reached from the internet. A ClearPing on a home or office network
                     (an address starting 192.168 or 10, or localhost) cannot be: that is what the way above is for.
                   </p>
-                  {tokenRequired && (
-                    <p className={HINT}>
-                      This ClearPing asks for a token. A connector signs in another way (OAuth) and has no field for a
-                      token like this one, so it cannot connect while one is set. Claude Desktop, set up the way
-                      above, and Claude Code can.
-                    </p>
-                  )}
+                  <p className={HINT}>
+                    A connector signs in another way (OAuth) and has no field for a key, so it connects as nobody in
+                    particular: it can only read, and {tokenRequired ? 'cannot connect at all while this ClearPing asks for a key' : 'only while this ClearPing does not ask for a key'}.
+                    Claude Desktop, set up the way above, and Claude Code can send one.
+                  </p>
                 </Fold>
               </>
             )}
@@ -406,20 +397,34 @@ function McpDialogBody() {
               </>
             )}
 
-            {tokenRequired && client !== 'claude-app' && (
-              <p className={HINT}>
-                This ClearPing asks for a token. Put the value of{' '}
-                <span className="font-mono">CLEARPING_MCP_TOKEN</span> where it says{' '}
-                <span className="font-mono">{TOKEN_PLACEHOLDER}</span>.
-              </p>
-            )}
           </div>
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+          <p className="text-xs leading-relaxed text-card-foreground">
+            Give each assistant a key of its own, and put it where it says{' '}
+            <span className="font-mono">{TOKEN_PLACEHOLDER}</span>. A <span className="font-medium">read-only</span> key
+            lets it read; a <span className="font-medium">read and change</span> key lets it add and change targets as
+            well. Whatever it changes is recorded under the key&apos;s name, and revoking the key cuts that assistant
+            off alone.
+          </p>
+          <p className={HINT}>
+            {tokenRequired
+              ? 'This ClearPing asks for a key on every connection.'
+              : 'Without a key an assistant can still read, but not change anything.'}
+          </p>
+          {onMakeKey && (
+            <Button type="button" variant="outline" size="sm" onClick={onMakeKey}>
+              <KeyRound className="h-4 w-4" />
+              Make a key
+            </Button>
+          )}
         </div>
 
         <div className="space-y-1.5">
           <p className={FIELD_LABEL}>Then ask it something like</p>
           <ul className="space-y-1">
-            {(tokenRequired ? [...EXAMPLES, WRITE_EXAMPLE] : EXAMPLES).map(example => (
+            {[...EXAMPLES, WRITE_EXAMPLE].map(example => (
               <li key={example} className="rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs text-card-foreground">
                 {example}
               </li>
@@ -428,19 +433,8 @@ function McpDialogBody() {
         </div>
 
         <p className={HINT}>
-          {tokenRequired ? (
-            <>
-              With the token, an assistant can also add targets, change them, pause them, probe one now and trace a
-              route. It cannot delete a target, and alerts are never shown to it.
-            </>
-          ) : (
-            <>
-              An assistant can only read: it cannot add, change, pause or probe a target, and alerts are never shown to
-              it. To let one add and change targets as well, set <span className="font-mono">CLEARPING_MCP_TOKEN</span>{' '}
-              where ClearPing runs. It is then asked for on every connection.
-            </>
-          )}{' '}
-          The report is only as good as what is monitored: with your router as a target as well as addresses beyond
+          The last of those needs a read and change key. With one, an assistant can add targets, change them, pause
+          them, probe one now and trace a route; it cannot delete a target, and alerts are never shown to it. The report is only as good as what is monitored: with your router as a target as well as addresses beyond
           it, the data can show whether a fault was inside your network or outside it.
         </p>
       </div>
@@ -451,15 +445,17 @@ function McpDialogBody() {
 interface McpDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Open the security settings, where keys are made. */
+  onMakeKey?: () => void
 }
 
-export function McpDialog({ open, onOpenChange }: McpDialogProps) {
+export function McpDialog({ open, onOpenChange, onMakeKey }: McpDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-card border-border sm:max-w-xl" suppressHydrationWarning>
         {/* Inside the dialog's content, which is there only while it is open:
             the address is read off the page it was opened from. */}
-        <McpDialogBody />
+        <McpDialogBody onMakeKey={onMakeKey} />
       </DialogContent>
     </Dialog>
   )

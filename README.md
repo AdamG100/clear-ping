@@ -232,10 +232,11 @@ Then ask it in your own words:
 - *Is my connection worse in the evenings?*
 
 As it comes it can only read: nothing an assistant does changes a target or
-sends anything, and alerts are never shown to it. Set `CLEARPING_MCP_TOKEN`
-and an assistant that sends the token can also add targets, change them, pause
-them and probe one now (*add my router and 1.1.1.1 as ping targets, in a group
-called Network*), though never delete one. A token is only taken over HTTPS or
+sends anything, and alerts are never shown to it. Give an assistant a key of
+its own that may read and change (Security → Keys) and it can also add
+targets, change them, pause them and probe one now (*add my router and 1.1.1.1
+as ping targets, in a group called Network*), though never delete one; what it
+changes is recorded under its key's name. A key is only taken over HTTPS or
 from ClearPing's own network, never in the clear across the internet. What it
 can be asked, what the report contains and how the token works are in
 [docs/mcp.md](docs/mcp.md).
@@ -268,7 +269,8 @@ All optional. With Docker, pass them with `-e`.
 | `CLEARPING_DB_PATH` | `./data/clearping.db` (`/data/clearping.db` in the image) | Where the database is kept |
 | `CLEARPING_RETENTION_DAYS` | `90` | Days of measurements to keep; `0` keeps everything |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes, for when `npm run probe` runs as its own process |
-| `CLEARPING_MCP_TOKEN` | unset | A token an AI assistant has to send to connect, which also lets it add and change targets. Without one the MCP address is as open as the rest of the app and can only read |
+| `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made: for getting back in after a lost password ([docs/security.md](docs/security.md#locked-out)) |
+| `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard. Still works, as a key that can change things; keys made under Security are better, one per assistant |
 | `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes the token over plain HTTP from anywhere, for when a VPN or tunnel does the encrypting. Otherwise it is taken only over HTTPS or from ClearPing's own network |
 | `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check of the registry for a newer image. The dashboard then shows the version it runs but not whether it is the latest |
 
@@ -296,6 +298,9 @@ Everything the interface does goes through these.
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
+| `GET /api/health` | Whether the server is up; open even with sign-in on |
+| `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
+| `/api/security/…` | Sign-in switches, keys, accounts and the activity record; signed in only |
 | `GET /api/version` | The version, commit and build time running, the same for the newest published image, and whether that is an update |
 | `POST /api/mcp` | The MCP server an AI assistant connects to; `GET /api/mcp/info` says whether it asks for a token |
 
@@ -320,3 +325,4 @@ SQLite.
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
 - [docs/alerting.md](docs/alerting.md): alerts, and sending them with Apprise
 - [docs/mcp.md](docs/mcp.md): connecting an AI assistant, and the report for an ISP
+- [docs/security.md](docs/security.md): sign-in, keys for scripts and assistants, and the activity record

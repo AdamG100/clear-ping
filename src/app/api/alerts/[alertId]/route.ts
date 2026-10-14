@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteAlert, parseAlertInput, updateAlert } from '@/lib/alerts';
+import { deleteAlert, getAlert, parseAlertInput, updateAlert } from '@/lib/alerts';
 import { checkNotifyUrls } from '@/lib/apprise';
 import { initializeServer } from '@/lib/init';
+import { actorFor } from '@/lib/security/access';
+import { recordActivity } from '@/lib/security/store';
 
 /**
  * PATCH /api/alerts/:alertId - Change an alert
@@ -26,6 +28,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const alert = await updateAlert(alertId, parsed.input);
     if (!alert) return NextResponse.json({ error: 'Alert not found' }, { status: 404 });
 
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'alert.change', `${alert.name || `${alert.metric} alert`}: ${Object.keys(parsed.input).join(', ')}`);
     return NextResponse.json(alert);
   } catch (error) {
     console.error('Error updating alert:', error);
@@ -38,10 +42,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await initializeServer();
 
     const { alertId } = await params;
+    const existing = await getAlert(alertId);
     if (!(await deleteAlert(alertId))) {
       return NextResponse.json({ error: 'Alert not found' }, { status: 404 });
     }
 
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'alert.delete', existing?.name || (existing ? `${existing.metric} alert` : alertId));
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting alert:', error);

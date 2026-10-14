@@ -63,6 +63,8 @@ export interface McpTool {
 export interface McpAccess {
   /** Whether the tools that change something are there for it. */
   writes: boolean
+  /** Told of every call to a tool that changes something, after it has run: for the record of who did what. */
+  onWrite?: (tool: string, args: Record<string, unknown>, failed: boolean) => Promise<void> | void
 }
 
 export interface McpPrompt {
@@ -88,7 +90,7 @@ export interface McpServer {
 
 /** What it takes for a connection to be allowed to change anything. */
 export const WRITES_NEED =
-  'An assistant can add and change targets only when ClearPing has been given a token (CLEARPING_MCP_TOKEN) and the connection sends it.'
+  'An assistant can add and change targets only with a key that may change things: one is made in ClearPing\'s security settings and sent as "Authorization: Bearer <key>".'
 
 const answer = (id: JsonRpcId | null, result: unknown): JsonRpcResponse => ({ jsonrpc: '2.0', id, result })
 const refuse = (id: JsonRpcId | null, code: number, message: string): JsonRpcResponse => ({
@@ -185,7 +187,9 @@ export async function handleMessage(
           isError: true,
         })
       }
-      return answer(id, await callTool(tool, params.arguments))
+      const result = await callTool(tool, params.arguments)
+      if (tool.writes) await access.onWrite?.(tool.name, isObject(params.arguments) ? params.arguments : {}, !!result.isError)
+      return answer(id, result)
     }
 
     case 'prompts/list':

@@ -347,12 +347,73 @@ async function keptGroups(database: Database): Promise<void> {
 }
 
 /** In the order they shipped. A migration's version is its position, from 1. */
+/**
+ * Accounts, sessions, keys for scripts and assistants, the switches that turn
+ * them on, and a record of who changed what. All of it optional: a database
+ * with none of it in use behaves as before. See src/lib/security/.
+ */
+async function security(database: Database): Promise<void> {
+  await run(database, `
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_login_at INTEGER
+    )
+  `);
+  // A session or key is kept only as a hash of itself: a copy of the database
+  // does not hand anyone a way in.
+  await run(database, `
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL
+    )
+  `);
+  await run(database, `
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      prefix TEXT NOT NULL,
+      key_hash TEXT NOT NULL UNIQUE,
+      access TEXT NOT NULL CHECK (access IN ('read', 'write')),
+      created_at INTEGER NOT NULL,
+      created_by TEXT,
+      last_used_at INTEGER,
+      revoked_at INTEGER
+    )
+  `);
+  await run(database, `
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  await run(database, `
+    CREATE TABLE IF NOT EXISTS activity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      actor_kind TEXT NOT NULL,
+      actor_id TEXT,
+      actor_name TEXT NOT NULL,
+      via TEXT NOT NULL,
+      action TEXT NOT NULL,
+      detail TEXT
+    )
+  `);
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_activity_at ON activity(at)');
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
   { name: 'alert destinations', up: alertDestinations },
   { name: 'apprise notifications', up: appriseNotifications },
   { name: 'kept groups', up: keptGroups },
+  { name: 'security', up: security },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

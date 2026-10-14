@@ -13,6 +13,7 @@ import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-
 import { GroupDialog, type GroupDialogTask } from './group-dialog'
 import { ShareDialog } from './share-dialog'
 import { McpDialog } from './mcp-dialog'
+import { SecurityDialog } from './security-dialog'
 import { DeleteTargetsDialog } from './delete-targets-dialog'
 import { useIncomingShareCode } from './use-incoming-share-code'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
@@ -64,6 +65,7 @@ import {
   ListX,
   MoreVertical,
   PanelLeftClose,
+  ShieldCheck,
   X,
 } from 'lucide-react'
 import { SidebarRail } from './sidebar-rail'
@@ -846,6 +848,8 @@ export function Sidebar({
   const [addingTo, setAddingTo] = useState('')
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isMcpOpen, setIsMcpOpen] = useState(false)
+  // Open, and on which tab: the MCP dialog opens it straight on the keys.
+  const [securityTab, setSecurityTab] = useState<'access' | 'keys' | null>(null)
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
   const [incomingShareCode, clearIncomingShareCode] = useIncomingShareCode()
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -1416,6 +1420,17 @@ export function Sidebar({
         >
           <Share2 className="h-4 w-4" />
         </Button>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          onClick={() => setSecurityTab('access')}
+          aria-label="Security"
+          data-tip="Security"
+          data-tip-detail="Sign-in, keys and activity"
+          suppressHydrationWarning
+        >
+          <ShieldCheck className="h-4 w-4" />
+        </Button>
         </div>
       </div>
       </motion.div>
@@ -1444,6 +1459,7 @@ export function Sidebar({
               firingAlerts={firingAlerts}
               onShare={() => setIsShareOpen(true)}
               onConnectAssistant={() => setIsMcpOpen(true)}
+              onOpenSecurity={() => setSecurityTab('access')}
               onAddTarget={() => openAddDialog()}
             />
           </motion.div>
@@ -1494,7 +1510,21 @@ export function Sidebar({
         }}
       />
 
-      <McpDialog open={isMcpOpen} onOpenChange={setIsMcpOpen} />
+      <McpDialog
+        open={isMcpOpen}
+        onOpenChange={setIsMcpOpen}
+        onMakeKey={() => {
+          setIsMcpOpen(false)
+          setSecurityTab('keys')
+        }}
+      />
+      <SecurityDialog
+        // A fresh dialog each time it opens, on the tab it was asked for.
+        key={securityTab ?? 'closed'}
+        open={securityTab !== null}
+        onOpenChange={open => { if (!open) setSecurityTab(null) }}
+        tab={securityTab ?? 'access'}
+      />
 
       <DeleteTargetsDialog
         open={isBulkDeleteOpen}

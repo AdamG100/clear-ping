@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Bell, Bot, PanelLeftOpen, Plus, Share2 } from 'lucide-react'
+import { Bell, Bot, PanelLeftOpen, Plus, Share2, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Target } from '@/types/probe'
 import { describeGroupHealth, groupIsOnline, groupIsPaused, summarizeGroupHealth } from '@/lib/group-health'
@@ -34,6 +34,7 @@ interface SidebarRailProps {
   firingAlerts: number
   onShare: () => void
   onConnectAssistant: () => void
+  onOpenSecurity: () => void
   onAddTarget: () => void
 }
 
@@ -62,6 +63,7 @@ export function SidebarRail({
   firingAlerts,
   onShare,
   onConnectAssistant,
+  onOpenSecurity,
   onAddTarget,
 }: SidebarRailProps) {
   const groups = useMemo(
@@ -184,6 +186,15 @@ export function SidebarRail({
           className={RAIL_BUTTON}
         >
           <Share2 className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenSecurity}
+          aria-label="Security"
+          {...beside('Security', 'Sign-in, keys and activity')}
+          className={RAIL_BUTTON}
+        >
+          <ShieldCheck className="h-4 w-4" />
         </button>
         <button
           type="button"

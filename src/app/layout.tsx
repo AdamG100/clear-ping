@@ -6,6 +6,7 @@ import { Tooltips } from "@/components/ui/tooltips";
 import { THEME_COLOR } from "@/lib/app-theme";
 import { InstallPrompt } from "./_components/install-prompt";
 import { ServiceWorker } from "./_components/service-worker";
+import { SessionWatcher } from "./_components/session-watcher";
 
 // Instrument Sans: a slightly condensed technical grotesque — reads like
 // equipment labelling rather than another product-dashboard Inter.
@@ -106,6 +107,7 @@ export default function RootLayout({
         <Tooltips />
         <InstallPrompt />
         <ServiceWorker />
+        <SessionWatcher />
       </body>
     </html>
   );

@@ -3,6 +3,8 @@ import { createGroup, deleteGroup, moveGroup } from '@/lib/database';
 import { MAX_GROUP_PATH_LENGTH, isWithinGroup, normalizeGroupPath } from '@/lib/group-path';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
+import { actorFor } from '@/lib/security/access';
+import { recordActivity } from '@/lib/security/store';
 
 /**
  * POST /api/groups - Make a group, with nothing in it
@@ -28,7 +30,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ group: await createGroup(group) }, { status: 201 });
+    const created = await createGroup(group);
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'group.add', group);
+    return NextResponse.json({ group: created }, { status: 201 });
   } catch (error) {
     console.error('Error creating group:', error);
     return NextResponse.json({ error: 'Failed to create group' }, { status: 500 });
@@ -58,6 +63,8 @@ export async function DELETE(request: NextRequest) {
     // An alert names the group its target is in, and the prober holds its own
     // copy of each target.
     await getScheduler().reloadTargets();
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'group.delete', group);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting group:', error);
@@ -92,6 +99,8 @@ export async function PUT(request: NextRequest) {
     // An alert names the group its target is in, and the prober holds its own
     // copy of each target.
     await getScheduler().reloadTargets();
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'group.move', `${from} → ${to}`);
     return NextResponse.json({ success: true, moved });
   } catch (error) {
     console.error('Error moving group:', error);

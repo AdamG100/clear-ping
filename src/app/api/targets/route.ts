@@ -4,6 +4,8 @@ import { randomUUID } from 'crypto';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
 import { validateTargetDefinition } from '@/lib/target-definition';
+import { actorFor } from '@/lib/security/access';
+import { recordActivity } from '@/lib/security/store';
 
 export async function GET(request: NextRequest) {
   try {
@@ -52,6 +54,8 @@ export async function POST(request: NextRequest) {
     }
 
     const target = await createTarget({ id: randomUUID(), ...definition.target, status: 'active' });
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'target.add', `${target.name} (${target.host})`);
 
     // Reload scheduler to pick up the new target immediately
     const scheduler = getScheduler();
@@ -85,7 +89,13 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Say which targets to delete, as a list of their ids' }, { status: 400 });
     }
 
-    const deleted = await deleteTargets([...new Set(ids as string[])]);
+    const wanted = new Set(ids as string[]);
+    const names = (await getAllTargets()).filter(target => wanted.has(target.id)).map(target => target.name);
+    const deleted = await deleteTargets([...wanted]);
+    if (deleted > 0) {
+      const { actor, via } = await actorFor(request);
+      await recordActivity(actor, via, 'target.delete', names.join(', '));
+    }
 
     // Once, for all of them.
     if (deleted > 0) await getScheduler().reloadTargets();

@@ -103,8 +103,8 @@ and the format wanted.
 
 ### Letting it change things
 
-Set `CLEARPING_MCP_TOKEN` and an assistant that sends the token gets five more
-tools:
+Give an assistant a **read and change** key (Security → Keys, see
+[security.md](security.md)) and it gets five more tools:
 
 | Tool | What it does |
 |---|---|
@@ -129,8 +129,9 @@ person to press. Pausing is the way an assistant stops something being
 monitored. And **alerts** cannot be seen or changed.
 
 Each of these tools is marked as one that changes something, so a client such
-as Claude Code asks you before it runs one. With no token set they do not
-exist: the list an assistant is given has only the six that read.
+as Claude Code asks you before it runs one. To an assistant without such a key
+they do not exist: the list it is given has only the six that read. Every call
+to one is recorded under the key's name in Security → Activity.
 
 ## The report
 
@@ -177,19 +178,18 @@ captured.
 The assistant is told to use only figures that are in the data, to keep the
 caveats in, and to say so if the period shows no real problem.
 
-## Keeping it to yourself
+## Keys
 
-With no token set, the endpoint is as open as the rest of ClearPing's API,
-which has no login: anyone who can reach the app can read it, and nobody can
-change anything through it. To ask for a token, set `CLEARPING_MCP_TOKEN` to a
-long random value and send it with every request:
+Each assistant gets a key of its own, made under Security → Keys: **read only**,
+or **read and change**. Revoke one and that assistant alone is cut off; what
+each one changes is recorded under its name. Send it with every request:
 
 ```bash
 claude mcp add --transport http clearping https://clearping.example.com/api/mcp \
-  --header "Authorization: Bearer your-token"
+  --header "Authorization: Bearer cp_your-key"
 ```
 
-For Claude Desktop the token goes in the bridge's settings. The header is
+For Claude Desktop the key goes in the bridge's settings. The header is
 written without a space after the colon, and its value kept in `env`, because
 Claude Desktop on Windows splits an argument at its spaces:
 
@@ -198,19 +198,25 @@ Claude Desktop on Windows splits an argument at its spaces:
   "command": "npx",
   "args": ["-y", "mcp-remote", "http://clearping.lan:3000/api/mcp", "--allow-http",
            "--header", "Authorization:${AUTH_HEADER}"],
-  "env": { "AUTH_HEADER": "Bearer your-token" }
+  "env": { "AUTH_HEADER": "Bearer cp_your-key" }
 }
 ```
 
-A request without it is refused, reading included. The dialog in the sidebar
-shows the command with a place for the token when one is set; it is never shown
-the token.
+Without a key an assistant can read but never change anything, unless
+**Require a key for AI assistants** is on under Security → Access (it always is
+while sign-in is on), and then it is refused altogether. A wrong or revoked key
+is refused either way. The dialog in the sidebar writes the command with a
+place for the key; it is never shown a key.
 
-### The token is only taken encrypted
+`CLEARPING_MCP_TOKEN`, the single token from before keys were made in the
+dashboard, still works as a read and change key, and while it is set a key is
+always asked for. Move to keys made in Security and unset it.
 
-A token sent over plain HTTP across the internet can be read by anything on the
-way, and whoever reads it can change what you monitor. So with a token set,
-ClearPing takes a connection only if it is one of:
+### Keys are only taken encrypted
+
+A key sent over plain HTTP across the internet can be read by anything on the
+way, and whoever reads it can do what the key can. So a request carrying a key
+is taken only if it is one of:
 
 - **over HTTPS**, from anywhere. ClearPing in a datacentre and an assistant at
   home is this case: put it behind a proxy that does TLS, as
@@ -220,8 +226,8 @@ ClearPing takes a connection only if it is one of:
   address (`192.168…`, `10…`), or a local name (`clearping.lan`, `nas.local`).
   There is no internet in between to listen.
 
-Anything else is refused with `403` before the token is looked at, and the
-answer says that a token sent with it should be changed, since it has already
+Anything else is refused with `403` before the key is looked at, and the
+answer says that the key should be revoked and replaced, since it has already
 travelled in the clear. The dialog in the sidebar warns of this before it is
 tried, when the page itself was opened over plain HTTP at a public address.
 
@@ -230,10 +236,10 @@ How it arrived is read from `X-Forwarded-Proto`, which a proxy has to pass on
 If something else encrypts the connection, a VPN or an SSH tunnel to a public
 address, set `CLEARPING_MCP_ALLOW_HTTP=1` to say so.
 
-This is a guard against sending a token in the clear by mistake, not what keeps
-a stranger out: the token does that. And it covers the MCP endpoint only. The
-app itself has no login, so a ClearPing that is reachable from the internet
-needs something in front of it that asks who is there.
+This is a guard against sending a key in the clear by mistake, not what keeps
+a stranger out: the key does that. A ClearPing reachable from the internet
+should also have sign-in on, or a sign-in proxy in front; see
+[security.md](security.md).
 
 A web page is only let through from the address ClearPing itself was reached
 at. Any other is refused, so that a website cannot have a visitor's browser

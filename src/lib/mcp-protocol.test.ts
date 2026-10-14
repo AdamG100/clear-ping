@@ -191,11 +191,22 @@ describe('tools that change something', () => {
     const refused = (await asked('tools/call', { name: 'add_thing' }, false))?.result as { content: Array<{ text: string }>; isError: boolean }
     expect(refused.isError).toBe(true)
     expect(refused.content[0].text).toContain('this connection may only read')
-    expect(refused.content[0].text).toContain('CLEARPING_MCP_TOKEN')
+    expect(refused.content[0].text).toContain('security settings')
 
     expect((await asked('tools/call', { name: 'add_thing' }, true))?.result).toEqual({ content: [{ type: 'text', text: '{"added":true}' }] })
     // One that only reads is there either way.
     expect((await asked('tools/call', { name: 'echo', arguments: { text: 'x' } }, false))?.result).toMatchObject({ content: [{ text: '{"said":"x"}' }] })
+  })
+
+  it('are reported once they have run, for the record of who changed what; reading is not', async () => {
+    const onWrite = vi.fn()
+    const call = (name: string, args?: object) =>
+      handleMessage(writing, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, { writes: true, onWrite })
+
+    await call('add_thing', { what: 'router' })
+    await call('echo', { text: 'x' })
+    expect(onWrite).toHaveBeenCalledTimes(1)
+    expect(onWrite).toHaveBeenCalledWith('add_thing', { what: 'router' }, false)
   })
 
   it('are told about when connecting only to a connection that has them', async () => {

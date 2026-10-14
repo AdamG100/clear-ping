@@ -4,6 +4,8 @@ import { addTargets } from '@/lib/target-actions';
 import { validateTargetDefinition } from '@/lib/target-definition';
 import { MAX_SHARED_TARGETS } from '@/lib/target-share';
 import type { TargetDefinition } from '@/types/probe';
+import { actorFor } from '@/lib/security/access';
+import { recordActivity } from '@/lib/security/store';
 
 /**
  * Add several targets at once: what importing a share link comes to.
@@ -38,7 +40,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Placed after everything already here, in the order they were shared in.
-    return NextResponse.json({ created: await addTargets(definitions) }, { status: 201 });
+    const created = await addTargets(definitions);
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'target.import', created.map(target => target.name).join(', '));
+    return NextResponse.json({ created }, { status: 201 });
   } catch (error) {
     console.error('Error importing targets:', error);
     return NextResponse.json(

@@ -5,6 +5,8 @@ import { isProbeType, PROBE_TYPES, validateProbeConfig } from '@/lib/probe-confi
 import { getScheduler } from '@/lib/scheduler';
 import { initializeServer } from '@/lib/init';
 import type { Target } from '@/types/probe';
+import { actorFor } from '@/lib/security/access';
+import { recordActivity } from '@/lib/security/store';
 
 const STATUSES = ['active', 'paused', 'error'] as const;
 
@@ -152,6 +154,10 @@ export async function PATCH(
     await getScheduler().reloadTargets();
 
     const target = await getTargetById(id);
+    const { actor, via } = await actorFor(request);
+    const fields = Object.keys(updates);
+    const action = fields.length === 1 && updates.status ? (updates.status === 'paused' ? 'target.pause' : 'target.resume') : 'target.change';
+    await recordActivity(actor, via, action, `${target?.name ?? id}${action === 'target.change' ? `: ${fields.join(', ')}` : ''}`);
     return NextResponse.json(target);
   } catch (error) {
     console.error('Error updating target:', error);
@@ -170,6 +176,7 @@ export async function DELETE(
     await initializeServer();
 
     const { id } = await params;
+    const existing = await getTargetById(id);
     const deleted = await deleteTarget(id);
 
     if (!deleted) {
@@ -180,6 +187,8 @@ export async function DELETE(
     }
 
     await getScheduler().reloadTargets();
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'target.delete', existing?.name ?? id);
 
     return NextResponse.json({ success: true });
   } catch (error) {

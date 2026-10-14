@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAlert, getAlerts, parseAlertInput, type AlertInput } from '@/lib/alerts';
 import { checkNotifyUrls } from '@/lib/apprise';
 import { initializeServer } from '@/lib/init';
+import { actorFor } from '@/lib/security/access';
+import { recordActivity } from '@/lib/security/store';
 
 /** GET /api/alerts - Every alert, with the state of each target it is ticked for */
 export async function GET() {
@@ -33,6 +35,8 @@ export async function POST(request: NextRequest) {
 
     // Not partial, so everything an alert needs has been checked to be there.
     const alert = await createAlert(parsed.input as AlertInput);
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'alert.add', alert.name || `${alert.metric} alert`);
     return NextResponse.json(alert, { status: 201 });
   } catch (error) {
     console.error('Error creating alert:', error);
