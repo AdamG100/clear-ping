@@ -14,7 +14,7 @@ import {
   TimeAxis,
   TimeGrid,
   chartHeightFor,
-  holdInside,
+  readingsBoxStyle,
   latencyDomain,
   niceTicks,
   useChartBrush,
@@ -311,7 +311,9 @@ export const SmokeTrace = memo(function SmokeTrace({
     if (commit && event.pointerType === 'touch') setHover(nearestTo(event.clientX))
   }
 
-  const tooltipLeft = active ? holdInside(active.x, 100, width) : 0
+  const readingsBox = active
+    ? readingsBoxStyle(active.x, [active.median, active.low, active.high], { width, height, top: PAD.top, bottom: traceBottom, halfWidth: 100, boxHeight: 150 })
+    : undefined
 
   const spanMs = xMax - xMin
 
@@ -544,8 +546,8 @@ export const SmokeTrace = memo(function SmokeTrace({
 
       {active && !selection && (
         <div
-          className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 rounded-md border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur-sm"
-          style={{ left: `${(tooltipLeft / width) * 100}%` }}
+          className="pointer-events-none absolute z-10 w-max max-w-64 rounded-md border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur-sm"
+          style={readingsBox}
         >
           <p className="font-mono text-[11px] text-muted-foreground">
             {active.point.timestamp.toLocaleString('en-US', {

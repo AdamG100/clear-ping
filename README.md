@@ -290,7 +290,7 @@ Everything the interface does goes through these.
 | `GET`, `PATCH`, `DELETE /api/targets/:id` | Read, change (including pause and group) or delete one |
 | `POST /api/targets/:id/probe` | Probe it now |
 | `GET /api/targets/:id/measurements` | Its readings, bucketed for a chart (`?hours=` or `?start=&end=`) |
-| `GET`, `POST /api/targets/:id/traceroute` | Its saved routes; trace it now |
+| `GET`, `POST /api/targets/:id/traceroute` | Its saved routes; trace it now, over `{"family": "ipv4" \| "ipv6" \| "both"}` if given |
 | `DELETE /api/targets/:id/traceroute` | Delete one saved route (`?trace=id`) or all but the newest (`?older=1`) |
 | `PUT /api/targets/reorder` | Save the order of targets or of groups |
 | `POST /api/groups` | Make a group (`{ group }`, a path such as `Home/Network`) |

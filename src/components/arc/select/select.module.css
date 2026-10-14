@@ -4,7 +4,7 @@
 .trigger { position: relative; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; min-height: var(--control-height-md); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 0 var(--space-3); background: var(--surface); color: var(--foreground); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard); }
 @media (hover: hover) and (pointer: fine) { .trigger:hover:not([data-disabled]) { border-color: var(--border-strong); background: var(--surface-muted); } }
 .trigger:active:not([data-disabled]), .trigger[data-state="open"] { border-color: var(--border-strong); background: var(--surface-muted); }
-.trigger:focus-visible { border-color: var(--border-strong); }
+.trigger:focus-visible { border-color: var(--focus-color); }
 .trigger[data-disabled] { opacity: .5; cursor: not-allowed; }
 .valueText { display: grid; flex: 1; min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .valueText > span { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

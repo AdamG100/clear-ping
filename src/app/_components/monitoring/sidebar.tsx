@@ -59,7 +59,6 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
-  Search,
   Pause,
   Play,
   ChartLine,
@@ -249,7 +248,7 @@ function TargetRow({
       }}
       className={cn(
         'relative w-full text-left px-2 py-2 rounded-md transition-colors group/target cursor-pointer',
-        'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'hover:bg-sidebar-accent',
         // The selected row is simply the one that is lit. The highlight used
         // to be one shared element that slid from the old row to the new one,
         // which read as something chasing the click down the list, and went
@@ -651,20 +650,26 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
 
           {/* A comparison needs at least two lines to compare. Labelled and
               in the accent colour: as a bare grey icon it read as decoration,
-              and nobody found the group chart without being told where it was. */}
+              and nobody found the group chart without being told where it was.
+              A chip the height of the header's text, not one of Arc's buttons:
+              the smallest of those is a pill as tall as a target's row. */}
           {onCompare && memberIds.length > 1 && (
             <Tooltip content="Show every target in this group on one chart">
-              <Button
+              <button
                 type="button"
-                size="sm"
-                variant={isCompared ? 'primary' : 'secondary'}
                 onClick={() => onCompare(group)}
                 aria-pressed={isCompared}
                 aria-label={`Compare the targets in ${name} on one chart`}
+                className={cn(
+                  'ml-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium leading-none transition-colors touch:py-2',
+                  isCompared
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-primary/40 bg-primary/10 text-primary hover:border-primary/70 hover:bg-primary/20'
+                )}
               >
-                <ChartLine {...ICON} />
+                <ChartLine size={13} strokeWidth={1.75} aria-hidden="true" />
                 Compare
-              </Button>
+              </button>
             </Tooltip>
           )}
         </div>
@@ -830,7 +835,6 @@ export function Sidebar({
   // mismatch.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(readCollapsedGroups)
   const [searchQuery, setSearchQuery] = useState('')
-  const [showSearch, setShowSearch] = useState(false)
   const [isGroupDragging, setIsGroupDragging] = useState(false)
   const listRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -1094,8 +1098,8 @@ export function Sidebar({
           )}
         </div>
 
-        {/* As tall as it is with the search button in it, which only appears
-            past a few targets, so the header is the same height either way. */}
+        {/* As tall as it is with the delete button in it, which only appears
+            past one target, so the header is the same height either way. */}
         <div className="flex min-h-5.5 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           {/* Not "0 online, 0 offline" while the list is on its way: that
               is a count of nothing, and it reads as everything being gone. */}
@@ -1135,39 +1139,17 @@ export function Sidebar({
                 </Button>
               </Tooltip>
             )}
-            {targets.length > 4 && (
-              <Tooltip content="Search targets">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { setShowSearch(!showSearch); if (showSearch) setSearchQuery('') }}
-                  aria-pressed={showSearch}
-                  aria-label="Search targets"
-                >
-                  <Search {...ICON} />
-                </Button>
-              </Tooltip>
-            )}
           </div>
         </div>
 
-        <AnimatePresence>
-          {showSearch && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="overflow-hidden"
-            >
-              {/* Its label is the button that opened it, so it is said, not shown. */}
-              <div className="mt-3 [&_label]:sr-only">
-                <SearchField label="Search targets" placeholder="Name or address" value={searchQuery} onValueChange={setSearchQuery} autoFocus />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Always there once there is something to find: behind a button it
+            went unnoticed. Its placeholder says what it is, so its label is
+            said, not shown. */}
+        {targets.length > 0 && (
+          <div className="mt-3 [&_label]:sr-only">
+            <SearchField label="Search targets" placeholder="Search name or address" value={searchQuery} onValueChange={setSearchQuery} />
+          </div>
+        )}
       </div>
 
       {/* Target List */}
@@ -1225,7 +1207,7 @@ export function Sidebar({
                             }}
                             className={cn(
                               'w-full text-left px-3 py-2 rounded-md transition-colors group cursor-pointer',
-                              'hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                              'hover:bg-sidebar-accent',
                               selectedTargetId === target.id && 'bg-sidebar-accent'
                             )}
                           >

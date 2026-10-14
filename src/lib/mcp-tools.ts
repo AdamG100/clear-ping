@@ -23,7 +23,7 @@ import {
   type SeriesEvidence,
 } from './evidence'
 import { groupLabel, isWithinGroup, normalizeGroupPath } from './group-path'
-import { FAMILY_LABEL, IP_VERSIONS, isDualStack, isPrivateAddress } from './host'
+import { FAMILY_LABEL, IP_VERSIONS, isDualStack, isPrivateAddress, isTraceFamilies, TRACE_FAMILIES } from './host'
 import { ToolError, type McpPrompt, type McpServer, type McpTool } from './mcp-protocol'
 import { round } from './metrics'
 import type { Incident } from './outages'
@@ -31,7 +31,7 @@ import { parseAddressInput, PROBE_TYPES, targetAddressLabel } from './probe-conf
 import { getScheduler } from './scheduler'
 import { addTargets, probeNow } from './target-actions'
 import { measurementKey, validateTargetDefinition } from './target-definition'
-import { ensureTracerouteSchema, getTraceroutes, traceAndStore } from './traceroute'
+import { ensureTracerouteSchema, getTraceroutes, traceAndStore, traceFamiliesProblem } from './traceroute'
 
 /**
  * What an assistant connected to ClearPing can ask it.
@@ -928,15 +928,27 @@ const traceRouteTool: McpTool = {
     'Trace the route to a target now, hop by hop, and save it with its other routes. Takes a few seconds for a path that works and up to a minute and a half for one that goes nowhere. Use it while something is failing: the route through a failure can only be traced while it lasts.',
   inputSchema: {
     type: 'object',
-    properties: { target: TARGET_REFERENCE, ...TIMEZONE_PROPERTY },
+    properties: {
+      target: TARGET_REFERENCE,
+      ip_version: {
+        type: 'string',
+        enum: TRACE_FAMILIES,
+        description: 'For a hostname: trace over "ipv4", "ipv6", or "both" in turn. Left out, the families the target is probed over.',
+      },
+      ...TIMEZONE_PROPERTY,
+    },
     required: ['target'],
     additionalProperties: false,
   },
   run: async args => {
     const timeZone = timeZoneFrom(args)
     const target = findTarget(await getAllTargets(), args.target)
+    const families = args.ip_version
+    if (families !== undefined && !isTraceFamilies(families)) throw new ToolError('ip_version is "ipv4", "ipv6" or "both".')
+    const problem = families && traceFamiliesProblem(target.host, families)
+    if (problem) throw new ToolError(`${problem}.`)
     await ensureTracerouteSchema()
-    const traces = await traceAndStore(target, 'manual')
+    const traces = await traceAndStore(target, 'manual', families)
     return { traceroutes: traces.map(trace => describeTrace(trace, target.name, timeZone)) }
   },
 }

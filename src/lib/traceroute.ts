@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { lookupService } from 'dns/promises';
 import type { ProbeIpVersion, Target, Traceroute, TracerouteHop } from '@/types/probe';
 import { getDatabase } from './database';
-import { classifyHost, normalizeHost, probeRuns, type AddressFamily } from './host';
+import { classifyHost, normalizeHost, probeRuns, type AddressFamily, type TraceFamilies } from './host';
 import { resolveHost } from './resolve';
 import { newestPerFamily, parseTraceroute, traceReached, tracerouteCommand } from './traceroute-parse';
 
@@ -332,21 +332,40 @@ export async function nameHops(trace: Traceroute): Promise<void> {
 }
 
 /**
- * Traces in progress, by target. A second request for a target already being
- * traced joins the first rather than starting another: two traces to the same
- * place at the same moment say the same thing and take twice the packets.
+ * Traces in progress, by target and the families asked for. A second request
+ * for a trace already running joins the first rather than starting another:
+ * two traces to the same place at the same moment say the same thing and
+ * take twice the packets.
  */
 const inFlight = new Map<string, Promise<Traceroute[]>>();
 
 /**
+ * Why a target's route cannot be traced over the families asked for, or null
+ * if it can. An address is reached over its own family only: tracing
+ * "8.8.8.8" over IPv6 cannot mean anything.
+ */
+export function traceFamiliesProblem(host: string, families: TraceFamilies): string | null {
+  const kind = classifyHost(normalizeHost(host));
+  if (kind === 'ipv4' && families === 'ipv6') return `${host} is an IPv4 address, so it can only be traced over IPv4`;
+  if (kind === 'ipv6' && families === 'ipv4') return `${host} is an IPv6 address, so it can only be traced over IPv6`;
+  return null;
+}
+
+/**
  * Trace a target and record the result.
  *
- * A target probed over both address families is traced over each: IPv4 and
- * IPv6 usually leave by different routes, and it is the route of whichever
- * one is failing that is wanted.
+ * Over the families asked for, or else the ones the target is probed over. A
+ * target over both is traced over each: IPv4 and IPv6 usually leave by
+ * different routes, and it is the route of whichever one is failing that is
+ * wanted.
  */
-export function traceAndStore(target: TraceTarget, trigger: Traceroute['trigger']): Promise<Traceroute[]> {
-  const running = inFlight.get(target.id);
+export function traceAndStore(
+  target: TraceTarget,
+  trigger: Traceroute['trigger'],
+  families?: TraceFamilies
+): Promise<Traceroute[]> {
+  const key = `${target.id}:${families ?? ''}`;
+  const running = inFlight.get(key);
   if (running) return running;
 
   const trace = (async () => {
@@ -355,7 +374,7 @@ export function traceAndStore(target: TraceTarget, trigger: Traceroute['trigger'
 
     // One after the other. Run together they would compete for the same
     // replies from the routers they share near this end.
-    for (const run of probeRuns(target.host, target.ipVersion)) {
+    for (const run of probeRuns(target.host, families ?? target.ipVersion)) {
       const result = await runTraceroute(target, trigger, run.ipVersion);
       await storeTraceroute(result);
 
@@ -368,8 +387,8 @@ export function traceAndStore(target: TraceTarget, trigger: Traceroute['trigger'
     }
 
     return traces;
-  })().finally(() => inFlight.delete(target.id));
+  })().finally(() => inFlight.delete(key));
 
-  inFlight.set(target.id, trace);
+  inFlight.set(key, trace);
   return trace;
 }

@@ -154,6 +154,10 @@ function ResolverTable({
               label: 'Resolver',
               render: (_, { reading, name }) => (
                 <span className="flex items-center gap-2">
+                  <span
+                    className={cn('size-2 shrink-0 rounded-full', reading.latency === null ? 'bg-destructive' : reading.loss > 0 ? 'bg-signal-moderate' : 'bg-signal-perfect')}
+                    aria-hidden="true"
+                  />
                   {/* By the name it has now, and without the protocol: the badge says that. */}
                   <span className="whitespace-nowrap font-medium text-foreground">{name}</span>
                   <Tooltip content={DNS_PROTOCOL_NAME[reading.protocol]}>

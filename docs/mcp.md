@@ -113,7 +113,7 @@ Give an assistant a **read and change** key (Settings → Keys, see
 | `update_target` | Changes a target's name, group, interval, address, probe or settings |
 | `set_target_paused` | Stops probing a target, or starts again |
 | `probe_now` | Takes a reading straight away |
-| `run_traceroute` | Traces the route to a target now and saves it |
+| `run_traceroute` | Traces the route to a target now and saves it; `ip_version` traces a name over `ipv4`, `ipv6` or `both` |
 
 > Add my router, my ISP's gateway and 1.1.1.1 as ping targets, in a group
 > called Network.

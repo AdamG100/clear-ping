@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import { ExpandableCard } from '@/components/arc/expandable-card/expandable-card'
+import { cn } from '@/lib/utils'
 import { FAMILY_LABEL } from '@/lib/host'
 import { resolversThatDiffer } from '@/lib/dns-resolver-series'
 import type { AddressFamily, FamilyReading } from '@/types/probe'
@@ -54,6 +55,8 @@ function summaryOf(latest: FamilyReading | undefined) {
     answered: counted ? `${answered} of ${sent} queries answered` : `${(100 - latest.packetLoss).toFixed(0)}% of queries answered`,
     silent: readings.filter(reading => reading.latency === null).length,
     differing: resolversThatDiffer(readings).size > 0,
+    // The family's state at a glance, in the colours the target list uses.
+    tone: !latest.success ? 'bg-destructive' : latest.packetLoss > 0 ? 'bg-signal-moderate' : 'bg-signal-perfect',
   }
 }
 
@@ -79,6 +82,7 @@ function describe(summary: ReturnType<typeof summaryOf>): string {
 }
 
 export function FamilySection({ family, detail, latest, children }: FamilySectionProps) {
+  const summary = summaryOf(latest)
   // Read once, from what was left last time.
   const [startOpen] = useState(() => readOpenFamilies().includes(family))
 
@@ -92,7 +96,8 @@ export function FamilySection({ family, detail, latest, children }: FamilySectio
   return (
     <ExpandableCard
       title={detail ? `${FAMILY_LABEL[family]}: ${detail}` : FAMILY_LABEL[family]}
-      description={describe(summaryOf(latest))}
+      description={describe(summary)}
+      leading={<span className={cn('size-2.5 shrink-0 rounded-full', summary?.tone ?? 'bg-muted-foreground/40')} aria-hidden="true" />}
       defaultExpanded={startOpen}
       onClickCapture={remember}
     >

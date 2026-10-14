@@ -5,9 +5,9 @@ import type { TargetStatistics } from "@/types/probe"
 import type { ProbeVocabulary } from "@/lib/probe-labels"
 import { cn } from "@/lib/utils"
 import { getLatencyColor, getPacketLossLabel, getPacketLossVar, isMeaningfulLoss, NO_DATA_COLOR } from "@/lib/packet-loss-colors"
-import { Clock, FileX, Gauge, Zap } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
+import { ArrowDown, ArrowUp, Clock, FileX, Gauge, TrendingUp, Zap } from "lucide-react"
 import { AnimatedCounter } from "@/components/arc/animated-counter/animated-counter"
-import { Badge, type BadgeTone } from "@/components/arc/badge/badge"
 
 /** How long ago something was, to the coarsest unit that says anything. */
 function describeAge(diffMs: number): string {
@@ -61,9 +61,6 @@ function StatItem({ label, value, variant = "default" }: { label: string; value:
   )
 }
 
-/** Good, bad or neither, for the verdict's badge. */
-const TREND_TONE: Record<"up" | "down" | "stable", BadgeTone> = { up: "success", down: "danger", stable: "warning" }
-
 interface StatCardProps {
   title: string
   icon: React.ReactNode
@@ -73,33 +70,70 @@ interface StatCardProps {
   stats: Array<{ label: string; value: string; variant?: Variant }>
   trend?: "up" | "down" | "stable"
   trendValue?: string
-  /** The colour the reading is in on the chart, marked beside the title. */
+  /** How the reading stands, in the colour it is drawn in on the chart: the card's glow, icon and verdict. */
   accentColor?: string
   lastUpdated?: Date
-  /** Nothing is being measured: the verdict says so instead of judging. */
+  /** No pulsing ring: nothing is being measured, so nothing should look live. */
   still?: boolean
   className?: string
 }
 
-function StatCard({ title, icon, main, mainLabel, stats, trend, trendValue, accentColor, lastUpdated, still = false, className }: StatCardProps) {
-  const neutral = still || !trend || trendValue === "No data" || trendValue === "Paused"
+function StatCard({ title, icon, main, mainLabel, stats, trend, trendValue, accentColor = "var(--accent)", lastUpdated, still = false, className }: StatCardProps) {
   return (
     // A container, so the four figures along the bottom can be laid out from
     // the card's own width: it is narrowest on a mid-sized screen, three
     // abreast, and wide again on a phone, where it has a row to itself.
-    <section className={cn("@container/card rounded-3xl border border-border bg-card p-4 @2xl/main:p-6", className)} aria-label={title}>
+    <section
+      className={cn("group @container/card relative overflow-hidden rounded-3xl border border-border bg-card p-4 transition-colors duration-300 hover:border-border-strong @2xl/main:p-6", className)}
+      aria-label={title}
+    >
+      {/* The card's glow, in the colour of how the reading stands, so the
+          state of all three can be taken in before any figure is read. */}
+      <div
+        className="pointer-events-none absolute -right-20 -top-20 h-65 w-65 rounded-full opacity-10 blur-3xl transition-[opacity,background-color] duration-500 group-hover:opacity-20"
+        style={{ backgroundColor: accentColor }}
+        aria-hidden="true"
+      />
+
       {/* Header. The verdict drops under the title where the card is too
           narrow for both, instead of squeezing the title onto three lines. */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
-          <span className="text-muted-foreground" aria-hidden="true">{icon}</span>
-          {title}
-          {accentColor && <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: accentColor }} aria-hidden="true" />}
-        </h3>
-        {trendValue && <Badge tone={neutral ? "neutral" : TREND_TONE[trend]}>{trendValue}</Badge>}
+      <div className="relative flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="relative flex size-10 shrink-0 items-center justify-center rounded-xl" aria-hidden="true">
+            {/* The pulse starts no brighter than the ring is at rest, so the
+                icon never blinks out against a solid square of its colour. */}
+            <div
+              className={cn("absolute inset-0 rounded-xl", !still && "custom-ping")}
+              style={{ backgroundColor: accentColor, opacity: 0.15, "--ping-peak": 0.15 } as React.CSSProperties}
+            />
+            <div className="absolute inset-0 rounded-xl" style={{ backgroundColor: accentColor, opacity: 0.08 }} />
+            <span className="relative" style={{ color: accentColor }}>{icon}</span>
+          </div>
+          <h3 className="text-sm font-medium text-foreground">{title}</h3>
+        </div>
+        <AnimatePresence mode="wait" initial={false}>
+          {trendValue && (
+            <motion.span
+              key={`${trend}-${trendValue}`}
+              className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+              // Mixed rather than given an alpha suffix: the colour is as
+              // often a `var(--…)` as a hex code.
+              style={{ backgroundColor: `color-mix(in oklab, ${accentColor} 14%, transparent)`, color: accentColor }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            >
+              {trend === "up" && <ArrowUp size={12} aria-hidden="true" />}
+              {trend === "down" && <ArrowDown size={12} aria-hidden="true" />}
+              {trend === "stable" && <TrendingUp size={12} aria-hidden="true" />}
+              {trendValue}
+            </motion.span>
+          )}
+        </AnimatePresence>
       </div>
 
-      <div className="mt-4 @2xl/main:mt-6">
+      <div className="relative mt-4 @2xl/main:mt-6">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           {/* A period with no readings says so with a dash, never a zero. */}
           <div className="font-mono text-3xl font-medium tabular-nums text-foreground">
@@ -116,7 +150,7 @@ function StatCard({ title, icon, main, mainLabel, stats, trend, trendValue, acce
 
       {/* Four across needs room for four figures the width of "123.4 ms"; in
           a card without it they overlapped, so there they go two by two. */}
-      <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 @2xs/card:grid-cols-4 @2xl/main:mt-6">
+      <div className="relative mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 @2xs/card:grid-cols-4 @2xl/main:mt-6">
         {stats.map((stat, index) => (
           <StatItem key={index} label={stat.label} value={stat.value} variant={stat.variant} />
         ))}
@@ -236,7 +270,7 @@ export default function StatsCards({
       <StatCard
         className={STAT_GRID_LEAD}
         title={vocabulary.latencyTitle}
-        icon={<Gauge size={16} strokeWidth={1.75} />}
+        icon={<Gauge size={20} strokeWidth={1.75} />}
         main={{ value: hasData ? medianLatency : null, suffix: " ms", decimals: 1 }}
         mainLabel={vocabulary.latencyLabel}
         accentColor={latencyAccentColor}
@@ -256,7 +290,7 @@ export default function StatsCards({
           They were previously hardcoded to 0% and to the average. */}
       <StatCard
         title={vocabulary.lossTitle}
-        icon={<FileX size={16} strokeWidth={1.75} />}
+        icon={<FileX size={20} strokeWidth={1.75} />}
         main={{ value: hasData ? packetLoss : null, suffix: "%", decimals: 2 }}
         mainLabel={hasData && statistics
           ? `${statistics.uptime.toFixed(1)}% of ${statistics.sampleCount} probes answered`
@@ -277,7 +311,7 @@ export default function StatsCards({
       {/* Jitter Card */}
       <StatCard
         title="Jitter"
-        icon={<Zap size={16} strokeWidth={1.75} />}
+        icon={<Zap size={20} strokeWidth={1.75} />}
         main={{ value: hasData ? jitter : null, suffix: " ms", decimals: 1 }}
         mainLabel={vocabulary.jitterLabel}
         accentColor={jitterAccentColor}

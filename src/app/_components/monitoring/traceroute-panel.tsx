@@ -1,20 +1,31 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { CheckCircle2, ChevronDown, ChevronRight, Route, Trash2, XCircle } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
+import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
+import { TextShimmer } from '@/components/arc/text-shimmer/text-shimmer'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useToast } from '@/components/notifications'
 import { cn } from '@/lib/utils'
 import { mean } from '@/lib/metrics'
+import {
+  addressFamilyFor,
+  canChooseTraceFamily,
+  classifyHost,
+  defaultTraceFamilies,
+  FAMILY_LABEL,
+  type AddressFamily,
+  type TraceFamilies,
+} from '@/lib/host'
 import { firstDeadHop, hopLoss, newestPerFamily } from '@/lib/traceroute-parse'
-import type { Traceroute, TracerouteHop } from '@/types/probe'
+import type { IpVersion, Traceroute, TracerouteHop } from '@/types/probe'
 
 /**
  * The route to a target, hop by hop.
@@ -26,6 +37,9 @@ import type { Traceroute, TracerouteHop } from '@/types/probe'
 
 interface TraceroutePanelProps {
   targetId: string
+  /** What is traced, and over which families unless someone picks others. */
+  host: string
+  ipVersion?: IpVersion
   /** Changes whenever a new probe lands, so traces taken by an alert show up. */
   refreshKey?: number
   /** The account signed in may look but not change anything: routes are shown, not traced or deleted. */
@@ -58,6 +72,29 @@ function summarize(trace: Traceroute): { text: string; tone: 'ok' | 'bad' } {
 function endToEnd(trace: Traceroute): number | null {
   return trace.reached ? mean(trace.hops.at(-1)?.rtts ?? []) : null
 }
+
+/** Which family a trace went over, read from the address it was traced to. */
+function familyOf(trace: Traceroute): AddressFamily | null {
+  const kind = classifyHost(trace.address)
+  return kind === 'ipv4' ? 4 : kind === 'ipv6' ? 6 : null
+}
+
+/** The runs a trace is made of, one per family, in the order they are run. */
+function familiesTraced(
+  host: string,
+  ipVersion: IpVersion | undefined,
+  families: TraceFamilies,
+  chosen: boolean
+): Array<AddressFamily | null> {
+  if (!chosen) return [addressFamilyFor(host, ipVersion)]
+  return families === 'both' ? [4, 6] : [families === 'ipv6' ? 6 : 4]
+}
+
+const FAMILY_OPTIONS = [
+  { value: 'ipv4', label: 'IPv4' },
+  { value: 'ipv6', label: 'IPv6' },
+  { value: 'both', label: 'Both' },
+]
 
 function formatTime(timestamp: Date): string {
   return timestamp.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -143,6 +180,50 @@ function LatencyBar({ hop, scale, state }: { hop: TracerouteHop; scale: number; 
         style={{ left: at(average) }}
       />
     </span>
+  )
+}
+
+// ─── A trace under way ──────────────────────────────────────────────────────
+
+const PLACEHOLDER_HOPS = 9
+
+/**
+ * A trace that has been asked for and not come back, in the place its result
+ * will take: a path of stops lighting up one after another, and how long it
+ * has been going. A healthy path takes seconds and a broken one up to a
+ * minute and a half, and a spinning button alone did not say which was
+ * happening, or that anything was.
+ */
+function TracingRow({ family, startedAt }: { family: AddressFamily | null; startedAt: number }) {
+  const reduceMotion = useReducedMotion()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000))
+
+  return (
+    <li className="rounded-2xl border border-primary/30 bg-primary/5 px-3 py-3">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
+        {family && <Badge size="sm" tone="info">{FAMILY_LABEL[family]}</Badge>}
+        <TextShimmer className="font-medium">{family ? `Tracing the ${FAMILY_LABEL[family]} route` : 'Tracing the route'}</TextShimmer>
+        <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground">{seconds}s</span>
+      </div>
+      <div className="mt-3 flex items-center px-1" aria-hidden="true">
+        {Array.from({ length: PLACEHOLDER_HOPS }, (_, index) => (
+          <Fragment key={index}>
+            {index > 0 && <span className="h-px flex-1 bg-primary/25" />}
+            <motion.span
+              className="size-2.5 shrink-0 rounded-full bg-primary"
+              initial={false}
+              animate={reduceMotion ? { opacity: 0.5 } : { opacity: [0.15, 1, 0.15], scale: [0.8, 1.15, 0.8] }}
+              transition={reduceMotion ? { duration: 0 } : { duration: 1.6, repeat: Infinity, delay: index * 0.14, ease: 'easeInOut' }}
+            />
+          </Fragment>
+        ))}
+      </div>
+    </li>
   )
 }
 
@@ -270,7 +351,12 @@ function HopTable({ trace }: { trace: Traceroute }) {
       {dead !== null && (
         <div className="mt-3">
           <Alert tone="danger" title={`Nothing answered from hop ${dead} onwards`}>
-            The fault is at that hop or just beyond the last one that replied.
+            {/* Seen on a network whose IPv6 ends at the provider's first
+                routers: easily read as the target's fault, and a DNS target's
+                healthy IPv6 line makes it look stranger still. */}
+            {familyOf(trace) === 6 && dead <= 4
+              ? "IPv6 stops inside your own provider's network, so this machine has no working IPv6 path past it. A DNS target's IPv6 line is its AAAA lookup, which can be answered over IPv4, so that can look healthy while this does not."
+              : 'The fault is at that hop or just beyond the last one that replied.'}
           </Alert>
         </div>
       )}
@@ -280,13 +366,19 @@ function HopTable({ trace }: { trace: Traceroute }) {
 
 // ─── The panel ──────────────────────────────────────────────────────────────
 
-export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: TraceroutePanelProps) {
+export function TraceroutePanel({ targetId, host, ipVersion, refreshKey, readOnly = false }: TraceroutePanelProps) {
   const { notify, reportError } = useToast()
   const [traces, setTraces] = useState<Traceroute[]>([])
   // How many are kept in all, which can be more than the newest few listed.
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [running, setRunning] = useState(false)
+  // When the trace now under way was asked for, or null when none is.
+  const [startedAt, setStartedAt] = useState<number | null>(null)
+  const running = startedAt !== null
+  // A name can be traced over either family; it starts on the ones it is probed over.
+  const choosable = canChooseTraceFamily(host)
+  const [families, setFamilies] = useState<TraceFamilies>(() => defaultTraceFamilies(host, ipVersion))
+  const [tracing, setTracing] = useState<Array<AddressFamily | null>>([])
   const [deleting, setDeleting] = useState(false)
   // The newest trace is open unless another has been chosen.
   const [chosenId, setChosenId] = useState<string | null | undefined>(undefined)
@@ -331,9 +423,13 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
   }, [traces, load])
 
   const trace = async () => {
-    setRunning(true)
+    setTracing(familiesTraced(host, ipVersion, families, choosable))
+    setStartedAt(Date.now())
     try {
-      const response = await fetch(`/api/targets/${targetId}/traceroute`, { method: 'POST' })
+      const response = await fetch(`/api/targets/${targetId}/traceroute`, {
+        method: 'POST',
+        ...(choosable ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ family: families }) } : {}),
+      })
       if (!response.ok) {
         const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
         reportError('Traceroute failed', error)
@@ -344,7 +440,7 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
     } catch (error) {
       reportError('Traceroute failed', error)
     } finally {
-      setRunning(false)
+      setStartedAt(null)
     }
   }
 
@@ -395,13 +491,25 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
   const openId = chosenId === undefined ? traces[0]?.id ?? null : chosenId
 
   return (
-    <section className="rounded-3xl border border-border bg-card">
+    <section
+      className={cn('relative rounded-3xl border bg-card transition-colors duration-300', running ? 'border-primary/40' : 'border-border')}
+      aria-busy={running}
+    >
+      {/* A light running along the top edge while a trace is under way, so
+          the whole card says it is working, not only its button. */}
+      {running && <span className="trace-sweep" aria-hidden="true" />}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-4 @2xl/main:px-5">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h2 className="text-sm font-medium text-foreground">Route</h2>
-          <p className="text-xs text-muted-foreground">
-            Where the path goes, hop by hop. Traced automatically when a loss alert fires.
-          </p>
+          {running ? (
+            <TextShimmer className="text-xs">
+              {tracing.length > 1 ? 'Tracing over IPv4, then IPv6' : 'Tracing, which can take up to a minute and a half'}
+            </TextShimmer>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Where the path goes, hop by hop. Traced automatically when a loss alert fires.
+            </p>
+          )}
         </div>
         {!readOnly && <div className="flex shrink-0 items-center gap-2">
           {olderCount > 0 && (
@@ -416,6 +524,18 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
               onConfirm={removeOlder}
             />
           )}
+          {/* Which families the next trace goes over. Only a name has a
+              choice: an address is reached over its own family alone. */}
+          {choosable && (
+            <div inert={running} className={cn('flex transition-opacity', running && 'opacity-60')}>
+              <SegmentedControl
+                label="Trace over"
+                value={families}
+                onValueChange={value => setFamilies(value as TraceFamilies)}
+                options={FAMILY_OPTIONS}
+              />
+            </div>
+          )}
           <Button variant="secondary" size="sm" onClick={trace} loading={running}>
             <Route size={16} strokeWidth={1.75} aria-hidden="true" />
             Trace route
@@ -426,25 +546,24 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
       <div className="px-4 pb-4 pt-3 @2xl/main:px-5">
         {loading ? (
           <Skeleton label="Loading the routes" lines={2} />
-        ) : traces.length === 0 ? (
+        ) : traces.length === 0 && !running ? (
           <EmptyState
             icon={<Route size={24} strokeWidth={1.75} />}
-            title={running ? 'Tracing the route' : 'No route recorded yet'}
-            description={
-              running
-                ? 'A healthy path takes a few seconds; one that goes nowhere can take a minute.'
-                : 'Trace it to see every router between here and the target, and how long each takes to answer.'
-            }
+            title="No route recorded yet"
+            description="Trace it to see every router between here and the target, and how long each takes to answer."
           />
         ) : (
           <>
             <ul className="space-y-1.5">
+              {startedAt !== null &&
+                tracing.map(family => <TracingRow key={family ?? 'any'} family={family} startedAt={startedAt} />)}
               {traces.map(item => {
                 const open = item.id === openId
                 const summary = summarize(item)
                 const took = endToEnd(item)
                 const StatusIcon = summary.tone === 'ok' ? CheckCircle2 : XCircle
                 const time = formatTime(item.timestamp)
+                const family = familyOf(item)
 
                 return (
                   <li
@@ -470,6 +589,9 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
                           className={cn('h-4 w-4 shrink-0', summary.tone === 'ok' ? 'text-signal-perfect' : 'text-destructive')}
                           aria-hidden="true"
                         />
+                        {/* Which family, first: the two take different routes,
+                            and a list of both read as one otherwise. */}
+                        {family && <Badge size="sm" tone="info">{FAMILY_LABEL[family]}</Badge>}
                         <span className={cn('font-medium', summary.tone === 'bad' ? 'text-destructive' : 'text-foreground')}>
                           {summary.text}
                         </span>

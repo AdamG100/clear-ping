@@ -1288,6 +1288,8 @@ export function Dashboard() {
                   <TraceroutePanel
                     key={selectedTarget.id}
                     targetId={selectedTarget.id}
+                    host={selectedTarget.host}
+                    ipVersion={selectedTarget.ipVersion}
                     refreshKey={lastUpdated?.getTime()}
                     readOnly={readOnly}
                   />

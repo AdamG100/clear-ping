@@ -9,7 +9,7 @@ import {
   TimeAxis,
   TimeGrid,
   chartHeightFor,
-  holdInside,
+  readingsBoxStyle,
   latencyDomain,
   niceTicks,
   useChartBrush,
@@ -236,7 +236,9 @@ export const CompareTrace = memo(function CompareTrace({
 
   const spanMs = end - start
   const hoverTime = hoverX === null ? null : start + ((hoverX - PAD.left) / plotW) * spanMs
-  const tooltipLeft = hoverX === null ? 0 : holdInside(hoverX, 130, width)
+  const readingsBox = hoverX === null || !readings
+    ? undefined
+    : readingsBoxStyle(hoverX, readings.map(({ at }) => at?.y), { width, height: totalHeight, top: PAD.top, bottom: traceBottom, halfWidth: 130, boxHeight: 34 + 18 * readings.length })
   const dimmed = (key: string) => highlighted !== null && highlighted !== key
 
   return (
@@ -387,8 +389,8 @@ export const CompareTrace = memo(function CompareTrace({
 
       {hoverTime !== null && readings && !selection && (
         <div
-          className="pointer-events-none absolute top-1 z-10 w-max max-w-64 -translate-x-1/2 rounded-md border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur-sm"
-          style={{ left: `${(tooltipLeft / width) * 100}%` }}
+          className="pointer-events-none absolute z-10 w-max max-w-64 rounded-md border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur-sm"
+          style={readingsBox}
         >
           <p className="font-mono text-[11px] text-muted-foreground">
             {new Date(hoverTime).toLocaleString('en-US', {

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from 'react'
 import { timeTicks } from '@/lib/time-ticks'
 
 /**
@@ -60,6 +60,48 @@ export function chartHeightFor(width: number, full: number) {
 export function holdInside(centre: number, halfWidth: number, chartWidth: number) {
   if (chartWidth <= halfWidth * 2) return chartWidth / 2
   return Math.min(Math.max(centre, halfWidth), chartWidth - halfWidth)
+}
+
+/** The space between the crosshair and the readings beside it. */
+const READINGS_GAP_PX = 16
+
+/**
+ * Where the box of readings under the pointer goes. Beside the crosshair, on
+ * whichever side has more room, and at the top or the bottom of the plot,
+ * whichever covers fewer of the points being read: laid across the top it
+ * covered the lines that run high, which are the very ones being pointed at.
+ * On a phone there is no room beside it, so it is centred on the crosshair
+ * and only moves up or down.
+ *
+ * `pointsY` are the hovered points' heights, `top`/`bottom` the plot's
+ * edges and `boxHeight` about how tall the box is, all in the chart's pixels.
+ */
+export function readingsBoxStyle(
+  x: number,
+  pointsY: Array<number | null | undefined>,
+  chart: { width: number; height: number; top: number; bottom: number; halfWidth: number; boxHeight: number }
+): CSSProperties {
+  const heights = pointsY.filter((y): y is number => typeof y === 'number' && Number.isFinite(y))
+  const margin = 8
+  // How many points each place would cover, then how close it comes to the nearest.
+  const cost = (from: number, to: number) => {
+    const covered = heights.filter(y => y >= from - margin && y <= to + margin).length
+    const nearest = Math.min(Infinity, ...heights.map(y => (y < from ? from - y : y > to ? y - to : 0)))
+    return covered * 10_000 - Math.min(nearest, 9_999)
+  }
+  const atTop = cost(chart.top, chart.top + chart.boxHeight)
+  const atBottom = cost(chart.bottom - chart.boxHeight, chart.bottom)
+  const vertical = atBottom < atTop ? { bottom: chart.height - chart.bottom } : { top: chart.top }
+
+  if (chart.width < NARROW_CHART_PX) {
+    return { ...vertical, left: `${(holdInside(x, chart.halfWidth, chart.width) / chart.width) * 100}%`, transform: 'translateX(-50%)' }
+  }
+  const toRight = x < chart.width / 2
+  return {
+    ...vertical,
+    left: `${(x / chart.width) * 100}%`,
+    transform: toRight ? `translateX(${READINGS_GAP_PX}px)` : `translateX(calc(-100% - ${READINGS_GAP_PX}px))`,
+  }
 }
 
 /**

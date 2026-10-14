@@ -150,6 +150,34 @@ export function isIpVersion(value: unknown): value is IpVersion {
   return IP_VERSIONS.includes(value as IpVersion)
 }
 
+/** What a route can be traced over when someone says: one family, or each in turn. */
+export type TraceFamilies = Exclude<IpVersion, 'auto'>
+
+export const TRACE_FAMILIES: readonly TraceFamilies[] = ['ipv4', 'ipv6', 'both']
+
+export function isTraceFamilies(value: unknown): value is TraceFamilies {
+  return TRACE_FAMILIES.includes(value as TraceFamilies)
+}
+
+/**
+ * Whether the family a target's route is traced over is anyone's to choose.
+ * A name can be traced over either; an address only over its own.
+ */
+export function canChooseTraceFamily(host: string): boolean {
+  return classifyHost(host) === 'hostname'
+}
+
+/**
+ * The family a trace is offered over first: the one the target is probed
+ * over. A name left to the resolver starts on IPv4, which nearly every name
+ * has; one with no IPv4 address says so in the trace, and IPv6 is one choice
+ * away.
+ */
+export function defaultTraceFamilies(host: string, ipVersion: IpVersion = 'auto'): TraceFamilies {
+  if (isDualStack(host, ipVersion)) return 'both'
+  return addressFamilyFor(host, ipVersion) === 6 ? 'ipv6' : 'ipv4'
+}
+
 /**
  * Public recursive resolvers. Typing one of these into the add-target dialog
  * almost always means "watch this DNS service", so the dialog suggests a DNS

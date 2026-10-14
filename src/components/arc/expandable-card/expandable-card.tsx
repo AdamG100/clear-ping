@@ -11,6 +11,8 @@ import styles from "./expandable-card.module.css";
 export interface ExpandableCardProps extends Omit<ComponentPropsWithoutRef<"article">, "title" | "children" | "onAnimationStart" | "onAnimationEnd" | "onAnimationIteration" | "onDrag" | "onDragStart" | "onDragEnd" | "onDragOver" | "onDragLeave" | "onDragEnter" | "onDragExit" | "onDrop"> {
   title: string;
   description?: string;
+  /** Shown before the title, such as a status dot. (ClearPing's addition.) */
+  leading?: ReactNode;
   children: ReactNode;
   defaultExpanded?: boolean;
   /** Collapsed width cap in px. The card is centered and never wider than its container. Fills the container when omitted. */
@@ -50,7 +52,7 @@ function RollingText({ text, reduced }: { text: string; reduced: boolean }) {
   </span>;
 }
 
-export function ExpandableCard({ title, description, children, defaultExpanded = false, width, expandedWidth, className, style, onKeyDown, ...rest }: ExpandableCardProps) {
+export function ExpandableCard({ title, description, leading, children, defaultExpanded = false, width, expandedWidth, className, style, onKeyDown, ...rest }: ExpandableCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [hold, setHold] = useState(true);
   const lastToggle = useRef(0);
@@ -115,7 +117,7 @@ export function ExpandableCard({ title, description, children, defaultExpanded =
       onKeyDown={handleKeyDown}
     >
       <button ref={triggerRef} type="button" className={styles.trigger} aria-expanded={expanded} aria-controls={panelId} onClick={() => toggle(!expanded)}>
-        <span className={styles.copy}><strong>{title}</strong>{description && <span className={styles.description}><RollingText text={description} reduced={reduceMotion} /></span>}</span>
+        <span className={styles.lead}>{leading}<span className={styles.copy}><strong>{title}</strong>{description && <span className={styles.description}><RollingText text={description} reduced={reduceMotion} /></span>}</span></span>
         <motion.span className={styles.arrow} initial={false} animate={{ rotate: expanded ? 180 : 0 }} transition={reduceMotion ? still : boxTransition(expanded, hold)}><NavArrowDown width={18} height={18} aria-hidden="true" /></motion.span>
       </button>
       {/* The panel stays mounted so a second click mid-animation reverses from where it is; inert keeps closed details out of reach. */}

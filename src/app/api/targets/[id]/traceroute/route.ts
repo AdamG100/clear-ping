@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTargetById } from '@/lib/database';
+import { isTraceFamilies } from '@/lib/host';
 import { initializeServer } from '@/lib/init';
 import {
   countTraceroutes,
@@ -8,6 +9,7 @@ import {
   ensureTracerouteSchema,
   getTraceroutes,
   traceAndStore,
+  traceFamiliesProblem,
 } from '@/lib/traceroute';
 
 /**
@@ -37,6 +39,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 /**
  * POST /api/targets/[id]/traceroute - Trace the route now
  *
+ * Body, optional: { "family": "ipv4" | "ipv6" | "both" } to trace over those
+ * families instead of the ones the target is probed over.
+ *
  * Responds once the trace has finished, which takes a few seconds for a
  * healthy path and up to about a minute for one that goes nowhere.
  */
@@ -50,7 +55,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'Target not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ traceroutes: await traceAndStore(target, 'manual') });
+    const body: unknown = await request.json().catch(() => ({}));
+    const family = body && typeof body === 'object' ? (body as { family?: unknown }).family : undefined;
+    if (family !== undefined && !isTraceFamilies(family)) {
+      return NextResponse.json({ error: 'family is "ipv4", "ipv6" or "both"' }, { status: 400 });
+    }
+    const problem = family && traceFamiliesProblem(target.host, family);
+    if (problem) return NextResponse.json({ error: problem }, { status: 400 });
+
+    return NextResponse.json({ traceroutes: await traceAndStore(target, 'manual', family) });
   } catch (error) {
     console.error('Error running traceroute:', error);
     return NextResponse.json({ error: 'Failed to run traceroute' }, { status: 500 });
