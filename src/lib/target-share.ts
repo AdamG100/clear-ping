@@ -181,3 +181,80 @@ export async function decodeShare(text: string): Promise<ShareDecoding> {
 
   return { ok: true, targets, skipped: packed.length - targets.length }
 }
+
+// ─── Files ──────────────────────────────────────────────────────────────────
+
+/**
+ * The same list as a file, for where a link does not suit: kept as a backup,
+ * or sent by email or on a stick. Written out in full and readable, so it can
+ * be looked over, or edited, before it is imported.
+ */
+export const EXPORT_KIND = 'clearping-targets'
+
+/** A file bigger than this is not an export of targets. */
+export const MAX_IMPORT_FILE_BYTES = 5_000_000
+
+export interface TargetExport {
+  kind: typeof EXPORT_KIND
+  version: 1
+  exportedAt: string
+  targets: TargetDefinition[]
+}
+
+/** The file for these targets: its name, and what goes in it. */
+export function exportTargets(targets: TargetDefinition[], now = new Date()): { fileName: string; text: string } {
+  const file: TargetExport = { kind: EXPORT_KIND, version: 1, exportedAt: now.toISOString(), targets }
+  return {
+    fileName: `clearping-targets-${now.toISOString().slice(0, 10)}.json`,
+    text: JSON.stringify(file, null, 2) + '\n',
+  }
+}
+
+const NOT_A_FILE = 'That is not a ClearPing export of targets.'
+
+/**
+ * Read the targets out of an exported file. Never throws. Takes the file as
+ * exported, or just its list of targets; and, as a link's targets are, holds
+ * each to the rules a typed one is, leaving out and counting what fails.
+ */
+export function readTargetFile(text: string): ShareDecoding {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { ok: false, error: NOT_A_FILE }
+  }
+
+  let entries: unknown
+  if (Array.isArray(parsed)) {
+    entries = parsed
+  } else if (parsed && typeof parsed === 'object') {
+    const file = parsed as Partial<TargetExport>
+    if (file.kind !== EXPORT_KIND) return { ok: false, error: NOT_A_FILE }
+    if (typeof file.version === 'number' && file.version > 1) {
+      return { ok: false, error: 'That export is from a newer ClearPing. Update this one to import it.' }
+    }
+    entries = file.targets
+  }
+  if (!Array.isArray(entries)) return { ok: false, error: NOT_A_FILE }
+  if (entries.length > MAX_SHARED_TARGETS) {
+    return { ok: false, error: `At most ${MAX_SHARED_TARGETS} targets can be imported at once.` }
+  }
+
+  const targets = entries
+    .map(entry => validateTargetDefinition(entry))
+    .flatMap(checked => (checked.ok ? [checked.target] : []))
+  if (targets.length === 0) return { ok: false, error: 'There are no targets in that file.' }
+
+  return { ok: true, targets, skipped: entries.length - targets.length }
+}
+
+/**
+ * Whatever was pasted or chosen to import: a share link, or the contents of an
+ * exported file. Never throws.
+ */
+export async function decodeImport(text: string): Promise<ShareDecoding> {
+  const trimmed = (text ?? '').trim()
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return readTargetFile(trimmed)
+  return decodeShare(trimmed)
+}

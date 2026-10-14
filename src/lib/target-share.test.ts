@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { TargetDefinition } from '@/types/probe'
 import {
   MAX_SHARED_TARGETS,
+  decodeImport,
   decodeShare,
   encodeShare,
+  exportTargets,
   extractShareCode,
+  readTargetFile,
   shareLinkFor,
 } from './target-share'
 
@@ -77,6 +80,38 @@ describe('share links', () => {
     expect(extractShareCode('')).toBeNull()
     expect(extractShareCode('#section')).toBeNull()
     expect(extractShareCode('https://example.com/')).toBeNull()
+  })
+})
+
+describe('exported files', () => {
+  it('bring every kind of target back exactly as it was exported, under a dated name', () => {
+    const { fileName, text } = exportTargets(TARGETS, new Date('2026-10-14T12:00:00Z'))
+    expect(fileName).toBe('clearping-targets-2026-10-14.json')
+    expect(JSON.parse(text)).toMatchObject({ kind: 'clearping-targets', version: 1 })
+    expect(readTargetFile(text)).toEqual({ ok: true, targets: TARGETS, skipped: 0 })
+  })
+
+  it('take a bare list of targets too, as someone editing one by hand might leave it', () => {
+    expect(readTargetFile(JSON.stringify(TARGETS.slice(0, 2)))).toMatchObject({ ok: true, targets: TARGETS.slice(0, 2) })
+  })
+
+  it('leave out, and count, entries that are not targets', () => {
+    const text = JSON.stringify({ kind: 'clearping-targets', version: 1, targets: [TARGETS[0], { host: '' }, 'nonsense'] })
+    expect(readTargetFile(text)).toMatchObject({ ok: true, targets: [TARGETS[0]], skipped: 2 })
+  })
+
+  it('say so for what is not an export, or one from a newer ClearPing', () => {
+    for (const text of ['', 'not json', '{"kind":"something-else","targets":[]}', '{"kind":"clearping-targets"}', '[]']) {
+      expect(readTargetFile(text).ok).toBe(false)
+    }
+    expect(readTargetFile('{"kind":"clearping-targets","version":2,"targets":[]}')).toMatchObject({ ok: false, error: expect.stringContaining('newer') })
+    const tooMany = JSON.stringify(Array.from({ length: MAX_SHARED_TARGETS + 1 }, () => TARGETS[0]))
+    expect(readTargetFile(tooMany)).toMatchObject({ ok: false, error: expect.stringContaining(String(MAX_SHARED_TARGETS)) })
+  })
+
+  it('import from a file or a link alike', async () => {
+    expect(await decodeImport(exportTargets(TARGETS).text)).toMatchObject({ ok: true, targets: TARGETS })
+    expect(await decodeImport(shareLinkFor('https://ping.example', await encodeShare(TARGETS)))).toMatchObject({ ok: true, targets: TARGETS })
   })
 })
 

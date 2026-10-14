@@ -23,9 +23,11 @@ looks different from one that is unstable.
   between them, and collapse a group to one trace for everything in it.
 - **Comparison charts.** Put every target in a group on one chart to see
   whether a slowdown hit one of them or all of them.
-- **Share links.** Tick some targets, or all of them, and get a link that
-  holds them. Someone else pastes it into their ClearPing and chooses which
-  to add.
+- **Share links and files.** Tick some targets, or all of them, and get a link
+  that holds them, or download them as a JSON file. Someone else pastes the
+  link, or chooses the file, in their ClearPing and picks which to add. Neither
+  needs the two ClearPings to reach each other, so it works between home
+  networks; the file doubles as a backup of what you monitor.
 - **Alerts.** One screen for all of them: make an alert, tick the targets it
   watches, and send it to any service [Apprise](https://github.com/caronc/apprise)
   can notify: Discord, Slack, Telegram, email, ntfy, a webhook and over a

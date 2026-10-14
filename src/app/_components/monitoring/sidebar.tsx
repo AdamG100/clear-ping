@@ -1512,6 +1512,7 @@ export function Sidebar({
         existing={targets}
         groupOrders={groupOrders}
         incomingCode={incomingShareCode}
+        canImport={!readOnly}
         onImport={async imported => {
           const added = await onImportTargets(imported)
           if (added) closeShareDialog()

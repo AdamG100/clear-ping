@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, use, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Copy, Download, Share2 } from 'lucide-react'
+import { Check, Copy, Download, FileDown, FileUp, Share2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,9 +17,11 @@ import { cn } from '@/lib/utils'
 import { buildSidebarLayout, groupsInOrder } from '@/lib/sidebar-layout'
 import { definitionOf, measurementKey } from '@/lib/target-definition'
 import {
+  MAX_IMPORT_FILE_BYTES,
   MAX_SHARED_TARGETS,
-  decodeShare,
+  decodeImport,
   encodeShare,
+  exportTargets,
   shareLinkFor,
   type ShareDecoding,
 } from '@/lib/target-share'
@@ -31,6 +33,10 @@ import type { GroupOrder, Target, TargetDefinition } from '@/types/probe'
  *
  * Both ends of the same thing, so they share a dialog: whoever is shown how to
  * make a link has also been shown where the other person will paste it.
+ *
+ * A link or a file. The link is the list itself, so it needs no connection
+ * between the two ClearPings, but it has to be pasted somewhere; a file can be
+ * kept as a backup, or sent where a link cannot be.
  */
 
 type Tab = 'share' | 'import'
@@ -74,18 +80,32 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
 
   const tooMany = selected.size > MAX_SHARED_TARGETS
 
-  const createLink = async () => {
-    // In the order the sidebar lists them, which is the order they arrive in.
+  /** The ticked targets in the order the sidebar lists them, which is the order they arrive in. */
+  const chosen = () => {
     const layout = buildSidebarLayout(targets, groupOrders)
     const byId = new Map(targets.map(target => [target.id, target]))
-    const chosen = groupsInOrder(layout)
+    return groupsInOrder(layout)
       .flatMap(group => layout.items[group])
       .filter(id => selected.has(id))
       .map(id => byId.get(id))
       .filter((target): target is Target => !!target)
+      .map(definitionOf)
+  }
 
+  const downloadFile = () => {
+    const { fileName, text } = exportTargets(chosen())
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    // After the browser has taken the download.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
+
+  const createLink = async () => {
     try {
-      const code = await encodeShare(chosen.map(definitionOf))
+      const code = await encodeShare(chosen())
       setLink(shareLinkFor(window.location.origin, code))
       setCopyState('idle')
     } catch (error) {
@@ -148,17 +168,24 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
         </div>
       ) : (
         <div className="space-y-2">
-          <Button type="button" className="w-full" onClick={createLink} disabled={selected.size === 0 || tooMany}>
-            <Share2 className="h-4 w-4" />
-            {selected.size === 0 ? 'Tick the targets to share' : `Create a share link for ${plural(selected.size)}`}
-          </Button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button type="button" className="min-w-0 flex-1" onClick={createLink} disabled={selected.size === 0 || tooMany}>
+              <Share2 className="h-4 w-4" />
+              {selected.size === 0 ? 'Tick the targets to share' : `Create a share link for ${plural(selected.size)}`}
+            </Button>
+            <Button type="button" variant="outline" className="shrink-0" onClick={downloadFile} disabled={selected.size === 0 || tooMany}>
+              <FileDown className="h-4 w-4" />
+              Download as a file
+            </Button>
+          </div>
           <p className={cn(HINT, tooMany && 'text-destructive')}>
             {tooMany ? (
-              <>A link holds at most {MAX_SHARED_TARGETS} targets. Untick some, or share them as two links.</>
+              <>A link or file holds at most {MAX_SHARED_TARGETS} targets. Untick some, or share them in two.</>
             ) : (
               <>
-                The link is the list itself: each target&apos;s name, address, probe settings, interval and group.
-                Nothing recorded for them goes with it, and no alerts.
+                The link, or the file, is the list itself: each target&apos;s name, address, probe settings, interval
+                and group. Nothing recorded for them goes with it, and no alerts. Neither needs the two ClearPings
+                to reach each other: a link is pasted into the other one, a file chosen there under Import.
               </>
             )}
           </p>
@@ -218,7 +245,7 @@ function ImportPreview({ decoding, existing, onImport }: ImportProps & { decodin
     <div className="space-y-4">
       <div className="space-y-2">
         <p className="text-xs text-muted-foreground">
-          The link holds {plural(decoded.targets.length)}.
+          It holds {plural(decoded.targets.length)}.
           {alreadyHere > 0 && ` ${alreadyHere} of them ${alreadyHere === 1 ? 'is' : 'are'} monitored here already, and start unticked.`}
           {decoded.skipped > 0 && ` ${decoded.skipped} more could not be read and ${decoded.skipped === 1 ? 'was' : 'were'} left out.`}
         </p>
@@ -241,15 +268,57 @@ function ImportPreview({ decoding, existing, onImport }: ImportProps & { decodin
 
 function ImportPanel({ initialText, existing, onImport }: ImportProps & { initialText: string }) {
   const [text, setText] = useState(initialText)
+  // A file chosen takes the place of anything pasted, until it is put back.
+  const [file, setFile] = useState<{ name: string; text: string } | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   const pasted = text.trim()
-  // Read as it is pasted. Made here, not in the preview that waits on it: a
-  // component that is still waiting keeps nothing, and would start it again.
-  const decoding = useMemo(() => (pasted ? decodeShare(pasted) : null), [pasted])
+  const source = file?.text ?? pasted
+  // Read as it is pasted or chosen. Made here, not in the preview that waits on
+  // it: a component that is still waiting keeps nothing, and would start it again.
+  const decoding = useMemo(() => (source ? decodeImport(source) : null), [source])
+
+  const chooseFile = async (chosen: File | undefined) => {
+    if (!chosen) return
+    setFileError(null)
+    if (chosen.size > MAX_IMPORT_FILE_BYTES) {
+      setFileError(`${chosen.name} is too big to be an export of targets.`)
+      return
+    }
+    setFile({ name: chosen.name, text: await chosen.text() })
+  }
 
   return (
     <div className="space-y-4">
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={event => {
+          void chooseFile(event.target.files?.[0])
+          // The same file chosen again, after a change to it, is read again.
+          event.target.value = ''
+        }}
+      />
+
+      {file ? (
+        <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+          <FileUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <p className="min-w-0 flex-1 truncate font-mono text-xs text-card-foreground">{file.name}</p>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setFile(null)} aria-label="Import something else">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
       <div className="space-y-1.5">
-        <Label htmlFor="import-link" className={FIELD_LABEL}>Share link</Label>
+        <div className="flex items-end justify-between gap-2">
+          <Label htmlFor="import-link" className={FIELD_LABEL}>Share link</Label>
+          <Button type="button" size="sm" variant="outline" onClick={() => fileInput.current?.click()}>
+            <FileUp className="h-4 w-4" />
+            Choose a file
+          </Button>
+        </div>
         <textarea
           id="import-link"
           rows={3}
@@ -268,17 +337,18 @@ function ImportPanel({ initialText, existing, onImport }: ImportProps & { initia
         />
         {!decoding && (
           <p id="import-link-hint" className={HINT}>
-            A link made under Share, on this ClearPing or on someone else&apos;s. You are shown what is in it,
-            and choose what to add, before anything is added.
+            A link made under Share, on this ClearPing or on someone else&apos;s, or a file downloaded there. You
+            are shown what is in it, and choose what to add, before anything is added.
           </p>
         )}
+        {fileError && <p className="text-xs text-destructive" role="alert">{fileError}</p>}
       </div>
+      )}
 
       {decoding && (
         <Suspense fallback={null}>
-          {/* Keyed by what was pasted: a different link is a different list,
-              ticked from scratch. */}
-          <ImportPreview key={pasted} decoding={decoding} existing={existing} onImport={onImport} />
+          {/* Keyed by what was pasted or chosen: a different list, ticked from scratch. */}
+          <ImportPreview key={source} decoding={decoding} existing={existing} onImport={onImport} />
         </Suspense>
       )}
     </div>
@@ -293,12 +363,16 @@ interface ShareDialogProps extends ImportProps {
   groupOrders: GroupOrder[]
   /** The share code the page was opened with, if it was opened from a share link. */
   incomingCode: string | null
+  /** False for an account that may only look: it can share what is here, but not add to it. */
+  canImport?: boolean
 }
 
-function ShareDialogBody({ existing, groupOrders, incomingCode, onImport }: Omit<ShareDialogProps, 'open' | 'onOpenChange'>) {
+function ShareDialogBody({ existing, groupOrders, incomingCode, onImport, canImport = true }: Omit<ShareDialogProps, 'open' | 'onOpenChange'>) {
   // Someone who followed a link came to import it, and with no targets yet
   // importing is all there is to do.
-  const [tab, setTab] = useState<Tab>(incomingCode || existing.length === 0 ? 'import' : 'share')
+  const [chosenTab, setTab] = useState<Tab>(incomingCode || existing.length === 0 ? 'import' : 'share')
+  const tab: Tab = canImport ? chosenTab : 'share'
+  const tabs = canImport ? TABS : TABS.filter(option => option.value === 'share')
 
   return (
     <>
@@ -310,16 +384,17 @@ function ShareDialogBody({ existing, groupOrders, incomingCode, onImport }: Omit
           Share targets
         </DialogTitle>
         <DialogDescription className="text-muted-foreground">
-          Send the targets you monitor to someone else&apos;s ClearPing as a link, or add the ones they sent you.
+          Send the targets you monitor to someone else&apos;s ClearPing as a link or a file, or add the ones they
+          sent you.
         </DialogDescription>
       </DialogHeader>
 
-      <div
+      {tabs.length > 1 && <div
         className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5"
         role="tablist"
         aria-label="Share or import"
       >
-        {TABS.map(option => (
+        {tabs.map(option => (
           <button
             key={option.value}
             type="button"
@@ -340,7 +415,7 @@ function ShareDialogBody({ existing, groupOrders, incomingCode, onImport }: Omit
             {option.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {/* Both are kept while the dialog is open, and the one not on show is
           hidden: looking at the other tab should not untick a list or lose a
@@ -348,9 +423,11 @@ function ShareDialogBody({ existing, groupOrders, incomingCode, onImport }: Omit
       <div role="tabpanel" id="share-panel-share" aria-labelledby="share-tab-share" hidden={tab !== 'share'}>
         <SharePanel targets={existing} groupOrders={groupOrders} />
       </div>
-      <div role="tabpanel" id="share-panel-import" aria-labelledby="share-tab-import" hidden={tab !== 'import'}>
-        <ImportPanel initialText={incomingCode ?? ''} existing={existing} onImport={onImport} />
-      </div>
+      {canImport && (
+        <div role="tabpanel" id="share-panel-import" aria-labelledby="share-tab-import" hidden={tab !== 'import'}>
+          <ImportPanel initialText={incomingCode ?? ''} existing={existing} onImport={onImport} />
+        </div>
+      )}
     </>
   )
 }
