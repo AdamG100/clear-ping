@@ -130,9 +130,18 @@ export async function runTraceroute(
     family = resolved.family;
   }
 
-  const { command, args } = tracerouteCommand(address, family);
-  const { stdout, error } = await runCommand(command, args);
-  const hops = parseTraceroute(stdout);
+  const icmp = tracerouteCommand(address, family);
+  let { stdout, error } = await runCommand(icmp.command, icmp.args);
+  let hops = parseTraceroute(stdout);
+
+  // ICMP without root takes the kernel allowing it (Docker does, through
+  // ping_group_range); where it does not, traceroute fails at once with
+  // nothing traced. UDP needs no privilege, and is better than no trace.
+  if (hops.length === 0 && process.platform !== 'win32') {
+    const udp = tracerouteCommand(address, family, undefined, 'udp');
+    ({ stdout, error } = await runCommand(udp.command, udp.args));
+    hops = parseTraceroute(stdout);
+  }
 
   return {
     ...base,

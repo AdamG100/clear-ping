@@ -154,6 +154,19 @@ describe('tracerouteCommand', () => {
     expect(args.at(-1)).toBe('192.0.2.1')
   })
 
+  it('probes with ICMP echo, as ping does, so a host that answers ping is reached', () => {
+    // UDP to a closed port goes unanswered by most servers: the trace would
+    // stop one hop short of a host that is up.
+    expect(tracerouteCommand('192.0.2.1', 4, 'linux').args).toContain('-I')
+    expect(tracerouteCommand('2001:db8::1', 6, 'darwin').args).toContain('-I')
+    expect(tracerouteCommand('192.0.2.1', 4, 'linux', 'udp').args).not.toContain('-I')
+  })
+
+  it('sends one hop\'s probes at a time on Linux, not a burst that rate limits drop', () => {
+    const { args } = tracerouteCommand('192.0.2.1', 4, 'linux')
+    expect(args[args.indexOf('-N') + 1]).toBe('3')
+  })
+
   it('switches binary rather than flag for IPv6 on macOS', () => {
     expect(tracerouteCommand('2001:db8::1', 6, 'darwin').command).toBe('traceroute6')
     expect(tracerouteCommand('192.0.2.1', 4, 'darwin').command).toBe('traceroute')

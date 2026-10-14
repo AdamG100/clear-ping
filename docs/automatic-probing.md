@@ -302,7 +302,18 @@ but will not reply to probes. It is labelled as such and is not the fault. The f
 is where replies stop and never resume.
 
 Uses the system `tracert` (Windows) or `traceroute` (Linux, macOS), which must be
-installed. Traces are kept for the same retention period as measurements, and can
+installed. The probes are ICMP echo, the same packets the ping probes send, and
+not traceroute's usual UDP: most servers, and the firewalls in front of them,
+never answer UDP sent to a closed port, so a UDP trace stops one hop short of a
+host that answers every ping. Where ICMP cannot be sent without root (Docker
+allows it by default; a host whose `net.ipv4.ping_group_range` does not), the
+trace falls back to UDP, and a trace that ends at the hop before the target may
+then mean nothing more than that. On Linux the three probes of one hop are sent
+together and the next hop waits for them, rather than sixteen at once, so that a
+target that limits how fast it answers pings does not show loss at the last hop
+that it does not have.
+
+Traces are kept for the same retention period as measurements, and can
 be deleted sooner: the bin on a trace deletes that one, and **Delete older**
 deletes all but the newest (the newest over each address family, for a target
 traced over both). Either takes a second press to confirm, since a trace taken

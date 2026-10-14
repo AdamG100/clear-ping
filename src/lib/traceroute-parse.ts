@@ -17,14 +17,29 @@ const MAX_HOPS = 24
 const PROBES_PER_HOP = 3
 
 /**
+ * What the probes are. `icmp` is ping's echo request, which is what Windows'
+ * tracert always sends; `udp` is the classic traceroute packet to a high port.
+ */
+export type TraceMethod = 'icmp' | 'udp'
+
+/**
  * The command for one trace. Addresses are always numeric here, and names are
  * never looked up for the hops: reverse lookups are what make a traceroute
  * take minutes, and a hop's name is not needed to see where loss begins.
+ *
+ * ICMP echo, not traceroute's usual UDP. The routers along the way answer
+ * either alike, but the destination only answers UDP to a closed port if
+ * nothing in front of it drops such packets, and most servers and the
+ * firewalls before them do. Traced with UDP, a host that answers every ping
+ * looks unreachable at the last hop. Echo is what the ping probes send, so a
+ * trace arrives wherever they do. `udp` is the fallback for where ICMP cannot
+ * be sent without privileges.
  */
 export function tracerouteCommand(
   address: string,
   family: AddressFamily,
-  platform: PingPlatform = process.platform as PingPlatform
+  platform: PingPlatform = process.platform as PingPlatform,
+  method: TraceMethod = 'icmp'
 ): { command: string; args: string[] } {
   if (platform === 'win32') {
     return {
@@ -34,12 +49,17 @@ export function tracerouteCommand(
   }
 
   const args = ['-n', '-w', '1', '-q', String(PROBES_PER_HOP), '-m', String(MAX_HOPS)]
+  if (method === 'icmp') args.push('-I')
 
   // macOS keeps IPv6 in a separate binary, as it does for ping.
   if (platform === 'darwin') {
     return { command: family === 6 ? 'traceroute6' : 'traceroute', args: [...args, address] }
   }
-  return { command: 'traceroute', args: [...args, `-${family}`, address] }
+  // One hop's probes at a time, as tracert and macOS send them. Linux sends
+  // sixteen at once by default, and near the end of the path they all reach
+  // the destination together, where a host that limits how fast it answers
+  // pings (many do) drops some, and the last hop shows loss it does not have.
+  return { command: 'traceroute', args: [...args, '-N', String(PROBES_PER_HOP), `-${family}`, address] }
 }
 
 /** "12 ms", "0.345 ms" and Windows' "<1 ms". */
