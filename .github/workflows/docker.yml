@@ -5,8 +5,16 @@ name: Docker image
 # one name, so `docker pull` picks the right one for the machine.
 #
 #   pull request      build and test only, nothing is published
-#   push to main      ghcr.io/<owner>/<repo>:latest and :sha-<commit>
+#   push to main      ghcr.io/<owner>/<repo>:latest, :<version> and :sha-<commit>,
+#                     then a git tag v<version> and a GitHub release of it
 #   tag v1.2.3        ghcr.io/<owner>/<repo>:1.2.3 and :1.2
+#
+# Every build of main is a deployment with a version number of its own:
+# MAJOR.MINOR from package.json, and the last number one more than the highest
+# release of that MAJOR.MINOR so far (starting at package.json's own). Bump
+# MAJOR or MINOR in package.json by hand; the rest counts itself. The number
+# is baked into the image, where the dashboard shows it and compares it with
+# whatever :latest is to say whether there is an update.
 
 on:
   push:
@@ -25,11 +33,69 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # The number this build goes out as, worked out once so both architectures
+  # carry the same one.
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.number.outputs.version }}
+      built_at: ${{ steps.number.outputs.built_at }}
+      image: ${{ steps.number.outputs.image }}
+      release: ${{ steps.number.outputs.release }}
+
+    steps:
+      # Every tag, to count on from.
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Number the build
+        id: number
+        run: |
+          base=$(jq -r .version package.json)
+          major_minor=${base%.*}
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Tagged by hand: the tag is the version, and it has its release already.
+            version=${GITHUB_REF_NAME#v}
+            release=false
+          else
+            last=$(git tag --list "v${major_minor}.*" | sed "s/^v${major_minor}\.//" | grep -E '^[0-9]+$' | sort -n | tail -n 1 || true)
+            patch=${base##*.}
+            if [ -n "$last" ] && [ "$((last + 1))" -gt "$patch" ]; then
+              patch=$((last + 1))
+            fi
+            version="${major_minor}.${patch}"
+
+            # Only main is deployed. Anything else is marked as not a release,
+            # so it can never be mistaken for one or count as newer than one.
+            if [ "$GITHUB_REF" = refs/heads/main ] && [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+              release=true
+            else
+              version="${version}-dev.${GITHUB_SHA::7}"
+              release=false
+            fi
+          fi
+
+          {
+            echo "version=$version"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "image=${REGISTRY}/${IMAGE_NAME,,}"
+            echo "release=$release"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Version $version" >> "$GITHUB_STEP_SUMMARY"
+
   # One job per architecture, each on a runner of that architecture. Nothing
   # is emulated, so the build is as fast as it was and the smoke test below
   # runs the real thing on both.
   build:
     name: Build (${{ matrix.arch }})
+    needs: version
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -60,6 +126,11 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           load: true
           tags: clearping:ci
+          build-args: |
+            CLEARPING_VERSION=${{ needs.version.outputs.version }}
+            CLEARPING_COMMIT=${{ github.sha }}
+            CLEARPING_BUILT_AT=${{ needs.version.outputs.built_at }}
+            CLEARPING_IMAGE=${{ needs.version.outputs.image }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
@@ -67,6 +138,8 @@ jobs:
       # starts it and takes a real reading: the server answers, the database
       # is writable, and `ping` runs as the unprivileged user.
       - name: Smoke test
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           # No database may ship inside the image. Looked for before the first
           # start, since starting is what creates the real one in /data.
@@ -77,7 +150,8 @@ jobs:
             exit 1
           fi
 
-          docker run -d --name clearping -p 3000:3000 clearping:ci
+          # Not asking the registry for updates: the test is of this image alone.
+          docker run -d --name clearping -p 3000:3000 -e CLEARPING_UPDATE_CHECK=off clearping:ci
 
           for attempt in $(seq 1 30); do
             if curl -fsS http://localhost:3000/api/scheduler/status > /dev/null; then
@@ -89,6 +163,12 @@ jobs:
           if [ -z "$up" ]; then
             echo "::error::The server did not come up"
             docker logs clearping
+            exit 1
+          fi
+
+          # The number the dashboard shows is the one this build was given.
+          if ! curl -fsS http://localhost:3000/api/version | jq -e --arg v "$VERSION" '.current.version == $v and .current.development == false'; then
+            echo "::error::The image does not report version $VERSION"
             exit 1
           fi
 
@@ -139,6 +219,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
 
       # The layers are already in the cache from the build above, so this only
       # uploads them. It is pushed without a tag, by its digest: the tags
@@ -152,6 +234,12 @@ jobs:
           file: docker/Dockerfile
           platforms: linux/${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
+          # The same as the build above, or this would be a different image.
+          build-args: |
+            CLEARPING_VERSION=${{ needs.version.outputs.version }}
+            CLEARPING_COMMIT=${{ github.sha }}
+            CLEARPING_BUILT_AT=${{ needs.version.outputs.built_at }}
+            CLEARPING_IMAGE=${{ needs.version.outputs.image }}
           outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.arch }}
 
@@ -176,7 +264,7 @@ jobs:
   # have passed, so a tag never points at an image for one architecture only.
   publish:
     name: Publish
-    needs: build
+    needs: [version, build]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -208,6 +296,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.release == 'true' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
@@ -222,3 +311,29 @@ jobs:
 
           # Printed so the log shows both architectures behind the tag.
           docker buildx imagetools inspect "$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+
+  # Marks the commit with the version once its image is out, and writes up
+  # what changed since the last one. Only after publishing: a version is not
+  # used up by a build that failed, so the numbers run on without gaps. Tags
+  # made with this job's token start no workflow, so this cannot loop.
+  release:
+    name: Release
+    needs: [version, publish]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
+          IMAGE: ${{ needs.version.outputs.image }}
+        run: |
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes "Image: \`$IMAGE:$VERSION\`" \
+            --generate-notes

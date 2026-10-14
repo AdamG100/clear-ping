@@ -270,6 +270,7 @@ All optional. With Docker, pass them with `-e`.
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes, for when `npm run probe` runs as its own process |
 | `CLEARPING_MCP_TOKEN` | unset | A token an AI assistant has to send to connect, which also lets it add and change targets. Without one the MCP address is as open as the rest of the app and can only read |
 | `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes the token over plain HTTP from anywhere, for when a VPN or tunnel does the encrypting. Otherwise it is taken only over HTTPS or from ClearPing's own network |
+| `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check of the registry for a newer image. The dashboard then shows the version it runs but not whether it is the latest |
 
 ## API
 
@@ -295,6 +296,7 @@ Everything the interface does goes through these.
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
+| `GET /api/version` | The version, commit and build time running, the same for the newest published image, and whether that is an update |
 | `POST /api/mcp` | The MCP server an AI assistant connects to; `GET /api/mcp/info` says whether it asks for a token |
 
 ## Development

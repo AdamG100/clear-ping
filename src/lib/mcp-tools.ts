@@ -1,5 +1,5 @@
 import type { AddressFamily, LatestMeasurement, Target, TargetDefinition } from '@/types/probe'
-import packageJson from '../../package.json'
+import { currentBuild } from './version'
 import {
   getAllTargets,
   getLatestMeasurementForAllTargets,
@@ -983,7 +983,7 @@ const ispReportPrompt: McpPrompt = {
 export const clearPingMcp: McpServer = {
   name: 'clearping',
   title: 'ClearPing',
-  version: packageJson.version,
+  version: currentBuild().version,
   instructions:
     'ClearPing is a self-hosted network monitor: it probes hosts on a schedule (ping, TCP, HTTP, DNS) and keeps every result. ' +
     'These tools read that history; none of them changes anything. ' +

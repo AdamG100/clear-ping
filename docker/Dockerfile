@@ -124,6 +124,19 @@ COPY --from=build --chown=node:node /app/public ./public
 RUN mkdir -p /data && chown node:node /data
 VOLUME /data
 
+# Which build this is, shown on the dashboard and compared with the newest
+# published image to say whether there is an update (src/lib/version.ts). CI
+# passes all four; a build without them says it is a development build. Last,
+# because they change with every build and anything after them would rebuild.
+ARG CLEARPING_VERSION=""
+ARG CLEARPING_COMMIT=""
+ARG CLEARPING_BUILT_AT=""
+ARG CLEARPING_IMAGE=""
+ENV CLEARPING_VERSION=${CLEARPING_VERSION} \
+    CLEARPING_COMMIT=${CLEARPING_COMMIT} \
+    CLEARPING_BUILT_AT=${CLEARPING_BUILT_AT} \
+    CLEARPING_IMAGE=${CLEARPING_IMAGE}
+
 USER node
 EXPOSE 3000
 

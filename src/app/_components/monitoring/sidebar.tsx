@@ -6,6 +6,7 @@ import { createPortal, flushSync } from 'react-dom'
 import { cn } from '@/lib/utils'
 import type { Target, TargetDefinition, GroupOrder, SparklinePoint } from '@/types/probe'
 import { BrandMark } from './brand-mark'
+import { VersionBadge } from './version-badge'
 import { Sparkline } from './sparkline'
 import { SidebarSkeleton } from './skeleton'
 import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-dialogs'
@@ -1097,8 +1098,9 @@ export function Sidebar({
             <h1 className="text-sm font-semibold tracking-tight text-sidebar-foreground">
               ClearPing
             </h1>
-            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
               Path monitor
+              <VersionBadge />
             </p>
           </div>
           <button

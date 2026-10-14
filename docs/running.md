@@ -124,6 +124,28 @@ What makes it installable, for anyone changing it:
   the dashboard would show old readings as if they were current. It is only
   started in a production build.
 
+## Versions
+
+Every push to `main` that builds is a deployment with a number of its own,
+`MAJOR.MINOR.PATCH`. MAJOR and MINOR are the ones in `package.json`, changed by
+hand for a big release; PATCH counts the deployments since. CI bakes the number
+into the image, tags the image with it (`ghcr.io/adamg100/clear-ping:0.1.4`
+beside `:latest`), and makes a GitHub release `v0.1.4` listing what changed.
+To go back to an earlier one, run its tag instead of `:latest`.
+
+The dashboard shows the version it is running under the ClearPing name in the
+sidebar, and once an hour asks the registry what `:latest` is:
+
+- a **green dot** is the latest version;
+- an **amber dot** means a newer one has been published; it links to that
+  release, and the tooltip says which;
+- **reload** means the server has been updated while the page was open.
+
+`GET /api/version` answers the same as JSON. The registry is asked without any
+credentials, because the image is public. Set `CLEARPING_UPDATE_CHECK=off` to
+never ask, and a build made by hand, not by CI, calls itself a development
+build and is not compared with anything.
+
 ## Upgrading
 
 Pull the new image and recreate the container. Nothing else is needed:
@@ -179,6 +201,7 @@ See `.env.example`. All settings are optional.
 | `CLEARPING_RETENTION_DAYS` | `90` | Measurement retention; `0` keeps everything |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes |
 | `CLEARPING_APPRISE_BIN` | `apprise` | The Apprise program that sends alerts, when it is not on the `PATH` |
+| `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check for a newer image (see [Versions](#versions)) |
 
 ## Development
 
