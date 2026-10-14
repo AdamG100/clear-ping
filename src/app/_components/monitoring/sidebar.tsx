@@ -167,6 +167,8 @@ interface SidebarProps {
   /** Whether Settings is what the main pane is showing. */
   settingsOpen?: boolean
   onOpenSettings?: () => void
+  /** The account signed in may look but not change anything: no way to change things is offered. */
+  readOnly?: boolean
   onReorderTargets?: (updates: { id: string; sortOrder: number; group?: string }[]) => void
   /** The targets have not arrived yet: there is no list to show and nothing to count. */
   loading?: boolean
@@ -210,30 +212,33 @@ function TargetRow({
   // On a touchscreen: whether the row's actions are set out underneath it.
   const [actionsOpen, setActionsOpen] = useState(false)
 
+  // Only the actions there is a way to carry out: none, for an account that
+  // may only look.
   const actions = [
     {
       label: paused ? 'Resume' : 'Pause',
       icon: paused ? Play : Pause,
       tone: 'text-muted-foreground',
       hover: 'hover:bg-muted',
-      run: () => onTogglePaused?.(target),
+      run: onTogglePaused && (() => onTogglePaused(target)),
     },
-    { label: 'Edit', icon: Pencil, tone: 'text-blue-500', hover: 'hover:bg-blue-500/20', run: () => onEditTarget?.(target) },
+    { label: 'Edit', icon: Pencil, tone: 'text-blue-500', hover: 'hover:bg-blue-500/20', run: onEditTarget && (() => onEditTarget(target)) },
     {
       label: 'Duplicate',
       icon: Copy,
       tone: 'text-muted-foreground',
       hover: 'hover:bg-muted',
-      run: () => onDuplicateTarget?.(target),
+      run: onDuplicateTarget && (() => onDuplicateTarget(target)),
     },
     {
       label: 'Delete',
       icon: Trash2,
       tone: 'text-destructive',
       hover: 'hover:bg-destructive/20',
-      run: () => onDeleteTarget?.(target.id),
+      run: onDeleteTarget && (() => onDeleteTarget(target.id)),
     },
-  ]
+  ].filter((action): action is typeof action & { run: () => void } => action.run !== undefined)
+  const draggable = floating || onHandlePointerDown !== undefined
 
   return (
     // Selecting a target has to work from the keyboard, so the row is a real
@@ -265,7 +270,7 @@ function TargetRow({
       )}
     >
       <div className="relative flex items-center gap-1.5">
-        <button
+        {draggable && <button
           type="button"
           tabIndex={floating ? -1 : undefined}
           onPointerDown={e => {
@@ -286,7 +291,7 @@ function TargetRow({
           onClick={e => e.stopPropagation()}
         >
           <GripVertical className="h-3 w-3" />
-        </button>
+        </button>}
         <StatusIndicator
           isOnline={target.isOnline}
           packetLoss={target.packetLoss}
@@ -347,7 +352,7 @@ function TargetRow({
             two, which the row's two lines have the height for: four in a line
             took their width out of the address, and inside a nested group
             that left an IP address cut short. */}
-        <div className="grid shrink-0 grid-cols-2 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100 touch:hidden">
+        {actions.length > 0 && <div className="grid shrink-0 grid-cols-2 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100 touch:hidden">
           {actions.map(action => (
             <button
               key={action.label}
@@ -360,13 +365,13 @@ function TargetRow({
               <action.icon className={cn('h-3.5 w-3.5', action.tone)} />
             </button>
           ))}
-        </div>
+        </div>}
 
         {/* A touchscreen has no hover to reveal those four, and side by side
             at that size a finger aiming for edit lands on delete. There they
             are one button, which sets them out underneath at a size that can
             be pressed. */}
-        <button
+        {actions.length > 0 && <button
           type="button"
           tabIndex={floating ? -1 : undefined}
           onClick={e => { e.stopPropagation(); setActionsOpen(open => !open) }}
@@ -375,7 +380,7 @@ function TargetRow({
           className="hidden shrink-0 cursor-pointer rounded p-2 text-muted-foreground touch:block"
         >
           <MoreVertical className="h-4 w-4" />
-        </button>
+        </button>}
       </div>
 
       {actionsOpen && !floating && (
@@ -493,6 +498,8 @@ function TargetDragOverlay({
 
 /** What every group in the tree needs, handed down unchanged from the sidebar. */
 interface GroupTreeProps {
+  /** Nothing in the tree is to be changed: no handles, and no offers to add. */
+  readOnly?: boolean
   layout: SidebarLayout
   targetsById: Map<string, Target>
   selectedTargetId: string | null
@@ -513,11 +520,12 @@ interface GroupTreeProps {
   onGroupDragStart: () => void
   onGroupDragEnd: (parent: string) => void
   onSelectTarget: (id: string) => void
-  onEditTarget: (target: Target) => void
-  onDuplicateTarget: (target: Target) => void
-  onDeleteTarget: (id: string) => void
-  onTogglePaused: (target: Target) => void
-  onHandlePointerDown: (id: string, event: ReactPointerEvent<HTMLElement>) => void
+  /** Each left out where the account may not do it: a row offers only what it can. */
+  onEditTarget?: (target: Target) => void
+  onDuplicateTarget?: (target: Target) => void
+  onDeleteTarget?: (id: string) => void
+  onTogglePaused?: (target: Target) => void
+  onHandlePointerDown?: (id: string, event: ReactPointerEvent<HTMLElement>) => void
 }
 
 /**
@@ -544,6 +552,7 @@ function GroupList({ parent, ...tree }: GroupTreeProps & { parent: string }) {
 
 function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: string; parent: string }) {
   const {
+    readOnly = false,
     layout,
     targetsById,
     selectedTargetId,
@@ -619,14 +628,14 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
       >
         {/* Group Header */}
         <div className="flex items-center gap-1 px-2 py-1.5 group/header">
-          <button
+          {!readOnly && <button
             type="button"
             onPointerDown={(e) => dragControls.start(e)}
             className="p-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground transition-colors touch-none touch:px-1 touch:py-2"
             aria-label={`Drag to reorder ${name}`}
           >
             <GripVertical className="h-3.5 w-3.5" />
-          </button>
+          </button>}
 
           <button
             type="button"
@@ -763,7 +772,9 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
                     transition={{ duration: 0.15 }}
                     className="flex min-h-11 list-none flex-wrap items-center justify-center gap-x-1 rounded-md border border-dashed border-border px-2 py-1.5 text-center text-[11px] text-muted-foreground"
                   >
-                    {group === UNGROUPED ? (
+                    {readOnly ? (
+                      'Empty'
+                    ) : group === UNGROUPED ? (
                       'Drop here to remove from its group'
                     ) : drag ? (
                       'Drop here'
@@ -838,6 +849,7 @@ export function Sidebar({
   firingAlerts = 0,
   settingsOpen = false,
   onOpenSettings,
+  readOnly = false,
   onReorderTargets,
   loading = false,
 }: SidebarProps) {
@@ -1309,6 +1321,7 @@ export function Sidebar({
               <>
               <GroupList
                 parent=""
+                readOnly={readOnly}
                 layout={layout}
                 targetsById={targetsById}
                 selectedTargetId={selectedTargetId}
@@ -1318,22 +1331,22 @@ export function Sidebar({
                 drag={drag.active}
                 onToggleCollapse={toggleCollapse}
                 onCompare={onSelectGroup}
-                onEditGroup={onMoveGroup ? openEditGroup : undefined}
-                onAddGroupInside={onCreateGroup ? parent => setGroupTask({ kind: 'create', parent }) : undefined}
+                onEditGroup={onMoveGroup && !readOnly ? openEditGroup : undefined}
+                onAddGroupInside={onCreateGroup && !readOnly ? parent => setGroupTask({ kind: 'create', parent }) : undefined}
                 onAddTargetTo={group => openAddDialog(null, group)}
                 onReorderSubgroups={handleGroupReorder}
                 onGroupDragStart={handleGroupDragStart}
                 onGroupDragEnd={handleGroupDragEnd}
                 onSelectTarget={onSelectTarget}
-                onEditTarget={openEditDialog}
-                onDuplicateTarget={openAddDialog}
-                onDeleteTarget={setDeletingId}
-                onTogglePaused={onTogglePaused}
-                onHandlePointerDown={drag.onHandlePointerDown}
+                onEditTarget={readOnly ? undefined : openEditDialog}
+                onDuplicateTarget={readOnly ? undefined : openAddDialog}
+                onDeleteTarget={readOnly ? undefined : setDeletingId}
+                onTogglePaused={readOnly ? undefined : onTogglePaused}
+                onHandlePointerDown={readOnly ? undefined : drag.onHandlePointerDown}
               />
               {/* Where the next group would go, and so where the way to make
                   one is. A group is made here first and filled afterwards. */}
-              {onCreateGroup && (
+              {onCreateGroup && !readOnly && (
                 <button
                   type="button"
                   onClick={() => setGroupTask({ kind: 'create', parent: '' })}
@@ -1388,15 +1401,20 @@ export function Sidebar({
             )}
           </Button>
         )}
-        <Button
-          className="min-w-0 flex-1"
-          size="sm"
-          onClick={() => openAddDialog()}
-          suppressHydrationWarning
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Target
-        </Button>
+        {readOnly ? (
+          // Where the button would be, so the rest keep their places.
+          <span className="min-w-0 flex-1" />
+        ) : (
+          <Button
+            className="min-w-0 flex-1"
+            size="sm"
+            onClick={() => openAddDialog()}
+            suppressHydrationWarning
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Target
+          </Button>
+        )}
         <Button
           variant="outline"
           size="icon-sm"
@@ -1451,7 +1469,7 @@ export function Sidebar({
               onShare={() => setIsShareOpen(true)}
               settingsOpen={settingsOpen}
               onOpenSettings={() => onOpenSettings?.()}
-              onAddTarget={() => openAddDialog()}
+              onAddTarget={readOnly ? undefined : () => openAddDialog()}
             />
           </motion.div>
         )}

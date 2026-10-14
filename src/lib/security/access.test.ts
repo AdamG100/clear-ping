@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { decide, presentedKey, readCookie, routeKind, type Identity } from './access'
 
 const nobody: Identity = { actor: null, invalidKey: false }
-const user: Identity = { actor: { kind: 'user', id: 'u1', name: 'adam' }, invalidKey: false }
+const user: Identity = { actor: { kind: 'user', id: 'u1', name: 'adam', role: 'admin' }, invalidKey: false }
+const editor: Identity = { actor: { kind: 'user', id: 'u2', name: 'jo', role: 'editor' }, invalidKey: false }
+const viewer: Identity = { actor: { kind: 'user', id: 'u3', name: 'sam', role: 'viewer' }, invalidKey: false }
 const reader: Identity = { actor: { kind: 'key', id: 'k1', name: 'Claude', access: 'read' }, invalidKey: false }
 const writer: Identity = { actor: { kind: 'key', id: 'k2', name: 'GPT', access: 'write' }, invalidKey: false }
 const badKey: Identity = { actor: null, invalidKey: true }
@@ -70,6 +72,24 @@ describe('decide, with sign-in on', () => {
     const elsewhere = { origin: 'https://evil.example', host: 'ping.example' }
     expect(ask('/api/targets', 'POST', on, user, elsewhere)).toMatchObject({ allow: false, status: 403 })
     expect(ask('/api/targets', 'GET', on, user, elsewhere)).toEqual({ allow: true })
+  })
+
+  it('lets an editor change what is monitored, and a viewer only look', () => {
+    expect(ask('/api/targets', 'POST', on, editor)).toEqual({ allow: true })
+    expect(ask('/api/alerts', 'POST', on, editor)).toEqual({ allow: true })
+    expect(ask('/api/targets', 'GET', on, viewer)).toEqual({ allow: true })
+    for (const [path, method] of [['/api/targets', 'POST'], ['/api/targets/t1', 'DELETE'], ['/api/alerts/a1', 'PATCH'], ['/api/targets/t1/probe', 'POST']]) {
+      expect(ask(path, method, on, viewer)).toMatchObject({ allow: false, status: 403 })
+    }
+  })
+
+  it('leaves Settings to its own routes, which know what each role may do there', () => {
+    // A viewer may still change their own password and make keys of their own.
+    expect(ask('/api/security/password', 'PUT', on, viewer)).toEqual({ allow: true })
+    expect(ask('/api/security/keys', 'POST', on, viewer)).toEqual({ allow: true })
+    // And the switches themselves, whose route answers that only an admin may.
+    expect(ask('/api/security', 'PUT', on, viewer)).toEqual({ allow: true })
+    expect(ask('/api/securityx', 'POST', on, viewer)).toMatchObject({ allow: false, status: 403 })
   })
 
   it('leaves the sign-in page, its API and the MCP address to look after themselves', () => {

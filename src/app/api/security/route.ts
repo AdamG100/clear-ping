@@ -1,38 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { securityPolicy } from '@/lib/security/access';
-import { requireUser } from '@/lib/security/http';
+import { requireAdmin, requireUser } from '@/lib/security/http';
 import { getSsoConfig, publicSsoConfig, ssoUsable } from '@/lib/security/oidc';
+import { canAdminister } from '@/lib/security/roles';
 import { getSecuritySettings, getUser, listApiKeys, listUsers, recordActivity, setSecuritySettings } from '@/lib/security/store';
 
 /**
- * GET /api/security - Everything the security settings show
+ * GET /api/security - Everything Settings shows the account signed in
  *
- * The switches as set and as in force (an environment variable can override
- * them), the accounts, and the keys. Never a key itself: those are shown once,
- * when made.
+ * An admin is shown everything: the switches as set and as in force (an
+ * environment variable can override them), every account, every key, the
+ * single sign-on settings. Anyone else, their own account and their own keys,
+ * and only as much of single sign-on as linking their account takes. Never a
+ * key itself: those are shown once, when made.
  */
 export async function GET(request: NextRequest) {
   const user = await requireUser(request);
   if (user instanceof NextResponse) return user;
 
-  const [settings, policy, users, keys, sso] = await Promise.all([getSecuritySettings(), securityPolicy(), listUsers(), listApiKeys(), getSsoConfig()]);
+  const admin = canAdminister(user.role);
+  const [settings, policy, users, keys, sso] = await Promise.all([
+    getSecuritySettings(),
+    securityPolicy(),
+    listUsers(),
+    listApiKeys(admin ? undefined : user.id),
+    getSsoConfig(),
+  ]);
+  const me = users.find(each => each.id === user.id);
   return NextResponse.json({
-    me: { id: user.id, username: user.name, ...(users.find(each => each.id === user.id) ?? {}) },
+    me: { id: user.id, username: user.name, ...(me ?? {}), role: user.role },
     settings,
     inForce: { loginRequired: policy.loginRequired, mcpKeyRequired: policy.mcpKeyRequired },
     environment: { recovery: policy.recovery, legacyMcpToken: policy.legacyMcpToken !== null },
-    users,
+    users: admin ? users : me ? [me] : [],
     keys,
-    sso: publicSsoConfig(sso),
+    sso: admin
+      ? publicSsoConfig(sso)
+      : { enabled: ssoUsable(sso), label: sso.label },
   });
 }
 
 /**
  * PUT /api/security - Turn sign-in, keys for the MCP address, or password sign-in on or off
  * Body: { loginRequired?: boolean, mcpKeyRequired?: boolean, passwordLogin?: boolean }
+ *
+ * Admins only.
  */
 export async function PUT(request: NextRequest) {
-  const user = await requireUser(request);
+  const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
 
   const body = await request.json().catch(() => null);

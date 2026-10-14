@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/security/http';
+import { requireAdmin } from '@/lib/security/http';
 import { listActivity } from '@/lib/security/store';
 
 /**
@@ -10,7 +10,7 @@ import { listActivity } from '@/lib/security/store';
  * included. `before` pages back from the oldest entry already shown.
  */
 export async function GET(request: NextRequest) {
-  const user = await requireUser(request);
+  const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
 
   const { searchParams } = new URL(request.url);

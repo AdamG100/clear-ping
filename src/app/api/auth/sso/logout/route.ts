@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { discover, getSsoConfig, ssoUsable, verifyLogoutToken } from '@/lib/security/oidc';
-import { endSsoSessions, recordActivity } from '@/lib/security/store';
+import { actorOf, endSsoSessions, recordActivity } from '@/lib/security/store';
 
 /** The answer the specification asks for: nothing to cache, and the reason when refused. */
 function answer(status: number, error?: string) {
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
   const users = await endSsoSessions(who.iss, who);
   for (const user of users) {
-    await recordActivity({ kind: 'user', id: user.id, name: user.username }, 'dashboard', 'signout', `Signed out at ${config.label}`);
+    await recordActivity(actorOf(user), 'dashboard', 'signout', `Signed out at ${config.label}`);
   }
   return answer(200);
 }

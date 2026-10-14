@@ -2,6 +2,7 @@ import { createHash, createHmac, createPublicKey, constants, timingSafeEqual, ve
 
 /** One of the provider's public keys, as its key set lists it. */
 type JsonWebKey = { kid?: string; use?: string; kty?: string; [field: string]: unknown }
+import { DEFAULT_NEW_ROLE, isRole, roleFromGroups, type Role } from './roles'
 import { newToken } from './secrets'
 import { getJsonSetting, setJsonSetting } from './store'
 
@@ -36,6 +37,14 @@ export interface SsoConfig {
   redirectUri: string
   /** Signing out of ClearPing, after signing in through the provider, signs out there too. */
   signOutAtProvider: boolean
+  /**
+   * Groups at the provider that make an account an admin, or an editor, set
+   * again at every sign-in. Both empty, the provider has no say in roles.
+   */
+  adminGroup: string
+  editorGroup: string
+  /** The role an account made at its first sign-in starts with, where no group decides it. */
+  newAccountRole: Role
 }
 
 const SETTING = 'sso.config'
@@ -50,6 +59,9 @@ export const SSO_DEFAULTS: SsoConfig = {
   autoCreate: true,
   redirectUri: '',
   signOutAtProvider: true,
+  adminGroup: '',
+  editorGroup: '',
+  newAccountRole: DEFAULT_NEW_ROLE,
 }
 
 export const SSO_CALLBACK_PATH = '/api/auth/sso/callback'
@@ -81,6 +93,9 @@ export async function saveSsoConfig(changes: Partial<SsoConfig>): Promise<SsoCon
   if (typeof changes.clientId === 'string') next.clientId = changes.clientId.trim()
   if (typeof changes.clientSecret === 'string' && changes.clientSecret.trim()) next.clientSecret = changes.clientSecret.trim()
   if (typeof changes.allowedGroup === 'string') next.allowedGroup = changes.allowedGroup.trim()
+  if (typeof changes.adminGroup === 'string') next.adminGroup = changes.adminGroup.trim()
+  if (typeof changes.editorGroup === 'string') next.editorGroup = changes.editorGroup.trim()
+  if (isRole(changes.newAccountRole)) next.newAccountRole = changes.newAccountRole
   if (typeof changes.issuer === 'string') {
     const issuer = changes.issuer.trim()
     if (issuer && !isHttpUrl(issuer)) throw new Error('The issuer has to be an http(s) address')
@@ -466,6 +481,14 @@ export function usernameFrom(claims: Claims): string {
 
 export function groupsOf(claims: Claims): string[] {
   return Array.isArray(claims.groups) ? claims.groups.filter((group): group is string => typeof group === 'string') : []
+}
+
+/**
+ * The role the person's groups give them, or null if the settings map no
+ * groups to roles. See roleFromGroups.
+ */
+export function ssoRole(claims: Claims, config: Pick<SsoConfig, 'adminGroup' | 'editorGroup'>): Role | null {
+  return roleFromGroups(groupsOf(claims), config)
 }
 
 /** Whether the person may sign in here, going by the group the configuration asks for. */

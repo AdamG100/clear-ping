@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { identify } from './access'
+import { canAdminister, ROLE_LABEL } from './roles'
 import { countUsers, SESSION_COOKIE, type Actor } from './store'
 
 /** What the security routes have in common. */
@@ -47,6 +48,18 @@ export async function requireUser(request: Request): Promise<UserActor | NextRes
       : { error: 'Sign in to change security settings', needsSignIn: true },
     { status: accounts === 0 ? 403 : 401 }
   )
+}
+
+/**
+ * The signed-in admin, or the response refusing the request. What only an
+ * admin may change: the switches, single sign-on, other people's accounts and
+ * keys, and what only an admin may see: the activity record.
+ */
+export async function requireAdmin(request: Request): Promise<UserActor | NextResponse> {
+  const user = await requireUser(request)
+  if (user instanceof NextResponse) return user
+  if (canAdminister(user.role)) return user
+  return NextResponse.json({ error: `Only an admin can do that. Your account is a ${ROLE_LABEL[user.role]}.`, needsAdmin: true }, { status: 403 })
 }
 
 // ─── Slowing down guessing ──────────────────────────────────────────────────

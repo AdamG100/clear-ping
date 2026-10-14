@@ -79,6 +79,19 @@ export function notifyUrlLabel(url: string): string {
   }
 }
 
+/**
+ * A notification URL with its secrets taken out: what service it is, and no
+ * more. These URLs carry tokens and passwords (a Discord webhook's token, a
+ * mail account's password), so they are shown whole only to those who may
+ * change the alert; anyone else sees `discord://…` or `https://hooks.example/…`.
+ */
+export function redactNotifyUrl(url: string): string {
+  const scheme = url.slice(0, Math.max(0, url.indexOf('://'))).toLowerCase();
+  if (!scheme) return '…';
+  const label = notifyUrlLabel(url);
+  return scheme === 'http' || scheme === 'https' ? `${scheme}://${label}/…` : `${scheme}://…`;
+}
+
 // ─── What it says ───────────────────────────────────────────────────────────
 
 /**

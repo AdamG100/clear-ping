@@ -21,6 +21,6 @@ export async function GET(request: NextRequest) {
     recovery: policy.recovery,
     passwordLogin: policy.passwordLogin,
     sso: ssoUsable(sso) ? { label: sso.label } : null,
-    signedIn: actor?.kind === 'user' ? { username: actor.name } : null,
+    signedIn: actor?.kind === 'user' ? { username: actor.name, role: actor.role } : null,
   });
 }

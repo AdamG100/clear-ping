@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recoveryMode } from '@/lib/security/access';
 import { setSessionCookie } from '@/lib/security/http';
 import { passwordProblem } from '@/lib/security/secrets';
-import { countUsers, createSession, createUser, recordActivity } from '@/lib/security/store';
+import { actorOf, countUsers, createSession, createUser, recordActivity } from '@/lib/security/store';
 
 /**
  * POST /api/auth/register - Make the first account, and sign in with it
@@ -10,7 +10,10 @@ import { countUsers, createSession, createUser, recordActivity } from '@/lib/sec
  *
  * Only while there is no account at all, or while CLEARPING_AUTH=off is set
  * to get back into an install whose password is lost. Every other account is
- * added by someone signed in, from the security settings.
+ * added by an admin, in Settings → Accounts.
+ *
+ * Either way the account is an admin: the first has to be, to set the rest
+ * up, and one made to get back in is made to fix what locked everyone out.
  */
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -24,10 +27,10 @@ export async function POST(request: NextRequest) {
   if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
   try {
-    const user = await createUser(username, password);
+    const user = await createUser(username, password, 'admin');
     const session = await createSession(user.id);
     await recordActivity(
-      { kind: 'user', id: user.id, name: user.username },
+      actorOf(user),
       'dashboard',
       'account.create',
       recoveryMode() ? 'Made while CLEARPING_AUTH=off' : 'First account'

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/security/http';
+import { requireAdmin } from '@/lib/security/http';
 import { discover } from '@/lib/security/oidc';
 
 /**
@@ -10,7 +10,7 @@ import { discover } from '@/lib/security/oidc';
  * found or why it could not. Nothing is saved.
  */
 export async function POST(request: NextRequest) {
-  const user = await requireUser(request);
+  const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
 
   const body = await request.json().catch(() => null);

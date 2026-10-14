@@ -333,12 +333,14 @@ interface AlertsViewProps {
   groupOrders: GroupOrder[]
   onChanged: () => Promise<void>
   onSelectTarget: (id: string) => void
+  /** The account signed in may look but not change anything: the alerts are shown, not offered for editing. */
+  readOnly?: boolean
 }
 
 /** `'new'` for an alert that does not exist yet. */
 type Editing = AlertResponse | 'new' | null
 
-export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, onSelectTarget }: AlertsViewProps) {
+export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, onSelectTarget, readOnly = false }: AlertsViewProps) {
   const { notify, reportError } = useToast()
   const [editing, setEditing] = useState<Editing>(null)
   const [saving, setSaving] = useState(false)
@@ -436,10 +438,12 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
             )}
           </p>
         </div>
-        <Button size="sm" onClick={() => setEditing('new')} className="shrink-0">
-          <Plus className="mr-2 h-4 w-4" />
-          New alert
-        </Button>
+        {!readOnly && (
+          <Button size="sm" onClick={() => setEditing('new')} className="shrink-0">
+            <Plus className="mr-2 h-4 w-4" />
+            New alert
+          </Button>
+        )}
       </header>
 
       {!loaded ? (
@@ -451,10 +455,12 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
             An alert is a condition, such as a target not responding, and the targets to watch for it on.
             Make one, tick the targets it applies to, and choose where it is sent.
           </p>
-          <Button size="sm" className="mt-4" onClick={() => setEditing('new')}>
-            <Plus className="mr-2 h-4 w-4" />
-            New alert
-          </Button>
+          {!readOnly && (
+            <Button size="sm" className="mt-4" onClick={() => setEditing('new')}>
+              <Plus className="mr-2 h-4 w-4" />
+              New alert
+            </Button>
+          )}
         </section>
       ) : (
         <ul className="space-y-3">
@@ -507,7 +513,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                     </p>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-1">
+                  {!readOnly && <div className="flex shrink-0 items-center gap-1">
                     {alert.notifyUrls.length > 0 && (
                       <Button variant="outline" size="sm" className="h-7 px-2 text-xs touch:h-9 touch:px-3" disabled={busy} onClick={() => sendTest(alert)}>
                         <Send className="mr-1.5 h-3 w-3" />
@@ -555,7 +561,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
                       </button>
                     )}
-                  </div>
+                  </div>}
                 </div>
 
                 {isFiring && (

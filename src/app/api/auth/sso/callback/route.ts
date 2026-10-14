@@ -7,12 +7,14 @@ import {
   inAllowedGroup,
   PENDING_COOKIE,
   redeemCode,
+  ssoRole,
   ssoUsable,
   usernameFrom,
   type Pending,
 } from '@/lib/security/oidc';
 import { sameSecret } from '@/lib/security/secrets';
-import { createSession, createSsoUser, linkSso, noteLogin, recordActivity, userForSso } from '@/lib/security/store';
+import { ROLE_LABEL } from '@/lib/security/roles';
+import { actorOf, createSession, createSsoUser, linkSso, noteLogin, recordActivity, setRole, userForSso } from '@/lib/security/store';
 
 /** Somewhere on this site, with the pending sign-in's cookie gone. */
 function go(request: NextRequest, path: string) {
@@ -77,6 +79,9 @@ export async function GET(request: NextRequest) {
     return go(request, pending.next);
   }
 
+  // The groups at the provider decide the role, when the settings map them.
+  const groupRole = ssoRole(claims, config);
+
   let user = await userForSso(claims.iss, claims.sub);
   if (!user) {
     if (!config.autoCreate) {
@@ -86,8 +91,19 @@ export async function GET(request: NextRequest) {
         `No ClearPing account is linked to ${who}. Sign in with a password and link it from Security, or have new accounts made on first sign-in.`
       );
     }
-    user = await createSsoUser(who, claims.iss, claims.sub);
-    await recordActivity({ kind: 'user', id: user.id, name: user.username }, 'dashboard', 'account.create', `First sign-in with ${config.label}`);
+    user = await createSsoUser(who, claims.iss, claims.sub, groupRole ?? config.newAccountRole);
+    await recordActivity(actorOf(user), 'dashboard', 'account.create', `First sign-in with ${config.label}, as ${ROLE_LABEL[user.role]}`);
+  } else if (groupRole && groupRole !== user.role) {
+    // Kept in step at every sign-in, so a change of groups at the provider is
+    // a change of role here. Never the last admin's: that would leave no one
+    // able to change it back.
+    try {
+      const before = user.role;
+      user = await setRole(user.id, groupRole);
+      await recordActivity(actorOf(user), 'dashboard', 'account.role', `${ROLE_LABEL[before]} to ${ROLE_LABEL[groupRole]}, by their groups at ${config.label}`);
+    } catch (error) {
+      await recordActivity(actorOf(user), 'dashboard', 'account.role', `Kept as ${ROLE_LABEL[user.role]}: ${error instanceof Error ? error.message : 'could not change'}`);
+    }
   }
 
   await noteLogin(user.id);
@@ -98,7 +114,7 @@ export async function GET(request: NextRequest) {
     sid: typeof claims.sid === 'string' && claims.sid ? claims.sid : null,
     idToken,
   });
-  await recordActivity({ kind: 'user', id: user.id, name: user.username }, 'dashboard', 'signin', `With ${config.label}, from ${clientAddress(request)}`);
+  await recordActivity(actorOf(user), 'dashboard', 'signin', `With ${config.label}, from ${clientAddress(request)}`);
 
   const response = go(request, pending.next);
   setSessionCookie(response, request, session.token, session.expiresAt);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, setSessionCookie } from '@/lib/security/http';
 import { securityPolicy } from '@/lib/security/access';
-import { checkLogin, createSession, recordActivity } from '@/lib/security/store';
+import { actorOf, checkLogin, createSession, recordActivity } from '@/lib/security/store';
 
 /**
  * POST /api/auth/login - Sign in
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
   noteLoginSuccess(keys);
   const session = await createSession(user.id);
-  await recordActivity({ kind: 'user', id: user.id, name: user.username }, 'dashboard', 'signin', `From ${address}`);
+  await recordActivity(actorOf(user), 'dashboard', 'signin', `From ${address}`);
 
   const response = NextResponse.json({ username: user.username });
   setSessionCookie(response, request, session.token, session.expiresAt);

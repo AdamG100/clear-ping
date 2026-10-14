@@ -1,6 +1,7 @@
 import { originAllowed } from '../mcp-protocol'
 import { KEY_PREFIX, sameSecret } from './secrets'
-import { ANONYMOUS, apiKeyFor, getSecuritySettings, SESSION_COOKIE, userForSession, type Actor, type Via } from './store'
+import { canChange, ROLE_LABEL } from './roles'
+import { actorOf, ANONYMOUS, apiKeyFor, getSecuritySettings, SESSION_COOKIE, userForSession, type Actor, type Via } from './store'
 
 /**
  * Who a request is from, and what they may do.
@@ -91,7 +92,7 @@ export async function identify(request: Request, legacyMcpToken = process.env.CL
   const session = readCookie(request.headers.get('cookie'), SESSION_COOKIE)
   if (session) {
     const user = await userForSession(session)
-    if (user) return { actor: { kind: 'user', id: user.id, name: user.username }, invalidKey: false }
+    if (user) return { actor: actorOf(user), invalidKey: false }
   }
   return { actor: null, invalidKey: false }
 }
@@ -150,6 +151,13 @@ export function decide(input: {
   if (invalidKey) return { allow: false, status: 401, message: 'That API key is not valid, or has been revoked' }
   if (actor?.kind === 'key' && actor.access === 'read' && !reading) {
     return { allow: false, status: 403, message: `The key "${actor.name}" may only read` }
+  }
+  // A viewer changes nothing that is monitored. Settings are left to their
+  // own routes, which know what each role may do there: a viewer may still
+  // change their own password, and make and revoke keys of their own.
+  const settingsRoute = input.pathname === '/api/security' || input.pathname.startsWith('/api/security/')
+  if (actor?.kind === 'user' && !reading && !canChange(actor.role) && !settingsRoute) {
+    return { allow: false, status: 403, message: `Your account is a ${ROLE_LABEL[actor.role]}, which may look but not change anything` }
   }
   if (input.policy.loginRequired && !actor) {
     return { allow: false, status: 401, message: 'Sign in, or send an API key as "Authorization: Bearer <key>"' }

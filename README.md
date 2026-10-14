@@ -300,7 +300,7 @@ Everything the interface does goes through these.
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
 | `GET /api/health` | Whether the server is up; open even with sign-in on |
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
-| `/api/security/…` | Sign-in switches, keys, accounts, single sign-on and the activity record; signed in only |
+| `/api/security/…` | Sign-in switches, keys, accounts and their roles (`PATCH /api/security/users/:id`), single sign-on and the activity record; signed in only, and most of it for admins ([docs/security.md](docs/security.md#roles)) |
 | `GET /api/auth/sso/start`, `/callback` | Signing in with Authentik or another OpenID Connect provider |
 | `POST /api/auth/sso/logout` | Where the provider says someone signed out there (back-channel logout) |
 | `GET /api/version` | The version, commit and build time running, the same for the newest published image, and whether that is an update |
@@ -327,4 +327,4 @@ SQLite.
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
 - [docs/alerting.md](docs/alerting.md): alerts, and sending them with Apprise
 - [docs/mcp.md](docs/mcp.md): connecting an AI assistant, and the report for an ISP
-- [docs/security.md](docs/security.md): sign-in, single sign-on with Authentik, keys for scripts and assistants, and the activity record
+- [docs/security.md](docs/security.md): sign-in, roles, single sign-on with Authentik, keys for scripts and assistants, and the activity record

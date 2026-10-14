@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type sqlite3 from 'sqlite3'
 import { getDatabase } from '../database'
+import { effectiveKeyAccess, isRole, type KeyAccess, type Role } from './roles'
 import { decoyHash, hashPassword, KEY_PREFIX, newToken, tokenHash, verifyPassword } from './secrets'
 
 /**
@@ -32,10 +33,10 @@ async function one<T>(database: Database, sql: string, params: unknown[] = []): 
 
 // ─── Who did something ──────────────────────────────────────────────────────
 
-export type KeyAccess = 'read' | 'write'
+export type { KeyAccess, Role }
 
 export type Actor =
-  | { kind: 'user'; id: string; name: string }
+  | { kind: 'user'; id: string; name: string; role: Role }
   | { kind: 'key'; id: string; name: string; access: KeyAccess }
   | { kind: 'anonymous'; name: string }
 
@@ -52,6 +53,7 @@ export interface User {
   sso: boolean
   /** Can also sign in with a password. An account made by signing in through the provider cannot. */
   hasPassword: boolean
+  role: Role
 }
 
 interface UserRow {
@@ -62,6 +64,7 @@ interface UserRow {
   last_login_at: number | null
   sso_issuer: string | null
   sso_subject: string | null
+  role: string
 }
 
 const userFrom = (row: UserRow): User => ({
@@ -71,7 +74,14 @@ const userFrom = (row: UserRow): User => ({
   lastLoginAt: row.last_login_at,
   sso: !!row.sso_subject,
   hasPassword: row.password_hash !== '',
+  // Anything unrecognised is the least, never the most.
+  role: isRole(row.role) ? row.role : 'viewer',
 })
+
+/** The user as the one making a change: what the activity record and the checks take. */
+export function actorOf(user: User): Extract<Actor, { kind: 'user' }> {
+  return { kind: 'user', id: user.id, name: user.username, role: user.role }
+}
 
 export const USERNAME = /^[A-Za-z0-9._@-]{1,64}$/
 
@@ -86,7 +96,7 @@ export async function listUsers(): Promise<User[]> {
 }
 
 /** Throws with a reason fit to show when the name is taken or not allowed. */
-export async function createUser(username: string, password: string): Promise<User> {
+export async function createUser(username: string, password: string, role: Role): Promise<User> {
   if (!USERNAME.test(username)) {
     throw new Error('A username is 1 to 64 letters, digits, dots, dashes, underscores or @')
   }
@@ -102,12 +112,14 @@ export async function createUser(username: string, password: string): Promise<Us
     last_login_at: null,
     sso_issuer: null,
     sso_subject: null,
+    role,
   }
-  await run(database, 'INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)', [
+  await run(database, 'INSERT INTO users (id, username, password_hash, created_at, role) VALUES (?, ?, ?, ?, ?)', [
     row.id,
     row.username,
     row.password_hash,
     row.created_at,
+    role,
   ])
   return userFrom(row)
 }
@@ -136,7 +148,7 @@ export async function userForSso(issuer: string, subject: string): Promise<User 
  * an account here already has it: an existing account is never taken over by
  * a name that happens to match.
  */
-export async function createSsoUser(wanted: string, issuer: string, subject: string): Promise<User> {
+export async function createSsoUser(wanted: string, issuer: string, subject: string, role: Role): Promise<User> {
   const database = await getDatabase()
   const base = wanted.replace(/[^A-Za-z0-9._@-]/g, '').slice(0, 56) || 'user'
   let username = base
@@ -150,11 +162,12 @@ export async function createSsoUser(wanted: string, issuer: string, subject: str
     last_login_at: null,
     sso_issuer: issuer,
     sso_subject: subject,
+    role,
   }
   await run(
     database,
-    'INSERT INTO users (id, username, password_hash, created_at, sso_issuer, sso_subject) VALUES (?, ?, ?, ?, ?, ?)',
-    [row.id, row.username, row.password_hash, row.created_at, issuer, subject]
+    'INSERT INTO users (id, username, password_hash, created_at, sso_issuer, sso_subject, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [row.id, row.username, row.password_hash, row.created_at, issuer, subject, role]
   )
   return userFrom(row)
 }
@@ -188,8 +201,37 @@ export async function setPassword(userId: string, password: string): Promise<voi
   await run(await getDatabase(), 'UPDATE users SET password_hash = ? WHERE id = ?', [await hashPassword(password), userId])
 }
 
+export async function countAdmins(): Promise<number> {
+  const row = await one<{ count: number }>(await getDatabase(), "SELECT COUNT(*) AS count FROM users WHERE role = 'admin'")
+  return row?.count ?? 0
+}
+
+/** Would taking this account's admin role away, or the account itself, leave no admin? */
+export async function isLastAdmin(userId: string): Promise<boolean> {
+  const user = await getUser(userId)
+  return user?.role === 'admin' && (await countAdmins()) <= 1
+}
+
+/** Change an account's role. Throws, changing nothing, if it would leave no admin. */
+export async function setRole(userId: string, role: Role): Promise<User> {
+  const user = await getUser(userId)
+  if (!user) throw new Error('No such account')
+  if (user.role === 'admin' && role !== 'admin' && (await isLastAdmin(userId))) {
+    throw new Error('This is the only admin. Make another account an admin first')
+  }
+  await run(await getDatabase(), 'UPDATE users SET role = ? WHERE id = ?', [role, userId])
+  return { ...user, role }
+}
+
+/**
+ * Remove an account. Its keys are revoked with it: a key does what the account
+ * that made it may, and that account is gone. Throws if it is the last admin.
+ */
 export async function deleteUser(userId: string): Promise<boolean> {
-  return (await run(await getDatabase(), 'DELETE FROM users WHERE id = ?', [userId])) > 0
+  if (await isLastAdmin(userId)) throw new Error('This is the only admin. Make another account an admin first')
+  const database = await getDatabase()
+  await run(database, 'UPDATE api_keys SET revoked_at = ? WHERE owner_id = ? AND revoked_at IS NULL', [Date.now(), userId])
+  return (await run(database, 'DELETE FROM users WHERE id = ?', [userId])) > 0
 }
 
 // ─── Sessions ───────────────────────────────────────────────────────────────
@@ -314,6 +356,8 @@ export interface ApiKey {
   access: KeyAccess
   createdAt: number
   createdBy: string | null
+  /** The account that made it, which it can never do more than. Null for keys from before roles. */
+  ownerId: string | null
   lastUsedAt: number | null
   revokedAt: number | null
 }
@@ -326,6 +370,7 @@ interface KeyRow {
   access: KeyAccess
   created_at: number
   created_by: string | null
+  owner_id: string | null
   last_used_at: number | null
   revoked_at: number | null
 }
@@ -337,12 +382,13 @@ const keyFrom = (row: KeyRow): ApiKey => ({
   access: row.access,
   createdAt: row.created_at,
   createdBy: row.created_by,
+  ownerId: row.owner_id,
   lastUsedAt: row.last_used_at,
   revokedAt: row.revoked_at,
 })
 
 /** The new key itself, which is shown this once and kept only as a hash. */
-export async function createApiKey(name: string, access: KeyAccess, createdBy: string | null): Promise<{ key: string; record: ApiKey }> {
+export async function createApiKey(name: string, access: KeyAccess, owner: { id: string; name: string } | null): Promise<{ key: string; record: ApiKey }> {
   const key = newToken(KEY_PREFIX)
   const row: KeyRow = {
     id: randomUUID(),
@@ -351,31 +397,54 @@ export async function createApiKey(name: string, access: KeyAccess, createdBy: s
     key_hash: tokenHash(key),
     access,
     created_at: Date.now(),
-    created_by: createdBy,
+    created_by: owner?.name ?? null,
+    owner_id: owner?.id ?? null,
     last_used_at: null,
     revoked_at: null,
   }
   await run(
     await getDatabase(),
-    'INSERT INTO api_keys (id, name, prefix, key_hash, access, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [row.id, row.name, row.prefix, row.key_hash, row.access, row.created_at, row.created_by]
+    'INSERT INTO api_keys (id, name, prefix, key_hash, access, created_at, created_by, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [row.id, row.name, row.prefix, row.key_hash, row.access, row.created_at, row.created_by, row.owner_id]
   )
   return { key, record: keyFrom(row) }
 }
 
+/**
+ * The key, if it is one and not revoked, with `access` as it stands now:
+ * never more than the account that made it may do (see effectiveKeyAccess).
+ */
 export async function apiKeyFor(key: string): Promise<ApiKey | null> {
   const database = await getDatabase()
-  const row = await one<KeyRow>(database, 'SELECT * FROM api_keys WHERE key_hash = ? AND revoked_at IS NULL', [tokenHash(key)])
+  const row = await one<KeyRow & { owner_role: string | null }>(
+    database,
+    `SELECT api_keys.*, users.role AS owner_role FROM api_keys LEFT JOIN users ON users.id = api_keys.owner_id
+      WHERE api_keys.key_hash = ? AND api_keys.revoked_at IS NULL`,
+    [tokenHash(key)]
+  )
   if (!row) return null
+  // A maker on record who is no longer here: the key went with them.
+  if (row.owner_id && row.owner_role === null) return null
   const now = Date.now()
   if (!row.last_used_at || now - row.last_used_at > TOUCH_AFTER_MS) {
     await run(database, 'UPDATE api_keys SET last_used_at = ? WHERE id = ?', [now, row.id]).catch(() => {})
   }
-  return keyFrom(row)
+  const makerRole = row.owner_role === null ? null : isRole(row.owner_role) ? row.owner_role : 'viewer'
+  return { ...keyFrom(row), access: effectiveKeyAccess(row.access, makerRole) }
 }
 
-export async function listApiKeys(): Promise<ApiKey[]> {
-  const rows = await all<KeyRow>(await getDatabase(), 'SELECT * FROM api_keys ORDER BY revoked_at IS NOT NULL, created_at DESC')
+export async function getApiKey(id: string): Promise<ApiKey | null> {
+  const row = await one<KeyRow>(await getDatabase(), 'SELECT * FROM api_keys WHERE id = ?', [id])
+  return row ? keyFrom(row) : null
+}
+
+/** Every key, or with `ownerId` only the keys that account made. */
+export async function listApiKeys(ownerId?: string): Promise<ApiKey[]> {
+  const rows = await all<KeyRow>(
+    await getDatabase(),
+    `SELECT * FROM api_keys ${ownerId ? 'WHERE owner_id = ?' : ''} ORDER BY revoked_at IS NOT NULL, created_at DESC`,
+    ownerId ? [ownerId] : []
+  )
   return rows.map(keyFrom)
 }
 

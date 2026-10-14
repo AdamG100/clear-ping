@@ -36,7 +36,8 @@ interface SidebarRailProps {
   /** Whether Settings is open. */
   settingsOpen?: boolean
   onOpenSettings: () => void
-  onAddTarget: () => void
+  /** Left out for an account that may only look. */
+  onAddTarget?: () => void
 }
 
 const RAIL_BUTTON =
@@ -189,7 +190,7 @@ export function SidebarRail({
         >
           <Settings className="h-4 w-4" />
         </button>
-        <button
+        {onAddTarget && <button
           type="button"
           onClick={onAddTarget}
           aria-label="Add target"
@@ -197,7 +198,7 @@ export function SidebarRail({
           className={cn(RAIL_BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}
         >
           <Plus className="h-4 w-4" />
-        </button>
+        </button>}
       </div>
     </>
   )

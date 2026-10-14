@@ -3,6 +3,7 @@ import { initializeServer } from '@/lib/init';
 import { handleMessage, JSON_RPC, MCP_PROTOCOL_VERSIONS, originAllowed, tokenTravelsSafely } from '@/lib/mcp-protocol';
 import { clearPingMcp } from '@/lib/mcp-tools';
 import { identify, presentedKey, securityPolicy } from '@/lib/security/access';
+import { canChange } from '@/lib/security/roles';
 import { ANONYMOUS, recordActivity } from '@/lib/security/store';
 
 /**
@@ -61,15 +62,15 @@ export async function POST(request: NextRequest) {
     return refuse(
       401,
       JSON_RPC.invalidRequest,
-      'A key is needed to connect: make one in ClearPing\'s security settings and send it as "Authorization: Bearer <key>"',
+      'A key is needed to connect: make one in ClearPing\'s Settings → Keys and send it as "Authorization: Bearer <key>"',
       { 'WWW-Authenticate': 'Bearer' }
     );
   }
 
   const access = {
-    // Someone signed in to the dashboard may do anything; a key what it was
-    // made for; and nobody at all, only read.
-    writes: actor?.kind === 'user' || (actor?.kind === 'key' && actor.access === 'write'),
+    // Someone signed in to the dashboard what their role allows; a key what it
+    // was made for, no more than its maker may; and nobody at all, only read.
+    writes: (actor?.kind === 'user' && canChange(actor.role)) || (actor?.kind === 'key' && actor.access === 'write'),
     onWrite: (tool: string, args: Record<string, unknown>, failed: boolean) =>
       recordActivity(actor ?? ANONYMOUS, 'mcp', `mcp.${tool}`, (failed ? 'Failed: ' : '') + JSON.stringify(args)),
   };

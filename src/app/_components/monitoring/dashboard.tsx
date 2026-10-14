@@ -37,6 +37,7 @@ import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { AlertsView, type AlertResponse } from './alerts-view'
 import { SettingsPage } from './settings-page'
 import { useDashboardPage } from './use-dashboard-page'
+import { useSignedIn } from './use-signed-in'
 import { DEFAULT_SETTINGS_SECTION, isSettingsSection, type DashboardPage } from '@/lib/dashboard-pages'
 import { ProbeDetailsPanel } from './probe-details'
 import { TraceroutePanel } from './traceroute-panel'
@@ -566,6 +567,8 @@ export function Dashboard() {
   // main pane. Which one is part of the address.
   const { page, goTo } = useDashboardPage()
   const showingAlerts = page?.kind === 'alerts'
+  // A viewer is shown everything and offered nothing to change.
+  const readOnly = useSignedIn()?.role === 'viewer'
   // On a narrow screen the sidebar is a drawer over the page. Choosing
   // anything in it is the reason it was opened, so every choice closes it.
   // On a wide one it sits beside the page and can be collapsed to a rail of icons.
@@ -923,6 +926,7 @@ export function Dashboard() {
         onOpenAlerts={openAlerts}
         settingsOpen={page?.kind === 'settings'}
         onOpenSettings={openSettings}
+        readOnly={readOnly}
         firingAlerts={firingAlerts}
         onAddTarget={addTarget}
         onImportTargets={handleImportTargets}
@@ -1006,6 +1010,7 @@ export function Dashboard() {
                 groupOrders={groupOrders}
                 onChanged={reloadAlerts}
                 onSelectTarget={setSelectedTargetId}
+                readOnly={readOnly}
               />
             </ErrorBoundary>
           </motion.div>
@@ -1107,15 +1112,17 @@ export function Dashboard() {
               </div>
               <div className={PANE_ACTIONS}>
                 <TimeRangeSelector value={timeRange} onChange={handleTimeRangeChange} busy={pending} />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleProbe}
-                  disabled={probing}
-                  className={PANE_ACTION}
-                >
-                  {probing ? 'Probing…' : 'Probe now'}
-                </Button>
+                {!readOnly && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleProbe}
+                    disabled={probing}
+                    className={PANE_ACTION}
+                  >
+                    {probing ? 'Probing…' : 'Probe now'}
+                  </Button>
+                )}
               </div>
             </header>
 
@@ -1341,6 +1348,7 @@ export function Dashboard() {
                     key={selectedTarget.id}
                     targetId={selectedTarget.id}
                     refreshKey={lastUpdated?.getTime()}
+                    readOnly={readOnly}
                   />
                 </ErrorBoundary>
 

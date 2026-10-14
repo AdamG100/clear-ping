@@ -6,6 +6,7 @@ import {
   notificationFor,
   notifyUrlLabel,
   parseNotifyUrls,
+  redactNotifyUrl,
 } from './alert-delivery'
 
 function event(over: Partial<AlertEvent> = {}, rule: Partial<AlertEvent['rule']> = {}): AlertEvent {
@@ -81,6 +82,21 @@ describe('notifyUrlLabel', () => {
   it('names the host of a web address, which is what Apprise knows the service by', () => {
     expect(notifyUrlLabel('https://hooks.slack.com/services/T000/B000/XXXX')).toBe('hooks.slack.com')
     expect(notifyUrlLabel('https://discord.com/api/webhooks/123/secret')).toBe('discord.com')
+  })
+})
+
+describe('redactNotifyUrl', () => {
+  it('keeps the service and drops the tokens and passwords', () => {
+    expect(redactNotifyUrl('discord://123456789012345678/secret-token')).toBe('discord://…')
+    expect(redactNotifyUrl('mailtos://user:password@example.com')).toBe('mailtos://…')
+    expect(redactNotifyUrl('https://hooks.slack.com/services/T000/B000/XXXX')).toBe('https://hooks.slack.com/…')
+    expect(redactNotifyUrl('not a url')).toBe('…')
+  })
+
+  it('still names the same service once redacted', () => {
+    for (const url of ['tgram://bot-token/chat-id', 'https://discord.com/api/webhooks/123/secret']) {
+      expect(notifyUrlLabel(redactNotifyUrl(url))).toBe(notifyUrlLabel(url))
+    }
   })
 })
 

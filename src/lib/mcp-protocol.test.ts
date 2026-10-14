@@ -191,7 +191,7 @@ describe('tools that change something', () => {
     const refused = (await asked('tools/call', { name: 'add_thing' }, false))?.result as { content: Array<{ text: string }>; isError: boolean }
     expect(refused.isError).toBe(true)
     expect(refused.content[0].text).toContain('this connection may only read')
-    expect(refused.content[0].text).toContain('security settings')
+    expect(refused.content[0].text).toContain('Settings → Keys')
 
     expect((await asked('tools/call', { name: 'add_thing' }, true))?.result).toEqual({ content: [{ type: 'text', text: '{"added":true}' }] })
     // One that only reads is there either way.

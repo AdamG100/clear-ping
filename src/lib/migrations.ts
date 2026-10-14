@@ -439,6 +439,22 @@ async function singleSignOut(database: Database): Promise<void> {
   await run(database, 'CREATE INDEX IF NOT EXISTS idx_sessions_sso ON sessions(sso_issuer, sso_subject) WHERE sso_subject IS NOT NULL');
 }
 
+/**
+ * Roles. The accounts already here could do everything, and still can: they
+ * are admins. A key remembers the account that made it, so that it can never
+ * do more than that account may.
+ */
+async function roles(database: Database): Promise<void> {
+  const users = await all<{ name: string }>(database, 'PRAGMA table_info(users)');
+  if (!users.some(column => column.name === 'role')) {
+    await run(database, "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'editor', 'viewer'))");
+  }
+  const keys = await all<{ name: string }>(database, 'PRAGMA table_info(api_keys)');
+  if (!keys.some(column => column.name === 'owner_id')) {
+    await run(database, 'ALTER TABLE api_keys ADD COLUMN owner_id TEXT');
+  }
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
@@ -448,6 +464,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'security', up: security },
   { name: 'single sign-on', up: singleSignOn },
   { name: 'single sign-out', up: singleSignOut },
+  { name: 'roles', up: roles },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

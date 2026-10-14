@@ -22,6 +22,8 @@ interface TraceroutePanelProps {
   targetId: string
   /** Changes whenever a new probe lands, so traces taken by an alert show up. */
   refreshKey?: number
+  /** The account signed in may look but not change anything: routes are shown, not traced or deleted. */
+  readOnly?: boolean
 }
 
 type TraceResponse = Omit<Traceroute, 'timestamp'> & { timestamp: string }
@@ -281,7 +283,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
 
 // ─── The panel ──────────────────────────────────────────────────────────────
 
-export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) {
+export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: TraceroutePanelProps) {
   const { notify, reportError } = useToast()
   const [traces, setTraces] = useState<Traceroute[]>([])
   // How many are kept in all, which can be more than the newest few listed.
@@ -413,7 +415,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
             Where the path goes, hop by hop. Traced automatically when a loss alert fires.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        {!readOnly && <div className="flex shrink-0 items-center gap-2">
           {olderCount > 0 && (
             <Button
               variant={confirming === 'older' ? 'destructive' : 'outline'}
@@ -432,7 +434,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
             <Route className={cn('mr-2 h-3.5 w-3.5', running && 'animate-pulse')} />
             {running ? 'Tracing…' : 'Trace route'}
           </Button>
-        </div>
+        </div>}
       </div>
 
       <div className="px-4 pb-4 pt-3 @2xl/main:px-5">
@@ -496,7 +498,7 @@ export function TraceroutePanel({ targetId, refreshKey }: TraceroutePanelProps) 
                         </span>
                       </button>
 
-                      {confirming === item.id ? (
+                      {readOnly ? null : confirming === item.id ? (
                         <Button
                           variant="destructive"
                           size="sm"

@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/security/http';
+import { requireAdmin } from '@/lib/security/http';
 import { getSsoConfig, publicSsoConfig, saveSsoConfig, SSO_CALLBACK_PATH, type SsoConfig } from '@/lib/security/oidc';
 import { recordActivity } from '@/lib/security/store';
 
 /**
  * PUT /api/security/sso - Set up single sign-on
- * Body: any of { enabled, label, issuer, clientId, clientSecret, allowedGroup, autoCreate, signOutAtProvider }
+ * Body: any of { enabled, label, issuer, clientId, clientSecret, allowedGroup, autoCreate, signOutAtProvider,
+ *   adminGroup, editorGroup, newAccountRole }
  *
+ * Admins only.
  * The client secret is only ever written: an empty one keeps what is saved,
  * and it is never sent back. The redirect URI is taken from the address the
  * dashboard was opened at, which is the one the provider has to send people
  * back to, and saved with the rest.
  */
 export async function PUT(request: NextRequest) {
-  const user = await requireUser(request);
+  const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
 
   const body = (await request.json().catch(() => null)) as Partial<SsoConfig> | null;

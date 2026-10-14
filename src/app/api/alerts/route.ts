@@ -2,14 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAlert, getAlerts, parseAlertInput, type AlertInput } from '@/lib/alerts';
 import { checkNotifyUrls } from '@/lib/apprise';
 import { initializeServer } from '@/lib/init';
-import { actorFor } from '@/lib/security/access';
+import { redactNotifyUrl } from '@/lib/alert-delivery';
+import { actorFor, identify } from '@/lib/security/access';
+import { canChange } from '@/lib/security/roles';
 import { recordActivity } from '@/lib/security/store';
 
-/** GET /api/alerts - Every alert, with the state of each target it is ticked for */
-export async function GET() {
+/**
+ * GET /api/alerts - Every alert, with the state of each target it is ticked for
+ *
+ * Where each is sent is shown whole only to whoever may change alerts: the
+ * URLs carry the services' tokens. A viewer, or a key that only reads, sees
+ * which service and no more.
+ */
+export async function GET(request: NextRequest) {
   try {
     await initializeServer();
-    return NextResponse.json({ alerts: await getAlerts() });
+    const alerts = await getAlerts();
+    const { actor } = await identify(request);
+    const mayChange = actor?.kind === 'user' ? canChange(actor.role) : actor?.kind === 'key' ? actor.access === 'write' : true;
+    return NextResponse.json({
+      alerts: mayChange ? alerts : alerts.map(alert => ({ ...alert, notifyUrls: alert.notifyUrls.map(redactNotifyUrl) })),
+    });
   } catch (error) {
     console.error('Error fetching alerts:', error);
     return NextResponse.json({ error: 'Failed to fetch alerts' }, { status: 500 });

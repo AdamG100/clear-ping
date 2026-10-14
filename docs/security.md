@@ -1,4 +1,4 @@
-# Security: sign-in, keys and activity
+# Security: sign-in, roles, keys and activity
 
 Everything here is optional and starts off. Out of the box ClearPing is as it
 always was: anyone who can reach it can use it, which is fine on your own
@@ -6,6 +6,7 @@ network or behind a sign-in proxy such as Authentik. For anything else, the
 **Settings** page (the cog at the foot of the sidebar, or `/settings`) sets up:
 
 - **Sign-in** for the dashboard and its API, with accounts.
+- **Roles**: admins, editors who change what is monitored, viewers who look.
 - **Keys** for scripts and AI assistants: one each, able to read or to read and
   change.
 - **Activity**: a record of every change, and which account or key made it.
@@ -25,6 +26,42 @@ network or behind a sign-in proxy such as Authentik. For anything else, the
 Changing anything under Settings always takes being signed in, even while
 sign-in is off for the dashboard. Otherwise anyone who could open the page could
 make themselves a key. A key can never change these settings.
+
+## Roles
+
+Every account has one of three roles, set by an admin in **Settings →
+Accounts** (or by Authentik groups; see below):
+
+| | Admin | Editor | Viewer |
+|---|---|---|---|
+| See targets, charts, routes, incidents | yes | yes | yes |
+| See alerts | yes | yes | yes, without the tokens in where they are sent |
+| Add, change, pause and delete targets and groups; probe; trace | yes | yes | no |
+| Make, change and delete alerts | yes | yes | no |
+| Make keys | any | of its own | of its own, read only |
+| Revoke keys | any | its own | its own |
+| Change its own password, link its own account to single sign-on | yes | yes | yes |
+| Sign-in, single sign-on settings, accounts and roles, the activity record | yes | no | no |
+
+- The first account is an admin, and so is one made with
+  `CLEARPING_AUTH=off` to get back in. Accounts that were here before roles
+  are admins: nothing changes for them.
+- An account an admin adds is a **viewer** unless they choose otherwise.
+- There is always an admin: the last one cannot be made anything else, or
+  removed.
+- A change of role takes effect at once, on the next request, without
+  signing in again.
+- A viewer's dashboard leaves out what it may not do (Add target, editing,
+  Probe now, Trace route, the alerts' buttons), and the server refuses it
+  anyway.
+- Roles are about a ClearPing that asks for sign-in. With sign-in off,
+  anyone who can reach it can change anything without signing in, as before.
+
+**A key never does more than the account that made it.** A viewer's keys only
+read. An editor made a viewer has keys that only read from the next request;
+made an editor again, they change things again. Removing an account revokes
+its keys. Keys made before roles have no maker on record and do what they were
+made to.
 
 ## What sign-in covers
 
@@ -59,7 +96,8 @@ a quarter of an hour.
 | API: `POST`, `PATCH`, `PUT`, `DELETE` | no (`403`) | yes |
 | MCP: the tools that read | yes | yes |
 | MCP: `add_targets`, `update_target`, `set_target_paused`, `probe_now`, `run_traceroute` | no | yes |
-| Security settings | no | no |
+| Settings | no | no |
+| Ever more than the account that made it | no | no |
 
 - Give each script or assistant **its own key**. Then one can be revoked
   without touching the others, and the activity record names which one did
@@ -87,8 +125,9 @@ revocable without a restart, named in the record. Move to them and unset it.
 - targets added, imported, changed, paused, resumed and deleted;
 - groups made, renamed and deleted; alerts made, changed and deleted;
 - every change an assistant made over MCP, with what it was asked to do;
-- keys made and revoked, accounts added and removed, passwords changed, sign-in
-  turned on and off;
+- keys made and revoked, accounts added and removed, roles changed (and by
+  whom: an admin, or the person's groups at Authentik), passwords changed,
+  sign-in turned on and off;
 - sign-ins, and failed sign-ins with the address they came from.
 
 Each entry says who (the account, the key, or *Anonymous* while sign-in is off)
@@ -134,9 +173,8 @@ button on the sign-in page, with no password to keep for ClearPing.
 
 1. Settings → **Single sign-on**: paste the issuer, client ID and client secret.
    **Test the issuer** checks that Authentik can be reached there.
-2. Optionally, **Only members of this group**: an Authentik group name. Every
-   account in ClearPing can do everything, these settings included, so keep
-   it to the people who should.
+2. Optionally, **Only members of this group**: an Authentik group name. Only
+   its members can sign in through Authentik at all.
 3. **Save**, then turn on **Sign in with Authentik**.
 4. **Link my account**: signs in through Authentik once and ties your existing
    account to that identity, so it is you who signs in rather than a new
@@ -151,6 +189,23 @@ through Authentik for the first time gets an account under their Authentik
 username. If that name is already taken here, a number is added; an existing
 account is never taken over because a name matches. Off, only accounts that
 have been linked can sign in this way.
+
+### Roles from Authentik groups
+
+Under **Roles from groups**, name a group for admins and one for editors:
+
+- At every sign-in through Authentik, the account's role is set from the
+  person's groups: in the admin group, an admin; in the editor group, an
+  editor; in neither, a viewer. A change of groups in Authentik is a change of
+  role here at their next sign-in.
+- The last admin is never made anything else this way; the activity record
+  says the role was kept, and why.
+- Left empty, Authentik has no say: roles are set in Settings → Accounts, and
+  an account made at its first sign-in starts as the role chosen there (a
+  viewer, unless changed).
+
+Authentik sends the groups with `profile`, which ClearPing asks for, so there
+is nothing to set up on that side beyond the groups themselves.
 
 ### Signing out, both ways
 
