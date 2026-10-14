@@ -12,8 +12,6 @@ import { SidebarSkeleton } from './skeleton'
 import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-dialogs'
 import { GroupDialog, type GroupDialogTask } from './group-dialog'
 import { ShareDialog } from './share-dialog'
-import { McpDialog } from './mcp-dialog'
-import { SecurityDialog } from './security-dialog'
 import { DeleteTargetsDialog } from './delete-targets-dialog'
 import { useIncomingShareCode } from './use-incoming-share-code'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
@@ -167,6 +165,12 @@ interface SidebarProps {
   onOpenAlerts?: () => void
   /** How many alerts are firing on at least one target. */
   firingAlerts?: number
+  /** Whether the page for connecting an AI assistant is what the main pane is showing. */
+  mcpOpen?: boolean
+  onOpenMcp?: () => void
+  /** Whether the security page is what the main pane is showing. */
+  securityOpen?: boolean
+  onOpenSecurity?: () => void
   onReorderTargets?: (updates: { id: string; sortOrder: number; group?: string }[]) => void
   /** The targets have not arrived yet: there is no list to show and nothing to count. */
   loading?: boolean
@@ -836,6 +840,10 @@ export function Sidebar({
   alertsOpen = false,
   onOpenAlerts,
   firingAlerts = 0,
+  mcpOpen = false,
+  onOpenMcp,
+  securityOpen = false,
+  onOpenSecurity,
   onReorderTargets,
   loading = false,
 }: SidebarProps) {
@@ -847,9 +855,6 @@ export function Sidebar({
   // The group a new target starts in, when it was added from inside one.
   const [addingTo, setAddingTo] = useState('')
   const [isShareOpen, setIsShareOpen] = useState(false)
-  const [isMcpOpen, setIsMcpOpen] = useState(false)
-  // Open, and on which tab: the MCP dialog opens it straight on the keys.
-  const [securityTab, setSecurityTab] = useState<'access' | 'keys' | null>(null)
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
   const [incomingShareCode, clearIncomingShareCode] = useIncomingShareCode()
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -1373,8 +1378,12 @@ export function Sidebar({
             the app says an assistant can be connected to it at all. */}
         <button
           type="button"
-          onClick={() => setIsMcpOpen(true)}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-1.5 text-left text-xs text-muted-foreground outline-none transition-colors hover:border-ring/60 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 touch:py-2.5"
+          onClick={onOpenMcp}
+          aria-current={mcpOpen ? 'page' : undefined}
+          className={cn(
+            'flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-1.5 text-left text-xs text-muted-foreground outline-none transition-colors hover:border-ring/60 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 touch:py-2.5',
+            mcpOpen && 'border-solid border-sidebar-ring/50 bg-sidebar-accent text-sidebar-foreground'
+          )}
         >
           <Bot className="h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 flex-1 truncate">Connect an AI assistant</span>
@@ -1421,9 +1430,10 @@ export function Sidebar({
           <Share2 className="h-4 w-4" />
         </Button>
         <Button
-          variant="outline"
+          variant={securityOpen ? 'secondary' : 'outline'}
           size="icon-sm"
-          onClick={() => setSecurityTab('access')}
+          onClick={onOpenSecurity}
+          aria-pressed={securityOpen}
           aria-label="Security"
           data-tip="Security"
           data-tip-detail="Sign-in, keys and activity"
@@ -1458,8 +1468,10 @@ export function Sidebar({
               onOpenAlerts={onOpenAlerts}
               firingAlerts={firingAlerts}
               onShare={() => setIsShareOpen(true)}
-              onConnectAssistant={() => setIsMcpOpen(true)}
-              onOpenSecurity={() => setSecurityTab('access')}
+              mcpOpen={mcpOpen}
+              onConnectAssistant={() => onOpenMcp?.()}
+              securityOpen={securityOpen}
+              onOpenSecurity={() => onOpenSecurity?.()}
               onAddTarget={() => openAddDialog()}
             />
           </motion.div>
@@ -1508,22 +1520,6 @@ export function Sidebar({
           if (added) closeShareDialog()
           return added
         }}
-      />
-
-      <McpDialog
-        open={isMcpOpen}
-        onOpenChange={setIsMcpOpen}
-        onMakeKey={() => {
-          setIsMcpOpen(false)
-          setSecurityTab('keys')
-        }}
-      />
-      <SecurityDialog
-        // A fresh dialog each time it opens, on the tab it was asked for.
-        key={securityTab ?? 'closed'}
-        open={securityTab !== null}
-        onOpenChange={open => { if (!open) setSecurityTab(null) }}
-        tab={securityTab ?? 'access'}
       />
 
       <DeleteTargetsDialog

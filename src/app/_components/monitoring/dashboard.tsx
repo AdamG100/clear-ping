@@ -35,6 +35,10 @@ import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { AlertsView, type AlertResponse } from './alerts-view'
+import { McpPage } from './mcp-page'
+import { SecurityPage } from './security-page'
+import { useDashboardPage } from './use-dashboard-page'
+import type { DashboardPage, SecurityTab } from '@/lib/dashboard-pages'
 import { ProbeDetailsPanel } from './probe-details'
 import { TraceroutePanel } from './traceroute-panel'
 import { ComparePanel } from './compare-panel'
@@ -559,8 +563,10 @@ export function Dashboard() {
   const { notify, reportError } = useToast()
   const { targets, latest, series, groups, groupOrders, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
-  // The alerts screen takes the place of a target or a group in the main pane.
-  const [showingAlerts, setShowingAlerts] = useState(false)
+  // A page (alerts, security, connecting an assistant) takes the place of a
+  // target or a group in the main pane. Which one is part of the address.
+  const { page, goTo } = useDashboardPage()
+  const showingAlerts = page?.kind === 'alerts'
   // On a narrow screen the sidebar is a drawer over the page. Choosing
   // anything in it is the reason it was opened, so every choice closes it.
   // On a wide one it sits beside the page and can be collapsed to a rail of icons.
@@ -602,7 +608,7 @@ export function Dashboard() {
   const setSelectedTargetId = useCallback((id: string | null) => {
     setSelectedTargetIdState(id)
     setSelectedGroupState(null)
-    setShowingAlerts(false)
+    goTo(null)
     setZoom(null)
     setFamilyView('both')
     hideSidebar()
@@ -610,20 +616,23 @@ export function Dashboard() {
     localStorage.removeItem('selectedGroup')
     if (id) localStorage.setItem('selectedTargetId', id)
     else localStorage.removeItem('selectedTargetId')
-  }, [hideSidebar])
+  }, [hideSidebar, goTo])
 
   const selectGroup = useCallback((groupName: string) => {
     setSelectedGroupState(groupName)
-    setShowingAlerts(false)
+    goTo(null)
     setZoom(null)
     hideSidebar()
     if (typeof window !== 'undefined') localStorage.setItem('selectedGroup', groupName)
-  }, [hideSidebar])
+  }, [hideSidebar, goTo])
 
-  const openAlerts = useCallback(() => {
-    setShowingAlerts(true)
+  const openPage = useCallback((next: DashboardPage) => {
+    goTo(next)
     hideSidebar()
-  }, [hideSidebar])
+  }, [goTo, hideSidebar])
+  const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
+  const openMcp = useCallback(() => openPage({ kind: 'mcp' }), [openPage])
+  const openSecurity = useCallback((tab: SecurityTab = 'access') => openPage({ kind: 'security', tab }), [openPage])
 
   // A group on screen keeps being on screen under its new name.
   const handleMoveGroup = useCallback(async (from: string, to: string) => {
@@ -882,8 +891,8 @@ export function Dashboard() {
   // Before the list of targets has arrived, "nothing selected" only means
   // "not known yet". Saying so with the empty state flashed "Pick a path to
   // inspect" on every refresh, ahead of the target that was selected all along.
-  const showLoadingState = !isLoaded && !showingAlerts
-  const showEmptyState = !selectedTarget && !groupTargets && !showingAlerts
+  const showLoadingState = !isLoaded && !page
+  const showEmptyState = !selectedTarget && !groupTargets && !page
   // Only the very first load for a target blanks the pane. Switching ranges
   // keeps the previous range on screen and dims it, so the layout never
   // collapses and reflows underneath the pointer.
@@ -901,13 +910,17 @@ export function Dashboard() {
         onCollapse={collapseSidebar}
         onExpand={expandSidebar}
         targets={transformedTargets}
-        selectedTargetId={groupTargets || showingAlerts ? null : selectedTargetId}
+        selectedTargetId={groupTargets || page ? null : selectedTargetId}
         onSelectTarget={setSelectedTargetId}
-        selectedGroup={groupTargets && !showingAlerts ? selectedGroup : null}
+        selectedGroup={groupTargets && !page ? selectedGroup : null}
         onSelectGroup={selectGroup}
         onMoveGroup={handleMoveGroup}
         alertsOpen={showingAlerts}
         onOpenAlerts={openAlerts}
+        mcpOpen={page?.kind === 'mcp'}
+        onOpenMcp={openMcp}
+        securityOpen={page?.kind === 'security'}
+        onOpenSecurity={openSecurity}
         firingAlerts={firingAlerts}
         onAddTarget={addTarget}
         onImportTargets={handleImportTargets}
@@ -992,6 +1005,32 @@ export function Dashboard() {
                 onChanged={reloadAlerts}
                 onSelectTarget={setSelectedTargetId}
               />
+            </ErrorBoundary>
+          </motion.div>
+          ) : page?.kind === 'security' ? (
+          <motion.div
+            key="security"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+          >
+            <ErrorBoundary label="Security">
+              {/* The tab is part of the address but not of the history: going
+                  back leaves Security rather than stepping through its tabs. */}
+              <SecurityPage tab={page.tab} onTab={tab => goTo({ kind: 'security', tab }, 'replace')} />
+            </ErrorBoundary>
+          </motion.div>
+          ) : page?.kind === 'mcp' ? (
+          <motion.div
+            key="mcp"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+          >
+            <ErrorBoundary label="Connect an AI assistant">
+              <McpPage onMakeKey={() => openSecurity('keys')} />
             </ErrorBoundary>
           </motion.div>
           ) : groupTargets ? (

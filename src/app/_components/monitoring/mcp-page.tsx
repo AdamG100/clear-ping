@@ -1,20 +1,14 @@
 'use client'
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { Bot, Check, ChevronRight, Copy, KeyRound } from 'lucide-react'
+import { Check, ChevronRight, Copy, KeyRound, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { isLocalHost } from '@/lib/host'
 import { cn } from '@/lib/utils'
+import { PANE, PANE_HEADER, PANE_TITLE } from './pane-layout'
 
 /**
  * How to connect an AI assistant to this ClearPing.
@@ -198,7 +192,18 @@ function Fold({
   )
 }
 
-function McpDialogBody({ onMakeKey }: { onMakeKey?: () => void }) {
+/** A section of a page in the dashboard's own card. */
+export const PAGE_CARD = 'min-w-0 space-y-4 rounded-xl border border-border bg-card p-4 @2xl/main:p-5'
+export const PAGE_CARD_TITLE = 'text-sm font-semibold text-card-foreground'
+
+const noSubscription = () => () => {}
+
+/** Whether this is the browser, which is where the page's own address is known. False while rendering on the server. */
+export function useInBrowser(): boolean {
+  return useSyncExternalStore(noSubscription, () => true, () => false)
+}
+
+function McpSetup({ onMakeKey }: { onMakeKey?: () => void }) {
   const [client, setClient] = useState<Client>('claude-code')
   // Open on the way that fits the address this page was reached at. One at a
   // time: opening the other puts this one away.
@@ -265,21 +270,9 @@ function McpDialogBody({ onMakeKey }: { onMakeKey?: () => void }) {
   )
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2 text-card-foreground">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-            <Bot className="h-4 w-4 text-primary" />
-          </div>
-          Connect an AI assistant
-        </DialogTitle>
-        <DialogDescription className="text-muted-foreground">
-          An assistant such as Claude can read this ClearPing over MCP: what is monitored, every outage with its times,
-          the traceroutes. Give it the address below, then ask it in your own words.
-        </DialogDescription>
-      </DialogHeader>
-
-      <div className="min-w-0 space-y-4">
+    <div className="grid items-start gap-4 @2xl/main:gap-6 @5xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <section className={PAGE_CARD} aria-labelledby="mcp-setup-title">
+        <h2 id="mcp-setup-title" className={PAGE_CARD_TITLE}>Set it up</h2>
         <CopyField id="mcp-url" label="MCP server address" value={url} />
 
         {tokenWouldBeRefused && (
@@ -399,8 +392,11 @@ function McpDialogBody({ onMakeKey }: { onMakeKey?: () => void }) {
 
           </div>
         </div>
+      </section>
 
-        <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+      <div className="min-w-0 space-y-4 @2xl/main:space-y-6">
+        <section className={PAGE_CARD} aria-labelledby="mcp-keys-title">
+          <h2 id="mcp-keys-title" className={PAGE_CARD_TITLE}>A key for each assistant</h2>
           <p className="text-xs leading-relaxed text-card-foreground">
             Give each assistant a key of its own, and put it where it says{' '}
             <span className="font-mono">{TOKEN_PLACEHOLDER}</span>. A <span className="font-medium">read-only</span> key
@@ -419,44 +415,51 @@ function McpDialogBody({ onMakeKey }: { onMakeKey?: () => void }) {
               Make a key
             </Button>
           )}
-        </div>
+        </section>
 
-        <div className="space-y-1.5">
-          <p className={FIELD_LABEL}>Then ask it something like</p>
-          <ul className="space-y-1">
+        <section className={PAGE_CARD} aria-labelledby="mcp-ask-title">
+          <h2 id="mcp-ask-title" className={PAGE_CARD_TITLE}>Then ask it something like</h2>
+          <ul className="space-y-1.5">
             {[...EXAMPLES, WRITE_EXAMPLE].map(example => (
               <li key={example} className="rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs text-card-foreground">
                 {example}
               </li>
             ))}
           </ul>
-        </div>
-
-        <p className={HINT}>
-          The last of those needs a read and change key. With one, an assistant can add targets, change them, pause
-          them, probe one now and trace a route; it cannot delete a target, and alerts are never shown to it. The report is only as good as what is monitored: with your router as a target as well as addresses beyond
-          it, the data can show whether a fault was inside your network or outside it.
-        </p>
+          <p className={HINT}>
+            The last of those needs a read and change key. With one, an assistant can add targets, change them, pause
+            them, probe one now and trace a route; it cannot delete a target, and alerts are never shown to it. The
+            report is only as good as what is monitored: with your router as a target as well as addresses beyond it,
+            the data can show whether a fault was inside your network or outside it.
+          </p>
+        </section>
       </div>
-    </>
+    </div>
   )
 }
 
-interface McpDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  /** Open the security settings, where keys are made. */
-  onMakeKey?: () => void
-}
+/**
+ * The dashboard's page for connecting an AI assistant, at /mcp.
+ *
+ * The address it gives is the one this page was opened at, which is only
+ * known in the browser: on the server the setup is not drawn yet.
+ */
+export function McpPage({ onMakeKey }: { onMakeKey?: () => void }) {
+  const inBrowser = useInBrowser()
 
-export function McpDialog({ open, onOpenChange, onMakeKey }: McpDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border sm:max-w-xl" suppressHydrationWarning>
-        {/* Inside the dialog's content, which is there only while it is open:
-            the address is read off the page it was opened from. */}
-        <McpDialogBody onMakeKey={onMakeKey} />
-      </DialogContent>
-    </Dialog>
+    <div className={PANE}>
+      <header className={PANE_HEADER}>
+        <div className="min-w-0">
+          <h1 className={PANE_TITLE}>Connect an AI assistant</h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            An assistant such as Claude can read this ClearPing over MCP: what is monitored, every outage with its
+            times, the traceroutes. Give it the address below, then ask it in your own words.
+          </p>
+        </div>
+      </header>
+
+      {inBrowser ? <McpSetup onMakeKey={onMakeKey} /> : <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+    </div>
   )
 }

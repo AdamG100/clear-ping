@@ -3,7 +3,7 @@
 Everything here is optional and starts off. Out of the box ClearPing is as it
 always was: anyone who can reach it can use it, which is fine on your own
 network or behind a sign-in proxy such as Authentik. For anything else, the
-shield button in the sidebar sets up:
+**Security** page (the shield button in the sidebar, or `/security`) sets up:
 
 - **Sign-in** for the dashboard and its API, with accounts.
 - **Keys** for scripts and AI assistants: one each, able to read or to read and
@@ -14,7 +14,8 @@ shield button in the sidebar sets up:
 ## Setting it up
 
 1. Open **Security** (the shield, bottom of the sidebar) and choose **Create an
-   account**. The first account is made on the sign-in page; after that the
+   account**. Each tab has an address of its own: `/security/keys`,
+   `/security/sso`, `/security/accounts`, `/security/activity`. The first account is made on the sign-in page; after that the
    page offers only to sign in, and more accounts are added from Security.
 2. Under **Access**, turn on **Require sign-in for the dashboard and API**.
 3. Under **Keys**, make a key for each assistant or script that needs one.

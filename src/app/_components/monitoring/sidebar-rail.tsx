@@ -33,7 +33,11 @@ interface SidebarRailProps {
   /** How many alerts are firing on at least one target. */
   firingAlerts: number
   onShare: () => void
+  /** Whether the page for connecting an AI assistant is open. */
+  mcpOpen?: boolean
   onConnectAssistant: () => void
+  /** Whether the security page is open. */
+  securityOpen?: boolean
   onOpenSecurity: () => void
   onAddTarget: () => void
 }
@@ -62,7 +66,9 @@ export function SidebarRail({
   onOpenAlerts,
   firingAlerts,
   onShare,
+  mcpOpen = false,
   onConnectAssistant,
+  securityOpen = false,
   onOpenSecurity,
   onAddTarget,
 }: SidebarRailProps) {
@@ -172,9 +178,10 @@ export function SidebarRail({
         <button
           type="button"
           onClick={onConnectAssistant}
+          aria-pressed={mcpOpen}
           aria-label="Connect an AI assistant"
           {...beside('Connect an AI assistant', 'MCP')}
-          className={RAIL_BUTTON}
+          className={cn(RAIL_BUTTON, mcpOpen && 'bg-sidebar-accent text-sidebar-foreground')}
         >
           <Bot className="h-4 w-4" />
         </button>
@@ -190,9 +197,10 @@ export function SidebarRail({
         <button
           type="button"
           onClick={onOpenSecurity}
+          aria-pressed={securityOpen}
           aria-label="Security"
           {...beside('Security', 'Sign-in, keys and activity')}
-          className={RAIL_BUTTON}
+          className={cn(RAIL_BUTTON, securityOpen && 'bg-sidebar-accent text-sidebar-foreground')}
         >
           <ShieldCheck className="h-4 w-4" />
         </button>

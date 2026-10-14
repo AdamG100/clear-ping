@@ -1,14 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, KeyRound, Loader2, LogOut, ShieldCheck, User, UserPlus } from 'lucide-react'
+import { Bot, KeyRound, Loader2, LogOut, User, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/toast'
+import type { SecurityTab } from '@/lib/dashboard-pages'
 import { cn } from '@/lib/utils'
-import { CopyField } from './mcp-dialog'
+import { CopyField, PAGE_CARD } from './mcp-page'
+import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
 
 /**
  * Who may use this ClearPing, and what they have done.
@@ -20,7 +21,7 @@ import { CopyField } from './mcp-dialog'
  */
 
 type Access = 'read' | 'write'
-type Tab = 'access' | 'keys' | 'sso' | 'accounts' | 'activity'
+type Tab = SecurityTab
 
 interface ApiKey {
   id: string
@@ -750,9 +751,15 @@ function ActivityTab() {
   )
 }
 
-function SecurityBody({ initialTab }: { initialTab: Tab }) {
+interface SecurityPageProps {
+  /** The tab on screen, which is part of the address: /security/keys and so on. */
+  tab: Tab
+  onTab: (tab: Tab) => void
+}
+
+/** The dashboard's security page, at /security. */
+export function SecurityPage({ tab, onTab }: SecurityPageProps) {
   const { reportError } = useToast()
-  const [tab, setTab] = useState<Tab>(initialTab)
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
 
   const reload = useCallback(async () => {
@@ -787,26 +794,39 @@ function SecurityBody({ initialTab }: { initialTab: Tab }) {
   const here = typeof window === 'undefined' ? '/' : window.location.pathname
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2 text-card-foreground">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-            <ShieldCheck className="h-4 w-4 text-primary" />
+    // Settings read best at the width of a form, not of a monitor: the whole
+    // page, header and all, is kept to it, so the header lines up with the rest.
+    <div className={cn(PANE, 'max-w-5xl')}>
+      <header className={PANE_HEADER}>
+        <div className="min-w-0">
+          <h1 className={PANE_TITLE}>Security</h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            Who may open this ClearPing, keys for scripts and AI assistants, and a record of every change and who made it.
+          </p>
+        </div>
+        {loaded.state === 'ready' && (
+          <div className={PANE_ACTIONS}>
+            <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+              <User className="h-4 w-4 shrink-0" />
+              <span className="truncate">
+                Signed in as <span className="font-medium text-foreground">{loaded.data.me.username}</span>
+              </span>
+            </p>
+            <Button type="button" size="sm" variant="outline" onClick={signOut}>
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </Button>
           </div>
-          Security
-        </DialogTitle>
-        <DialogDescription className="text-muted-foreground">
-          Who may open this ClearPing, keys for scripts and AI assistants, and a record of every change and who made it.
-        </DialogDescription>
-      </DialogHeader>
+        )}
+      </header>
 
       {loaded.state === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
 
-      {loaded.state === 'failed' && <p className="text-xs text-destructive">{loaded.error}</p>}
+      {loaded.state === 'failed' && <p className="text-sm text-destructive">{loaded.error}</p>}
 
       {(loaded.state === 'needsAccount' || loaded.state === 'needsSignIn') && (
-        <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-          <p className="text-xs leading-relaxed text-card-foreground">
+        <div className={PAGE_CARD}>
+          <p className="text-sm leading-relaxed text-card-foreground">
             {loaded.state === 'needsAccount'
               ? 'Security is set up with an account: it is what turns sign-in on, makes keys, and is the name changes are recorded under. There is none yet.'
               : 'Security settings are changed signed in.'}
@@ -819,18 +839,7 @@ function SecurityBody({ initialTab }: { initialTab: Tab }) {
 
       {loaded.state === 'ready' && (
         <div className="min-w-0 space-y-4">
-          <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
-            <User className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <p className="min-w-0 flex-1 truncate text-xs text-card-foreground">
-              Signed in as <span className="font-medium">{loaded.data.me.username}</span>
-            </p>
-            <Button type="button" size="sm" variant="ghost" onClick={signOut}>
-              <LogOut className="h-4 w-4" />
-              Sign out
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-5 gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5" role="tablist" aria-label="Security">
+          <div className="flex gap-0.5 overflow-x-auto rounded-lg border border-border bg-muted/30 p-0.5 scrollbar-none" role="tablist" aria-label="Security">
             {TABS.map(option => (
               <button
                 key={option.value}
@@ -839,9 +848,9 @@ function SecurityBody({ initialTab }: { initialTab: Tab }) {
                 id={`security-tab-${option.value}`}
                 aria-selected={tab === option.value}
                 aria-controls={`security-panel-${option.value}`}
-                onClick={() => setTab(option.value)}
+                onClick={() => onTab(option.value)}
                 className={cn(
-                  'cursor-pointer rounded-md px-2 py-1.5 text-xs outline-none transition-colors touch:py-2.5',
+                  'flex-1 cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-sm outline-none transition-colors touch:py-2.5',
                   'focus-visible:ring-[3px] focus-visible:ring-ring/50',
                   tab === option.value ? 'bg-primary font-medium text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
@@ -851,7 +860,7 @@ function SecurityBody({ initialTab }: { initialTab: Tab }) {
             ))}
           </div>
 
-          <div role="tabpanel" id={`security-panel-${tab}`} aria-labelledby={`security-tab-${tab}`}>
+          <div role="tabpanel" id={`security-panel-${tab}`} aria-labelledby={`security-tab-${tab}`} className={PAGE_CARD}>
             {tab === 'access' && <AccessTab data={loaded.data} onChange={change} />}
             {tab === 'keys' && <KeysTab data={loaded.data} reload={reload} />}
             {tab === 'sso' && <SsoTab data={loaded.data} reload={reload} />}
@@ -860,23 +869,6 @@ function SecurityBody({ initialTab }: { initialTab: Tab }) {
           </div>
         </div>
       )}
-    </>
-  )
-}
-
-interface SecurityDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  /** Which tab it opens on. */
-  tab?: Tab
-}
-
-export function SecurityDialog({ open, onOpenChange, tab = 'access' }: SecurityDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] overflow-y-auto border-border bg-card sm:max-w-2xl" suppressHydrationWarning>
-        <SecurityBody initialTab={tab} />
-      </DialogContent>
-    </Dialog>
+    </div>
   )
 }

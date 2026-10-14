@@ -17,8 +17,8 @@ The address is `/api/mcp` on wherever your ClearPing is reached:
 http://clearping.lan:3000/api/mcp
 ```
 
-**Connect an AI assistant**, at the foot of the sidebar, shows the address for
-your installation and what to do with it.
+**Connect an AI assistant**, at the foot of the sidebar, opens a page (`/mcp`)
+with the address for your installation and what to do with it.
 
 **Claude Code.** Once, in a terminal:
 
@@ -205,7 +205,7 @@ Claude Desktop on Windows splits an argument at its spaces:
 Without a key an assistant can read but never change anything, unless
 **Require a key for AI assistants** is on under Security → Access (it always is
 while sign-in is on), and then it is refused altogether. A wrong or revoked key
-is refused either way. The dialog in the sidebar writes the command with a
+is refused either way. The page for connecting an assistant writes the command with a
 place for the key; it is never shown a key.
 
 `CLEARPING_MCP_TOKEN`, the single token from before keys were made in the
@@ -228,7 +228,7 @@ is taken only if it is one of:
 
 Anything else is refused with `403` before the key is looked at, and the
 answer says that the key should be revoked and replaced, since it has already
-travelled in the clear. The dialog in the sidebar warns of this before it is
+travelled in the clear. The page for connecting an assistant warns of this before it is
 tried, when the page itself was opened over plain HTTP at a public address.
 
 How it arrived is read from `X-Forwarded-Proto`, which a proxy has to pass on
