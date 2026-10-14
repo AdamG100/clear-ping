@@ -1,23 +1,23 @@
 import type { Metadata, Viewport } from "next";
-import { Instrument_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Geist, Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
-import { ToastProvider } from "@/components/ui/toast";
-import { Tooltips } from "@/components/ui/tooltips";
+import { NotificationsProvider } from "@/components/notifications";
 import { THEME_COLOR } from "@/lib/app-theme";
 import { InstallPrompt } from "./_components/install-prompt";
 import { ServiceWorker } from "./_components/service-worker";
 import { SessionWatcher } from "./_components/session-watcher";
 
-// Instrument Sans: a slightly condensed technical grotesque — reads like
-// equipment labelling rather than another product-dashboard Inter.
-//
-// The two faces are handed to the stylesheet under names of their own, and
-// globals.css makes them Tailwind's `--font-sans` and `--font-mono`. Named
-// `--font-sans` here, the theme's `--font-sans: var(--font-sans)` defined the
-// variable as itself, which is no value at all: the page fell back to the
-// system's font and this one was never so much as downloaded.
-const instrumentSans = Instrument_Sans({
-  variable: "--font-instrument-sans",
+// Arc UI's two faces: Inter for text, Geist for large headings. They are
+// handed to the stylesheet under the names Arc's tokens read, and globals.css
+// makes Inter Tailwind's `--font-sans` too.
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const geist = Geist({
+  variable: "--font-geist",
   subsets: ["latin"],
   display: "swap",
 });
@@ -72,12 +72,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // suppressHydrationWarning: the inline script below sets the theme class
+    // suppressHydrationWarning: the inline script below sets the theme
     // before React hydrates, so the server and client markup differ by design.
     // The fonts are named on the root element, not on <body>: that is where
     // the theme's variables are worked out, and what the page's own font is
     // taken from.
-    <html lang="en" className={`${instrumentSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${geist.variable} ${plexMono.variable}`} suppressHydrationWarning>
       <head>
         <script
           // Applies the saved theme before first paint. Without this the page
@@ -88,7 +88,7 @@ export default function RootLayout({
           // whether the sidebar was collapsed, so it is not drawn and then
           // taken away (see `sidebar-collapsed` in globals.css).
           dangerouslySetInnerHTML={{
-            __html: `(function(){var d=document.documentElement;try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}d.classList.toggle('dark',t!=='light');if(localStorage.getItem('selectedGroup'))d.dataset.view='group';if(localStorage.getItem('sidebarCollapsed'))d.dataset.sidebar='collapsed';}catch(e){d.classList.add('dark');}})();`,
+            __html: `(function(){var d=document.documentElement;try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}d.dataset.theme=t==='light'?'light':'dark';if(localStorage.getItem('selectedGroup'))d.dataset.view='group';if(localStorage.getItem('sidebarCollapsed'))d.dataset.sidebar='collapsed';}catch(e){d.dataset.theme='dark';}})();`,
           }}
         />
         <script
@@ -103,8 +103,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased bg-background text-foreground">
-        <ToastProvider>{children}</ToastProvider>
-        <Tooltips />
+        <NotificationsProvider>{children}</NotificationsProvider>
         <InstallPrompt />
         <ServiceWorker />
         <SessionWatcher />

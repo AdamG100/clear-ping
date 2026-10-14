@@ -4,7 +4,7 @@ import { maxKeyAccess, ROLE_LABEL } from '@/lib/security/roles';
 import { createApiKey, recordActivity, type KeyAccess } from '@/lib/security/store';
 
 /**
- * POST /api/security/keys - Make a key for a script or an assistant
+ * POST /api/security/keys - Create a key for a script or an assistant
  * Body: { name: string, access: 'read' | 'write' }
  *
  * Any account may make keys, as its own: a key can never do more than the

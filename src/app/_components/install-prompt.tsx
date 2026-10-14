@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { Share, SquarePlus, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/arc/button/button'
 import type { InstallOffer } from '@/types/pwa'
 import { BrandMark } from './monitoring/brand-mark'
 import { useInstallPrompt } from './use-install-prompt'
@@ -54,7 +54,7 @@ export function InstallPrompt() {
   return (
     <section
       aria-label={title}
-      className="animate-in fade-in slide-in-from-bottom-4 fixed bottom-[calc(0.75rem+var(--safe-bottom))] left-[calc(0.75rem+var(--safe-left))] right-[calc(0.75rem+var(--safe-right))] z-20 mx-auto max-w-md rounded-xl border border-border bg-card p-3 shadow-lg duration-300"
+      className="animate-in fade-in slide-in-from-bottom-4 fixed bottom-[calc(0.75rem+var(--safe-bottom))] left-[calc(0.75rem+var(--safe-left))] right-[calc(0.75rem+var(--safe-right))] z-20 mx-auto max-w-md rounded-3xl border border-border bg-popover p-4 shadow-floating duration-300"
     >
       <div className="flex items-start gap-3">
         <BrandMark className="mt-0.5" />
@@ -62,24 +62,19 @@ export function InstallPrompt() {
           <h2 className="text-sm font-medium text-card-foreground">{title}</h2>
           <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{body}</p>
         </div>
-        <button
-          type="button"
-          onClick={dismiss}
-          className="-mr-1 -mt-1 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="Dismiss"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <Button type="button" variant="ghost" size="sm" onClick={dismiss} aria-label="Dismiss the offer to install">
+          <X size={16} strokeWidth={1.75} aria-hidden="true" />
+        </Button>
       </div>
 
       {/* Only where there is something the page can do: elsewhere the text
           above is the whole of it, and the cross puts it away. */}
       {offer === 'prompt' && (
         <div className="mt-3 flex gap-2">
-          <Button size="sm" className="h-9 flex-1" onClick={install}>
-            Install
+          <Button size="sm" className="flex-1" onClick={install}>
+            Install ClearPing
           </Button>
-          <Button size="sm" variant="outline" className="h-9 flex-1" onClick={dismiss}>
+          <Button size="sm" variant="secondary" className="flex-1" onClick={dismiss}>
             Not now
           </Button>
         </div>

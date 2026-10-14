@@ -1,26 +1,22 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Bell, BellOff, Pencil, Plus, Send, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { useToast } from '@/components/ui/toast'
-import { cn } from '@/lib/utils'
+import { Bell, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { Alert as Notice } from '@/components/arc/alert/alert'
+import { Badge } from '@/components/arc/badge/badge'
+import { Button } from '@/components/arc/button/button'
+import { Card } from '@/components/arc/card/card'
+import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
+import { Drawer, DrawerContent } from '@/components/arc/drawer/drawer'
+import { EmptyState } from '@/components/arc/empty-state/empty-state'
+import { Input } from '@/components/arc/input/input'
+import { NumberField } from '@/components/arc/number-field/number-field'
+import { Select } from '@/components/arc/select/select'
+import { Skeleton } from '@/components/arc/skeleton/skeleton'
+import { Switch } from '@/components/arc/switch/switch'
+import { Textarea } from '@/components/arc/textarea/textarea'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
+import { useToast } from '@/components/notifications'
 import { alertTitle, describeCondition, notifyUrlLabel, parseNotifyUrls } from '@/lib/alert-delivery'
 import { PANE, PANE_TITLE } from './pane-layout'
 import { TargetChecklist } from './target-checklist'
@@ -35,6 +31,8 @@ import { ALERT_METRIC_LABELS } from '@/types/probe'
  * for every target and keeping the copies in step by hand. An alert is now
  * made once, here, and ticked for the targets it should watch.
  */
+
+const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 
 /** An alert as the API sends it: its dates are still text. */
 export interface AlertResponse extends Omit<Alert, 'createdAt' | 'targets'> {
@@ -93,9 +91,7 @@ interface AlertPayload {
   targetIds: string[]
 }
 
-const SECTION_LABEL = 'text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
-const FIELD_LABEL = 'text-xs text-card-foreground'
-const FIELD_INPUT = 'bg-input border-border text-foreground h-9 text-sm'
+const SECTION_TITLE = 'text-sm font-medium text-card-foreground'
 
 function AlertForm({
   alert,
@@ -113,28 +109,26 @@ function AlertForm({
 }) {
   const [name, setName] = useState(alert?.name ?? '')
   const [metric, setMetric] = useState<AlertMetric>(alert?.metric ?? 'unreachable')
-  const [threshold, setThreshold] = useState(alert ? String(alert.threshold) : DEFAULT_THRESHOLD.unreachable)
-  const [consecutiveProbes, setConsecutiveProbes] = useState(String(alert?.consecutiveProbes ?? 3))
+  const [threshold, setThreshold] = useState(alert ? alert.threshold : Number(DEFAULT_THRESHOLD.unreachable))
+  const [consecutiveProbes, setConsecutiveProbes] = useState(alert?.consecutiveProbes ?? 3)
   const [notifyUrls, setNotifyUrls] = useState((alert?.notifyUrls ?? []).join('\n'))
   const [selected, setSelected] = useState(() => new Set(alert?.targets.map(entry => entry.targetId) ?? []))
   const [attempted, setAttempted] = useState(false)
 
   const urls = parseNotifyUrls(notifyUrls)
-  const probes = Number(consecutiveProbes)
-  const limit = Number(threshold)
 
   const problems = [
-    metric !== 'unreachable' && (threshold.trim() === '' || !Number.isFinite(limit) || limit < 0) &&
-      'The threshold must be a number, zero or more.',
-    (!Number.isInteger(probes) || probes < 1 || probes > 100) && 'The number of probes must be between 1 and 100.',
+    metric !== 'unreachable' && (!Number.isFinite(threshold) || threshold < 0) && 'The threshold must be a number, zero or more.',
+    (!Number.isInteger(consecutiveProbes) || consecutiveProbes < 1 || consecutiveProbes > 100) &&
+      'The number of probes must be between 1 and 100.',
     !urls && 'Each notification URL must be an Apprise URL, such as discord://… or mailto://…, on a line of its own.',
     selected.size === 0 && 'Tick at least one target for the alert to watch.',
   ].filter((problem): problem is string => !!problem)
 
   const applyPreset = (preset: Preset) => {
     setMetric(preset.metric)
-    setThreshold(String(preset.threshold))
-    setConsecutiveProbes(String(preset.consecutiveProbes))
+    setThreshold(preset.threshold)
+    setConsecutiveProbes(preset.consecutiveProbes)
   }
 
   const handleSubmit = () => {
@@ -145,179 +139,134 @@ function AlertForm({
     onSubmit({
       name: name.trim(),
       metric,
-      threshold: metric === 'unreachable' ? 0 : limit,
-      consecutiveProbes: probes,
+      threshold: metric === 'unreachable' ? 0 : threshold,
+      consecutiveProbes,
       notifyUrls: urls ?? [],
       targetIds: [...selected],
     })
   }
 
-  const condition = describeCondition({ metric, threshold: Number.isFinite(limit) ? limit : 0 })
+  const condition = describeCondition({ metric, threshold: Number.isFinite(threshold) ? threshold : 0 })
+  const labels = ALERT_METRIC_LABELS[metric]
 
   return (
-    <form className="space-y-5 pt-2" noValidate onSubmit={event => { event.preventDefault(); handleSubmit() }}>
+    <form className="space-y-8" noValidate onSubmit={event => { event.preventDefault(); handleSubmit() }}>
       {/* Condition */}
-      <div className="space-y-3">
-        <p className={SECTION_LABEL}>Alert when</p>
-        <div className="flex flex-wrap gap-1.5">
+      <fieldset className="space-y-4">
+        <legend className={`${SECTION_TITLE} pb-2`}>Alert when</legend>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Common alerts">
           {PRESETS.map(preset => {
-            const active =
-              metric === preset.metric && (preset.metric === 'unreachable' || limit === preset.threshold)
+            const active = metric === preset.metric && (preset.metric === 'unreachable' || threshold === preset.threshold)
             return (
-              <button
+              <Button
                 key={preset.label}
                 type="button"
+                size="sm"
+                variant={active ? 'primary' : 'secondary'}
+                aria-pressed={active}
                 onClick={() => applyPreset(preset)}
-                className={cn(
-                  'cursor-pointer rounded-md border px-2.5 py-1.5 text-xs transition-colors touch:py-2.5',
-                  active
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted'
-                )}
               >
                 {preset.label}
-              </button>
+              </Button>
             )
           })}
         </div>
 
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="alert-metric" className={FIELD_LABEL}>Watching</Label>
-            <Select
-              value={metric}
-              onValueChange={value => {
-                const next = value as AlertMetric
-                setMetric(next)
-                setThreshold(DEFAULT_THRESHOLD[next])
-                if (next === 'certExpiry') setConsecutiveProbes('1')
-              }}
-            >
-              <SelectTrigger id="alert-metric" className={cn(FIELD_INPUT, 'w-48')}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(ALERT_METRIC_LABELS) as AlertMetric[]).map(option => (
-                  <SelectItem key={option} value={option}>{ALERT_METRIC_LABELS[option].label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <Select
+          id="alert-metric"
+          label="Watching"
+          value={metric}
+          onValueChange={value => {
+            const next = value as AlertMetric
+            setMetric(next)
+            setThreshold(Number(DEFAULT_THRESHOLD[next]))
+            if (next === 'certExpiry') setConsecutiveProbes(1)
+          }}
+          options={(Object.keys(ALERT_METRIC_LABELS) as AlertMetric[]).map(option => ({ value: option, label: ALERT_METRIC_LABELS[option].label }))}
+        />
 
+        <div className="grid items-start gap-4 sm:grid-cols-2">
           {metric !== 'unreachable' && (
-            <div className="space-y-1.5">
-              <Label htmlFor="alert-threshold" className={FIELD_LABEL}>
-                {ALERT_METRIC_LABELS[metric].comparison === 'below' ? 'Under' : 'Above'} (
-                {ALERT_METRIC_LABELS[metric].unit.trim()})
-              </Label>
-              <Input
-                id="alert-threshold"
-                type="number"
-                min={0}
-                value={threshold}
-                onChange={e => setThreshold(e.target.value)}
-                className={cn(FIELD_INPUT, 'w-24')}
-              />
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="alert-consecutive" className={FIELD_LABEL}>For (probes in a row)</Label>
-            <Input
-              id="alert-consecutive"
-              type="number"
-              min={1}
-              max={100}
-              value={consecutiveProbes}
-              onChange={e => setConsecutiveProbes(e.target.value)}
-              className={cn(FIELD_INPUT, 'w-24')}
+            <NumberField
+              id="alert-threshold"
+              label={labels.comparison === 'below' ? 'Under' : 'Above'}
+              suffix={labels.unit}
+              min={0}
+              max={100000}
+              step={1}
+              formatOptions={{ maximumFractionDigits: 1 }}
+              value={threshold}
+              onValueChange={setThreshold}
             />
-          </div>
+          )}
+          <NumberField
+            id="alert-consecutive"
+            label="For this many probes in a row"
+            min={1}
+            max={100}
+            value={consecutiveProbes}
+            onValueChange={setConsecutiveProbes}
+          />
         </div>
         {metric === 'certExpiry' && (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Only HTTPS targets have a certificate to watch. On anything else this alert never fires.
           </p>
         )}
-      </div>
+      </fieldset>
 
       {/* Delivery */}
-      <div className="space-y-3">
-        <p className={SECTION_LABEL}>Send it to</p>
-        <div className="space-y-1.5">
-          <Label htmlFor="alert-notify-urls" className={FIELD_LABEL}>Notification URLs (optional)</Label>
-          {/* A box of lines rather than one field: an alert can go to several
-              places at once, and each is one URL. */}
-          <textarea
-            id="alert-notify-urls"
-            rows={3}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            placeholder={'discord://webhook_id/webhook_token\nmailto://user:password@gmail.com'}
-            value={notifyUrls}
-            onChange={e => setNotifyUrls(e.target.value)}
-            aria-invalid={!urls}
-            aria-describedby="alert-notify-urls-hint"
-            className={cn(
-              'w-full min-w-0 resize-y rounded-md border border-border bg-input px-3 py-2 font-mono text-xs text-foreground',
-              'placeholder:text-muted-foreground outline-none transition-[color,box-shadow]',
-              'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
-              'aria-invalid:border-destructive'
-            )}
-          />
-          <p id="alert-notify-urls-hint" className="text-[11px] text-muted-foreground">
-            {urls?.length === 0 ? (
-              <>Left empty, nothing is sent: a firing alert is shown on this screen and counted beside the Alerts button. </>
-            ) : (
-              <>Each one is sent a message when the alert fires and when it clears. </>
-            )}
-            One{' '}
-            <a
-              href={APPRISE_SERVICES}
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary underline-offset-2 hover:underline"
-            >
-              Apprise URL
-            </a>{' '}
-            to a line, for any service Apprise supports: Discord, Slack, Telegram, email, ntfy, Teams and the rest.
-            A plain webhook is <code className="font-mono">json://</code> or{' '}
-            <code className="font-mono">jsons://</code> in place of http:// or https://.
-          </p>
-        </div>
-      </div>
+      <fieldset className="space-y-3">
+        <legend className={`${SECTION_TITLE} pb-2`}>Send it to</legend>
+        {/* A box of lines rather than one field: an alert can go to several
+            places at once, and each is one URL. */}
+        <Textarea
+          id="alert-notify-urls"
+          label="Notification URLs (optional)"
+          rows={3}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          placeholder={'discord://webhook_id/webhook_token\nmailto://user:password@gmail.com'}
+          value={notifyUrls}
+          onChange={e => setNotifyUrls(e.target.value)}
+          error={urls ? undefined : 'Each line must be one Apprise URL, such as discord://… or mailto://….'}
+          style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
+        />
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {urls?.length === 0 ? (
+            <>Left empty, nothing is sent: a firing alert is shown on this screen and counted beside the Alerts button. </>
+          ) : (
+            <>Each one is sent a message when the alert fires and when it clears. </>
+          )}
+          One{' '}
+          <a href={APPRISE_SERVICES} target="_blank" rel="noreferrer" className="text-primary underline-offset-2 hover:underline">
+            Apprise URL
+          </a>{' '}
+          to a line, for any service Apprise supports: Discord, Slack, Telegram, email, ntfy, Teams and the rest. A plain
+          webhook is <code className="font-mono">json://</code> or <code className="font-mono">jsons://</code> in place
+          of http:// or https://.
+        </p>
+      </fieldset>
 
       {/* Targets */}
-      <div className="space-y-3">
-        <p className={SECTION_LABEL}>On these targets</p>
+      <fieldset className="space-y-3">
+        <legend className={`${SECTION_TITLE} pb-2`}>On these targets</legend>
         {targets.length === 0 ? (
           <p className="text-xs text-muted-foreground">There are no targets yet. Add one from the sidebar first.</p>
         ) : (
           <TargetChecklist targets={targets} groupOrders={groupOrders} selected={selected} onChange={setSelected} />
         )}
-      </div>
+      </fieldset>
 
       {/* Name */}
-      <div className="space-y-1.5">
-        <Label htmlFor="alert-name" className={FIELD_LABEL}>Name (optional)</Label>
-        <Input
-          id="alert-name"
-          placeholder={condition}
-          value={name}
-          onChange={e => setName(e.target.value)}
-          maxLength={80}
-          className={FIELD_INPUT}
-        />
-      </div>
+      <Input id="alert-name" label="Name (optional)" placeholder={condition} value={name} onChange={e => setName(e.target.value)} maxLength={80} />
 
-      <div className="space-y-2">
-        <Button type="submit" className="w-full" disabled={saving} aria-disabled={problems.length > 0}>
-          {saving ? 'Saving…' : alert ? 'Save changes' : 'Create alert'}
+      <div className="space-y-3">
+        {attempted && problems.length > 0 && <Notice tone="danger" title="Not saved yet">{problems[0]}</Notice>}
+        <Button type="submit" className="w-full" loading={saving} aria-disabled={problems.length > 0}>
+          {alert ? 'Save changes' : 'Create alert'}
         </Button>
-        {attempted && problems.length > 0 && (
-          <p className="text-center text-xs text-destructive" role="alert">{problems[0]}</p>
-        )}
       </div>
     </form>
   )
@@ -345,9 +294,6 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
   const [editing, setEditing] = useState<Editing>(null)
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
-  // Deleting takes two presses of the same button: an alert ticked for twenty
-  // targets is a lot to rebuild after a slip of the hand.
-  const [confirmingId, setConfirmingId] = useState<string | null>(null)
 
   const targetsById = useMemo(() => new Map(targets.map(target => [target.id, target])), [targets])
 
@@ -392,15 +338,13 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
     setBusyId(null)
   }
 
+  // Deleting asks first, in place: an alert ticked for twenty targets is a
+  // lot to rebuild after a slip of the hand.
   const remove = async (alert: AlertResponse) => {
-    if (confirmingId !== alert.id) {
-      setConfirmingId(alert.id)
-      return
-    }
-    setConfirmingId(null)
     setBusyId(alert.id)
-    await request(`/api/alerts/${alert.id}`, 'DELETE', 'Could not delete the alert')
+    const deleted = await request(`/api/alerts/${alert.id}`, 'DELETE', 'Could not delete the alert')
     setBusyId(null)
+    if (!deleted) throw new Error('Not deleted')
   }
 
   const sendTest = async (alert: AlertResponse) => {
@@ -431,39 +375,35 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
           <h1 className={PANE_TITLE}>Alerts</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
             <span>Get told when a path breaks, instead of finding out here.</span>
-            {firingCount > 0 && (
-              <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-medium text-destructive">
-                {firingCount} firing
-              </span>
-            )}
+            {firingCount > 0 && <Badge tone="danger" size="sm">{firingCount} firing</Badge>}
           </p>
         </div>
         {!readOnly && (
-          <Button size="sm" onClick={() => setEditing('new')} className="shrink-0">
-            <Plus className="mr-2 h-4 w-4" />
+          <Button size="sm" onClick={() => setEditing('new')}>
+            <Plus {...ICON} />
             New alert
           </Button>
         )}
       </header>
 
       {!loaded ? (
-        <div className="h-24 animate-pulse rounded-xl border border-border bg-card" />
+        <Skeleton label="Loading the alerts" lines={3} />
       ) : alerts.length === 0 ? (
-        <section className="rounded-xl border border-dashed border-border bg-card px-6 py-10 text-center">
-          <h2 className="text-sm font-medium text-foreground">No alerts yet</h2>
-          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            An alert is a condition, such as a target not responding, and the targets to watch for it on.
-            Make one, tick the targets it applies to, and choose where it is sent.
-          </p>
-          {!readOnly && (
-            <Button size="sm" className="mt-4" onClick={() => setEditing('new')}>
-              <Plus className="mr-2 h-4 w-4" />
-              New alert
-            </Button>
-          )}
-        </section>
+        <EmptyState
+          icon={<Bell size={24} strokeWidth={1.75} />}
+          title="No alerts yet"
+          description="An alert is a condition, such as a target not responding, and the targets to watch for it on. Make one, tick the targets it applies to, and choose where it is sent."
+          action={
+            readOnly ? undefined : (
+              <Button onClick={() => setEditing('new')}>
+                <Plus {...ICON} />
+                New alert
+              </Button>
+            )
+          }
+        />
       ) : (
-        <ul className="space-y-3">
+        <ul className="grid gap-4 @4xl/main:grid-cols-2">
           {alerts.map(alert => {
             const firing = alert.enabled ? alert.targets.filter(entry => entry.state === 'firing') : []
             const isFiring = firing.length > 0
@@ -472,152 +412,91 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
             const condition = describeCondition(alert)
 
             return (
-              <li
-                key={alert.id}
-                className={cn(
-                  'rounded-xl border bg-card px-4 py-4 @2xl/main:px-5',
-                  isFiring ? 'border-destructive/50' : 'border-border',
-                  !alert.enabled && 'opacity-60'
-                )}
-              >
-                <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                  {/* A width to start from, so that where there is not room
-                      for it beside the buttons they go underneath. Without
-                      one the text gave way instead, down to a column a few
-                      words wide. */}
-                  <div className="min-w-0 flex-1 basis-64">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={cn(
-                          'h-2 w-2 shrink-0 rounded-full',
-                          isFiring ? 'bg-destructive' : alert.enabled ? 'bg-signal-perfect' : 'bg-muted-foreground'
+              <li key={alert.id}>
+                <Card
+                  title={title}
+                  description={[
+                    title !== condition ? condition : null,
+                    alert.consecutiveProbes === 1 ? 'on a single probe' : `for ${alert.consecutiveProbes} probes in a row`,
+                    `${alert.targets.length} target${alert.targets.length === 1 ? '' : 's'}`,
+                    deliveryLabel(alert),
+                  ].filter(Boolean).join(' · ')}
+                  status={isFiring ? `Firing on ${firing.length}` : alert.enabled ? 'Watching' : 'Muted'}
+                  action={
+                    readOnly ? undefined : (
+                      <span className="flex flex-wrap items-center gap-1">
+                        {alert.notifyUrls.length > 0 && (
+                          <Button variant="secondary" size="sm" loading={busy} onClick={() => sendTest(alert)}>
+                            <Send {...ICON} />
+                            Send test
+                          </Button>
                         )}
-                        aria-hidden="true"
-                      />
-                      <h2 className="min-w-0 break-words text-sm font-medium text-foreground">{title}</h2>
-                      {!alert.enabled && (
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
-                          Muted
-                        </span>
-                      )}
+                        <Tooltip content={alert.enabled ? 'Mute: stop judging and sending this alert' : 'Unmute'}>
+                          <Switch
+                            checked={alert.enabled}
+                            disabled={busy}
+                            onCheckedChange={() => toggle(alert)}
+                            aria-label={alert.enabled ? `Mute ${title}` : `Unmute ${title}`}
+                          />
+                        </Tooltip>
+                        <Tooltip content="Edit">
+                          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(alert)} aria-label={`Edit ${title}`}>
+                            <Pencil {...ICON} />
+                          </Button>
+                        </Tooltip>
+                        <ConfirmMorph
+                          label="Delete"
+                          icon={<Trash2 {...ICON} />}
+                          prompt={`Delete ${title}?`}
+                          confirmLabel="Delete"
+                          doneLabel="Deleted"
+                          disabled={busy}
+                          onConfirm={() => remove(alert)}
+                        />
+                      </span>
+                    )
+                  }
+                >
+                  {isFiring && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone="danger" size="sm">Firing on</Badge>
+                      {firing.map(entry => {
+                        const target = targetsById.get(entry.targetId)
+                        if (!target) return null
+                        return (
+                          <Tooltip key={entry.targetId} content={`Open ${target.name}`}>
+                            <Button variant="danger" size="sm" onClick={() => onSelectTarget(entry.targetId)}>
+                              {target.name}
+                            </Button>
+                          </Tooltip>
+                        )
+                      })}
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {title !== condition && `${condition} · `}
-                      {alert.consecutiveProbes === 1
-                        ? 'on a single probe'
-                        : `for ${alert.consecutiveProbes} probes in a row`}
-                      {' · '}
-                      {alert.targets.length} target{alert.targets.length === 1 ? '' : 's'}
-                      {' · '}
-                      {deliveryLabel(alert)}
-                    </p>
-                  </div>
-
-                  {!readOnly && <div className="flex shrink-0 items-center gap-1">
-                    {alert.notifyUrls.length > 0 && (
-                      <Button variant="outline" size="sm" className="h-7 px-2 text-xs touch:h-9 touch:px-3" disabled={busy} onClick={() => sendTest(alert)}>
-                        <Send className="mr-1.5 h-3 w-3" />
-                        Send test
-                      </Button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => toggle(alert)}
-                      disabled={busy}
-                      className="cursor-pointer rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 touch:p-2.5"
-                      aria-label={alert.enabled ? `Mute ${title}` : `Unmute ${title}`}
-                      data-tip={alert.enabled ? 'Mute: stop judging and sending this alert' : 'Unmute'}
-                    >
-                      {alert.enabled ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditing(alert)}
-                      disabled={busy}
-                      className="cursor-pointer rounded p-1.5 transition-colors hover:bg-blue-500/20 disabled:opacity-40 touch:p-2.5"
-                      aria-label={`Edit ${title}`}
-                    >
-                      <Pencil className="h-3.5 w-3.5 text-blue-500" />
-                    </button>
-                    {confirmingId === alert.id ? (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="h-7 px-2 text-xs touch:h-9 touch:px-3"
-                        onClick={() => remove(alert)}
-                        onBlur={() => setConfirmingId(null)}
-                        autoFocus
-                      >
-                        Delete?
-                      </Button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => remove(alert)}
-                        disabled={busy}
-                        className="cursor-pointer rounded p-1.5 transition-colors hover:bg-destructive/20 disabled:opacity-40 touch:p-2.5"
-                        aria-label={`Delete ${title}`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </button>
-                    )}
-                  </div>}
-                </div>
-
-                {isFiring && (
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] font-medium text-destructive">Firing on</span>
-                    {firing.map(entry => {
-                      const target = targetsById.get(entry.targetId)
-                      if (!target) return null
-                      return (
-                        <button
-                          key={entry.targetId}
-                          type="button"
-                          onClick={() => onSelectTarget(entry.targetId)}
-                          data-tip={`Open ${target.name}`}
-                          className="cursor-pointer rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-destructive/20 touch:px-3 touch:py-1.5"
-                        >
-                          {target.name}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
+                  )}
+                </Card>
               </li>
             )
           })}
         </ul>
       )}
 
-      <Dialog open={editing !== null} onOpenChange={open => { if (!open) setEditing(null) }}>
-        <DialogContent className="bg-card border-border sm:max-w-xl" suppressHydrationWarning>
+      <Drawer open={editing !== null} onOpenChange={open => { if (!open) setEditing(null) }}>
+        <DrawerContent
+          title={editing === 'new' ? 'New alert' : 'Edit alert'}
+          description="One condition, watched on every target you tick. Each target fires and clears on its own."
+        >
           {editing !== null && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="text-card-foreground flex items-center gap-2">
-                  <div className="h-8 w-8 shrink-0 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Bell className="h-4 w-4 text-primary" />
-                  </div>
-                  {editing === 'new' ? 'New alert' : 'Edit alert'}
-                </DialogTitle>
-                <DialogDescription className="text-muted-foreground">
-                  One condition, watched on every target you tick. Each target fires and clears on its own.
-                </DialogDescription>
-              </DialogHeader>
-
-              <AlertForm
-                key={editing === 'new' ? 'new' : editing.id}
-                alert={editing === 'new' ? null : editing}
-                targets={targets}
-                groupOrders={groupOrders}
-                saving={saving}
-                onSubmit={save}
-              />
-            </>
+            <AlertForm
+              key={editing === 'new' ? 'new' : editing.id}
+              alert={editing === 'new' ? null : editing}
+              targets={targets}
+              groupOrders={groupOrders}
+              saving={saving}
+              onSubmit={save}
+            />
           )}
-        </DialogContent>
-      </Dialog>
+        </DrawerContent>
+      </Drawer>
     </div>
   )
 }

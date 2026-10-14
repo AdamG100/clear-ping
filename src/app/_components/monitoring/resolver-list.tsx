@@ -1,17 +1,11 @@
 'use client'
 
 import { Plus, X } from 'lucide-react'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { cn } from '@/lib/utils'
+import { Button } from '@/components/arc/button/button'
+import { Input } from '@/components/arc/input/input'
+import { SegmentedField } from '@/components/segmented-field'
+import { Select } from '@/components/arc/select/select'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import {
   DNS_PROTOCOL_LABEL,
   DNS_PROTOCOL_NAME,
@@ -49,7 +43,6 @@ const PLACEHOLDER: Record<AskedProtocol, string> = {
   doh: 'https://dns.example.net/dns-query',
 }
 
-const FIELD_INPUT = 'bg-input border-border text-foreground h-9 text-sm'
 
 /**
  * The provider a row is showing, if it is showing one. A row that has a name
@@ -114,8 +107,8 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
   const hasCustom = rows.some(row => row.protocol !== 'system' && !shownProvider(row))
 
   return (
-    <div className="space-y-2">
-      <Label className="gap-1.5 text-xs text-card-foreground">Ask these resolvers</Label>
+    <fieldset className="space-y-3">
+      <legend className="pb-2 text-sm font-medium text-card-foreground">Ask these resolvers</legend>
 
       <ul className="space-y-2">
         {rows.map((row, index) => {
@@ -126,127 +119,81 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
           return (
             // By position: a row has nothing else that stays the same while it
             // is being typed in, and rows are only ever added at the end.
-            <li key={index} className="flex flex-wrap items-center gap-2">
-              <Select
-                value={who}
-                onValueChange={value => {
-                  if (value === SYSTEM_VALUE) return setRow(index, SYSTEM)
-                  const protocol: AskedProtocol = row.protocol === 'system' ? lastProtocol ?? 'udp' : row.protocol
-                  const provider = DNS_PROVIDERS.find(each => each.id === value)
-                  setRow(index, provider ? providerResolver(provider, protocol) : { protocol, server: '', name: '' })
-                }}
-              >
-                <SelectTrigger id={`${idPrefix}-resolver-${index}`} aria-label={`${position}: who to ask`} className={cn(FIELD_INPUT, 'w-36 shrink-0')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem value={SYSTEM_VALUE}>System</SelectItem>
-                  <SelectSeparator />
-                  {DNS_PROVIDERS.map(provider => (
-                    <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
-                  ))}
-                  <SelectSeparator />
-                  <SelectItem value={CUSTOM_VALUE}>Custom</SelectItem>
-                </SelectContent>
-              </Select>
+            <li key={index} className="space-y-3 rounded-2xl border border-border p-3">
+              <div className="flex items-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <Select
+                    id={`${idPrefix}-resolver-${index}`}
+                    label={position}
+                    value={who}
+                    onValueChange={value => {
+                      if (value === SYSTEM_VALUE) return setRow(index, SYSTEM)
+                      const protocol: AskedProtocol = row.protocol === 'system' ? lastProtocol ?? 'udp' : row.protocol
+                      const provider = DNS_PROVIDERS.find(each => each.id === value)
+                      setRow(index, provider ? providerResolver(provider, protocol) : { protocol, server: '', name: '' })
+                    }}
+                    options={[
+                      { value: SYSTEM_VALUE, label: 'System' },
+                      ...DNS_PROVIDERS.map(provider => ({ value: provider.id, label: provider.name })),
+                      { value: CUSTOM_VALUE, label: 'Custom' },
+                    ]}
+                  />
+                </div>
+                {rows.length > 1 && (
+                  <Tooltip content="Remove this resolver">
+                    <Button type="button" variant="ghost" onClick={() => removeRow(index)} aria-label={`Remove ${resolverLabel(row) || position}`}>
+                      <X size={16} strokeWidth={1.75} aria-hidden="true" />
+                    </Button>
+                  </Tooltip>
+                )}
+              </div>
 
               {row.protocol === 'system' ? (
-                <p className="min-w-0 flex-1 basis-40 text-xs text-muted-foreground">
-                  Whatever this machine uses for every other lookup.
-                </p>
+                <p className="text-xs text-muted-foreground">Whatever this machine uses for every other lookup.</p>
               ) : (
                 <>
-                  {/* One tray, so the three read as a single setting. */}
-                  <div
-                    className="flex shrink-0 gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5"
-                    role="radiogroup"
-                    aria-label={`${position}: how to ask`}
-                  >
-                    {ASKED_PROTOCOLS.map(protocol => (
-                      <button
-                        key={protocol}
-                        type="button"
-                        role="radio"
-                        aria-checked={row.protocol === protocol}
-                        data-tip={DNS_PROTOCOL_NAME[protocol]}
-                        onClick={() => setRow(index, withProtocol(row, protocol))}
-                        className={cn(
-                          'cursor-pointer rounded-md px-2 py-1.5 text-xs outline-none transition-colors touch:py-2.5',
-                          'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                          row.protocol === protocol
-                            ? 'bg-primary font-medium text-primary-foreground'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                        )}
-                      >
-                        {DNS_PROTOCOL_LABEL[protocol]}
-                      </button>
-                    ))}
-                  </div>
+                  <SegmentedField
+                    label="How to ask"
+                    value={row.protocol}
+                    onValueChange={protocol => setRow(index, withProtocol(row, protocol as AskedProtocol))}
+                    options={ASKED_PROTOCOLS.map(protocol => ({ value: protocol, label: DNS_PROTOCOL_LABEL[protocol] }))}
+                  />
                   {isCustom && (
                     <Input
-                      aria-label={`${position}: its name`}
-                      placeholder="Name (optional)"
+                      label="Its name (optional)"
                       value={row.name ?? ''}
                       maxLength={MAX_RESOLVER_NAME_LENGTH}
                       onChange={event => setRow(index, { ...row, name: event.target.value })}
-                      className={cn(FIELD_INPUT, 'min-w-0 flex-1 basis-28 text-xs md:text-xs')}
                     />
                   )}
                   <Input
-                    aria-label={`${position}: where it is`}
+                    label={`Where it is (${DNS_PROTOCOL_NAME[row.protocol]})`}
                     placeholder={PLACEHOLDER[row.protocol]}
                     value={row.server ?? ''}
                     onChange={event => setRow(index, { ...row, server: event.target.value })}
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
-                    className={cn(
-                      FIELD_INPUT,
-                      'min-w-0 font-mono text-xs md:text-xs',
-                      // A custom one has its name on the first line, so where
-                      // it is takes the whole of a second, after the remove button.
-                      isCustom ? 'order-last basis-full' : 'flex-1 basis-40'
-                    )}
+                    style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
                   />
                 </>
-              )}
-
-              {rows.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => removeRow(index)}
-                  aria-label={`Remove ${resolverLabel(row) || position}`}
-                  data-tip="Remove this resolver"
-                  className="shrink-0 cursor-pointer rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground touch:p-2.5"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
               )}
             </li>
           )
         })}
       </ul>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <button
-          type="button"
-          onClick={addRow}
-          disabled={full}
-          className="flex cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-ring/60 hover:bg-muted/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 touch:py-2.5"
-        >
-          <Plus className="h-3.5 w-3.5" />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="secondary" size="sm" onClick={addRow} disabled={full}>
+          <Plus size={16} strokeWidth={1.75} aria-hidden="true" />
           Add resolver
-        </button>
+        </Button>
         {!hasAnyOfThem && rows.length + bigThree.length <= MAX_DNS_RESOLVERS && (
-          <button
-            type="button"
-            onClick={addBigThree}
-            className="cursor-pointer text-xs text-primary underline-offset-2 hover:underline touch:py-1.5"
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={addBigThree}>
             Add {bigThree.map(provider => provider.name).join(', ').replace(/, ([^,]*)$/, ' and $1')}
-          </button>
+          </Button>
         )}
-        {full && <span className="text-[11px] text-muted-foreground">{MAX_DNS_RESOLVERS} is the most one target can ask.</span>}
+        {full && <span className="text-xs text-muted-foreground">{MAX_DNS_RESOLVERS} is the most one target can ask.</span>}
       </div>
 
       <p className="text-xs leading-relaxed text-muted-foreground">
@@ -256,6 +203,6 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
         DoT is DNS over TLS and DoH is DNS over HTTPS, the two encrypted ways of asking.
         {hasCustom && ' A custom resolver is listed under the name you give it, or under its address without one.'}
       </p>
-    </div>
+    </fieldset>
   )
 }

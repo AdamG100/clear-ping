@@ -1,27 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import type { DnsRecordType, DnsResolver, IpVersion, ProbeConfig, ProbeType, Target } from '@/types/probe'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Label } from '@/components/ui/label'
+import { Alert } from '@/components/arc/alert/alert'
+import { Badge } from '@/components/arc/badge/badge'
+import { Button } from '@/components/arc/button/button'
+import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
+import { Drawer, DrawerContent } from '@/components/arc/drawer/drawer'
+import { Input } from '@/components/arc/input/input'
+import { RadioCards } from '@/components/arc/radio-cards/radio-cards'
+import { SegmentedField } from '@/components/segmented-field'
+import { Select } from '@/components/arc/select/select'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { addressFamilyFor, classifyHost, isDualStack, isWellKnownResolver, targetTypeFor } from '@/lib/host'
 import { groupLabel, joinGroupPath } from '@/lib/group-path'
 import { describeProbe } from '@/lib/probe-labels'
@@ -36,20 +28,11 @@ import {
 } from '@/lib/probe-config'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { ResolverList } from './resolver-list'
-import {
-  Plus,
-  Pencil,
-  Copy,
-  Globe,
-  Network,
-  Plug,
-  Wifi,
-  Check,
-  Trash2,
-} from 'lucide-react'
+import { Globe, Network, Plug, Wifi } from 'lucide-react'
 
 /**
- * The add and edit dialogs, which are the same form.
+ * The add and edit forms, which are the same form, and asking before a
+ * target is deleted.
  *
  * They used to be two hand-kept copies of every field, so each new probe
  * setting had to be added, and kept in step, twice.
@@ -121,15 +104,17 @@ interface TargetFormValues {
 
 // ─── Probe method ───────────────────────────────────────────────────────────
 
+const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
+
 /**
  * Each method with the question it answers. The names alone only help someone
  * who already knows what ICMP is; the question is what a person actually came
  * with, and all four are on show at once so they can be told apart.
  */
 const PROBE_METHODS: { value: ProbeType; label: string; question: string; icon: typeof Wifi }[] = [
-  { value: 'ping', label: 'Ping (ICMP)', question: 'Is it up, and how fast does it reply?', icon: Wifi },
+  { value: 'ping', label: 'Ping', question: 'ICMP. Is it up, and how fast does it reply?', icon: Wifi },
   { value: 'tcp', label: 'TCP port', question: 'Is a service accepting connections?', icon: Plug },
-  { value: 'http', label: 'Web page (HTTP)', question: 'Does a page load as expected?', icon: Globe },
+  { value: 'http', label: 'Web page', question: 'HTTP. Does a page load as expected?', icon: Globe },
   { value: 'dns', label: 'DNS lookup', question: 'Is DNS answering correctly?', icon: Network },
 ]
 
@@ -148,45 +133,19 @@ function ProbeMethodPicker({
   onChange: (probeType: ProbeType) => void
 }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="How to check it">
-      {PROBE_METHODS.map(method => {
-        const selected = value === method.value
-        return (
-          <button
-            key={method.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            onClick={() => onChange(method.value)}
-            className={cn(
-              'flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left outline-none transition-colors',
-              'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
-              selected ? 'border-primary bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/60'
-            )}
-          >
-            <span
-              className={cn(
-                'flex size-8 shrink-0 items-center justify-center rounded-md transition-colors',
-                selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-              )}
-            >
-              <method.icon className="size-4" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-card-foreground">
-                {method.label}
-                {selected && suggested === method.value && (
-                  <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] leading-none text-primary">
-                    Detected
-                  </span>
-                )}
-              </span>
-              <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{method.question}</span>
-            </span>
-          </button>
-        )
-      })}
-    </div>
+    <RadioCards
+      aria-label="How to check it"
+      value={value}
+      onValueChange={next => onChange(next as ProbeType)}
+      minColumnWidth={180}
+      options={PROBE_METHODS.map(method => ({
+        value: method.value,
+        label: method.label,
+        description: method.question,
+        icon: <method.icon {...ICON} />,
+        meta: value === method.value && suggested === method.value ? <Badge size="sm" tone="info">Detected</Badge> : undefined,
+      }))}
+    />
   )
 }
 
@@ -204,7 +163,7 @@ function ProbeSummary({
 }) {
   return (
     <div className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
-      <span className="flex shrink-0 items-center gap-1 pt-0.5">
+      <span className="flex shrink-0 items-center gap-1">
         <TypeBadge type={targetTypeFor(host, probeType)} />
         {isDualStack(host, ipVersion)
           ? <DualStackBadge />
@@ -215,65 +174,12 @@ function ProbeSummary({
   )
 }
 
-// ─── Field labels ───────────────────────────────────────────────────────────
-
-/**
- * A field's label, saying whether it has to be filled in.
- *
- * Every field used to look the same, so the only way to find out which ones
- * the form insisted on was to watch the button stay grey. Now the ones it
- * cannot do without carry a red asterisk, the ones that can be left alone say
- * "optional", and a field with neither already holds a sensible value.
- */
-function FieldLabel({
-  htmlFor,
-  required = false,
-  optional = false,
-  small = false,
-  children,
-}: {
-  htmlFor?: string
-  required?: boolean
-  optional?: boolean
-  /** The quieter size used for a probe's own settings. */
-  small?: boolean
-  children: ReactNode
-}) {
-  return (
-    <Label htmlFor={htmlFor} className={cn('gap-1.5 text-card-foreground', small ? 'text-xs' : 'text-sm font-medium')}>
-      {children}
-      {required && (
-        <>
-          <span className="text-base leading-none text-destructive" aria-hidden="true">*</span>
-          <span className="sr-only">(required)</span>
-        </>
-      )}
-      {optional && <span className="text-xs font-normal text-muted-foreground">optional</span>}
-    </Label>
-  )
-}
-
-/** Why a required field is not acceptable yet, under the field it is about. */
-function FieldError({ id, children }: { id: string; children: ReactNode }) {
-  return (
-    <p id={id} className="text-xs text-destructive">
-      {children}
-    </p>
-  )
-}
-
-/** What a field is for or what it accepts, under the field. */
-function FieldHint({ id, children }: { id?: string; children: ReactNode }) {
-  return (
-    <p id={id} className="text-xs leading-relaxed text-muted-foreground">
-      {children}
-    </p>
-  )
+/** What a field is for or what it accepts, said under a group of fields. */
+function FieldHint({ children }: { children: ReactNode }) {
+  return <p className="text-xs leading-relaxed text-muted-foreground">{children}</p>
 }
 
 // ─── Probe-specific settings ────────────────────────────────────────────────
-
-const FIELD_INPUT = 'bg-input border-border text-foreground h-9 text-sm'
 
 /** A name's address record, A or AAAA as its IP version has it, as one item of a list. */
 const ADDRESS_RECORD = 'address'
@@ -307,87 +213,68 @@ function ProbeConfigFields({
 
   if (probeType === 'tcp') {
     return (
-      <div className="space-y-2">
-        <FieldLabel htmlFor={`${idPrefix}-port`} required>Port</FieldLabel>
+      <div className="max-w-48">
         <Input
           id={`${idPrefix}-port`}
+          label="Port"
           inputMode="numeric"
           placeholder="e.g., 443, 22, 5432"
           value={draft.port}
           onChange={e => onChange({ port: e.target.value })}
           onBlur={onPortBlur}
-          aria-required="true"
-          aria-invalid={!!portError}
-          aria-describedby={portError ? `${idPrefix}-port-error` : undefined}
-          className={cn(FIELD_INPUT, 'w-40')}
+          required
+          error={portError}
         />
-        {portError && <FieldError id={`${idPrefix}-port-error`}>{portError}</FieldError>}
       </div>
     )
   }
 
   if (probeType === 'http') {
     return (
-      <div className="space-y-3">
-        {/* Three across leaves the path a few letters wide in a dialog the
-            width of a phone, so there it has the second line to itself. */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[7rem_6rem_1fr]">
-          <div className="space-y-2">
-            <FieldLabel htmlFor={`${idPrefix}-scheme`} small>Scheme</FieldLabel>
-            <Select value={draft.scheme} onValueChange={(v: 'http' | 'https') => onChange({ scheme: v })}>
-              <SelectTrigger id={`${idPrefix}-scheme`} className={cn(FIELD_INPUT, 'w-full')}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-popover border-border">
-                <SelectItem value="https">HTTPS</SelectItem>
-                <SelectItem value="http">HTTP</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <FieldLabel htmlFor={`${idPrefix}-http-port`} small>Port</FieldLabel>
-            <Input
-              id={`${idPrefix}-http-port`}
-              inputMode="numeric"
-              placeholder={draft.scheme === 'https' ? '443' : '80'}
-              value={draft.port}
-              onChange={e => onChange({ port: e.target.value })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div className="col-span-2 space-y-2 sm:col-span-1">
-            <FieldLabel htmlFor={`${idPrefix}-path`} small>Path</FieldLabel>
-            <Input
-              id={`${idPrefix}-path`}
-              placeholder="/"
-              value={draft.path}
-              onChange={e => onChange({ path: e.target.value })}
-              className={cn(FIELD_INPUT, 'font-mono')}
-            />
-          </div>
+      <div className="space-y-4">
+        <SegmentedField
+          label="Scheme"
+          value={draft.scheme}
+          onValueChange={value => onChange({ scheme: value as 'http' | 'https' })}
+          options={[
+            { value: 'https', label: 'HTTPS' },
+            { value: 'http', label: 'HTTP' },
+          ]}
+        />
+        <div className="grid items-start gap-3 sm:grid-cols-[7rem_1fr]">
+          <Input
+            id={`${idPrefix}-http-port`}
+            label="Port"
+            inputMode="numeric"
+            placeholder={draft.scheme === 'https' ? '443' : '80'}
+            value={draft.port}
+            onChange={e => onChange({ port: e.target.value })}
+          />
+          <Input
+            id={`${idPrefix}-path`}
+            label="Path"
+            placeholder="/"
+            value={draft.path}
+            onChange={e => onChange({ path: e.target.value })}
+            style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
+          />
         </div>
-        <div className="grid gap-3 sm:grid-cols-[9rem_1fr]">
-          <div className="space-y-2">
-            <FieldLabel htmlFor={`${idPrefix}-status`} small optional>Expect status</FieldLabel>
-            <Input
-              id={`${idPrefix}-status`}
-              inputMode="numeric"
-              placeholder="2xx / 3xx"
-              value={draft.expectedStatus}
-              onChange={e => onChange({ expectedStatus: e.target.value })}
-              className={FIELD_INPUT}
-            />
-          </div>
-          <div className="space-y-2">
-            <FieldLabel htmlFor={`${idPrefix}-keyword`} small optional>Page must contain</FieldLabel>
-            <Input
-              id={`${idPrefix}-keyword`}
-              placeholder="e.g., Sign in"
-              value={draft.keyword}
-              onChange={e => onChange({ keyword: e.target.value })}
-              className={FIELD_INPUT}
-            />
-          </div>
+        <div className="grid items-start gap-3 sm:grid-cols-[9rem_1fr]">
+          <Input
+            id={`${idPrefix}-status`}
+            label="Expect status (optional)"
+            inputMode="numeric"
+            placeholder="2xx / 3xx"
+            value={draft.expectedStatus}
+            onChange={e => onChange({ expectedStatus: e.target.value })}
+          />
+          <Input
+            id={`${idPrefix}-keyword`}
+            label="Page must contain (optional)"
+            placeholder="e.g., Sign in"
+            value={draft.keyword}
+            onChange={e => onChange({ keyword: e.target.value })}
+          />
         </div>
       </div>
     )
@@ -401,34 +288,23 @@ function ProbeConfigFields({
   const choosesRecord = !isServer && draft.resolvers.length > 0
 
   const expectedAnswer = (
-    <div className="space-y-2">
-      <FieldLabel htmlFor={`${idPrefix}-answer`} small optional>
-        {isServer ? 'Answer must include' : choosesRecord ? 'Every answer must include' : 'Must resolve to'}
-      </FieldLabel>
-      <Input
-        id={`${idPrefix}-answer`}
-        placeholder={isServer || choosesRecord ? 'e.g., 203.0.113.10 or mx.example.com' : 'e.g., 203.0.113.10'}
-        value={draft.expectedAnswer}
-        onChange={e => onChange({ expectedAnswer: e.target.value })}
-        className={FIELD_INPUT}
-      />
-    </div>
+    <Input
+      id={`${idPrefix}-answer`}
+      label={`${isServer ? 'Answer must include' : choosesRecord ? 'Every answer must include' : 'Must resolve to'} (optional)`}
+      placeholder={isServer || choosesRecord ? 'e.g., 203.0.113.10 or mx.example.com' : 'e.g., 203.0.113.10'}
+      value={draft.expectedAnswer}
+      onChange={e => onChange({ expectedAnswer: e.target.value })}
+    />
   )
 
   const recordType = (
-    <div className="space-y-2">
-      <FieldLabel htmlFor={`${idPrefix}-record`} small>Record</FieldLabel>
-      <Select value={draft.recordType} onValueChange={(v: DnsRecordType) => onChange({ recordType: v })}>
-        <SelectTrigger id={`${idPrefix}-record`} className={cn(FIELD_INPUT, 'w-full')}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="bg-popover border-border">
-          {DNS_RECORD_TYPES.map(type => (
-            <SelectItem key={type} value={type}>{type}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+    <Select
+      id={`${idPrefix}-record`}
+      label="Record"
+      value={draft.recordType}
+      onValueChange={value => onChange({ recordType: value as DnsRecordType })}
+      options={DNS_RECORD_TYPES.map(type => ({ value: type, label: type }))}
+    />
   )
 
   if (!isServer) {
@@ -438,36 +314,30 @@ function ProbeConfigFields({
     const asksForAddress = isAddressRecord(draft.recordType)
     const addressRecord = nameRecordType(draft.recordType, ipVersion)
     const nameRecord = (
-      <div className="space-y-2">
-        <FieldLabel htmlFor={`${idPrefix}-record`} small>Record</FieldLabel>
-        <Select
-          value={asksForAddress ? ADDRESS_RECORD : draft.recordType}
-          onValueChange={(v: DnsRecordType | typeof ADDRESS_RECORD) => {
-            if (v !== ADDRESS_RECORD) onChange({ recordType: v })
-            else if (!asksForAddress) onChange({ recordType: 'A' })
-          }}
-        >
-          <SelectTrigger id={`${idPrefix}-record`} className={cn(FIELD_INPUT, 'w-full')}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-popover border-border">
-            <SelectItem value={ADDRESS_RECORD}>
-              {ipVersion === 'both' ? 'A + AAAA' : asksForAddress ? addressRecord : nameRecordType(undefined, ipVersion)}
-            </SelectItem>
-            {DNS_RECORD_TYPES.filter(type => !isAddressRecord(type)).map(type => (
-              <SelectItem key={type} value={type}>{type}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <Select
+        id={`${idPrefix}-record`}
+        label="Record"
+        value={asksForAddress ? ADDRESS_RECORD : draft.recordType}
+        onValueChange={value => {
+          if (value !== ADDRESS_RECORD) onChange({ recordType: value as DnsRecordType })
+          else if (!asksForAddress) onChange({ recordType: 'A' })
+        }}
+        options={[
+          {
+            value: ADDRESS_RECORD,
+            label: ipVersion === 'both' ? 'A + AAAA' : asksForAddress ? addressRecord : nameRecordType(undefined, ipVersion),
+          },
+          ...DNS_RECORD_TYPES.filter(type => !isAddressRecord(type)).map(type => ({ value: type, label: type })),
+        ]}
+      />
     )
 
     return (
-      <div className="space-y-3">
+      <div className="space-y-4">
         <ResolverList idPrefix={idPrefix} resolvers={draft.resolvers} onChange={resolvers => onChange({ resolvers })} />
         {choosesRecord ? (
           <>
-            <div className="grid grid-cols-[8rem_1fr] gap-3">
+            <div className="grid items-start gap-3 sm:grid-cols-[9rem_1fr]">
               {nameRecord}
               {expectedAnswer}
             </div>
@@ -487,18 +357,15 @@ function ProbeConfigFields({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-[1fr_7rem] gap-3">
-        <div className="space-y-2">
-          <FieldLabel htmlFor={`${idPrefix}-query`} small>Name to look up</FieldLabel>
-          <Input
-            id={`${idPrefix}-query`}
-            placeholder={DEFAULT_DNS_QUERY_NAME}
-            value={draft.queryName}
-            onChange={e => onChange({ queryName: e.target.value })}
-            className={FIELD_INPUT}
-          />
-        </div>
+    <div className="space-y-4">
+      <div className="grid items-start gap-3 sm:grid-cols-[1fr_8rem]">
+        <Input
+          id={`${idPrefix}-query`}
+          label="Name to look up"
+          placeholder={DEFAULT_DNS_QUERY_NAME}
+          value={draft.queryName}
+          onChange={e => onChange({ queryName: e.target.value })}
+        />
         {recordType}
       </div>
       {expectedAnswer}
@@ -519,45 +386,27 @@ const NO_GROUP = '__none__'
  */
 function GroupSelect({
   id,
-  newGroupInputId,
   group,
   availableGroups,
   onChange,
 }: {
   id: string
-  /** The box that appears for a new group's name, which is where typing goes next. */
-  newGroupInputId: string
   group: string
   availableGroups: string[]
   onChange: (group: string) => void
 }) {
   return (
-    <div className="space-y-2">
-      <FieldLabel htmlFor={id} small>Group</FieldLabel>
-      <Select value={group || NO_GROUP} onValueChange={value => onChange(value === NO_GROUP ? '' : value)}>
-        <SelectTrigger id={id} className={cn(FIELD_INPUT, 'w-full')}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent
-          className="bg-popover border-border"
-          // A closing list hands focus back to its button, which would take it
-          // from the name box that "New group…" has just opened.
-          onCloseAutoFocus={event => {
-            const input = group === NEW_GROUP ? document.getElementById(newGroupInputId) : null
-            if (!input) return
-            event.preventDefault()
-            input.focus()
-          }}
-        >
-          <SelectItem value={NO_GROUP}>No group</SelectItem>
-          {availableGroups.map(name => (
-            <SelectItem key={name} value={name}>{groupLabel(name)}</SelectItem>
-          ))}
-          <SelectSeparator />
-          <SelectItem value={NEW_GROUP}>New group…</SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
+    <Select
+      id={id}
+      label="Group"
+      value={group || NO_GROUP}
+      onValueChange={value => onChange(value === NO_GROUP ? '' : value)}
+      options={[
+        { value: NO_GROUP, label: 'No group' },
+        ...availableGroups.map(name => ({ value: name, label: groupLabel(name) })),
+        { value: NEW_GROUP, label: 'New group…' },
+      ]}
+    />
   )
 }
 
@@ -584,32 +433,12 @@ function IpVersionPicker({
 
   return (
     <div className="space-y-2">
-      <FieldLabel small>IP version</FieldLabel>
-      {/* One tray, so the four read as a single setting rather than four buttons. */}
-      <div
-        className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5 sm:grid-cols-4"
-        role="radiogroup"
-        aria-label="IP version"
-      >
-        {IP_VERSION_CHOICES.map(option => (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={value === option.value}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              'cursor-pointer rounded-md px-2 py-1.5 text-xs outline-none transition-colors touch:py-2.5',
-              'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-              value === option.value
-                ? 'bg-primary font-medium text-primary-foreground'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-            )}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      <SegmentedField
+        label="IP version"
+        value={value}
+        onValueChange={next => onChange(next as IpVersion)}
+        options={IP_VERSION_CHOICES.map(option => ({ value: option.value, label: option.label }))}
+      />
       <FieldHint>{selected.hint}</FieldHint>
     </div>
   )
@@ -651,19 +480,13 @@ function IntervalSelect({
   onChange: (seconds: number) => void
 }) {
   return (
-    <div className="space-y-2">
-      <FieldLabel htmlFor={id} small>Probe every</FieldLabel>
-      <Select value={value.toString()} onValueChange={v => onChange(parseInt(v))}>
-        <SelectTrigger id={id} className={cn(FIELD_INPUT, 'w-full')}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="bg-popover border-border">
-          {INTERVALS.map(option => (
-            <SelectItem key={option.seconds} value={option.seconds.toString()}>{option.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+    <Select
+      id={id}
+      label="Probe every"
+      value={value.toString()}
+      onValueChange={v => onChange(parseInt(v))}
+      options={INTERVALS.map(option => ({ value: option.seconds.toString(), label: option.label }))}
+    />
   )
 }
 
@@ -816,60 +639,51 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
   // messages for one mistake is one too many.
   const settingsError = hostValid && host && !validation.ok && probeType !== 'tcp' ? validation.error : null
   const hasSettings = probeType !== 'ping'
+  const recap = isValid && validation.ok ? recapFor(host, probeType, config, interval) : null
+
+  // "New group…" picked: typing goes to the new group's name next. Once the
+  // list has closed, which hands focus back to itself first.
+  useEffect(() => {
+    if (group !== NEW_GROUP) return
+    const frame = requestAnimationFrame(() => document.getElementById(`${idPrefix}-new-group`)?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [group, idPrefix])
 
   return (
-    <form
-      className="flex min-h-0 flex-1 flex-col"
-      noValidate
-      onSubmit={event => { event.preventDefault(); handleSubmit() }}
-    >
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
-        {/* What. The one field that has to be filled in, and built to look it. */}
-        <div className="space-y-2">
-          <FieldLabel htmlFor={`${idPrefix}-address`}>What do you want to monitor?</FieldLabel>
-          <div className="relative">
-            <Input
-              id={`${idPrefix}-address`}
-              placeholder="example.com"
-              value={address}
-              onChange={e => handleAddressChange(e.target.value)}
-              onBlur={handleAddressBlur}
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              aria-required="true"
-              aria-invalid={!!addressError}
-              aria-describedby={`${idPrefix}-address-${addressError ? 'error' : 'hint'}`}
-              className="h-12 border-border bg-input pr-10 font-mono text-base text-foreground md:text-base"
-              autoFocus={initial.host === ''}
-            />
-            {host && hostValid && (
-              <Check
-                className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-signal-perfect"
-                aria-hidden="true"
-              />
-            )}
-          </div>
-          {addressError ? (
-            <FieldError id={`${idPrefix}-address-error`}>{addressError}</FieldError>
-          ) : (
-            <FieldHint id={`${idPrefix}-address-hint`}>
-              A hostname, an IP address, <span className="font-mono">host:port</span> or a whole URL. Paste
-              whatever you have: a port or path is moved into the settings below.
-            </FieldHint>
-          )}
-        </div>
+    <form noValidate onSubmit={event => { event.preventDefault(); handleSubmit() }}>
+      <div className="space-y-6">
+        {/* What. The one field that has to be filled in. */}
+        <Input
+          id={`${idPrefix}-address`}
+          label="What do you want to monitor?"
+          placeholder="example.com"
+          value={address}
+          onChange={e => handleAddressChange(e.target.value)}
+          onBlur={handleAddressBlur}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          required
+          error={addressError ?? undefined}
+          description={
+            addressError
+              ? undefined
+              : 'A hostname, an IP address, host:port or a whole URL. Paste whatever you have: a port or path is moved into the settings below.'
+          }
+          style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
+          autoFocus={initial.host === ''}
+        />
 
         {/* How, with the chosen method's own settings attached beneath it. */}
-        <div className="space-y-2">
-          <FieldLabel>How should it be checked?</FieldLabel>
+        <fieldset className="space-y-3">
+          <legend className="pb-2 text-sm font-medium text-card-foreground">How should it be checked?</legend>
           <ProbeMethodPicker
             value={probeType}
             suggested={suggested}
             onChange={value => { setProbeType(value); setProbeChosen(true); setSuggested(null) }}
           />
           {(hasSettings || summary) && (
-            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3.5">
+            <div className="space-y-4 rounded-2xl border border-border bg-background p-4">
               <ProbeConfigFields
                 idPrefix={idPrefix}
                 probeType={probeType}
@@ -880,7 +694,7 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
                 onChange={changes => setDraft(current => ({ ...current, ...changes }))}
                 onPortBlur={() => touch('port')}
               />
-              {settingsError && <p className="text-xs text-destructive">{settingsError}</p>}
+              {settingsError && <Alert tone="danger" title="A setting is not right">{settingsError}</Alert>}
               {summary && (
                 <div className={cn(hasSettings && 'border-t border-border pt-3')}>
                   <ProbeSummary host={host} probeType={probeType} ipVersion={effectiveIpVersion} summary={summary} />
@@ -888,61 +702,46 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
               )}
             </div>
           )}
-        </div>
+        </fieldset>
 
         {/* What to call it. */}
-        <div className="space-y-2">
-          <FieldLabel htmlFor={`${idPrefix}-name`} optional>Name</FieldLabel>
-          <Input
-            id={`${idPrefix}-name`}
-            placeholder={host && hostValid ? host : 'e.g. Office router'}
-            value={name}
-            onChange={e => setName(e.target.value)}
-            aria-describedby={`${idPrefix}-name-hint`}
-            className="border-border bg-input text-foreground"
-          />
-          <FieldHint id={`${idPrefix}-name-hint`}>Shown in the sidebar. Left blank, the address is used.</FieldHint>
-        </div>
+        <Input
+          id={`${idPrefix}-name`}
+          label="Name (optional)"
+          placeholder={host && hostValid ? host : 'e.g. Office router'}
+          value={name}
+          onChange={e => setName(e.target.value)}
+          description="Shown in the sidebar. Left blank, the address is used."
+        />
 
         {/* Everything from here down already holds a sensible answer. */}
-        <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+        <div className="grid items-start gap-4 sm:grid-cols-2">
           <IntervalSelect id={`${idPrefix}-interval`} value={interval} onChange={setInterval} />
           <GroupSelect
             id={`${idPrefix}-group`}
-            newGroupInputId={`${idPrefix}-new-group`}
             group={group}
             availableGroups={availableGroups}
             onChange={next => { setGroup(next); if (next !== NEW_GROUP) { setCustomGroup(''); setCustomParent('') } }}
           />
           {group === NEW_GROUP && (
-            <div className="grid gap-x-4 gap-y-3 rounded-lg border border-border bg-muted/30 p-3.5 sm:col-span-2 sm:grid-cols-2">
-              <div className="space-y-2">
-                <FieldLabel htmlFor={`${idPrefix}-new-group`} small>New group&apos;s name</FieldLabel>
-                <Input
-                  id={`${idPrefix}-new-group`}
-                  placeholder="e.g. Network"
-                  value={customGroup}
-                  onChange={e => setCustomGroup(e.target.value)}
-                  className={FIELD_INPUT}
-                />
-              </div>
-              <div className="space-y-2">
-                <FieldLabel htmlFor={`${idPrefix}-new-group-parent`} small>Inside</FieldLabel>
-                <Select
-                  value={customParent || NO_GROUP}
-                  onValueChange={value => setCustomParent(value === NO_GROUP ? '' : value)}
-                >
-                  <SelectTrigger id={`${idPrefix}-new-group-parent`} className={cn(FIELD_INPUT, 'w-full')}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-popover border-border">
-                    <SelectItem value={NO_GROUP}>Nothing (top level)</SelectItem>
-                    {availableGroups.map(name => (
-                      <SelectItem key={name} value={name}>{groupLabel(name)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="grid items-start gap-4 rounded-2xl border border-border bg-background p-4 sm:col-span-2 sm:grid-cols-2">
+              <Input
+                id={`${idPrefix}-new-group`}
+                label="New group's name"
+                placeholder="e.g. Network"
+                value={customGroup}
+                onChange={e => setCustomGroup(e.target.value)}
+              />
+              <Select
+                id={`${idPrefix}-new-group-parent`}
+                label="Inside"
+                value={customParent || NO_GROUP}
+                onValueChange={value => setCustomParent(value === NO_GROUP ? '' : value)}
+                options={[
+                  { value: NO_GROUP, label: 'Nothing (top level)' },
+                  ...availableGroups.map(each => ({ value: each, label: groupLabel(each) })),
+                ]}
+              />
               <div className="sm:col-span-2">
                 <FieldHint>
                   {newGroupPath
@@ -957,15 +756,12 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
         {hostKind !== 'ipv4' && hostKind !== 'ipv6' && !asksNoAddress && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
       </div>
 
-      {/* Outside the part that scrolls, so the button is on show however long
+      {/* Held at the foot of the drawer, so the button is on show however long
           the settings above it get. */}
-      <div className="flex flex-col gap-3 border-t border-border bg-muted/20 px-5 py-3.5 sm:flex-row sm:items-center sm:px-6">
+      <div className="sticky -bottom-6 -mx-6 -mb-6 mt-6 flex flex-col gap-3 border-t border-border bg-popover px-6 py-4">
         {/* What pressing the button will do, or what is stopping it. */}
         <p
-          className={cn(
-            'min-w-0 flex-1 text-xs',
-            attempted && !isValid ? 'text-destructive' : 'text-muted-foreground'
-          )}
+          className={cn('min-w-0 text-xs', attempted && !isValid ? 'text-destructive' : 'text-muted-foreground')}
           role={attempted && !isValid ? 'alert' : undefined}
         >
           {missing.length > 0 ? (
@@ -973,18 +769,20 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
           ) : !validation.ok ? (
             validation.error
           ) : (
-            <span className="block truncate" data-tip={recapFor(host, probeType, config, interval)}>
-              {recapFor(host, probeType, config, interval)}
-            </span>
+            recap && (
+              <Tooltip content={recap}>
+                <span className="block truncate">{recap}</span>
+              </Tooltip>
+            )
           )}
         </p>
-        <div className="flex shrink-0 gap-2">
-          <Button type="button" variant="outline" className="flex-1 sm:flex-none" onClick={onCancel}>
+        <div className="flex gap-2">
+          <Button type="button" variant="secondary" className="flex-1" onClick={onCancel}>
             Cancel
           </Button>
           {/* Left enabled while something is missing: pressing it says what,
               where a greyed-out button only says no. */}
-          <Button type="submit" className="flex-1 sm:flex-none" aria-disabled={!isValid}>
+          <Button type="submit" className="flex-1" aria-disabled={!isValid}>
             {submitLabel}
           </Button>
         </div>
@@ -993,15 +791,7 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
   )
 }
 
-// ─── Add Target Dialog ──────────────────────────────────────────────────────
-
-/**
- * The dialog as three stacked parts: a header and a footer that stay where
- * they are, and the form's fields scrolling between them. The dialog's own
- * padding and scrolling are turned off so each part can do its own.
- */
-const DIALOG_SHELL = 'flex flex-col gap-0 overflow-hidden border-border bg-card p-0 sm:max-w-xl sm:p-0'
-const DIALOG_HEADER = 'border-b border-border px-5 py-4 text-left sm:px-6'
+// ─── Add Target ─────────────────────────────────────────────────────────────
 
 const BLANK_TARGET: TargetFormValues = {
   name: '',
@@ -1041,27 +831,19 @@ interface AddTargetDialogProps {
   group?: string
 }
 
+/** Adding a target, in a drawer: a long form, with the page kept in view beside it. */
 export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGroups, template = null, group = '' }: AddTargetDialogProps) {
-  const TitleIcon = template ? Copy : Plus
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={DIALOG_SHELL} suppressHydrationWarning>
-        <DialogHeader className={DIALOG_HEADER}>
-          <DialogTitle className="text-card-foreground flex items-center gap-2">
-            <div className="h-8 w-8 shrink-0 rounded-lg bg-primary/10 flex items-center justify-center">
-              <TitleIcon className="h-4 w-4 text-primary" />
-            </div>
-            {template ? <span className="min-w-0 break-words pr-6">Duplicate {template.name}</span> : 'Add a target'}
-          </DialogTitle>
-          <DialogDescription className="text-muted-foreground">
-            {template
-              ? 'A new target that starts with the same settings. Change what is different about this one. None of the history is copied.'
-              : 'Only the address is needed. Everything else starts with a sensible default.'}
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* The form lives inside the dialog's content, which is unmounted on
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent
+        title={template ? `Duplicate ${template.name}` : 'Add a target'}
+        description={
+          template
+            ? 'A new target that starts with the same settings. Change what is different about this one. None of the history is copied.'
+            : 'Only the address is needed. Everything else starts with a sensible default.'
+        }
+      >
+        {/* The form lives inside the drawer's content, which is unmounted on
             close, so every opening starts from a blank form without a reset. */}
         <TargetForm
           idPrefix="add"
@@ -1081,12 +863,12 @@ export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGrou
             onOpenChange(false)
           }}
         />
-      </DialogContent>
-    </Dialog>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
-// ─── Edit Target Dialog ─────────────────────────────────────────────────────
+// ─── Edit Target ────────────────────────────────────────────────────────────
 
 interface EditTargetDialogProps {
   open: boolean
@@ -1100,17 +882,8 @@ export function EditTargetDialog({ open, onOpenChange, target, onSave, available
   if (!target) return null
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={DIALOG_SHELL} suppressHydrationWarning>
-        <DialogHeader className={DIALOG_HEADER}>
-          <DialogTitle className="text-card-foreground flex items-center gap-2">
-            <div className="h-8 w-8 shrink-0 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <Pencil className="h-4 w-4 text-blue-500" />
-            </div>
-            <span className="min-w-0 break-words pr-6">Edit {target.name}</span>
-          </DialogTitle>
-        </DialogHeader>
-
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent title={`Edit ${target.name}`}>
         <TargetForm
           key={target.id}
           idPrefix="edit"
@@ -1125,8 +898,8 @@ export function EditTargetDialog({ open, onOpenChange, target, onSave, available
             onOpenChange(false)
           }}
         />
-      </DialogContent>
-    </Dialog>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -1151,46 +924,31 @@ interface DeleteTargetDialogProps {
 export function DeleteTargetDialog({ target, onCancel, onConfirm, onPause }: DeleteTargetDialogProps) {
   return (
     <Dialog open={target !== null} onOpenChange={open => { if (!open) onCancel() }}>
-      <DialogContent className="bg-card border-border sm:max-w-md" suppressHydrationWarning>
+      <DialogContent
+        title={target ? `Delete ${target.name}?` : 'Delete the target?'}
+        description="This removes the target and everything recorded for it: its measurement history, its alert rules and its saved routes. It cannot be undone."
+      >
         {target && (
-          <>
-            <DialogHeader>
-              <DialogTitle className="text-card-foreground flex items-center gap-2">
-                <div className="h-8 w-8 shrink-0 rounded-lg bg-destructive/10 flex items-center justify-center">
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </div>
-                <span className="min-w-0 break-words">Delete {target.name}?</span>
-              </DialogTitle>
-              <DialogDescription className="text-muted-foreground">
-                This removes the target and everything recorded for it: its measurement history, its alert
-                rules and its saved routes. It cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-
+          <div className="space-y-4">
             {target.status !== 'paused' && (
-              <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                To stop probing but keep the history,{' '}
-                <button
-                  type="button"
-                  onClick={() => { onPause(target); onCancel() }}
-                  className="cursor-pointer font-medium text-foreground underline underline-offset-2"
-                >
-                  pause it instead
-                </button>
-                .
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-background p-3">
+                <p className="text-sm text-muted-foreground">To stop probing but keep the history, pause it instead.</p>
+                <Button type="button" size="sm" variant="secondary" onClick={() => { onPause(target); onCancel() }}>
+                  Pause {target.name}
+                </Button>
+              </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2">
               {/* Focused first, so Enter on a dialog opened by accident keeps the target. */}
-              <Button variant="outline" onClick={onCancel} autoFocus>
+              <Button type="button" variant="secondary" onClick={onCancel} autoFocus>
                 Cancel
               </Button>
-              <Button variant="destructive" onClick={() => onConfirm(target.id)}>
+              <Button type="button" variant="danger" onClick={() => onConfirm(target.id)}>
                 Delete target
               </Button>
             </div>
-          </>
+          </div>
         )}
       </DialogContent>
     </Dialog>

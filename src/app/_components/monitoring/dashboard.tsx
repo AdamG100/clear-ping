@@ -31,9 +31,8 @@ import { probeVocabulary } from '@/lib/probe-labels'
 import { DNS_QUERIES_PER_PROBE, nameRecordType, targetAddressLabel } from '@/lib/probe-config'
 import { groupLabel, isWithinGroup, rebaseGroupPath } from '@/lib/group-path'
 import { buildSidebarLayout, targetsWithin } from '@/lib/sidebar-layout'
-import { cn } from '@/lib/utils'
-import { useToast } from '@/components/ui/toast'
-import { ErrorBoundary } from '@/components/ui/error-boundary'
+import { useToast } from '@/components/notifications'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { AlertsView, type AlertResponse } from './alerts-view'
 import { SettingsPage } from './settings-page'
 import { useDashboardPage } from './use-dashboard-page'
@@ -44,8 +43,12 @@ import { TraceroutePanel } from './traceroute-panel'
 import { ComparePanel } from './compare-panel'
 import { FamilySection } from './family-section'
 import { formatWindowEdge } from './chart-brush'
-import { Button } from '@/components/ui/button'
-import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
+import { ChartLine } from 'lucide-react'
+import { Badge } from '@/components/arc/badge/badge'
+import { Button } from '@/components/arc/button/button'
+import { EmptyState } from '@/components/arc/empty-state/empty-state'
+import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
+import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 
 /** Content that replaces a placeholder fades in over it instead of cutting. */
 const FADE_IN = {
@@ -445,10 +448,10 @@ function useTargetMeasurements(
 
 type FamilyView = 'both' | AddressFamily
 
-const FAMILY_VIEWS: { value: FamilyView; label: string }[] = [
-  { value: 'both', label: 'Compare' },
-  { value: 4, label: 'IPv4' },
-  { value: 6, label: 'IPv6' },
+const FAMILY_VIEWS: { value: string; view: FamilyView; label: string }[] = [
+  { value: 'both', view: 'both', label: 'Compare' },
+  { value: '4', view: 4, label: 'IPv4' },
+  { value: '6', view: 6, label: 'IPv6' },
 ]
 
 /**
@@ -457,34 +460,12 @@ const FAMILY_VIEWS: { value: FamilyView; label: string }[] = [
  */
 function FamilySwitch({ value, onChange }: { value: FamilyView; onChange: (view: FamilyView) => void }) {
   return (
-    <div className="inline-flex items-center gap-1 rounded-lg bg-secondary p-1" role="tablist" aria-label="Address family">
-      {FAMILY_VIEWS.map(option => {
-        const selected = value === option.value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              'relative cursor-pointer rounded-md px-3 py-1 text-xs font-medium',
-              'transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              selected ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {selected && (
-              <motion.span
-                layoutId="family-view-indicator"
-                className="absolute inset-0 rounded-md bg-primary shadow-sm"
-                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-              />
-            )}
-            <span className="relative z-10 whitespace-nowrap">{option.label}</span>
-          </button>
-        )
-      })}
-    </div>
+    <SegmentedControl
+      label="Address family"
+      value={String(value)}
+      onValueChange={chosen => onChange(FAMILY_VIEWS.find(option => option.value === chosen)?.view ?? 'both')}
+      options={FAMILY_VIEWS.map(({ value: option, label }) => ({ value: option, label }))}
+    />
   )
 }
 
@@ -521,7 +502,7 @@ function TargetAlerts({
   const watching = alerts.filter(alert => alert.targets.some(entry => entry.targetId === targetId))
 
   return (
-    <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-4 py-4 @2xl/main:px-5">
+    <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-3xl border border-border bg-card px-4 py-4 @2xl/main:px-6">
       <h2 className="text-sm font-medium text-foreground">Alerts</h2>
       {watching.length === 0 ? (
         <p className="text-xs text-muted-foreground">No alert is watching this target.</p>
@@ -530,31 +511,21 @@ function TargetAlerts({
           {watching.map(alert => {
             const firing = alert.enabled && alert.targets.some(entry => entry.targetId === targetId && entry.state === 'firing')
             return (
-              <li
-                key={alert.id}
-                className={cn(
-                  'flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-foreground',
-                  firing ? 'border-destructive/50 bg-destructive/10' : 'border-border bg-background',
-                  !alert.enabled && 'opacity-55'
-                )}
-              >
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 shrink-0 rounded-full',
-                    firing ? 'bg-destructive' : alert.enabled ? 'bg-signal-perfect' : 'bg-muted-foreground'
-                  )}
-                  aria-hidden="true"
-                />
-                {alertTitle(alert)}
-                {firing && <span className="sr-only">(firing)</span>}
+              <li key={alert.id}>
+                <Badge tone={firing ? 'danger' : alert.enabled ? 'success' : 'neutral'}>
+                  {alertTitle(alert)}
+                  {firing ? ': firing' : !alert.enabled ? ': muted' : ''}
+                </Badge>
               </li>
             )
           })}
         </ul>
       )}
-      <Button variant="outline" size="sm" className="ml-auto h-7 px-2 text-xs touch:h-9 touch:px-3" onClick={onManage}>
-        Manage alerts
-      </Button>
+      <span className="ml-auto">
+        <Button variant="secondary" size="sm" onClick={onManage}>
+          Manage alerts
+        </Button>
+      </span>
     </section>
   )
 }
@@ -965,25 +936,11 @@ export function Dashboard() {
           <PaneSkeleton />
         ) : showEmptyState ? (
           <div className="flex h-full items-center justify-center p-6">
-            <div className="text-center">
-              <svg viewBox="0 0 120 40" className="mx-auto mb-5 h-10 w-32" fill="none" aria-hidden="true">
-                <path
-                  d="M2 28 L14 26 L26 30 L38 12 L50 22 L62 18 L74 20 L86 8 L98 24 L118 22"
-                  stroke="var(--signal-none)"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  opacity="0.6"
-                />
-              </svg>
-              <h2 className="mb-2 text-lg font-semibold tracking-tight text-foreground">
-                Pick a path to inspect
-              </h2>
-              <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-                Choose a target from the sidebar to see its latency spread and packet loss, or add
-                one to start measuring.
-              </p>
-            </div>
+            <EmptyState
+              icon={<ChartLine size={24} strokeWidth={1.75} />}
+              title="Pick a path to inspect"
+              description="Choose a target from the sidebar to see its latency spread and packet loss, or add one to start measuring."
+            />
           </div>
         ) : (
           // Switching target fades the old pane out before the new one comes
@@ -1044,9 +1001,7 @@ export function Dashboard() {
                   <span>
                     {groupTargets.length} target{groupTargets.length === 1 ? '' : 's'} on one chart
                   </span>
-                  <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.1em]">
-                    Group
-                  </span>
+                  <Badge size="sm">Group</Badge>
                 </p>
               </div>
               <div className={PANE_ACTIONS}>
@@ -1095,33 +1050,19 @@ export function Dashboard() {
                       {selectedTarget.resolvedAddress}
                     </span>
                   )}
-                  <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                    {methodLabel}
-                  </span>
-                  {(addressFamily || dualStack) && (
-                    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] tracking-[0.1em] text-muted-foreground">
-                      {dualStack ? 'IPv4 + IPv6' : `IPv${addressFamily}`}
-                    </span>
-                  )}
-                  {selectedTarget.status === 'paused' && (
-                    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                      Paused
-                    </span>
-                  )}
+                  <Badge size="sm">{methodLabel}</Badge>
+                  {(addressFamily || dualStack) && <Badge size="sm">{dualStack ? 'IPv4 + IPv6' : `IPv${addressFamily}`}</Badge>}
+                  {selectedTarget.status === 'paused' && <Badge size="sm" tone="warning">Paused</Badge>}
                 </p>
               </div>
               <div className={PANE_ACTIONS}>
                 <TimeRangeSelector value={timeRange} onChange={handleTimeRangeChange} busy={pending} />
                 {!readOnly && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleProbe}
-                    disabled={probing}
-                    className={PANE_ACTION}
-                  >
-                    {probing ? 'Probing…' : 'Probe now'}
-                  </Button>
+                  <span className={PANE_ACTION}>
+                    <Button variant="secondary" size="sm" className="w-full" onClick={handleProbe} loading={probing}>
+                      Probe now
+                    </Button>
+                  </span>
                 )}
               </div>
             </header>
@@ -1272,7 +1213,7 @@ export function Dashboard() {
                       <span>
                         {formatWindowEdge(zoom.start)} – {formatWindowEdge(zoom.end)}
                       </span>
-                      <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] touch:h-8 touch:px-3" onClick={handleResetZoom}>
+                      <Button variant="secondary" size="sm" onClick={handleResetZoom}>
                         Reset zoom
                       </Button>
                     </p>

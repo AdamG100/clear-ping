@@ -16,3 +16,24 @@ with a `Release:` trailer beside `Co-Authored-By`.
 One trailer is enough for everything going out together: the biggest one asked
 for since the last release wins. Do not edit `package.json`'s version or make
 `v*` tags.
+
+## UI: Arc
+
+The UI is built from Arc UI (https://uiarc.dev) components in
+`src/components/arc/`, installed with `npx shadcn@latest add @uiarc/<name>`.
+Use an Arc component wherever one fits before writing UI by hand; the charts
+and the traceroute diagram are the custom exceptions. Colours are Arc's tokens
+(`globals.css` maps the Tailwind names onto them); dark mode is
+`data-theme="dark"` on `<html>`, page `#121212`, surfaces `#1b2024`.
+
+Things that bite:
+- Arc's CSS modules are unlayered, so they beat Tailwind utilities: a class
+  passed to an Arc component cannot change what its module sets (font, padding,
+  height, margin). Wrap it in an element and style that, or use `style`.
+- Arc fields take a visible `label`; `SegmentedControl` only says its label to
+  a screen reader, so in a form use `SegmentedField` (`src/components/segmented-field.tsx`).
+- Inside Arc `TabsContent` text is the secondary colour; give content in a tab
+  `text-foreground`, or field labels come out grey.
+- Buttons and segmented controls are inline: put each on a line of its own in
+  a stacked form, or they sit side by side.
+- Notifications are `useToast()` from `@/components/notifications` (Arc's toast stack).

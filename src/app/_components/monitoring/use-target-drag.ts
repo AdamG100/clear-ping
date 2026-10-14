@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
 import { flushSync } from 'react-dom'
-import { animate, useMotionValue, useReducedMotion, type MotionValue } from 'framer-motion'
+import { animate, useMotionValue, useReducedMotion, type MotionValue } from 'motion/react'
 import {
   UNGROUPED,
   locateTarget,

@@ -1,3 +1,7 @@
+import { Alert } from '@/components/arc/alert/alert'
+import { Badge } from '@/components/arc/badge/badge'
+import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { cn } from '@/lib/utils'
 import { DNS_PROTOCOL_LABEL, DNS_PROTOCOL_NAME, readingName } from '@/lib/dns-resolvers'
 import { resolversThatDiffer } from '@/lib/dns-resolver-series'
@@ -73,24 +77,24 @@ function Certificate({ expiresAt, asOf }: { expiresAt: number; asOf: Date }) {
   // Counted from the probe that saw the certificate, not from the clock: the
   // figure is then the same one a certificate alert is judged on.
   const daysLeft = Math.floor((expiresAt - asOf.getTime()) / DAY_MS)
-  const tone = daysLeft < 0 ? 'text-destructive' : daysLeft < 14 ? 'text-amber-500' : 'text-foreground'
+  const tone = daysLeft < 0 ? 'text-destructive' : daysLeft < 14 ? 'text-warning' : 'text-foreground'
 
   return (
     <div>
-      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">Certificate</p>
+      <p className="text-xs text-muted-foreground">Certificate</p>
       <p className={cn('mt-0.5 text-sm font-medium', tone)}>
         {daysLeft < 0
           ? `Expired ${-daysLeft} day${daysLeft === -1 ? '' : 's'} ago`
           : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
       </p>
-      <p className="font-mono text-[11px] text-muted-foreground">
+      <p className="font-mono text-xs text-muted-foreground">
         until {new Date(expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
       </p>
     </div>
   )
 }
 
-const SECTION_LABEL = 'text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70'
+const SECTION_LABEL = 'text-sm font-medium text-card-foreground'
 
 /**
  * The same lookup as each resolver answered it: how long each took, and what
@@ -121,7 +125,7 @@ function ResolverTable({
       <p className={SECTION_LABEL}>
         Latest probe, resolver by resolver
         {differing.size > 0 && (
-          <span className="ml-2 normal-case tracking-normal text-signal-moderate">they do not all agree</span>
+          <span className="ml-2"><Badge tone="warning" size="sm">They do not all agree</Badge></span>
         )}
       </p>
       {/* What the rows are rows of, before any of them is read. */}
@@ -129,85 +133,103 @@ function ResolverTable({
         At {time} each resolver was sent {sent ? `${sent} queries` : 'the same queries'}
         {question && <> for {question}</>}, all at the same moment.
       </p>
-      <div className="mt-2 overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground/70">
-              <th className="pb-1.5 pr-4 font-medium">Resolver</th>
-              <th className="whitespace-nowrap pb-1.5 pr-4 text-right font-medium">Query time</th>
-              <th className="hidden w-[18%] pb-1.5 pr-4 @2xl/main:table-cell" />
-              <th className="pb-1.5 pr-4 text-right font-medium">Answered</th>
-              <th className="hidden pb-1.5 pr-4 text-right font-medium @lg/main:table-cell">Connect</th>
-              <th className="pb-1.5 font-medium">Answer</th>
-            </tr>
-          </thead>
-          <tbody>
-            {readings.map(reading => {
-              const failed = reading.latency === null
-              const differs = differing.has(reading.label)
-              // Out of how many, where that was kept; as a share where it was not.
-              const answered = reading.sent
-                ? `${Math.round(reading.sent * (1 - reading.loss / 100))} of ${reading.sent}`
-                : `${(100 - reading.loss).toFixed(0)}%`
-
-              return (
-                <tr key={reading.label} className={cn('border-t border-border/50 align-top', failed && 'bg-destructive/5')}>
-                  <td className="py-1.5 pr-4">
-                    <span className="flex items-center gap-2">
-                      <span
-                        className={cn('h-1.5 w-1.5 shrink-0 rounded-full', failed ? 'bg-destructive' : reading.loss > 0 ? 'bg-signal-moderate' : 'bg-signal-perfect')}
-                        aria-hidden="true"
-                      />
-                      {/* By the name it has now, and without the protocol: the badge says that. */}
-                      <span className="whitespace-nowrap font-medium text-foreground">{readingName(reading, resolvers)}</span>
-                      <span
-                        className="rounded border border-border px-1 py-px text-[10px] leading-none text-muted-foreground"
-                        data-tip={DNS_PROTOCOL_NAME[reading.protocol]}
-                      >
+      <div className="mt-3">
+        <SortableDataTable
+          caption="Resolver by resolver"
+          itemName={{ one: 'resolver', other: 'resolvers' }}
+          rowKey="label"
+          rows={readings.map(reading => ({
+            label: reading.label,
+            name: readingName(reading, resolvers),
+            // Unanswered sorts last, as the slowest of all.
+            latency: reading.latency ?? Number.MAX_SAFE_INTEGER,
+            answered: 100 - reading.loss,
+            connect: reading.connectMs ?? -1,
+            answer: reading.answers?.join(', ') ?? '',
+            reading,
+          }))}
+          columns={[
+            {
+              key: 'name',
+              label: 'Resolver',
+              render: (_, { reading, name }) => (
+                <span className="flex items-center gap-2">
+                  {/* By the name it has now, and without the protocol: the badge says that. */}
+                  <span className="whitespace-nowrap font-medium text-foreground">{name}</span>
+                  <Tooltip content={DNS_PROTOCOL_NAME[reading.protocol]}>
+                    <span tabIndex={0}>
+                      <Badge size="sm" tone={reading.latency === null ? 'danger' : reading.loss > 0 ? 'warning' : 'neutral'}>
                         {DNS_PROTOCOL_LABEL[reading.protocol]}
-                      </span>
+                      </Badge>
                     </span>
-                  </td>
-                  <td className="whitespace-nowrap py-1.5 pr-4 text-right font-mono text-foreground">
-                    {reading.latency === null ? <span className="text-destructive">no answer</span> : `${reading.latency.toFixed(1)} ms`}
-                  </td>
-                  <td className="hidden py-1.5 pr-4 align-middle @2xl/main:table-cell">
-                    {reading.latency !== null && (
-                      <span className="block h-1.5 rounded-full bg-muted/40" aria-hidden="true">
-                        <span
-                          className="block h-full min-w-1 rounded-full bg-trace/70"
-                          style={{ width: `${(reading.latency / slowest) * 100}%` }}
-                        />
-                      </span>
-                    )}
-                  </td>
-                  <td className={cn('whitespace-nowrap py-1.5 pr-4 text-right font-mono', reading.loss > 0 ? 'text-destructive' : 'text-muted-foreground')}>
-                    {answered}
-                  </td>
-                  <td className="hidden whitespace-nowrap py-1.5 pr-4 text-right font-mono text-muted-foreground @lg/main:table-cell">
-                    {reading.connectMs === undefined ? '—' : `${reading.connectMs.toFixed(0)} ms`}
-                  </td>
-                  {/* Wide enough to be read: on a phone the table is scrolled
-                      sideways to it, instead of the answer being broken into
-                      a column three characters across. */}
-                  <td className="min-w-48 py-1.5">
+                  </Tooltip>
+                </span>
+              ),
+            },
+            {
+              key: 'latency',
+              label: 'Query time',
+              numeric: true,
+              render: (_, { reading }) =>
+                reading.latency === null ? (
+                  <span className="text-destructive">no answer</span>
+                ) : (
+                  <span className="flex items-center justify-end gap-2">
+                    <span className="hidden h-1.5 w-20 rounded-full bg-muted @2xl/main:block" aria-hidden="true">
+                      <span className="block h-full min-w-1 rounded-full bg-trace/70" style={{ width: `${(reading.latency / slowest) * 100}%` }} />
+                    </span>
+                    <span className="font-mono">{reading.latency.toFixed(1)} ms</span>
+                  </span>
+                ),
+            },
+            {
+              key: 'answered',
+              label: 'Answered',
+              numeric: true,
+              render: (_, { reading }) => (
+                // Out of how many, where that was kept; as a share where it was not.
+                <span className={cn('font-mono', reading.loss > 0 ? 'text-destructive' : 'text-muted-foreground')}>
+                  {reading.sent
+                    ? `${Math.round(reading.sent * (1 - reading.loss / 100))} of ${reading.sent}`
+                    : `${(100 - reading.loss).toFixed(0)}%`}
+                </span>
+              ),
+            },
+            ...(encrypted
+              ? [
+                  {
+                    key: 'connect',
+                    label: 'Connect',
+                    numeric: true,
+                    render: (value: unknown) => (
+                      <span className="font-mono text-muted-foreground">{(value as number) < 0 ? 'none' : `${(value as number).toFixed(0)} ms`}</span>
+                    ),
+                  },
+                ]
+              : []),
+            {
+              key: 'answer',
+              label: 'Answer',
+              sortable: false,
+              render: (_, { reading }) => {
+                const differs = differing.has(reading.label)
+                return (
+                  <span className="block min-w-48">
                     {reading.answers && reading.answers.length > 0 && (
-                      <span className={cn('break-all font-mono', differs ? 'text-signal-moderate' : 'text-foreground')}>
+                      <span className={cn('break-all font-mono', differs ? 'text-warning' : 'text-foreground')}>
                         {reading.answers.join(', ')}
-                        {differs && <span className="ml-2 font-sans text-[10px] font-medium">differs</span>}
+                        {differs && <span className="ml-2"><Badge tone="warning" size="sm">Differs</Badge></span>}
                       </span>
                     )}
-                    {reading.error && (
-                      <span className="block break-all text-destructive">{reading.error}</span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                    {reading.error && <span className="block break-all text-destructive">{reading.error}</span>}
+                  </span>
+                )
+              },
+            },
+          ]}
+        />
       </div>
-      <dl className="mt-3 space-y-1 text-[11px] leading-relaxed text-muted-foreground/80">
+      <dl className="mt-3 space-y-1 text-xs leading-relaxed text-muted-foreground">
         <div>
           <dt className="inline font-medium text-muted-foreground">Query time </dt>
           <dd className="inline">is the average of the queries that were answered, from sending one to its answer arriving.</dd>
@@ -231,7 +253,7 @@ function ResolverTable({
         )}
         {differing.size > 0 && (
           <div>
-            <dt className="inline font-medium text-signal-moderate">Differs </dt>
+            <dt className="inline font-medium text-warning">Differs </dt>
             <dd className="inline">
               marks an answer that is not the one most of them gave. That is usual for a name served by region, and
               worth a look for a record that was changed lately.
@@ -264,22 +286,19 @@ export function ProbeDetailsPanel({ probeType, latest, label, resolverList = [],
   if (!failure && !hasBody) return null
 
   return (
-    <section className="rounded-xl border border-border bg-card px-4 py-4 @2xl/main:px-5">
-      {label && (
-        <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{label}</p>
-      )}
+    <section className="rounded-3xl border border-border bg-card px-4 py-4 @2xl/main:px-6">
+      {label && <p className="mb-3 text-sm font-medium text-card-foreground">{label}</p>}
       {failure && (
-        <p className={cn('flex flex-wrap items-baseline gap-x-2 text-sm', hasBody && 'mb-3')}>
-          <span className="font-medium text-destructive">Last probe failed</span>
-          <span className="break-all font-mono text-xs text-muted-foreground">{failure}</span>
-        </p>
+        <div className={cn(hasBody && 'mb-4')}>
+          <Alert tone="danger" title="Last probe failed">{failure}</Alert>
+        </div>
       )}
 
       {hasBody && (
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
           {details.statusCode !== undefined && (
             <div>
-              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">Status</p>
+              <p className="text-xs text-muted-foreground">Status</p>
               <p className="mt-0.5 font-mono text-sm font-medium text-foreground">HTTP {details.statusCode}</p>
             </div>
           )}
@@ -290,7 +309,7 @@ export function ProbeDetailsPanel({ probeType, latest, label, resolverList = [],
 
           {answers.length > 0 && (
             <div className="min-w-0">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">Answer</p>
+              <p className="text-xs text-muted-foreground">Answer</p>
               <p className="mt-0.5 break-all font-mono text-xs text-foreground">{answers.join(', ')}</p>
             </div>
           )}

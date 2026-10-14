@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { getPacketLossColor, isMeaningfulLoss, NO_DATA_COLOR } from '@/lib/packet-loss-colors'
 
 /**
@@ -48,8 +49,8 @@ export function StatusIndicator({
 
   if (note && !pending && !paused) label = note
 
-  return (
-    <span className="relative inline-flex shrink-0" data-tip={bare ? undefined : label}>
+  const dot = (
+    <span className="relative inline-flex shrink-0">
       {/* The pulse only runs for a live target; a steady dot for offline and
           pending states stops a dead target from looking like active traffic. */}
       {isOnline && !paused && (
@@ -67,4 +68,7 @@ export function StatusIndicator({
       <span className="sr-only">{label}</span>
     </span>
   )
+
+  // Bare where something around it already says what it means.
+  return bare ? dot : <Tooltip content={label}>{dot}</Tooltip>
 }

@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { cn } from '@/lib/utils'
+import { Badge } from '@/components/arc/badge/badge'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import type { VersionStatus } from '@/lib/version'
 
 /**
@@ -26,10 +27,17 @@ function provenance(build: { builtAt: string | null; commit: string | null }): s
   return parts.filter(Boolean).join(' · ') || undefined
 }
 
-const CHIP =
-  'inline-flex items-center gap-1 rounded border px-1 py-px font-mono text-[10px] leading-none tracking-normal normal-case'
+/** A name and a quieter second line, for a tooltip. */
+function TwoLines({ name, detail }: { name: string; detail?: string }) {
+  return (
+    <span className="block max-w-64 space-y-0.5">
+      <span className="block">{name}</span>
+      {detail && <span className="block text-muted-foreground">{detail}</span>}
+    </span>
+  )
+}
 
-export function VersionBadge({ className }: { className?: string }) {
+export function VersionBadge() {
   const [status, setStatus] = useState<VersionStatus | null>(null)
   // The version the server was on when this page loaded: the one its scripts are from.
   const [loadedWith, setLoadedWith] = useState<string | null>(null)
@@ -60,15 +68,11 @@ export function VersionBadge({ className }: { className?: string }) {
 
   if (loadedWith && loadedWith !== current.version) {
     return (
-      <button
-        type="button"
-        onClick={() => window.location.reload()}
-        className={cn(CHIP, 'cursor-pointer border-signal-perfect/50 text-signal-perfect hover:bg-sidebar-accent', className)}
-        data-tip={`Updated to ${label}`}
-        data-tip-detail="Reload to use the new version"
-      >
-        {label} · reload
-      </button>
+      <Tooltip content={<TwoLines name={`Updated to ${label}`} detail="Reload to use the new version" />}>
+        <button type="button" onClick={() => window.location.reload()} className="cursor-pointer">
+          <Badge tone="success" size="sm">{label} · reload</Badge>
+        </button>
+      </Tooltip>
     )
   }
 
@@ -77,16 +81,14 @@ export function VersionBadge({ className }: { className?: string }) {
     const release = latest.version && latest.source ? `${latest.source}/releases/tag/v${latest.version}` : undefined
     const Tag = release ? 'a' : 'span'
     return (
-      <Tag
-        {...(release ? { href: release, target: '_blank', rel: 'noreferrer' } : {})}
-        className={cn(CHIP, 'border-signal-minor/50 text-signal-minor', release && 'hover:bg-sidebar-accent', className)}
-        data-tip={`${newer} is available`}
-        data-tip-detail={`Running ${label}. Pull the latest image and recreate the container to update.`}
-      >
-        <span className="size-1.5 rounded-full bg-signal-minor" aria-hidden="true" />
-        {label}
-        <span className="sr-only">, update available: {newer}</span>
-      </Tag>
+      <Tooltip content={<TwoLines name={`${newer} is available`} detail={`Running ${label}. Pull the latest image and recreate the container to update.`} />}>
+        <Tag {...(release ? { href: release, target: '_blank', rel: 'noreferrer' } : { tabIndex: 0 })}>
+          <Badge tone="warning" size="sm">
+            {label}
+            <span className="sr-only">, update available: {newer}</span>
+          </Badge>
+        </Tag>
+      </Tooltip>
     )
   }
 
@@ -102,11 +104,10 @@ export function VersionBadge({ className }: { className?: string }) {
       : [provenance(current), status.latestUnknownBecause].filter(Boolean).join('. ')
 
   return (
-    <span className={cn(CHIP, 'border-sidebar-border text-muted-foreground', className)} data-tip={tip} data-tip-detail={detail}>
-      {updateAvailable === false && (
-        <span className="size-1.5 rounded-full bg-signal-perfect" aria-hidden="true" />
-      )}
-      {label}
-    </span>
+    <Tooltip content={<TwoLines name={tip} detail={detail} />}>
+      <span tabIndex={0}>
+        <Badge tone={updateAvailable === false ? 'success' : 'neutral'} size="sm">{label}</Badge>
+      </span>
+    </Tooltip>
   )
 }

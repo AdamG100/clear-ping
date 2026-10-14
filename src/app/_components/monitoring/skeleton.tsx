@@ -1,5 +1,6 @@
 'use client'
 
+import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { cn } from '@/lib/utils'
 import { PANE, PANE_HEADER } from './pane-layout'
 import { STAT_GRID, STAT_GRID_LEAD } from './stats-cards'
@@ -14,7 +15,7 @@ import { STAT_GRID, STAT_GRID_LEAD } from './stats-cards'
  */
 
 function Block({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse rounded bg-muted/50 ${className}`} />
+  return <div className={`animate-pulse rounded-md bg-muted ${className}`} />
 }
 
 export function ReadoutSkeleton() {
@@ -26,17 +27,17 @@ export function ReadoutSkeleton() {
         <div
           key={i}
           className={cn(
-            '@container/card rounded-xl border border-border/50 bg-card p-4 @2xl/main:p-6',
+            '@container/card rounded-3xl border border-border bg-card p-4 @2xl/main:p-6',
             i === 0 && STAT_GRID_LEAD
           )}
         >
-          <div className="flex items-center gap-3">
-            <Block className="h-10 w-10 rounded-lg" />
-            <Block className="h-4 w-24" />
+          <div className="flex items-center justify-between gap-3">
+            <Block className="h-5 w-28" />
+            <Block className="h-6 w-16 rounded-full" />
           </div>
           <Block className="mt-4 h-9 w-32 @2xl/main:mt-6" />
           <Block className="mt-2 h-3 w-40" />
-          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border/50 pt-4 @2xs/card:grid-cols-4 @2xl/main:mt-6">
+          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 @2xs/card:grid-cols-4 @2xl/main:mt-6">
             {/* As tall as a label over a figure, so the cards do not grow when
                 the figures arrive and push the chart down the page. */}
             {[0, 1, 2, 3].map(j => (
@@ -80,7 +81,7 @@ export function PaneSkeleton() {
         <ReadoutSkeleton />
       </div>
 
-      <section className="min-h-[26rem] rounded-xl border border-border bg-card p-4 @2xl/main:p-5" aria-hidden="true">
+      <section className="min-h-[26rem] rounded-3xl border border-border bg-card p-4 @2xl/main:p-6" aria-hidden="true">
         <div className="mb-4">
           <Block className="h-5 w-40" />
           <Block className="mt-0.5 h-4 w-80 max-w-full" />
@@ -91,27 +92,12 @@ export function PaneSkeleton() {
   )
 }
 
-/** The sidebar's list, before the targets have arrived: a couple of groups of rows. */
+/** The sidebar's list, before the targets have arrived: a few rows of a name and an address each. */
 export function SidebarSkeleton() {
   return (
-    <div className="space-y-1" aria-hidden="true">
-      {[3, 2].map((rows, group) => (
-        <div key={group}>
-          <div className="flex h-[30px] items-center px-2">
-            <Block className="h-2.5 w-24" />
-          </div>
-          <div className="ml-1 space-y-0.5">
-            {Array.from({ length: rows }, (_, row) => (
-              <div key={row} className="flex items-center gap-2.5 px-2 py-2">
-                <Block className="h-2.5 w-2.5 shrink-0 rounded-full" />
-                <div className="min-w-0 flex-1">
-                  <Block className="my-0.5 h-4 w-32" />
-                  <Block className="my-0.5 h-3 w-44" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+    <div className="space-y-4 px-2 py-1">
+      {[0, 1, 2, 3, 4].map(row => (
+        <Skeleton key={row} label="Loading the targets" lines={2} />
       ))}
     </div>
   )

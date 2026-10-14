@@ -6,11 +6,11 @@
  * to be changed along with them.
  */
 
-/** `--sidebar`, which is what the bar across the top of a phone's screen is drawn in. */
+/** `--surface`, which the sidebar and the bar across the top of a phone's screen are drawn in. */
 export const THEME_COLOR = {
-  light: '#fafafa',
-  dark: '#060b11',
+  light: '#ffffff',
+  dark: '#1b2024',
 } as const
 
 /** `--background` in the dark theme, behind the icon while the installed app starts. */
-export const SPLASH_BACKGROUND = '#0a1016'
+export const SPLASH_BACKGROUND = '#121212'

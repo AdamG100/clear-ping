@@ -2,6 +2,9 @@
 
 import { useMemo } from 'react'
 import { Bell, PanelLeftOpen, Plus, Settings, Share2 } from 'lucide-react'
+import { Badge } from '@/components/arc/badge/badge'
+import { Button } from '@/components/arc/button/button'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { cn } from '@/lib/utils'
 import type { Target } from '@/types/probe'
 import { describeGroupHealth, groupIsOnline, groupIsPaused, summarizeGroupHealth } from '@/lib/group-health'
@@ -40,16 +43,14 @@ interface SidebarRailProps {
   onAddTarget?: () => void
 }
 
-const RAIL_BUTTON =
-  'relative flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground ' +
-  'transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground'
+const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 
 /**
- * A button's name, shown to its right (see `Tooltips`). Above or below, where
- * a name usually goes, it would lie over the next button in the rail.
+ * A button and its name, shown to its right. Above or below, where a name
+ * usually goes, it would lie over the next button in the rail.
  */
-function beside(name: string, detail?: string) {
-  return { 'data-tip': name, 'data-tip-detail': detail, 'data-tip-side': 'right' }
+function Beside({ name, children }: { name: string; children: React.ReactElement }) {
+  return <Tooltip content={name} side="right">{children}</Tooltip>
 }
 
 export function SidebarRail({
@@ -87,16 +88,11 @@ export function SidebarRail({
   return (
     <>
       <div className="flex h-[4.25rem] shrink-0 items-center justify-center border-b border-sidebar-border">
-        <button
-          id={SIDEBAR_EXPAND_BUTTON_ID}
-          type="button"
-          onClick={onExpand}
-          className={RAIL_BUTTON}
-          aria-label="Expand sidebar"
-          {...beside('Expand sidebar')}
-        >
-          <PanelLeftOpen className="h-4 w-4" />
-        </button>
+        <Beside name="Expand sidebar">
+          <Button id={SIDEBAR_EXPAND_BUTTON_ID} type="button" variant="ghost" size="sm" onClick={onExpand} aria-label="Expand sidebar">
+            <PanelLeftOpen {...ICON} />
+          </Button>
+        </Beside>
       </div>
 
       <nav
@@ -112,8 +108,8 @@ export function SidebarRail({
             (selectedTargetId !== null && memberIds.includes(selectedTargetId))
 
           return (
+            <Beside key={group} name={summary}>
             <button
-              key={group}
               type="button"
               // A group of several opens as its comparison chart, which is
               // every target in it at once. A group of one has nothing to
@@ -121,16 +117,14 @@ export function SidebarRail({
               onClick={() => (memberIds.length > 1 && onSelectGroup ? onSelectGroup(group) : onSelectTarget(memberIds[0]))}
               disabled={memberIds.length === 0}
               aria-current={active}
+              // The tile shows two letters of the name; its name in full, and
+              // what its light is saying, are the tooltip.
               aria-label={summary}
-              // The tile shows two letters of the name; this is the rest of
-              // it, and what its light is saying.
-              {...beside(name, state)}
               className={cn(
-                RAIL_BUTTON,
-                'border font-mono text-[11px] font-semibold tracking-wide',
+                'relative flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl border font-mono text-xs font-medium transition-colors',
                 active
-                  ? 'border-sidebar-ring/50 bg-sidebar-accent text-sidebar-foreground'
-                  : 'border-sidebar-border bg-sidebar-accent/40'
+                  ? 'border-primary bg-sidebar-accent text-sidebar-foreground'
+                  : 'border-sidebar-border bg-background text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
               )}
             >
               <span aria-hidden="true">{groupInitials(group)}</span>
@@ -146,59 +140,50 @@ export function SidebarRail({
                 />
               </span>
             </button>
+            </Beside>
           )
         })}
       </nav>
 
       <div className="flex shrink-0 flex-col items-center gap-1.5 border-t border-sidebar-border py-3 pb-[calc(0.75rem+var(--safe-bottom))]">
         {onOpenAlerts && (
-          <button
-            type="button"
-            onClick={onOpenAlerts}
-            aria-pressed={alertsOpen}
-            aria-label={firingAlerts > 0 ? `Alerts, ${firingAlerts} firing` : 'Alerts'}
-            {...beside('Alerts', firingAlerts > 0 ? `${firingAlerts} firing` : undefined)}
-            className={cn(RAIL_BUTTON, alertsOpen && 'bg-sidebar-accent text-sidebar-foreground')}
-          >
-            <Bell className="h-4 w-4" />
-            {firingAlerts > 0 && (
-              <span
-                className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-destructive px-1 py-0.5 text-center text-[10px] font-semibold leading-none text-white"
-                aria-hidden="true"
+          <Beside name={firingAlerts > 0 ? `Alerts: ${firingAlerts} firing` : 'Alerts'}>
+            <span className="relative">
+              <Button
+                type="button"
+                variant={alertsOpen ? 'primary' : 'ghost'}
+                size="sm"
+                onClick={onOpenAlerts}
+                aria-pressed={alertsOpen}
+                aria-label={firingAlerts > 0 ? `Alerts, ${firingAlerts} firing` : 'Alerts'}
               >
-                {firingAlerts}
-              </span>
-            )}
-          </button>
+                <Bell {...ICON} />
+              </Button>
+              {firingAlerts > 0 && (
+                <span className="pointer-events-none absolute -right-1.5 -top-1.5" aria-hidden="true">
+                  <Badge tone="danger" size="sm">{firingAlerts}</Badge>
+                </span>
+              )}
+            </span>
+          </Beside>
         )}
-        <button
-          type="button"
-          onClick={onShare}
-          aria-label="Share or import targets"
-          {...beside('Share or import targets')}
-          className={RAIL_BUTTON}
-        >
-          <Share2 className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          aria-pressed={settingsOpen}
-          aria-label="Settings"
-          {...beside('Settings', 'Security, keys and AI assistants')}
-          className={cn(RAIL_BUTTON, settingsOpen && 'bg-sidebar-accent text-sidebar-foreground')}
-        >
-          <Settings className="h-4 w-4" />
-        </button>
-        {onAddTarget && <button
-          type="button"
-          onClick={onAddTarget}
-          aria-label="Add target"
-          {...beside('Add target')}
-          className={cn(RAIL_BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}
-        >
-          <Plus className="h-4 w-4" />
-        </button>}
+        <Beside name="Share or import targets">
+          <Button type="button" variant="ghost" size="sm" onClick={onShare} aria-label="Share or import targets">
+            <Share2 {...ICON} />
+          </Button>
+        </Beside>
+        <Beside name="Settings: security, keys and AI assistants">
+          <Button type="button" variant={settingsOpen ? 'primary' : 'ghost'} size="sm" onClick={onOpenSettings} aria-pressed={settingsOpen} aria-label="Settings">
+            <Settings {...ICON} />
+          </Button>
+        </Beside>
+        {onAddTarget && (
+          <Beside name="Add target">
+            <Button type="button" size="sm" onClick={onAddTarget} aria-label="Add target">
+              <Plus {...ICON} />
+            </Button>
+          </Beside>
+        )}
       </div>
     </>
   )

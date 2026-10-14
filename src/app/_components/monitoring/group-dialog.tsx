@@ -1,23 +1,12 @@
 'use client'
 
 import { Fragment, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Alert } from '@/components/arc/alert/alert'
+import { Button } from '@/components/arc/button/button'
+import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
+import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
+import { Input } from '@/components/arc/input/input'
+import { Select } from '@/components/arc/select/select'
 import {
   GROUP_SEPARATOR,
   groupLabel,
@@ -27,7 +16,7 @@ import {
   parentGroup,
   splitGroupPath,
 } from '@/lib/group-path'
-import { ChevronRight, FolderPlus, FolderTree } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 
 /** The select cannot hold an empty value, so the top level needs a name. */
 const TOP_LEVEL = '__top__'
@@ -68,30 +57,20 @@ interface GroupDialogProps {
  */
 export function GroupDialog({ task, ...form }: GroupDialogProps) {
   const creating = task?.kind === 'create'
-  const TitleIcon = creating ? FolderPlus : FolderTree
 
   return (
     <Dialog open={task !== null} onOpenChange={open => { if (!open) form.onCancel() }}>
-      <DialogContent className="bg-card border-border sm:max-w-md" suppressHydrationWarning>
+      <DialogContent
+        title={creating ? 'New group' : 'Edit group'}
+        description={
+          creating
+            ? 'Somewhere to keep targets that belong together. It can sit inside another group, and start out empty.'
+            : 'Rename the group or move it inside another. Its targets, and any groups inside it, go with it.'
+        }
+      >
+        {/* Keyed so a different group opens with its own values. */}
         {task !== null && (
-          <>
-            <DialogHeader>
-              <DialogTitle className="text-card-foreground flex items-center gap-2">
-                <div className="h-8 w-8 shrink-0 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <TitleIcon className="h-4 w-4 text-primary" />
-                </div>
-                {creating ? 'New group' : 'Edit group'}
-              </DialogTitle>
-              <DialogDescription className="text-muted-foreground">
-                {creating
-                  ? 'Somewhere to keep targets that belong together. It can sit inside another group, and start out empty.'
-                  : 'Rename the group or move it inside another. Its targets, and any groups inside it, go with it.'}
-              </DialogDescription>
-            </DialogHeader>
-
-            {/* Keyed so a different group opens with its own values. */}
-            <GroupForm key={task.kind === 'edit' ? `edit:${task.group}` : `create:${task.parent}`} task={task} {...form} />
-          </>
+          <GroupForm key={task.kind === 'edit' ? `edit:${task.group}` : `create:${task.parent}`} task={task} {...form} />
         )}
       </DialogContent>
     </Dialog>
@@ -126,7 +105,6 @@ function GroupForm({ task, groups, onCancel, onCreate, onMove, onDelete }: Group
   // Said only once the form has been submitted: an empty box in a dialog that
   // has just opened is not a mistake yet.
   const [attempted, setAttempted] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   // A group cannot go inside itself, or inside anything it contains.
   const parents = editing ? groups.filter(candidate => !isWithinGroup(candidate, editing.group)) : groups
@@ -154,7 +132,7 @@ function GroupForm({ task, groups, onCancel, onCreate, onMove, onDelete }: Group
 
   return (
     <form
-      className="space-y-4 pt-2"
+      className="space-y-4"
       noValidate
       onSubmit={event => {
         event.preventDefault()
@@ -168,35 +146,27 @@ function GroupForm({ task, groups, onCancel, onCreate, onMove, onDelete }: Group
         else onCancel()
       }}
     >
-      <div className="space-y-2">
-        <Label htmlFor="group-name" className="text-sm font-medium text-card-foreground">Name</Label>
-        <Input
-          id="group-name"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          placeholder={editing ? undefined : 'e.g. Network'}
-          maxLength={60}
-          aria-invalid={!!shownProblem}
-          aria-describedby={shownProblem ? 'group-name-error' : undefined}
-          className="bg-input border-border text-foreground"
-          autoFocus
-        />
-        {shownProblem && <p id="group-name-error" className="text-xs text-destructive">{shownProblem}</p>}
-      </div>
+      <Input
+        id="group-name"
+        label="Name"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        placeholder={editing ? undefined : 'e.g. Network'}
+        maxLength={60}
+        error={shownProblem ?? undefined}
+        autoFocus
+      />
 
       <div className="space-y-2">
-        <Label htmlFor="group-parent" className="text-sm font-medium text-card-foreground">Inside</Label>
-        <Select value={parent || TOP_LEVEL} onValueChange={value => setParent(value === TOP_LEVEL ? '' : value)}>
-          <SelectTrigger id="group-parent" className="bg-input border-border text-foreground h-9 w-full text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={TOP_LEVEL}>Nothing (top level)</SelectItem>
-            {parents.map(candidate => (
-              <SelectItem key={candidate} value={candidate}>{groupLabel(candidate)}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Select
+          label="Inside"
+          value={parent || TOP_LEVEL}
+          onValueChange={value => setParent(value === TOP_LEVEL ? '' : value)}
+          options={[
+            { value: TOP_LEVEL, label: 'Nothing (top level)' },
+            ...parents.map(candidate => ({ value: candidate, label: groupLabel(candidate) })),
+          ]}
+        />
         {/* Where that puts it, drawn rather than described: the answer to
             "did I nest it the way I meant to" before anything is saved. */}
         {trimmed && !problem && parent && (
@@ -208,35 +178,30 @@ function GroupForm({ task, groups, onCancel, onCreate, onMove, onDelete }: Group
       </div>
 
       {editing && exists && !problem && (
-        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          {groupLabel(destination)} already exists. Saving puts everything from this group into it.
-        </p>
+        <Alert tone="info" title={`${groupLabel(destination)} already exists`}>
+          Saving puts everything from this group into it.
+        </Alert>
       )}
 
-      {editing && confirmingDelete && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-foreground" role="alert">
-          Only the group is deleted. Its {contents} {editing.targets + editing.groups === 1 ? 'moves' : 'move'}{' '}
-          {upTo ? <>up into {groupLabel(upTo)}</> : 'out to the top level'}, with all of their history. Press
-          Delete again to go ahead.
+      {editing && contents && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Deleting it deletes only the group. Its {contents} {editing.targets + editing.groups === 1 ? 'moves' : 'move'}{' '}
+          {upTo ? <>up into {groupLabel(upTo)}</> : 'out to the top level'}, with all of their history.
         </p>
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
         {editing && (
-          <Button
-            type="button"
-            variant="outline"
-            className="mr-auto text-destructive hover:text-destructive"
-            onClick={() => {
-              // An empty group goes at once: there is nothing to be warned about.
-              if (contents && !confirmingDelete) setConfirmingDelete(true)
-              else onDelete(editing.group)
-            }}
-          >
-            {confirmingDelete ? 'Delete' : 'Delete group'}
-          </Button>
+          <span className="mr-auto">
+            <ConfirmMorph
+              label="Delete group"
+              prompt="Delete the group?"
+              confirmLabel="Delete"
+              onConfirm={() => onDelete(editing.group)}
+            />
+          </span>
         )}
-        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
         {/* Left enabled while something is wrong: pressing it says what. */}
         <Button type="submit" aria-disabled={!!problem}>{editing ? 'Save' : 'Create group'}</Button>
       </div>

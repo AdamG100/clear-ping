@@ -29,4 +29,4 @@ export const PANE_ACTIONS = 'flex flex-wrap items-center gap-2 @3xl/main:flex-no
 /** A button among those controls: half of the wrapped line, or its own width once they fit on one. */
 export const PANE_ACTION = 'flex-1 shrink-0 @3xl/main:flex-none'
 
-export const PANE_TITLE = 'break-words text-xl font-semibold tracking-tight text-foreground @2xl/main:text-2xl'
+export const PANE_TITLE = 'break-words font-display text-xl font-medium tracking-tight text-foreground @2xl/main:text-2xl'

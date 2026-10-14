@@ -18,5 +18,7 @@
     "lib": "@/lib",
     "hooks": "@/hooks"
   },
-  "registries": {}
+  "registries": {
+    "@uiarc": "https://uiarc.dev/r/{name}.json"
+  }
 }

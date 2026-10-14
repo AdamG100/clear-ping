@@ -1,10 +1,16 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import { CheckCircle2, ChevronDown, ChevronRight, Route, Trash2, XCircle } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { useToast } from '@/components/ui/toast'
+import { Alert } from '@/components/arc/alert/alert'
+import { Badge } from '@/components/arc/badge/badge'
+import { Button } from '@/components/arc/button/button'
+import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
+import { EmptyState } from '@/components/arc/empty-state/empty-state'
+import { Skeleton } from '@/components/arc/skeleton/skeleton'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
+import { useToast } from '@/components/notifications'
 import { cn } from '@/lib/utils'
 import { mean } from '@/lib/metrics'
 import { firstDeadHop, hopLoss, newestPerFamily } from '@/lib/traceroute-parse'
@@ -92,7 +98,7 @@ const NODE_STYLE: Record<HopState, string> = {
   lossy: 'border-signal-moderate/70 bg-signal-moderate/15 text-foreground',
   silent: 'border-dashed border-muted-foreground/40 text-muted-foreground',
   dead: 'border-destructive/60 bg-destructive/15 text-destructive',
-  destination: 'border-signal-perfect bg-signal-perfect font-semibold text-background',
+  destination: 'border-signal-perfect bg-signal-perfect font-medium text-background',
 }
 
 /** Half of the line joining a hop to the one before or after it. */
@@ -187,21 +193,18 @@ function HopTable({ trace }: { trace: Traceroute }) {
           ) : (
             <>
               <span className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    'min-w-0 break-all @2xl/main:truncate',
-                    hop.hostname ? 'text-foreground' : 'font-mono text-foreground',
-                    state === 'destination' && 'font-medium'
-                  )}
-                  data-tip={hop.hostname ?? hop.address}
-                >
-                  {hop.hostname ?? hop.address}
-                </span>
-                {state === 'destination' && (
-                  <span className="shrink-0 rounded bg-signal-perfect/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-signal-perfect">
-                    Target
+                <Tooltip content={hop.hostname ?? hop.address}>
+                  <span
+                    className={cn(
+                      'min-w-0 break-all @2xl/main:truncate',
+                      hop.hostname ? 'text-foreground' : 'font-mono text-foreground',
+                      state === 'destination' && 'font-medium'
+                    )}
+                  >
+                    {hop.hostname ?? hop.address}
                   </span>
-                )}
+                </Tooltip>
+                {state === 'destination' && <Badge tone="success" size="sm">Target</Badge>}
               </span>
               {hop.hostname ? (
                 <span className="block break-all font-mono text-[11px] text-muted-foreground">{hop.address}</span>
@@ -219,14 +222,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
             // Every probe unanswered, and not a loss of traffic: left quiet.
             <span className="text-muted-foreground">{loss.toFixed(0)}%</span>
           ) : (
-            <span
-              className={cn(
-                'rounded px-1.5 py-0.5',
-                state === 'dead' ? 'bg-destructive/15 text-destructive' : 'bg-signal-moderate/15 text-signal-moderate'
-              )}
-            >
-              {loss.toFixed(0)}%
-            </span>
+            <Badge tone={state === 'dead' ? 'danger' : 'warning'} size="sm">{loss.toFixed(0)}%</Badge>
           )}
         </td>
         <td className="whitespace-nowrap py-2 text-right font-mono text-foreground @md/main:pr-4">
@@ -253,7 +249,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
-          <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground/70">
+          <tr className="text-left text-xs text-muted-foreground">
             <th className="pb-2 text-center font-medium">Hop</th>
             <th className="pb-2 pl-1 pr-4 font-medium">Router</th>
             <th className="pb-2 pr-4 text-right font-medium">Loss</th>
@@ -262,7 +258,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
             <th className="hidden pb-2 pr-4 text-right font-medium @3xl/main:table-cell">Max</th>
             <th className="hidden pb-2 pr-1 @md/main:table-cell">
               {/* The ends of the scale the bars below are drawn on. */}
-              <span className="flex justify-between font-mono font-normal normal-case tracking-normal">
+              <span className="flex justify-between font-mono font-normal">
                 <span>0</span>
                 <span>{ms(scale)} ms</span>
               </span>
@@ -272,10 +268,11 @@ function HopTable({ trace }: { trace: Traceroute }) {
         <tbody>{trace.hops.map(row)}</tbody>
       </table>
       {dead !== null && (
-        <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-foreground">
-          Nothing answered from hop {dead} onwards. The fault is at that hop or just beyond the last one that
-          replied.
-        </p>
+        <div className="mt-3">
+          <Alert tone="danger" title={`Nothing answered from hop ${dead} onwards`}>
+            The fault is at that hop or just beyond the last one that replied.
+          </Alert>
+        </div>
       )}
     </div>
   )
@@ -293,10 +290,6 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
   const [deleting, setDeleting] = useState(false)
   // The newest trace is open unless another has been chosen.
   const [chosenId, setChosenId] = useState<string | null | undefined>(undefined)
-  // Deleting takes two presses of the same button: a trace taken while
-  // something was broken cannot be taken again once it has mended. This is the
-  // trace whose button has had its first press, or `older` for the old ones.
-  const [confirming, setConfirming] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -357,7 +350,6 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
 
   /** Delete what `query` names; true if it went. */
   const remove = async (query: string): Promise<boolean> => {
-    setConfirming(null)
     setDeleting(true)
     try {
       const response = await fetch(`/api/targets/${targetId}/traceroute?${query}`, { method: 'DELETE' })
@@ -376,13 +368,12 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
     }
   }
 
+  // Deleting asks first, in place: a trace taken while something was broken
+  // cannot be taken again once it has mended.
   const removeOne = async (item: Traceroute) => {
-    if (confirming !== item.id) {
-      setConfirming(item.id)
-      return
-    }
+    if (!(await remove(`trace=${encodeURIComponent(item.id)}`))) throw new Error('Not deleted')
     // The one that was open is gone; the newest takes its place.
-    if ((await remove(`trace=${encodeURIComponent(item.id)}`)) && item.id === chosenId) setChosenId(undefined)
+    if (item.id === chosenId) setChosenId(undefined)
   }
 
   // Everything but the newest trace to each address family. Counted from the
@@ -390,11 +381,8 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
   const olderCount = Math.max(0, total - newestPerFamily(traces).length)
 
   const removeOlder = async () => {
-    if (confirming !== 'older') {
-      setConfirming('older')
-      return
-    }
-    if (await remove('older=1')) {
+    if (!(await remove('older=1'))) throw new Error('Not deleted')
+    {
       setChosenId(undefined)
       notify({
         tone: 'info',
@@ -407,7 +395,7 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
   const openId = chosenId === undefined ? traces[0]?.id ?? null : chosenId
 
   return (
-    <section className="rounded-xl border border-border bg-card">
+    <section className="rounded-3xl border border-border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-4 @2xl/main:px-5">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h2 className="text-sm font-medium text-foreground">Route</h2>
@@ -417,38 +405,37 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
         </div>
         {!readOnly && <div className="flex shrink-0 items-center gap-2">
           {olderCount > 0 && (
-            <Button
-              variant={confirming === 'older' ? 'destructive' : 'outline'}
-              size="sm"
-              onClick={removeOlder}
-              onBlur={() => setConfirming(current => (current === 'older' ? null : current))}
+            <ConfirmMorph
+              key={olderCount}
+              label={`Delete ${olderCount} older`}
+              icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
+              prompt={`Delete every route but the newest?`}
+              confirmLabel="Delete"
+              doneLabel="Deleted"
               disabled={deleting}
-              className="h-8"
-              data-tip="Delete every route but the newest"
-            >
-              <Trash2 className="mr-2 h-3.5 w-3.5" />
-              {confirming === 'older' ? `Delete ${olderCount}?` : `Delete ${olderCount} older`}
-            </Button>
+              onConfirm={removeOlder}
+            />
           )}
-          <Button variant="outline" size="sm" onClick={trace} disabled={running} className="h-8">
-            <Route className={cn('mr-2 h-3.5 w-3.5', running && 'animate-pulse')} />
-            {running ? 'Tracing…' : 'Trace route'}
+          <Button variant="secondary" size="sm" onClick={trace} loading={running}>
+            <Route size={16} strokeWidth={1.75} aria-hidden="true" />
+            Trace route
           </Button>
         </div>}
       </div>
 
       <div className="px-4 pb-4 pt-3 @2xl/main:px-5">
         {loading ? (
-          <div className="h-8 w-56 animate-pulse rounded bg-muted/50" />
+          <Skeleton label="Loading the routes" lines={2} />
         ) : traces.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 text-center">
-            <Route className={cn('h-5 w-5 text-muted-foreground/60', running && 'animate-pulse')} aria-hidden="true" />
-            <p className="max-w-sm text-xs text-muted-foreground">
-              {running
-                ? 'Tracing. A healthy path takes a few seconds; one that goes nowhere can take a minute.'
-                : 'No route recorded yet. Trace it to see every router between here and the target, and how long each takes to answer.'}
-            </p>
-          </div>
+          <EmptyState
+            icon={<Route size={24} strokeWidth={1.75} />}
+            title={running ? 'Tracing the route' : 'No route recorded yet'}
+            description={
+              running
+                ? 'A healthy path takes a few seconds; one that goes nowhere can take a minute.'
+                : 'Trace it to see every router between here and the target, and how long each takes to answer.'
+            }
+          />
         ) : (
           <>
             <ul className="space-y-1.5">
@@ -463,8 +450,8 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
                   <li
                     key={item.id}
                     className={cn(
-                      'rounded-lg border transition-colors',
-                      open ? 'border-border bg-background/40' : 'border-border/60 hover:border-border'
+                      'rounded-2xl border transition-colors',
+                      open ? 'border-border bg-background' : 'border-border hover:border-border-strong'
                     )}
                   >
                     {/* Side by side, not one inside the other: a button
@@ -474,7 +461,7 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
                         type="button"
                         onClick={() => setChosenId(open ? null : item.id)}
                         aria-expanded={open}
-                        className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg px-3 py-2.5 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring touch:py-3"
+                        className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl px-3 py-2.5 text-left text-sm touch:py-3"
                       >
                         {open
                           ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -487,39 +474,23 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
                           {summary.text}
                         </span>
                         {took !== null && <span className="font-mono text-muted-foreground">{ms(took)} ms</span>}
-                        {item.trigger === 'alert' && (
-                          <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
-                            taken on alert
-                          </span>
-                        )}
+                        {item.trigger === 'alert' && <Badge tone="danger" size="sm">Taken on alert</Badge>}
                         <span className="ml-auto flex flex-wrap items-center justify-end gap-x-3 font-mono text-[11px] text-muted-foreground">
                           <span className="break-all">{item.address}</span>
                           <span className="whitespace-nowrap">{time}</span>
                         </span>
                       </button>
 
-                      {readOnly ? null : confirming === item.id ? (
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="h-7 shrink-0 px-2 text-xs touch:h-9 touch:px-3"
-                          onClick={() => removeOne(item)}
-                          onBlur={() => setConfirming(null)}
-                          autoFocus
-                        >
-                          Delete?
-                        </Button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => removeOne(item)}
+                      {readOnly ? null : (
+                        <ConfirmMorph
+                          label="Delete"
+                          icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
+                          prompt={`Delete the route taken ${time}?`}
+                          confirmLabel="Delete"
+                          doneLabel="Deleted"
                           disabled={deleting}
-                          className="shrink-0 cursor-pointer rounded p-1.5 transition-colors hover:bg-destructive/20 disabled:opacity-40 touch:p-2.5"
-                          aria-label={`Delete the route taken ${time}`}
-                          data-tip="Delete this route"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </button>
+                          onConfirm={() => removeOne(item)}
+                        />
                       )}
                     </div>
 
@@ -532,7 +503,7 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
                           transition={{ duration: 0.18 }}
                           className="overflow-hidden"
                         >
-                          <div className="border-t border-border/60 px-3 pb-3 pt-3">
+                          <div className="border-t border-border px-3 pb-3 pt-3">
                             <HopTable trace={item} />
                           </div>
                         </motion.div>
@@ -543,7 +514,7 @@ export function TraceroutePanel({ targetId, refreshKey, readOnly = false }: Trac
               })}
             </ul>
             {total > traces.length && (
-              <p className="mt-2 text-[11px] text-muted-foreground">
+              <p className="mt-2 text-xs text-muted-foreground">
                 The newest {traces.length} of {total} kept for this target.
               </p>
             )}

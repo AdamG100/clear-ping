@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import { createPortal, flushSync } from 'react-dom'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import type { Target, TargetDefinition, GroupOrder, SparklinePoint } from '@/types/probe'
 import { BrandMark } from './brand-mark'
@@ -15,9 +15,14 @@ import { ShareDialog } from './share-dialog'
 import { DeleteTargetsDialog } from './delete-targets-dialog'
 import { useIncomingShareCode } from './use-incoming-share-code'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { Badge } from '@/components/arc/badge/badge'
+import { Button } from '@/components/arc/button/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/arc/popover/popover'
+import { ScrollArea } from '@/components/arc/scroll-area/scroll-area'
+import { SearchField } from '@/components/arc/search-field/search-field'
+import { ThemeSwitch } from '@/components/arc/theme-switch/theme-switch'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
+import { useTheme } from '../use-theme'
 import { StatusIndicator } from './status-indicator'
 import { addressFamilyFor, isDualStack } from '@/lib/host'
 import { targetAddressLabel } from '@/lib/probe-config'
@@ -43,7 +48,7 @@ import {
   motion,
   type MotionValue,
   type TargetAndTransition,
-} from 'framer-motion'
+} from 'motion/react'
 import {
   Plus,
   GripVertical,
@@ -60,13 +65,15 @@ import {
   ChartLine,
   Bell,
   ListX,
-  MoreVertical,
+  MoreHorizontal,
   PanelLeftClose,
   Settings,
   X,
 } from 'lucide-react'
 import { SidebarRail } from './sidebar-rail'
 import { SIDEBAR_COLLAPSE_BUTTON_ID } from './use-sidebar-drawer'
+
+const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 
 // ─── Collapsing ─────────────────────────────────────────────────────────────
 
@@ -209,34 +216,16 @@ function TargetRow({
   const address = targetAddressLabel(target)
   const dualStack = isDualStack(target.host, target.ipVersion)
   const usesIpv6 = addressFamilyFor(target.host, target.ipVersion) === 6
-  // On a touchscreen: whether the row's actions are set out underneath it.
+  // Whether the row's actions are open beside it.
   const [actionsOpen, setActionsOpen] = useState(false)
 
   // Only the actions there is a way to carry out: none, for an account that
   // may only look.
   const actions = [
-    {
-      label: paused ? 'Resume' : 'Pause',
-      icon: paused ? Play : Pause,
-      tone: 'text-muted-foreground',
-      hover: 'hover:bg-muted',
-      run: onTogglePaused && (() => onTogglePaused(target)),
-    },
-    { label: 'Edit', icon: Pencil, tone: 'text-blue-500', hover: 'hover:bg-blue-500/20', run: onEditTarget && (() => onEditTarget(target)) },
-    {
-      label: 'Duplicate',
-      icon: Copy,
-      tone: 'text-muted-foreground',
-      hover: 'hover:bg-muted',
-      run: onDuplicateTarget && (() => onDuplicateTarget(target)),
-    },
-    {
-      label: 'Delete',
-      icon: Trash2,
-      tone: 'text-destructive',
-      hover: 'hover:bg-destructive/20',
-      run: onDeleteTarget && (() => onDeleteTarget(target.id)),
-    },
+    { label: paused ? 'Resume' : 'Pause', icon: paused ? Play : Pause, danger: false, run: onTogglePaused && (() => onTogglePaused(target)) },
+    { label: 'Edit', icon: Pencil, danger: false, run: onEditTarget && (() => onEditTarget(target)) },
+    { label: 'Duplicate', icon: Copy, danger: false, run: onDuplicateTarget && (() => onDuplicateTarget(target)) },
+    { label: 'Delete', icon: Trash2, danger: true, run: onDeleteTarget && (() => onDeleteTarget(target.id)) },
   ].filter((action): action is typeof action & { run: () => void } => action.run !== undefined)
   const draggable = floating || onHandlePointerDown !== undefined
 
@@ -274,9 +263,8 @@ function TargetRow({
           type="button"
           tabIndex={floating ? -1 : undefined}
           onPointerDown={e => {
-            // The drag measures the row as it picks it up, and the copy that
-            // follows the finger has no actions under it: put them away first.
-            if (actionsOpen) flushSync(() => setActionsOpen(false))
+            // The copy that follows the finger has no actions beside it.
+            setActionsOpen(false)
             onHandlePointerDown?.(target.id, e)
           }}
           className={cn(
@@ -319,8 +307,8 @@ function TargetRow({
               </span>
             )}
             {paused && (
-              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
-                Paused
+              <span className="shrink-0">
+                <Badge size="sm">Paused</Badge>
               </span>
             )}
           </div>
@@ -328,12 +316,9 @@ function TargetRow({
           <div className="flex items-center gap-2">
             {/* An IPv6 address rarely fits; the tooltip carries it in full,
                 along with where a domain last resolved to. */}
-            <span
-              className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
-              data-tip={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address}
-            >
-              {address}
-            </span>
+            <Tooltip content={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address}>
+              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{address}</span>
+            </Tooltip>
             {/* The family sits with the address it describes, and off the
                 name's line, where every badge costs the name some letters. */}
             {(dualStack || usesIpv6) && (
@@ -347,58 +332,45 @@ function TargetRow({
           </div>
         </div>
 
-        {/* Reserves its width at all times, so revealing the controls never
-            reflows the row or pushes the last button out of bounds. Two by
-            two, which the row's two lines have the height for: four in a line
-            took their width out of the address, and inside a nested group
-            that left an IP address cut short. */}
-        {actions.length > 0 && <div className="grid shrink-0 grid-cols-2 gap-0.5 opacity-0 transition-opacity group-hover/target:opacity-100 focus-within:opacity-100 touch:hidden">
-          {actions.map(action => (
-            <button
-              key={action.label}
-              type="button"
-              tabIndex={floating ? -1 : undefined}
-              onClick={e => { e.stopPropagation(); action.run() }}
-              className={cn('cursor-pointer rounded p-0.5 transition-colors', action.hover)}
-              aria-label={`${action.label} ${target.name}`}
-            >
-              <action.icon className={cn('h-3.5 w-3.5', action.tone)} />
-            </button>
-          ))}
-        </div>}
-
-        {/* A touchscreen has no hover to reveal those four, and side by side
-            at that size a finger aiming for edit lands on delete. There they
-            are one button, which sets them out underneath at a size that can
-            be pressed. */}
-        {actions.length > 0 && <button
-          type="button"
-          tabIndex={floating ? -1 : undefined}
-          onClick={e => { e.stopPropagation(); setActionsOpen(open => !open) }}
-          aria-expanded={actionsOpen}
-          aria-label={`Actions for ${target.name}`}
-          className="hidden shrink-0 cursor-pointer rounded p-2 text-muted-foreground touch:block"
-        >
-          <MoreVertical className="h-4 w-4" />
-        </button>}
+        {/* One button for the row's actions, the same with a mouse or a
+            finger: four icons a few pixels apart were too small to aim at,
+            and a touchscreen has no hover to reveal them. */}
+        {actions.length > 0 && !floating && (
+          <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+            <Tooltip content="Pause, edit, duplicate or delete">
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={e => e.stopPropagation()}
+                  onKeyDown={e => e.stopPropagation()}
+                  aria-label={`Actions for ${target.name}`}
+                >
+                  <MoreHorizontal {...ICON} />
+                </Button>
+              </PopoverTrigger>
+            </Tooltip>
+            <PopoverContent align="end" onClick={e => e.stopPropagation()}>
+              <div className="flex min-w-40 flex-col gap-1">
+                {actions.map(action => (
+                  <Button
+                    key={action.label}
+                    type="button"
+                    size="sm"
+                    variant={action.danger ? 'danger' : 'ghost'}
+                    onClick={() => { setActionsOpen(false); action.run() }}
+                    aria-label={`${action.label} ${target.name}`}
+                  >
+                    <action.icon {...ICON} />
+                    {action.label}
+                  </Button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
-
-      {actionsOpen && !floating && (
-        // Two by two: four across, with their names, is wider than a phone's drawer.
-        <div className="relative mt-1.5 hidden grid-cols-2 gap-1.5 touch:grid">
-          {actions.map(action => (
-            <button
-              key={action.label}
-              type="button"
-              onClick={e => { e.stopPropagation(); setActionsOpen(false); action.run() }}
-              className="flex cursor-pointer items-center justify-center gap-1.5 rounded-md border border-sidebar-border bg-sidebar px-2 py-2 text-xs font-medium text-sidebar-foreground"
-            >
-              <action.icon className={cn('h-3.5 w-3.5', action.tone)} />
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -648,7 +620,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
             ) : (
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             )}
-            <span className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            <span className="truncate text-xs font-medium text-muted-foreground">
               {name}
             </span>
           </button>
@@ -656,29 +628,21 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
           {/* Nesting, as a button on the group that is to hold the new one:
               no path to type, and no doubt about where it will land. */}
           {onAddGroupInside && group !== UNGROUPED && (
-            <button
-              type="button"
-              onClick={() => onAddGroupInside(group)}
-              className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/header:opacity-100 touch:p-2 touch:opacity-100"
-              aria-label={`New group inside ${name}`}
-              data-tip="New group inside this one"
-            >
-              <FolderPlus className="h-3 w-3 text-muted-foreground" />
-            </button>
+            <Tooltip content="New group inside this one">
+              <Button type="button" variant="ghost" size="sm" onClick={() => onAddGroupInside(group)} aria-label={`New group inside ${name}`}>
+                <FolderPlus {...ICON} />
+              </Button>
+            </Tooltip>
           )}
 
           {/* Ungrouped is where targets without a group are listed, not a
               group that can be renamed or put inside another. */}
           {onEditGroup && group !== UNGROUPED && (
-            <button
-              type="button"
-              onClick={() => onEditGroup(group)}
-              className="shrink-0 cursor-pointer rounded p-0.5 opacity-0 transition-opacity hover:bg-blue-500/20 focus-visible:opacity-100 group-hover/header:opacity-100 touch:p-2 touch:opacity-100"
-              aria-label={`Rename, move or delete ${name}`}
-              data-tip="Rename this group, move it inside another, or delete it"
-            >
-              <Pencil className="h-3 w-3 text-blue-500" />
-            </button>
+            <Tooltip content="Rename this group, move it inside another, or delete it">
+              <Button type="button" variant="ghost" size="sm" onClick={() => onEditGroup(group)} aria-label={`Rename, move or delete ${name}`}>
+                <Pencil {...ICON} />
+              </Button>
+            </Tooltip>
           )}
 
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
@@ -689,22 +653,19 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               in the accent colour: as a bare grey icon it read as decoration,
               and nobody found the group chart without being told where it was. */}
           {onCompare && memberIds.length > 1 && (
-            <button
-              type="button"
-              onClick={() => onCompare(group)}
-              aria-pressed={isCompared}
-              aria-label={`Compare the targets in ${name} on one chart`}
-              data-tip="Show every target in this group on one chart"
-              className={cn(
-                'ml-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium leading-none transition-colors touch:py-2',
-                isCompared
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-primary/40 bg-primary/10 text-primary hover:border-primary/70 hover:bg-primary/20'
-              )}
-            >
-              <ChartLine className="h-3.5 w-3.5" />
-              Compare
-            </button>
+            <Tooltip content="Show every target in this group on one chart">
+              <Button
+                type="button"
+                size="sm"
+                variant={isCompared ? 'primary' : 'secondary'}
+                onClick={() => onCompare(group)}
+                aria-pressed={isCompared}
+                aria-label={`Compare the targets in ${name} on one chart`}
+              >
+                <ChartLine {...ICON} />
+                Compare
+              </Button>
+            </Tooltip>
           )}
         </div>
 
@@ -719,12 +680,11 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div
-                className="px-2 pb-2"
-                data-tip={`${name}: mean latency across its ${memberIds.length} target${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}
-              >
-                <Sparkline points={groupTrace} width={240} height={22} stretch />
-              </div>
+              <Tooltip content={`${name}: mean latency across its ${memberIds.length} target${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}>
+                <div className="px-2 pb-2">
+                  <Sparkline points={groupTrace} width={240} height={22} stretch />
+                </div>
+              </Tooltip>
             </motion.div>
           )}
         </AnimatePresence>
@@ -781,13 +741,9 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
                     ) : (
                       <>
                         Empty. Drag a target here, or
-                        <button
-                          type="button"
-                          onClick={() => onAddTargetTo(group)}
-                          className="cursor-pointer font-medium text-primary underline-offset-2 hover:underline touch:py-1.5"
-                        >
+                        <Button type="button" variant="ghost" size="sm" onClick={() => onAddTargetTo(group)}>
                           add one
-                        </button>
+                        </Button>
                       </>
                     )}
                   </motion.li>
@@ -879,6 +835,7 @@ export function Sidebar({
   const listRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const reduceMotion = useReducedMotion()
+  const [theme, setTheme] = useTheme()
 
   // Opened as a drawer, the keyboard goes with it: focus left on the button
   // that opened it would be on a page that can no longer be used.
@@ -1059,7 +1016,7 @@ export function Sidebar({
       aria-hidden="true"
       onClick={onClose}
       className={cn(
-        'fixed inset-0 z-30 bg-black/50 transition-opacity duration-200 lg:hidden',
+        'fixed inset-0 z-30 bg-background/70 backdrop-blur-sm transition-opacity duration-200 lg:hidden',
         open ? 'opacity-100' : 'pointer-events-none opacity-0'
       )}
     />
@@ -1110,34 +1067,30 @@ export function Sidebar({
         <div className="flex items-center gap-2 mb-3">
           <BrandMark />
           <div>
-            <h1 className="text-sm font-semibold tracking-tight text-sidebar-foreground">
+            <h1 className="text-sm font-medium text-sidebar-foreground">
               ClearPing
             </h1>
-            <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               Path monitor
               <VersionBadge />
             </p>
           </div>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            className="-mr-1.5 ml-auto flex size-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
-            aria-label="Close targets"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <span className="ml-auto">
+            <ThemeSwitch theme={theme} variant="rise" iconOnly onThemeChange={next => setTheme(next)} />
+          </span>
+          <span className="lg:hidden">
+            <Button ref={closeRef} type="button" variant="ghost" size="sm" onClick={onClose} aria-label="Close targets">
+              <X {...ICON} />
+            </Button>
+          </span>
           {onCollapse && (
-            <button
-              id={SIDEBAR_COLLAPSE_BUTTON_ID}
-              type="button"
-              onClick={onCollapse}
-              className="-mr-1.5 ml-auto hidden size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex"
-              aria-label="Collapse sidebar"
-              data-tip="Collapse sidebar"
-            >
-              <PanelLeftClose className="h-4 w-4" />
-            </button>
+            <span className="hidden lg:block">
+              <Tooltip content="Collapse sidebar">
+                <Button id={SIDEBAR_COLLAPSE_BUTTON_ID} type="button" variant="ghost" size="sm" onClick={onCollapse} aria-label="Collapse sidebar">
+                  <PanelLeftClose {...ICON} />
+                </Button>
+              </Tooltip>
+            </span>
           )}
         </div>
 
@@ -1176,26 +1129,25 @@ export function Sidebar({
             {/* One target is deleted from its own row. This is for clearing
                 out several, so it is not there until there are several. */}
             {targets.length > 1 && (
-              <button
-                type="button"
-                onClick={() => setIsBulkDeleteOpen(true)}
-                className="p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer touch:-my-1.5 touch:p-2.5"
-                aria-label="Delete several targets"
-                data-tip="Delete several targets"
-              >
-                <ListX className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
+              <Tooltip content="Delete several targets">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setIsBulkDeleteOpen(true)} aria-label="Delete several targets">
+                  <ListX {...ICON} />
+                </Button>
+              </Tooltip>
             )}
             {targets.length > 4 && (
-              <button
-                type="button"
-                onClick={() => { setShowSearch(!showSearch); if (showSearch) setSearchQuery('') }}
-                className="p-1 hover:bg-sidebar-accent rounded transition-colors cursor-pointer touch:-my-1.5 touch:p-2.5"
-                aria-label="Search targets"
-                data-tip="Search targets"
-              >
-                <Search className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
+              <Tooltip content="Search targets">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setShowSearch(!showSearch); if (showSearch) setSearchQuery('') }}
+                  aria-pressed={showSearch}
+                  aria-label="Search targets"
+                >
+                  <Search {...ICON} />
+                </Button>
+              </Tooltip>
             )}
           </div>
         </div>
@@ -1209,13 +1161,10 @@ export function Sidebar({
               transition={{ duration: 0.15 }}
               className="overflow-hidden"
             >
-              <Input
-                placeholder="Search targets…"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="mt-3 bg-sidebar-accent border-sidebar-border text-sm h-8"
-                autoFocus
-              />
+              {/* Its label is the button that opened it, so it is said, not shown. */}
+              <div className="mt-3 [&_label]:sr-only">
+                <SearchField label="Search targets" placeholder="Name or address" value={searchQuery} onValueChange={setSearchQuery} autoFocus />
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1234,7 +1183,7 @@ export function Sidebar({
             rows, so where they do not all fit (a phone, a phone on its side)
             it ran off the bottom of the screen, took the buttons under it
             along, and had nothing to scroll. */}
-        <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:overscroll-contain [&_[data-slot=scroll-area-viewport]>div]:block!">
+        <ScrollArea label="Targets" className="min-h-0 flex-1" viewportStyle={{ overscrollBehavior: 'contain' }}>
           <nav
             ref={listRef}
             // While a row is in the air the list must not react to the pointer
@@ -1253,11 +1202,11 @@ export function Sidebar({
                     <div className="flex items-center gap-1 px-2 py-1.5">
                       {/* The whole path: out of the tree, a name alone does
                           not say which of two same-named groups this is. */}
-                      <span className="text-xs font-semibold text-sidebar-foreground uppercase tracking-wider truncate">
+                      <span className="truncate text-xs font-medium text-sidebar-foreground">
                         {groupLabel(group)}
                       </span>
-                      <span className="font-mono text-[10px] text-muted-foreground tabular-nums bg-muted/50 px-1.5 py-0.5 rounded-full ml-auto">
-                        {matches.length}
+                      <span className="ml-auto">
+                        <Badge size="sm">{matches.length}</Badge>
                       </span>
                     </div>
                     <ul className="space-y-0.5 ml-1">
@@ -1347,14 +1296,12 @@ export function Sidebar({
               {/* Where the next group would go, and so where the way to make
                   one is. A group is made here first and filled afterwards. */}
               {onCreateGroup && !readOnly && (
-                <button
-                  type="button"
-                  onClick={() => setGroupTask({ kind: 'create', parent: '' })}
-                  className="mt-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-sidebar-border px-2 py-2 text-xs text-muted-foreground transition-colors hover:border-sidebar-ring/50 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch:py-3"
-                >
-                  <FolderPlus className="h-3.5 w-3.5" />
-                  New group
-                </button>
+                <div className="mt-2 flex">
+                  <Button type="button" variant="ghost" size="sm" className="flex-1" onClick={() => setGroupTask({ kind: 'create', parent: '' })}>
+                    <FolderPlus {...ICON} />
+                    New group
+                  </Button>
+                </div>
               )}
               </>
             )}
@@ -1378,68 +1325,52 @@ export function Sidebar({
         )}
       </MotionConfig>
 
-      {/* Footer actions */}
-      <div className="border-t border-sidebar-border p-3 pb-[calc(0.75rem+var(--safe-bottom))]">
+      {/* Footer actions. Two rows: at Arc's sizes, four controls side by side
+          were wider than the sidebar, and the label ran out of its button. */}
+      <div className="flex flex-col gap-2 border-t border-sidebar-border p-3 pb-[calc(0.75rem+var(--safe-bottom))]">
+        {!readOnly && (
+          <Button className="w-full" size="sm" onClick={() => openAddDialog()} suppressHydrationWarning>
+            <Plus {...ICON} />
+            Add target
+          </Button>
+        )}
         <div className="flex gap-2">
-        {onOpenAlerts && (
-          <Button
-            variant={alertsOpen ? 'secondary' : 'outline'}
-            size="sm"
-            onClick={onOpenAlerts}
-            aria-pressed={alertsOpen}
-            className="shrink-0"
-            suppressHydrationWarning
-          >
-            <Bell className="h-4 w-4 mr-2" />
-            Alerts
-            {/* Said here so a firing alert is seen from any screen. */}
-            {firingAlerts > 0 && (
-              <span className="ml-2 rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                {firingAlerts}
-                <span className="sr-only"> firing</span>
-              </span>
-            )}
-          </Button>
-        )}
-        {readOnly ? (
-          // Where the button would be, so the rest keep their places.
-          <span className="min-w-0 flex-1" />
-        ) : (
-          <Button
-            className="min-w-0 flex-1"
-            size="sm"
-            onClick={() => openAddDialog()}
-            suppressHydrationWarning
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Target
-          </Button>
-        )}
-        <Button
-          variant="outline"
-          size="icon-sm"
-          onClick={() => setIsShareOpen(true)}
-          aria-label="Share or import targets"
-          data-tip="Share or import targets"
-          suppressHydrationWarning
-        >
-          <Share2 className="h-4 w-4" />
-        </Button>
-        {/* Everything that is set up rather than monitored, in one place:
-            sign-in, keys, single sign-on, accounts, the activity record, and
-            connecting an AI assistant. */}
-        <Button
-          variant={settingsOpen ? 'secondary' : 'outline'}
-          size="icon-sm"
-          onClick={() => onOpenSettings?.()}
-          aria-pressed={settingsOpen}
-          aria-label="Settings"
-          data-tip="Settings"
-          data-tip-detail="Security, keys and AI assistants"
-          suppressHydrationWarning
-        >
-          <Settings className="h-4 w-4" />
-        </Button>
+          {onOpenAlerts && (
+            <Button
+              className="flex-1"
+              variant={alertsOpen ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={onOpenAlerts}
+              aria-pressed={alertsOpen}
+              aria-label={firingAlerts > 0 ? `Alerts, ${firingAlerts} firing` : 'Alerts'}
+              suppressHydrationWarning
+            >
+              <Bell {...ICON} />
+              Alerts
+              {/* Said here so a firing alert is seen from any screen. */}
+              {firingAlerts > 0 && <Badge tone="danger" size="sm">{firingAlerts}</Badge>}
+            </Button>
+          )}
+          <Tooltip content="Share or import targets">
+            <Button variant="secondary" size="sm" onClick={() => setIsShareOpen(true)} aria-label="Share or import targets" suppressHydrationWarning>
+              <Share2 {...ICON} />
+            </Button>
+          </Tooltip>
+          {/* Everything that is set up rather than monitored, in one place:
+              sign-in, keys, single sign-on, accounts, the activity record, and
+              connecting an AI assistant. */}
+          <Tooltip content="Settings: security, keys and AI assistants">
+            <Button
+              variant={settingsOpen ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => onOpenSettings?.()}
+              aria-pressed={settingsOpen}
+              aria-label="Settings"
+              suppressHydrationWarning
+            >
+              <Settings {...ICON} />
+            </Button>
+          </Tooltip>
         </div>
       </div>
       </motion.div>

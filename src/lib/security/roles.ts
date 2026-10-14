@@ -23,8 +23,8 @@ export const ROLE_LABEL: Record<Role, string> = { admin: 'Admin', editor: 'Edito
 
 export const ROLE_DETAIL: Record<Role, string> = {
   admin: 'Everything, Settings included: sign-in, keys, single sign-on, accounts and the activity record.',
-  editor: 'Adds, changes and deletes targets, groups and alerts. Makes keys of its own. No other settings.',
-  viewer: 'Sees everything monitored and changes nothing. Makes read-only keys of its own.',
+  editor: 'Adds, changes and deletes targets, groups and alerts. Creates keys of its own. No other settings.',
+  viewer: 'Sees everything monitored and changes nothing. Creates read-only keys of its own.',
 }
 
 /** The role an account added by an admin starts with, unless they choose another: the least. */

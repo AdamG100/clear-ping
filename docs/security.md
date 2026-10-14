@@ -21,7 +21,7 @@ network or behind a sign-in proxy such as Authentik. For anything else, the
    `/settings/sso`, `/settings/accounts`, `/settings/activity`,
    `/settings/assistant`.
 2. Under **Access**, turn on **Require sign-in for the dashboard and API**.
-3. Under **Keys**, make a key for each assistant or script that needs one.
+3. Under **Keys**, create a key for each assistant or script that needs one.
 
 Changing anything under Settings always takes being signed in, even while
 sign-in is off for the dashboard. Otherwise anyone who could open the page could
@@ -38,7 +38,7 @@ Accounts** (or by Authentik groups; see below):
 | See alerts | yes | yes | yes, without the tokens in where they are sent |
 | Add, change, pause and delete targets and groups; probe; trace | yes | yes | no |
 | Make, change and delete alerts | yes | yes | no |
-| Make keys | any | of its own | of its own, read only |
+| Create keys | any | of its own | of its own, read only |
 | Revoke keys | any | its own | its own |
 | Change its own password, link its own account to single sign-on | yes | yes | yes |
 | Sign-in, single sign-on settings, accounts and roles, the activity record | yes | no | no |

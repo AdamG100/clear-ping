@@ -1,11 +1,24 @@
 'use client'
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, History, KeyRound, Loader2, LogIn, LogOut, ShieldCheck, User, UserPlus, Users, type LucideIcon } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { useToast } from '@/components/ui/toast'
+import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
+import { Bot, History, KeyRound, LogIn, LogOut, ShieldAlert, ShieldCheck, Trash2, User, UserPlus, Users, type LucideIcon } from 'lucide-react'
+import { Alert } from '@/components/arc/alert/alert'
+import { Badge } from '@/components/arc/badge/badge'
+import { Button } from '@/components/arc/button/button'
+import { CodeBlock } from '@/components/arc/code-block/code-block'
+import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
+import { EmptyState } from '@/components/arc/empty-state/empty-state'
+import { Input } from '@/components/arc/input/input'
+import { PasswordField } from '@/components/arc/password-field/password-field'
+import { RadioGroup } from '@/components/arc/radio-group/radio-group'
+import { SegmentedField } from '@/components/segmented-field'
+import { Select } from '@/components/arc/select/select'
+import { Skeleton } from '@/components/arc/skeleton/skeleton'
+import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
+import { Switch } from '@/components/arc/switch/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/arc/tabs/tabs'
+import { Timeline } from '@/components/arc/timeline/timeline'
+import { useToast } from '@/components/notifications'
 import type { SettingsSection } from '@/lib/dashboard-pages'
 import { canAdminister, DEFAULT_NEW_ROLE, maxKeyAccess, ROLE_DETAIL, ROLE_LABEL, ROLES, type Role } from '@/lib/security/roles'
 import { cn } from '@/lib/utils'
@@ -86,8 +99,11 @@ type Loaded =
   | { state: 'failed'; error: string }
   | { state: 'ready'; data: Security }
 
-const HINT = 'text-[11px] leading-relaxed text-muted-foreground'
-const SECTION_TITLE = 'text-xs font-semibold text-card-foreground'
+const HINT = 'text-xs leading-relaxed text-muted-foreground'
+const SECTION_TITLE = 'text-sm font-medium text-card-foreground'
+const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
+
+const ROLE_OPTIONS = ROLES.map(role => ({ value: role, label: ROLE_LABEL[role] }))
 
 function when(ms: number | null): string {
   return ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'never'
@@ -102,8 +118,8 @@ async function send(url: string, method: string, body?: unknown): Promise<{ ok: 
   return { ok: response.ok, body: await response.json().catch(() => ({})) }
 }
 
-/** On or off, said as a switch. */
-function Toggle({
+/** A setting that takes effect at once: its title and what it does, with the switch that says which way it is. */
+function SettingSwitch({
   checked,
   disabled,
   onChange,
@@ -116,91 +132,34 @@ function Toggle({
   label: string
   detail: ReactNode
 }) {
+  const id = useId()
   return (
-    <div className="flex items-start gap-3">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        disabled={disabled}
-        onClick={() => onChange(!checked)}
-        className={cn(
-          'relative mt-0.5 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors outline-none',
-          'focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60',
-          checked ? 'border-primary bg-primary' : 'border-border bg-muted'
-        )}
-      >
-        <span
-          className={cn(
-            'inline-block size-3.5 rounded-full bg-background shadow transition-transform',
-            checked ? 'translate-x-4.5' : 'translate-x-0.5'
-          )}
-        />
-      </button>
-      <div className="min-w-0 space-y-0.5">
-        <p className="text-xs font-medium text-card-foreground">{label}</p>
-        <div className={HINT}>{detail}</div>
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0 space-y-0.5 pt-2.5">
+        <p id={`${id}-title`} className="text-sm font-medium text-card-foreground">{label}</p>
+        <div id={`${id}-detail`} className={HINT}>{detail}</div>
       </div>
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+        aria-labelledby={`${id}-title`}
+        aria-describedby={`${id}-detail`}
+      />
     </div>
   )
 }
 
-/** One of the three roles, as a small dropdown. */
-function RoleSelect({ id, label, value, onChange, disabled }: { id: string; label: string; value: Role; onChange: (role: Role) => void; disabled?: boolean }) {
+/**
+ * A role chosen in a table row. The column's heading is what the field is
+ * called on screen; the field's own label, which names the account, is there
+ * for a screen reader.
+ */
+function RowRoleSelect({ label, value, onChange, disabled }: { label: string; value: Role; onChange: (role: Role) => void; disabled?: boolean }) {
   return (
-    <select
-      id={id}
-      aria-label={label}
-      value={value}
-      disabled={disabled}
-      onChange={event => onChange(event.target.value as Role)}
-      className={cn(
-        'h-9 shrink-0 cursor-pointer rounded-md border border-border bg-input px-2 text-xs text-foreground outline-none dark:scheme-dark',
-        'focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60'
-      )}
-    >
-      {ROLES.map(role => (
-        <option key={role} value={role}>
-          {ROLE_LABEL[role]}
-        </option>
-      ))}
-    </select>
-  )
-}
-
-/** What the three roles may do, said once where roles are chosen. */
-function RoleKey() {
-  return (
-    <dl className="grid gap-1.5 text-[11px] leading-relaxed sm:grid-cols-[auto_1fr] sm:gap-x-3">
-      {ROLES.map(role => (
-        <div key={role} className="contents">
-          <dt className="font-medium text-card-foreground">{ROLE_LABEL[role]}</dt>
-          <dd className="text-muted-foreground">{ROLE_DETAIL[role]}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
-/** A button that asks to be pressed again before it does anything that cannot be undone. */
-function ConfirmButton({ children, confirm, onConfirm }: { children: ReactNode; confirm: string; onConfirm: () => void }) {
-  const [armed, setArmed] = useState(false)
-  useEffect(() => {
-    if (!armed) return
-    const disarm = setTimeout(() => setArmed(false), 4000)
-    return () => clearTimeout(disarm)
-  }, [armed])
-
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant={armed ? 'destructive' : 'outline'}
-      onClick={() => (armed ? (setArmed(false), onConfirm()) : setArmed(true))}
-    >
-      {armed ? confirm : children}
-    </Button>
+    <div className="w-36 [&_label]:sr-only">
+      <Select label={label} value={value} disabled={disabled} onValueChange={next => onChange(next as Role)} options={ROLE_OPTIONS} />
+    </div>
   )
 }
 
@@ -209,14 +168,13 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
   return (
     <div className="space-y-5">
       {environment.recovery && (
-        <p className="rounded-md border border-signal-minor/40 bg-signal-minor/10 px-3 py-2 text-xs leading-relaxed text-foreground">
-          <span className="font-mono">CLEARPING_AUTH=off</span> is set where ClearPing runs, so sign-in is not asked
-          for whatever the switch below says, and a new account can be made from the sign-in page. Remove it once you
-          are back in.
-        </p>
+        <Alert tone="warning" title="CLEARPING_AUTH=off is set where ClearPing runs">
+          Sign-in is not asked for whatever the switch below says, and a new account can be made from the sign-in page.
+          Remove it once you are back in.
+        </Alert>
       )}
 
-      <Toggle
+      <SettingSwitch
         checked={settings.loginRequired}
         onChange={on => onChange({ loginRequired: on })}
         label="Require sign-in for the dashboard and API"
@@ -229,7 +187,7 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
         }
       />
 
-      <Toggle
+      <SettingSwitch
         checked={inForce.mcpKeyRequired}
         disabled={inForce.loginRequired || environment.legacyMcpToken}
         onChange={on => onChange({ mcpKeyRequired: on })}
@@ -248,13 +206,10 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
         }
       />
 
-      <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
-        <p className={HINT}>
-          Changes to these settings, to keys and to accounts are always made signed in, even while the dashboard does
-          not ask for it. Locked out? Start ClearPing with <span className="font-mono">CLEARPING_AUTH=off</span> to
-          turn sign-in off and make a new account.
-        </p>
-      </div>
+      <Alert tone="info" title="Changed signed in, always">
+        Changes to these settings, to keys and to accounts are always made signed in, even while the dashboard does not
+        ask for it. Locked out? Start ClearPing with CLEARPING_AUTH=off to turn sign-in off and make a new account.
+      </Alert>
     </div>
   )
 }
@@ -275,7 +230,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
     setBusy(true)
     const { ok, body } = await send('/api/security/keys', 'POST', { name: name.trim(), access })
     setBusy(false)
-    if (!ok) return reportError('Could not make the key', body.error)
+    if (!ok) return reportError('Could not create the key', body.error)
     setMade({ key: String(body.key), name: name.trim(), access })
     setName('')
     reload()
@@ -283,127 +238,149 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
 
   const revoke = async (key: ApiKey) => {
     const { ok, body } = await send(`/api/security/keys/${key.id}`, 'DELETE')
-    if (!ok) return reportError('Could not revoke the key', body.error)
+    if (!ok) {
+      reportError('Could not revoke the key', body.error)
+      throw new Error(String(body.error ?? 'Could not revoke the key'))
+    }
     reload()
   }
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
 
+  const rows = data.keys.map(key => ({ ...key, key }))
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {made && (
-        <div className="space-y-3 rounded-lg border border-signal-perfect/40 bg-signal-perfect/5 p-3">
-          <p className="text-xs font-medium text-card-foreground">
-            The key for {made.name}. Copy it now: it is not kept, and cannot be shown again.
-          </p>
+        <div className="space-y-3">
+          <Alert tone="success" title={`The key for ${made.name}`}>
+            Copy it now: it is not kept, and cannot be shown again.
+          </Alert>
           <CopyField id="new-key" label="Key" value={made.key} />
-          <CopyField
-            id="new-key-mcp"
-            label="For Claude Code"
-            value={`claude mcp add --transport http clearping ${origin}/api/mcp --header "Authorization: Bearer ${made.key}"`}
+          <CodeBlock
+            filename="For Claude Code"
+            language="bash"
+            code={`claude mcp add --transport http clearping ${origin}/api/mcp --header "Authorization: Bearer ${made.key}"`}
           />
-          <CopyField
-            id="new-key-curl"
-            label="For a script"
-            value={`curl -H "Authorization: Bearer ${made.key}" ${origin}/api/targets`}
-          />
-          <Button type="button" size="sm" variant="outline" onClick={() => setMade(null)}>
-            Done
+          <CodeBlock filename="For a script" language="bash" code={`curl -H "Authorization: Bearer ${made.key}" ${origin}/api/targets`} />
+          <Button type="button" size="sm" variant="secondary" onClick={() => setMade(null)}>
+            Done, I have copied it
           </Button>
         </div>
       )}
 
       <form onSubmit={make} className="space-y-3">
-        <p className={SECTION_TITLE}>Make a key</p>
-        <p className={HINT}>
-          One for each script or assistant, so each can be cut off alone and the activity record says which did what.
-          A key is yours, and never does more than your account may: if your role changes, so does what your keys can do.
-        </p>
-        {!mayWrite && (
+        <div className="space-y-1">
+          <p className={SECTION_TITLE}>Create a key</p>
+          <p className={HINT}>
+            One for each script or assistant, so each can be cut off alone and the activity record says which did what.
+            A key is yours, and never does more than your account may: if your role changes, so does what your keys can do.
+          </p>
+        </div>
+        <Input
+          label="Name"
+          placeholder="Claude, ChatGPT, Home Assistant…"
+          value={name}
+          maxLength={60}
+          onChange={event => setName(event.target.value)}
+        />
+        {mayWrite ? (
+          <SegmentedField
+            label="What it may do"
+            value={access}
+            onValueChange={value => setAccess(value as Access)}
+            options={[
+              { value: 'read', label: 'Read only' },
+              { value: 'write', label: 'Read and change' },
+            ]}
+          />
+        ) : (
           <p className={HINT}>Your account is a {ROLE_LABEL[data.me.role]}, so its keys can only read.</p>
         )}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <Label htmlFor="key-name" className="text-xs text-card-foreground">Name</Label>
-            <Input
-              id="key-name"
-              placeholder="Claude, ChatGPT, Home Assistant…"
-              value={name}
-              maxLength={60}
-              onChange={event => setName(event.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5" role="radiogroup" aria-label="What it may do">
-            {(['read', 'write'] as const).map(option => (
-              <button
-                key={option}
-                type="button"
-                role="radio"
-                aria-checked={access === option}
-                disabled={option === 'write' && !mayWrite}
-                onClick={() => setAccess(option)}
-                className={cn(
-                  'cursor-pointer whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs outline-none transition-colors',
-                  'focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-40',
-                  access === option ? 'bg-primary font-medium text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-              >
-                {option === 'read' ? 'Read only' : 'Read and change'}
-              </button>
-            ))}
-          </div>
-          <Button type="submit" disabled={busy || !name.trim()}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-            Make key
+        {/* On a line of its own: a button is inline, and sat beside the control above. */}
+        <div>
+          <Button type="submit" loading={busy} disabled={!name.trim()}>
+            <KeyRound {...ICON} />
+            Create key
           </Button>
         </div>
       </form>
 
-      <div className="space-y-2">
-        <p className={SECTION_TITLE}>{admin ? 'Every key' : 'Your keys'}</p>
-        {data.keys.length === 0 ? (
-          <p className={HINT}>None yet.</p>
-        ) : (
-          <ul className="divide-y divide-border rounded-lg border border-border">
-            {data.keys.map(key => (
-              <li key={key.id} className={cn('flex items-center gap-3 px-3 py-2.5', key.revokedAt && 'opacity-55')}>
-                <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-card-foreground">
-                    <span className="truncate">{key.name}</span>
-                    <span
-                      className={cn(
-                        'rounded border px-1 py-px text-[10px] font-normal leading-none',
-                        key.access === 'write' ? 'border-signal-minor/50 text-signal-minor' : 'border-border text-muted-foreground'
-                      )}
-                    >
-                      {key.access === 'write' ? 'read and change' : 'read only'}
+      <SortableDataTable
+        caption={admin ? 'Every key' : 'Your keys'}
+        emptyMessage="No keys yet"
+        itemName={{ one: 'key', other: 'keys' }}
+        rows={rows}
+        rowKey="id"
+        defaultSort={{ key: 'createdAt', direction: 'desc' }}
+        columns={[
+          {
+            key: 'name',
+            label: 'Name',
+            render: (_, { key }) => (
+              <span className={cn('flex flex-col gap-1', key.revokedAt && 'opacity-60')}>
+                <span className="font-medium">{key.name}</span>
+                <span className="font-mono text-xs text-muted-foreground">{key.prefix}…</span>
+              </span>
+            ),
+          },
+          {
+            key: 'access',
+            label: 'May',
+            render: (_, { key }) => {
+              const makerRole = roleOf(key.ownerId)
+              const capped = key.access === 'write' && !key.revokedAt && makerRole && maxKeyAccess(makerRole) === 'read'
+              return (
+                <span className="flex flex-col items-start gap-1">
+                  <Badge tone={key.revokedAt ? 'danger' : key.access === 'write' ? 'warning' : 'neutral'} size="sm">
+                    {key.revokedAt ? 'Revoked' : key.access === 'write' ? 'Read and change' : 'Read only'}
+                  </Badge>
+                  {capped && (
+                    <span className="text-xs text-muted-foreground">
+                      Only reads while {key.createdBy ?? 'its maker'} is a {ROLE_LABEL[makerRole]}
                     </span>
-                    {key.access === 'write' && !key.revokedAt && (() => {
-                      const makerRole = roleOf(key.ownerId)
-                      return makerRole && maxKeyAccess(makerRole) === 'read' ? (
-                        <span className="text-[10px] font-normal text-muted-foreground">
-                          only reads while {key.createdBy ?? 'its maker'} is a {ROLE_LABEL[makerRole]}
-                        </span>
-                      ) : null
-                    })()}
-                    {key.revokedAt && <span className="text-[10px] font-normal text-destructive">revoked {when(key.revokedAt)}</span>}
-                  </p>
-                  <p className="truncate font-mono text-[10px] text-muted-foreground">
-                    {key.prefix}… · made {when(key.createdAt)}
-                    {key.createdBy ? ` by ${key.createdBy}` : ''} · last used {when(key.lastUsedAt)}
-                  </p>
-                </div>
-                {!key.revokedAt && (
-                  <ConfirmButton confirm="Revoke it" onConfirm={() => revoke(key)}>
-                    Revoke
-                  </ConfirmButton>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+                  )}
+                </span>
+              )
+            },
+          },
+          {
+            key: 'createdAt',
+            label: 'Made',
+            numeric: false,
+            render: (_, { key }) => (
+              <span className="text-muted-foreground">
+                {when(key.createdAt)}
+                {key.createdBy ? ` by ${key.createdBy}` : ''}
+              </span>
+            ),
+          },
+          {
+            key: 'lastUsedAt',
+            label: 'Last used',
+            numeric: false,
+            render: (_, { key }) => <span className="text-muted-foreground">{when(key.lastUsedAt)}</span>,
+          },
+          {
+            key: 'actions',
+            label: 'Actions',
+            sortable: false,
+            render: (_, { key }) =>
+              key.revokedAt ? (
+                <span className="text-xs text-muted-foreground">Revoked {when(key.revokedAt)}</span>
+              ) : (
+                <ConfirmMorph
+                  label="Revoke"
+                  icon={<Trash2 {...ICON} />}
+                  prompt={`Revoke ${key.name}?`}
+                  confirmLabel="Revoke"
+                  doneLabel="Revoked"
+                  onConfirm={() => revoke(key)}
+                />
+              ),
+          },
+        ]}
+      />
     </div>
   )
 }
@@ -441,86 +418,125 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
 
   const remove = async (account: Account) => {
     const { ok, body } = await send(`/api/security/users/${account.id}`, 'DELETE')
-    if (!ok) return reportError('Could not remove the account', body.error)
+    if (!ok) {
+      reportError('Could not remove the account', body.error)
+      throw new Error(String(body.error ?? 'Could not remove the account'))
+    }
     reload()
   }
 
   if (!admin) {
     return (
-      <div className="space-y-5">
+      <div className="space-y-6">
         <div className="space-y-2">
           <p className={SECTION_TITLE}>Your account</p>
-          <div className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
-            <User className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1 space-y-0.5">
-              <p className="truncate text-xs font-medium text-card-foreground">
-                {data.me.username}
-                <span className="ml-1.5 rounded border border-border px-1 py-px text-[10px] font-normal text-muted-foreground">
-                  {ROLE_LABEL[data.me.role]}
-                </span>
-              </p>
-              <p className={HINT}>{ROLE_DETAIL[data.me.role]} An admin can change your role.</p>
-            </div>
-          </div>
+          <p className="flex flex-wrap items-center gap-2 text-sm text-card-foreground">
+            <span className="font-medium">{data.me.username}</span>
+            <Badge size="sm">{ROLE_LABEL[data.me.role]}</Badge>
+          </p>
+          <p className={HINT}>{ROLE_DETAIL[data.me.role]} An admin can change your role.</p>
         </div>
         {data.me.hasPassword && <PasswordForm busy={busy} setBusy={setBusy} />}
       </div>
     )
   }
 
+  const rows = data.users.map(account => ({
+    id: account.id,
+    username: account.username,
+    lastLoginAt: account.lastLoginAt ?? 0,
+    role: account.role,
+    account,
+  }))
+
   return (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <p className={SECTION_TITLE}>Accounts</p>
-        <ul className="divide-y divide-border rounded-lg border border-border">
-          {data.users.map(account => (
-            <li key={account.id} className="flex items-center gap-3 px-3 py-2.5">
-              <User className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium text-card-foreground">
-                  {account.username}
-                  {account.id === data.me.id && <span className="font-normal text-muted-foreground"> (you)</span>}
-                  {account.sso && (
-                    <span className="ml-1.5 rounded border border-border px-1 py-px text-[10px] font-normal text-muted-foreground">
-                      {data.sso.label}
-                    </span>
-                  )}
-                </p>
-                <p className="text-[10px] text-muted-foreground">Last signed in {when(account.lastLoginAt)}</p>
-              </div>
-              <RoleSelect
-                id={`role-${account.id}`}
+    <div className="space-y-8">
+      <SortableDataTable
+        caption="Accounts"
+        itemName={{ one: 'account', other: 'accounts' }}
+        rows={rows}
+        rowKey="id"
+        defaultSort={{ key: 'username', direction: 'asc' }}
+        columns={[
+          {
+            key: 'username',
+            label: 'Account',
+            render: (_, { account }) => (
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span className="font-medium">{account.username}</span>
+                {account.id === data.me.id && <span className="text-muted-foreground">(you)</span>}
+                {account.sso && <Badge size="sm">{data.sso.label}</Badge>}
+              </span>
+            ),
+          },
+          {
+            key: 'lastLoginAt',
+            label: 'Last signed in',
+            numeric: false,
+            render: (_, { account }) => <span className="text-muted-foreground">{when(account.lastLoginAt)}</span>,
+          },
+          {
+            key: 'role',
+            label: 'Role',
+            render: (_, { account }) => (
+              <RowRoleSelect
                 label={`What ${account.username} may do`}
                 value={account.role}
                 disabled={busy !== null}
                 onChange={next => changeRole(account, next)}
               />
-              {account.id !== data.me.id && (
-                <ConfirmButton confirm="Remove it" onConfirm={() => remove(account)}>
-                  Remove
-                </ConfirmButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
+            ),
+          },
+          {
+            key: 'actions',
+            label: 'Actions',
+            sortable: false,
+            render: (_, { account }) =>
+              account.id === data.me.id ? null : (
+                <ConfirmMorph
+                  label="Remove"
+                  icon={<Trash2 {...ICON} />}
+                  prompt={`Remove ${account.username}?`}
+                  confirmLabel="Remove"
+                  doneLabel="Removed"
+                  onConfirm={() => remove(account)}
+                />
+              ),
+          },
+        ]}
+      />
+      <p className={HINT}>
+        There is always at least one admin: the last cannot be removed or made anything else. Roles matter once sign-in
+        is on (Access): with it off, anyone who can reach ClearPing can change anything without signing in.
+      </p>
 
-      <form onSubmit={add} className="space-y-2">
+      <form onSubmit={add} className="space-y-4">
         <p className={SECTION_TITLE}>Add an account</p>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input aria-label="Username" placeholder="Username" autoComplete="off" value={username} onChange={event => setUsername(event.target.value)} />
-          <Input aria-label="Password" placeholder="Password, 10 characters or more" type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} />
-          <RoleSelect id="new-account-role" label="What the account may do" value={role} onChange={setRole} />
-          <Button type="submit" disabled={busy !== null || !username.trim() || !password}>
-            {busy === 'add' ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-            Add
-          </Button>
+        <div className="grid items-start gap-3 sm:grid-cols-2">
+          <Input label="Username" autoComplete="off" value={username} onChange={event => setUsername(event.target.value)} />
+          <PasswordField
+            label="Password"
+            description="10 characters or more"
+            autoComplete="new-password"
+            value={password}
+            onChange={event => setPassword(event.target.value)}
+          />
         </div>
-        <RoleKey />
-        <p className={HINT}>
-          There is always at least one admin: the last cannot be removed or made anything else. Roles matter once
-          sign-in is on (Access): with it off, anyone who can reach ClearPing can change anything without signing in.
-        </p>
+        {/* In a box of its own: the group sets its own margin to none, which
+            would take away the space the form puts under it. */}
+        <div>
+          <RadioGroup
+            label="What the account may do"
+            name="new-account-role"
+            value={role}
+            onValueChange={value => setRole(value as Role)}
+            options={ROLES.map(option => ({ value: option, label: ROLE_LABEL[option], description: ROLE_DETAIL[option] }))}
+          />
+        </div>
+        <Button type="submit" loading={busy === 'add'} disabled={busy !== null || !username.trim() || !password}>
+          <UserPlus {...ICON} />
+          Add account
+        </Button>
       </form>
 
       {data.me.hasPassword && <PasswordForm busy={busy} setBusy={setBusy} />}
@@ -546,45 +562,50 @@ function PasswordForm<Busy extends string>({ busy, setBusy }: { busy: Busy | nul
   }
 
   return (
-    <form onSubmit={changePassword} className="space-y-2">
+    <form onSubmit={changePassword} className="space-y-4">
       <p className={SECTION_TITLE}>Change your password</p>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Input aria-label="Current password" placeholder="Current password" type="password" autoComplete="current-password" value={current} onChange={event => setCurrent(event.target.value)} />
-        <Input aria-label="New password" placeholder="New password" type="password" autoComplete="new-password" value={next} onChange={event => setNext(event.target.value)} />
-        <Button type="submit" variant="outline" disabled={busy !== null || !current || !next}>
-          {busy === 'password' && <Loader2 className="h-4 w-4 animate-spin" />}
-          Change
-        </Button>
+      <div className="grid items-start gap-3 sm:grid-cols-2">
+        <PasswordField label="Current password" autoComplete="current-password" value={current} onChange={event => setCurrent(event.target.value)} />
+        <PasswordField label="New password" autoComplete="new-password" value={next} onChange={event => setNext(event.target.value)} />
       </div>
+      <Button type="submit" variant="secondary" loading={busy === 'password'} disabled={(busy !== null && busy !== 'password') || !current || !next}>
+        Change password
+      </Button>
     </form>
   )
 }
-
-const SSO_FIELD = 'space-y-1.5'
 
 /** Linking your own account to the provider: all of single sign-on that is anyone's but an admin's. */
 function SsoLink({ data, reload }: { data: Security; reload: () => void }) {
   const { reportError } = useToast()
   const unlink = async () => {
     const { ok, body } = await send('/api/security/sso/link', 'DELETE')
-    if (!ok) return reportError('Could not unlink', body.error)
+    if (!ok) {
+      reportError('Could not unlink', body.error)
+      throw new Error(String(body.error ?? 'Could not unlink'))
+    }
     reload()
   }
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <p className="min-w-0 flex-1 text-xs text-card-foreground">
+      <p className="min-w-0 flex-1 text-sm text-card-foreground">
         {data.me.sso ? `Your account signs in with ${data.sso.label}.` : `Your account is not linked to ${data.sso.label} yet.`}
       </p>
       {data.me.sso
         ? data.me.hasPassword && (
-            <ConfirmButton confirm="Unlink it" onConfirm={unlink}>
-              Unlink
-            </ConfirmButton>
+            <ConfirmMorph label="Unlink" prompt={`Unlink from ${data.sso.label}?`} confirmLabel="Unlink" doneLabel="Unlinked" onConfirm={unlink} />
           )
         : data.sso.enabled && (
-            <Button asChild size="sm" variant="outline">
-              <a href="/api/auth/sso/start?link=1">Link my account</a>
+            // A full load, not a fetch: linking goes out to the provider and back.
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a route that redirects out to the provider, not a page
+              onClick={() => { window.location.href = '/api/auth/sso/start?link=1' }}
+            >
+              Link my account
             </Button>
           )}
     </div>
@@ -629,6 +650,7 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
   const configured = !!saved.issuer && !!saved.clientId && saved.clientSecretSet
   const usable = saved.enabled && configured
   const savedElsewhere = saved.redirectUri && saved.redirectUri !== redirectUri
+  const groupsDecide = !!(form.adminGroup.trim() || form.editorGroup.trim())
 
   const save = async (changes: Record<string, unknown>, what: 'save' | 'toggle') => {
     setBusy(what)
@@ -656,9 +678,9 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
   const passwordLocked = data.settings.passwordLogin && !(usable && data.me.sso)
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
-        <p className="text-xs leading-relaxed text-card-foreground">
+    <div className="space-y-8">
+      <div className="space-y-3">
+        <p className="text-sm leading-relaxed text-card-foreground">
           Sign in with Authentik, or any OpenID Connect provider. In Authentik:{' '}
           <span className="font-medium">Applications → Providers → Create → OAuth2/OpenID Provider</span>, client type{' '}
           <span className="font-medium">Confidential</span>, with this redirect URI and a{' '}
@@ -673,13 +695,13 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
             be the one in Authentik.
           </p>
         )}
-        <p className="pt-1 text-xs leading-relaxed text-card-foreground">
+        <p className="text-sm leading-relaxed text-card-foreground">
           To be signed out here when you sign out of Authentik, set the provider&apos;s{' '}
           <span className="font-medium">Logout URI</span> to this, with the logout method{' '}
           <span className="font-medium">Back-channel</span> (Authentik 2025.8 or later):
         </p>
         <CopyField id="sso-logout" label="Logout URI" value={logoutUri} />
-        <p className="pt-1 text-xs leading-relaxed text-card-foreground">
+        <p className="text-sm leading-relaxed text-card-foreground">
           And to come back to the sign-in page after signing out, add this to its{' '}
           <span className="font-medium">Post logout redirect URIs</span>:
         </p>
@@ -691,48 +713,37 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
           event.preventDefault()
           void save(form, 'save')
         }}
-        className="space-y-3"
+        className="space-y-6"
       >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className={SSO_FIELD}>
-            <Label htmlFor="sso-issuer" className="text-xs text-card-foreground">Issuer</Label>
+        <div className="grid items-start gap-4 sm:grid-cols-2">
+          <Input
+            label="Issuer"
+            placeholder="https://auth.example.com/application/o/clearping/"
+            value={form.issuer}
+            onChange={event => set('issuer')(event.target.value)}
+          />
+          <Input label="Name on the button" placeholder="Authentik" value={form.label} maxLength={40} onChange={event => set('label')(event.target.value)} />
+          <Input label="Client ID" autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
+          <PasswordField
+            label="Client secret"
+            autoComplete="new-password"
+            description={saved.clientSecretSet ? 'Saved. Leave it empty to keep it.' : undefined}
+            value={form.clientSecret}
+            onChange={event => set('clientSecret')(event.target.value)}
+          />
+          <div className="sm:col-span-2">
             <Input
-              id="sso-issuer"
-              placeholder="https://auth.example.com/application/o/clearping/"
-              value={form.issuer}
-              onChange={event => set('issuer')(event.target.value)}
+              label="Only members of this group (optional)"
+              placeholder="clearping-users"
+              description="Left empty, anyone the provider lets through to this application can sign in."
+              value={form.allowedGroup}
+              onChange={event => set('allowedGroup')(event.target.value)}
             />
-          </div>
-          <div className={SSO_FIELD}>
-            <Label htmlFor="sso-label" className="text-xs text-card-foreground">Name on the button</Label>
-            <Input id="sso-label" placeholder="Authentik" value={form.label} maxLength={40} onChange={event => set('label')(event.target.value)} />
-          </div>
-          <div className={SSO_FIELD}>
-            <Label htmlFor="sso-client" className="text-xs text-card-foreground">Client ID</Label>
-            <Input id="sso-client" autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
-          </div>
-          <div className={SSO_FIELD}>
-            <Label htmlFor="sso-secret" className="text-xs text-card-foreground">Client secret</Label>
-            <Input
-              id="sso-secret"
-              type="password"
-              autoComplete="new-password"
-              placeholder={saved.clientSecretSet ? 'Saved; leave empty to keep it' : ''}
-              value={form.clientSecret}
-              onChange={event => set('clientSecret')(event.target.value)}
-            />
-          </div>
-          <div className={cn(SSO_FIELD, 'sm:col-span-2')}>
-            <Label htmlFor="sso-group" className="text-xs text-card-foreground">Only members of this group (optional)</Label>
-            <Input id="sso-group" placeholder="clearping-users" value={form.allowedGroup} onChange={event => set('allowedGroup')(event.target.value)} />
-            <p className={HINT}>
-              Left empty, anyone the provider lets through to this application can sign in.
-            </p>
           </div>
         </div>
 
-        <div className="space-y-3 rounded-lg border border-border p-3">
-          <div className="space-y-0.5">
+        <div className="space-y-4">
+          <div className="space-y-1">
             <p className={SECTION_TITLE}>Roles from groups</p>
             <p className={HINT}>
               Name a group at {form.label || 'the provider'} for each role, and every sign-in through it sets the
@@ -741,63 +752,50 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
               anything else this way.
             </p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className={SSO_FIELD}>
-              <Label htmlFor="sso-admin-group" className="text-xs text-card-foreground">Admins: members of</Label>
-              <Input id="sso-admin-group" placeholder="clearping-admins" value={form.adminGroup} onChange={event => set('adminGroup')(event.target.value)} />
-            </div>
-            <div className={SSO_FIELD}>
-              <Label htmlFor="sso-editor-group" className="text-xs text-card-foreground">Editors: members of</Label>
-              <Input id="sso-editor-group" placeholder="clearping-editors" value={form.editorGroup} onChange={event => set('editorGroup')(event.target.value)} />
-            </div>
+          <div className="grid items-start gap-4 sm:grid-cols-2">
+            <Input label="Admins: members of" placeholder="clearping-admins" value={form.adminGroup} onChange={event => set('adminGroup')(event.target.value)} />
+            <Input label="Editors: members of" placeholder="clearping-editors" value={form.editorGroup} onChange={event => set('editorGroup')(event.target.value)} />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Label htmlFor="sso-new-role" className="text-xs text-card-foreground">An account made at its first sign-in starts as</Label>
-            <RoleSelect
-              id="sso-new-role"
+          <div className="max-w-sm">
+            <Select
               label="An account made at its first sign-in starts as"
+              description={groupsDecide ? 'Its groups decide.' : undefined}
               value={form.newAccountRole}
-              disabled={!!(form.adminGroup.trim() || form.editorGroup.trim())}
-              onChange={role => setForm(previous => ({ ...previous, newAccountRole: role }))}
+              disabled={groupsDecide}
+              onValueChange={value => setForm(previous => ({ ...previous, newAccountRole: value as Role }))}
+              options={ROLE_OPTIONS}
             />
-            {(form.adminGroup.trim() || form.editorGroup.trim()) && <span className={HINT}>Its groups decide.</span>}
           </div>
         </div>
 
-        <Toggle
+        <SettingSwitch
           checked={form.autoCreate}
           onChange={on => set('autoCreate')(on)}
           label="Make an account on first sign-in"
           detail="Off: only accounts already linked can sign in this way."
         />
 
-        <Toggle
+        <SettingSwitch
           checked={form.signOutAtProvider}
           onChange={on => set('signOutAtProvider')(on)}
           label={`Signing out here signs out of ${form.label || 'the provider'} too`}
           detail="For sessions signed in through it. Whether that ends only this application's session there or the whole Authentik session is the provider's invalidation flow: default-invalidation-flow logs out of Authentik."
         />
 
-        {tested && (
-          <p className={cn('text-xs', tested.ok ? 'text-signal-perfect' : 'text-destructive')} role="status">
-            {tested.text}
-          </p>
-        )}
+        {tested && <Alert tone={tested.ok ? 'success' : 'danger'} title={tested.ok ? 'The issuer answered' : 'The issuer did not answer'}>{tested.text}</Alert>}
 
         <div className="flex flex-wrap gap-2">
-          <Button type="submit" disabled={busy !== null}>
-            {busy === 'save' && <Loader2 className="h-4 w-4 animate-spin" />}
-            Save
+          <Button type="submit" loading={busy === 'save'} disabled={busy !== null && busy !== 'save'}>
+            Save single sign-on
           </Button>
-          <Button type="button" variant="outline" disabled={busy !== null || !form.issuer} onClick={test}>
-            {busy === 'test' && <Loader2 className="h-4 w-4 animate-spin" />}
+          <Button type="button" variant="secondary" loading={busy === 'test'} disabled={(busy !== null && busy !== 'test') || !form.issuer} onClick={test}>
             Test the issuer
           </Button>
         </div>
       </form>
 
-      <div className="space-y-4 border-t border-border pt-4">
-        <Toggle
+      <div className="space-y-5 border-t border-border pt-6">
+        <SettingSwitch
           checked={saved.enabled}
           disabled={busy !== null || (!saved.enabled && !configured)}
           onChange={on => save({ enabled: on }, 'toggle')}
@@ -807,7 +805,7 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
 
         <SsoLink data={{ ...data, sso: { ...data.sso, enabled: usable } }} reload={reload} />
 
-        <Toggle
+        <SettingSwitch
           checked={data.settings.passwordLogin}
           disabled={passwordLocked}
           onChange={changePasswordLogin}
@@ -837,7 +835,7 @@ const ACTIONS: Record<string, string> = {
   'alert.add': 'made an alert',
   'alert.change': 'changed an alert',
   'alert.delete': 'deleted an alert',
-  'key.create': 'made a key',
+  'key.create': 'created a key',
   'key.revoke': 'revoked a key',
   'account.create': 'created the account',
   'account.add': 'added an account',
@@ -864,6 +862,8 @@ function ActivityTab() {
   const [entries, setEntries] = useState<ActivityEntry[] | null>(null)
   const [more, setMore] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // What "today" and "2 hours ago" are counted from: when the record was read.
+  const [now, setNow] = useState(0)
 
   const load = useCallback(async (before?: number) => {
     const { ok, body } = await send(`/api/security/activity?limit=50${before ? `&before=${before}` : ''}`, 'GET')
@@ -871,6 +871,7 @@ function ActivityTab() {
     const page = (body.entries as ActivityEntry[]) ?? []
     setEntries(previous => (before && previous ? [...previous, ...page] : page))
     setMore(page.length === 50)
+    setNow(Date.now())
   }, [])
 
   useEffect(() => {
@@ -879,51 +880,50 @@ function ActivityTab() {
     void load()
   }, [load])
 
-  if (error) return <p className="text-xs text-destructive">{error}</p>
-  if (!entries) return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-  if (entries.length === 0) return <p className={HINT}>Nothing yet. Changes appear here as they are made.</p>
+  if (error) return <Alert tone="danger" title="Could not load the activity">{error}</Alert>
+  if (!entries) return <Skeleton label="Loading the activity" lines={4} />
+  if (entries.length === 0) {
+    return <EmptyState icon={<History size={24} strokeWidth={1.75} />} title="Nothing yet" description="Changes appear here as they are made." />
+  }
+
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   return (
-    <div className="space-y-2">
-      <ul className="divide-y divide-border rounded-lg border border-border">
-        {entries.map(entry => (
-          <li key={entry.id} className="space-y-0.5 px-3 py-2">
-            <p className="text-xs text-card-foreground">
-              <span
-                className={cn(
-                  'font-medium',
-                  entry.actor.kind === 'key' && 'text-primary',
-                  entry.action === 'signin.failed' && 'text-destructive'
-                )}
-              >
-                {entry.actor.kind === 'key' ? `🔑 ${entry.actor.name}` : entry.actor.name}
-              </span>{' '}
-              {ACTIONS[entry.action] ?? entry.action}
-              {entry.detail && <span className="text-muted-foreground">: {entry.detail}</span>}
-            </p>
-            <p className="text-[10px] text-muted-foreground">
-              {when(entry.at)} · {VIA[entry.via] ?? entry.via}
-            </p>
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-3">
+      <Timeline
+        label="Activity"
+        now={now}
+        timeZone={timeZone}
+        locale={typeof navigator === 'undefined' ? 'en-US' : navigator.language}
+        maxHeight={560}
+        scrollToNew={false}
+        events={entries.map(entry => ({
+          id: String(entry.id),
+          at: entry.at,
+          actor: entry.actor.kind === 'key' ? `Key ${entry.actor.name}` : entry.actor.name,
+          title: `${ACTIONS[entry.action] ?? entry.action}${entry.detail ? `: ${entry.detail}` : ''}`,
+          meta: VIA[entry.via] ?? entry.via,
+          tone: entry.action === 'signin.failed' ? 'danger' : 'neutral',
+          icon: entry.action === 'signin.failed' ? <ShieldAlert {...ICON} /> : entry.actor.kind === 'key' ? <KeyRound {...ICON} /> : <User {...ICON} />,
+        }))}
+      />
       {more && (
-        <Button type="button" size="sm" variant="outline" onClick={() => load(entries.at(-1)?.id)}>
-          Older
+        <Button type="button" size="sm" variant="secondary" onClick={() => load(entries.at(-1)?.id)}>
+          Show older activity
         </Button>
       )}
     </div>
   )
 }
 
-/** The menu down the side of Settings, in its two groups. */
-const SECTIONS: { value: SettingsSection; label: string; icon: LucideIcon; group: string; adminOnly?: boolean }[] = [
-  { value: 'access', label: 'Access', icon: ShieldCheck, group: 'Security', adminOnly: true },
-  { value: 'keys', label: 'Keys', icon: KeyRound, group: 'Security' },
-  { value: 'sso', label: 'Single sign-on', icon: LogIn, group: 'Security' },
-  { value: 'accounts', label: 'Accounts', icon: Users, group: 'Security' },
-  { value: 'activity', label: 'Activity', icon: History, group: 'Security', adminOnly: true },
-  { value: 'assistant', label: 'AI assistant', icon: Bot, group: 'Integrations' },
+/** The sections of Settings, Security's first. */
+const SECTIONS: { value: SettingsSection; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
+  { value: 'access', label: 'Access', icon: ShieldCheck, adminOnly: true },
+  { value: 'keys', label: 'Keys', icon: KeyRound },
+  { value: 'sso', label: 'Single sign-on', icon: LogIn },
+  { value: 'accounts', label: 'Accounts', icon: Users },
+  { value: 'activity', label: 'Activity', icon: History, adminOnly: true },
+  { value: 'assistant', label: 'AI assistant', icon: Bot },
 ]
 
 interface SettingsPageProps {
@@ -935,7 +935,7 @@ interface SettingsPageProps {
 /**
  * The dashboard's Settings page, at /settings: who may get in, keys,
  * single sign-on, accounts, the activity record, and connecting an AI
- * assistant, each a section of its own in the menu down the side.
+ * assistant, each a tab of its own.
  */
 export function SettingsPage({ section, onSection }: SettingsPageProps) {
   const { reportError } = useToast()
@@ -982,7 +982,6 @@ export function SettingsPage({ section, onSection }: SettingsPageProps) {
       canAdminister(me.role) ||
       (!item.adminOnly && (item.value !== 'sso' || (loaded.state === 'ready' && loaded.data.sso.enabled)))
   ).map(item => (item.value === 'accounts' && me && !canAdminister(me.role) ? { ...item, label: 'Your account' } : item))
-  const groups = [...new Set(sections.map(item => item.group))]
   const current = sections.find(item => item.value === section) ?? sections[0]
 
   return (
@@ -998,81 +997,63 @@ export function SettingsPage({ section, onSection }: SettingsPageProps) {
         </div>
         {loaded.state === 'ready' && (
           <div className={PANE_ACTIONS}>
-            <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-              <User className="h-4 w-4 shrink-0" />
+            <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
               <span className="truncate">
                 Signed in as <span className="font-medium text-foreground">{loaded.data.me.username}</span>
-                <span className="ml-1.5 rounded border border-border px-1 py-px text-[10px]">{ROLE_LABEL[loaded.data.me.role]}</span>
               </span>
+              <Badge size="sm">{ROLE_LABEL[loaded.data.me.role]}</Badge>
             </p>
-            <Button type="button" size="sm" variant="outline" onClick={signOut}>
-              <LogOut className="h-4 w-4" />
+            <Button type="button" size="sm" variant="secondary" onClick={signOut}>
+              <LogOut {...ICON} />
               Sign out
             </Button>
           </div>
         )}
       </header>
 
-      <div className="grid items-start gap-4 @2xl/main:gap-6 @3xl/main:grid-cols-[12rem_minmax(0,1fr)]">
-        {/* A column down the side where there is room; a row that scrolls
-            sideways where there is not, its group names left out. */}
-        <nav
-          aria-label="Settings"
-          className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 scrollbar-none @3xl/main:sticky @3xl/main:top-6 @3xl/main:mx-0 @3xl/main:flex-col @3xl/main:overflow-visible @3xl/main:px-0"
-        >
-          {groups.map((group, index) => (
-            <div key={group} className={cn('contents @3xl/main:block @3xl/main:space-y-0.5', index > 0 && '@3xl/main:mt-4')}>
-              <p className="hidden px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground @3xl/main:block">
-                {group}
-              </p>
-              {sections.filter(item => item.group === group).map(item => {
-                const Icon = item.icon
-                const active = item.value === current.value
-                return (
-                  <button
-                    key={item.value}
-                    type="button"
-                    onClick={() => onSection(item.value)}
-                    aria-current={active ? 'page' : undefined}
-                    className={cn(
-                      'flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm outline-none transition-colors touch:py-2.5 @3xl/main:w-full',
-                      'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                      active
-                        ? 'bg-secondary font-medium text-secondary-foreground'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    {item.label}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </nav>
+      <Tabs value={current.value} onValueChange={value => onSection(value as SettingsSection)}>
+        <TabsList aria-label="Settings">
+          {sections.map(item => {
+            const Icon = item.icon
+            return (
+              <TabsTrigger key={item.value} value={item.value}>
+                <span className="inline-flex items-center gap-2">
+                  <Icon {...ICON} />
+                  {item.label}
+                </span>
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
 
-        <div className="min-w-0 space-y-4">
-          <h2 className="text-base font-semibold tracking-tight text-foreground">{current.label}</h2>
-
+        <TabsContent value={current.value}>
           {current.value === 'assistant' ? (
             <AssistantSettings onMakeKey={() => onSection('keys')} />
           ) : (
             <>
-              {loaded.state === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              {loaded.state === 'loading' && <Skeleton label="Loading the settings" lines={5} />}
 
-              {loaded.state === 'failed' && <p className="text-sm text-destructive">{loaded.error}</p>}
+              {loaded.state === 'failed' && <Alert tone="danger" title="Could not load the settings">{loaded.error}</Alert>}
 
               {(loaded.state === 'needsAccount' || loaded.state === 'needsSignIn') && (
-                <div className={PAGE_CARD}>
-                  <p className="text-sm leading-relaxed text-card-foreground">
-                    {loaded.state === 'needsAccount'
-                      ? 'Security is set up with an account: it is what turns sign-in on, makes keys, and is the name changes are recorded under. There is none yet.'
-                      : 'Security settings are changed signed in.'}
-                  </p>
-                  <Button asChild size="sm">
-                    <a href={`/login?next=${encodeURIComponent(here)}`}>{loaded.state === 'needsAccount' ? 'Create an account' : 'Sign in'}</a>
-                  </Button>
-                </div>
+                <EmptyState
+                  icon={<ShieldCheck size={24} strokeWidth={1.75} />}
+                  title={loaded.state === 'needsAccount' ? 'No account yet' : 'Sign in to change these'}
+                  description={
+                    loaded.state === 'needsAccount'
+                      ? 'Security is set up with an account: it is what turns sign-in on, creates keys, and is the name changes are recorded under.'
+                      : 'Security settings are changed signed in.'
+                  }
+                  action={
+                    <Button
+                      type="button"
+                      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- the sign-in page is its own app shell; a full load, as signing in is
+                      onClick={() => { window.location.href = `/login?next=${encodeURIComponent(here)}` }}
+                    >
+                      {loaded.state === 'needsAccount' ? 'Create an account' : 'Sign in'}
+                    </Button>
+                  }
+                />
               )}
 
               {loaded.state === 'ready' && (
@@ -1086,8 +1067,8 @@ export function SettingsPage({ section, onSection }: SettingsPageProps) {
               )}
             </>
           )}
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

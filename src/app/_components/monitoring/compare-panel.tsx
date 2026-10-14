@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import type {
   AddressFamily,
   ComparisonSeries,
@@ -12,8 +12,10 @@ import type {
   TimeWindow,
 } from '@/types/probe'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
-import { Button } from '@/components/ui/button'
-import { ErrorBoundary } from '@/components/ui/error-boundary'
+import { Button } from '@/components/arc/button/button'
+import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
+import { Tooltip } from '@/components/arc/tooltip/tooltip'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { cn } from '@/lib/utils'
 import { FAMILY_LABEL } from '@/lib/host'
 import { getPacketLossVar, isMeaningfulLoss } from '@/lib/packet-loss-colors'
@@ -277,7 +279,7 @@ export function ComparePanel({
   const hasMeasurements = rows.some(row => (row.statistics?.sampleCount ?? 0) > 0)
 
   return (
-    <section className="min-h-[26rem] rounded-xl border border-border bg-card p-4 @2xl/main:p-5">
+    <section className="min-h-[26rem] rounded-3xl border border-border bg-card p-4 @2xl/main:p-6">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-sm font-medium text-foreground">{title}</h2>
@@ -288,7 +290,7 @@ export function ComparePanel({
             <span>
               {formatWindowEdge(zoom.start)} – {formatWindowEdge(zoom.end)}
             </span>
-            <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] touch:h-8 touch:px-3" onClick={onResetZoom}>
+            <Button variant="secondary" size="sm" onClick={onResetZoom}>
               Reset zoom
             </Button>
           </p>
@@ -339,104 +341,114 @@ export function ComparePanel({
                 telling first, so that the ones that remain fit without the
                 table having to be scrolled sideways: the extremes go first,
                 then the two that say again what the median and the loss do. */}
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                    <th className="pb-1.5 pr-4 font-medium">Line</th>
-                    <th className="pb-1.5 pr-4 text-right font-medium">Now</th>
-                    <th className="pb-1.5 pr-4 text-right font-medium">Median</th>
-                    <th className="hidden pb-1.5 pr-4 text-right font-medium @lg/main:table-cell">Avg</th>
-                    <th className="hidden pb-1.5 pr-4 text-right font-medium @3xl/main:table-cell">Min</th>
-                    <th className="hidden pb-1.5 pr-4 text-right font-medium @3xl/main:table-cell">Max</th>
-                    <th className="pb-1.5 text-right font-medium @lg/main:pr-4">{lossLabel}</th>
-                    <th className="hidden pb-1.5 text-right font-medium @lg/main:table-cell">Uptime</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(({ line, target, statistics, now }) => {
-                    const loss = statistics?.packetLoss ?? 0
-                    const nowValue = now ? now.p50Latency ?? now.latency : null
-
-                    return (
-                      <tr
-                        key={line.key}
+            <div className="mt-4">
+              <SortableDataTable
+                caption="The lines on the chart"
+                itemName={{ one: 'line', other: 'lines' }}
+                rowKey="key"
+                rows={rows.map(({ line, target, statistics, now }) => ({
+                  key: line.key,
+                  label: line.label,
+                  now: now ? now.p50Latency ?? now.latency ?? -1 : null,
+                  median: statistics?.medianLatency ?? null,
+                  avg: statistics?.avgLatency ?? null,
+                  min: statistics?.minLatency ?? null,
+                  max: statistics?.maxLatency ?? null,
+                  loss: statistics ? statistics.packetLoss ?? 0 : null,
+                  uptime: statistics ? statistics.uptime : null,
+                  line,
+                  target,
+                }))}
+                columns={[
+                  {
+                    key: 'label',
+                    label: 'Line',
+                    render: (_, { line, target }) => (
+                      <span
+                        className="flex items-center gap-2"
                         onMouseEnter={() => setHighlighted(line.key)}
                         onMouseLeave={() => setHighlighted(null)}
-                        className={cn(
-                          'border-t border-border/50 transition-colors',
-                          highlighted === line.key && 'bg-muted/40'
-                        )}
                       >
-                        <td className="max-w-72 py-1.5 pr-4">
-                          <div className="flex items-center gap-2">
-                            <svg viewBox="0 0 16 6" className="h-1.5 w-4 shrink-0" aria-hidden="true">
-                              <line
-                                x1={1}
-                                x2={15}
-                                y1={3}
-                                y2={3}
-                                stroke={line.color}
-                                strokeWidth={2.5}
-                                strokeLinecap="round"
-                                strokeDasharray={line.dashed ? '5 3' : undefined}
-                              />
-                            </svg>
-                            {onSelectTarget ? (
-                              <button
-                                type="button"
-                                onClick={() => onSelectTarget(target.id)}
-                                onFocus={() => setHighlighted(line.key)}
-                                onBlur={() => setHighlighted(null)}
-                                className="min-w-0 cursor-pointer truncate text-left font-medium text-foreground underline-offset-2 hover:underline"
-                                data-tip={`Open ${target.name}`}
-                              >
-                                {line.label}
-                              </button>
-                            ) : (
-                              <span className="min-w-0 truncate font-medium text-foreground">{line.label}</span>
-                            )}
-                            {showAddress && (
-                              <span className="hidden min-w-0 truncate font-mono text-[11px] text-muted-foreground @4xl/main:inline">
-                                {targetAddressLabel(target)}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap py-1.5 pr-4 text-right font-mono">
-                          {!now ? (
-                            <span className="text-muted-foreground/60">—</span>
-                          ) : nowValue === null ? (
-                            <span style={{ color: getPacketLossVar(100) }}>no reply</span>
-                          ) : (
-                            `${ms(nowValue)} ms`
-                          )}
-                        </td>
-                        <td className="py-1.5 pr-4 text-right font-mono">{ms(statistics?.medianLatency)}</td>
-                        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground @lg/main:table-cell">
-                          {ms(statistics?.avgLatency)}
-                        </td>
-                        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground @3xl/main:table-cell">
-                          {ms(statistics?.minLatency)}
-                        </td>
-                        <td className="hidden py-1.5 pr-4 text-right font-mono text-muted-foreground @3xl/main:table-cell">
-                          {ms(statistics?.maxLatency)}
-                        </td>
-                        <td
-                          className="py-1.5 text-right font-mono @lg/main:pr-4"
-                          style={statistics && isMeaningfulLoss(loss) ? { color: getPacketLossVar(loss) } : undefined}
-                        >
-                          {statistics ? `${loss.toFixed(loss > 0 && loss < 10 ? 1 : 0)}%` : '—'}
-                        </td>
-                        <td className="hidden py-1.5 text-right font-mono text-muted-foreground @lg/main:table-cell">
-                          {statistics ? `${statistics.uptime.toFixed(statistics.uptime < 100 ? 1 : 0)}%` : '—'}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-              <p className="mt-3 text-[11px] text-muted-foreground/70">
+                        <svg viewBox="0 0 16 6" className="h-1.5 w-4 shrink-0" aria-hidden="true">
+                          <line
+                            x1={1}
+                            x2={15}
+                            y1={3}
+                            y2={3}
+                            stroke={line.color}
+                            strokeWidth={2.5}
+                            strokeLinecap="round"
+                            strokeDasharray={line.dashed ? '5 3' : undefined}
+                          />
+                        </svg>
+                        {onSelectTarget ? (
+                          <Tooltip content={`Open ${target.name}`}>
+                            <button
+                              type="button"
+                              onClick={() => onSelectTarget(target.id)}
+                              onFocus={() => setHighlighted(line.key)}
+                              onBlur={() => setHighlighted(null)}
+                              className="min-w-0 cursor-pointer truncate text-left font-medium text-foreground underline-offset-2 hover:underline"
+                            >
+                              {line.label}
+                            </button>
+                          </Tooltip>
+                        ) : (
+                          <span className="min-w-0 truncate font-medium text-foreground">{line.label}</span>
+                        )}
+                        {showAddress && (
+                          <span className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground @4xl/main:inline">
+                            {targetAddressLabel(target)}
+                          </span>
+                        )}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'now',
+                    label: 'Now',
+                    numeric: true,
+                    render: value =>
+                      value === null ? (
+                        <span className="text-faint">—</span>
+                      ) : value === -1 ? (
+                        <span style={{ color: getPacketLossVar(100) }}>no reply</span>
+                      ) : (
+                        <span className="font-mono">{ms(value as number)} ms</span>
+                      ),
+                  },
+                  { key: 'median', label: 'Median', numeric: true, render: value => <span className="font-mono">{ms(value as number | null)}</span> },
+                  { key: 'avg', label: 'Avg', numeric: true, render: value => <span className="font-mono text-muted-foreground">{ms(value as number | null)}</span> },
+                  { key: 'min', label: 'Min', numeric: true, render: value => <span className="font-mono text-muted-foreground">{ms(value as number | null)}</span> },
+                  { key: 'max', label: 'Max', numeric: true, render: value => <span className="font-mono text-muted-foreground">{ms(value as number | null)}</span> },
+                  {
+                    key: 'loss',
+                    label: lossLabel,
+                    numeric: true,
+                    render: value => {
+                      if (value === null) return <span className="text-faint">—</span>
+                      const loss = value as number
+                      return (
+                        <span className="font-mono" style={isMeaningfulLoss(loss) ? { color: getPacketLossVar(loss) } : undefined}>
+                          {loss.toFixed(loss > 0 && loss < 10 ? 1 : 0)}%
+                        </span>
+                      )
+                    },
+                  },
+                  {
+                    key: 'uptime',
+                    label: 'Uptime',
+                    numeric: true,
+                    render: value =>
+                      value === null ? (
+                        <span className="text-faint">—</span>
+                      ) : (
+                        <span className="font-mono text-muted-foreground">{(value as number).toFixed((value as number) < 100 ? 1 : 0)}%</span>
+                      ),
+                  },
+                ]}
+              />
+              <p className="mt-3 text-xs text-muted-foreground">
                 {note && <>{note} </>}
                 Latency columns are in milliseconds, over the period shown.{' '}
                 <span className="touch:hidden">
