@@ -4,8 +4,8 @@ import packageJson from '../../package.json'
  * Which build of ClearPing this is, and whether a newer one has been published.
  *
  * Every deployment gets a version number of its own: CI numbers each build of
- * main (MAJOR.MINOR from package.json, the last number counting deployments),
- * bakes it into the image, tags the image and the commit with it, and makes a
+ * main (scripts/next-version.mjs: the last release plus a patch, or the minor or
+ * major a commit asked for in a Release: trailer), bakes it into the image, tags the image and the commit with it, and makes a
  * release of it. This module reads that number back out of the environment
  * the image was built with.
  *

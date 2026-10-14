@@ -127,8 +127,19 @@ What makes it installable, for anyone changing it:
 ## Versions
 
 Every push to `main` that builds is a deployment with a number of its own,
-`MAJOR.MINOR.PATCH`. MAJOR and MINOR are the ones in `package.json`, changed by
-hand for a big release; PATCH counts the deployments since. CI bakes the number
+`MAJOR.MINOR.PATCH`: one more than the last release. It is a patch unless a
+commit going out asks for more, with a line at the end of its message:
+
+```
+Release: minor      something new a user would notice
+Release: major      an upgrade that needs the user to do something
+```
+
+The biggest one asked for among the commits since the last release wins, so
+several features pushed together still make one minor release. Nothing has to
+be tagged or edited by hand; `node scripts/next-version.mjs --explain` says
+what a push would come out as. `package.json`'s version is only a floor:
+setting it higher makes that the next version. CI bakes the number
 into the image, tags the image with it (`ghcr.io/adamg100/clear-ping:0.1.4`
 beside `:latest`), and makes a GitHub release `v0.1.4` listing what changed.
 To go back to an earlier one, run its tag instead of `:latest`.

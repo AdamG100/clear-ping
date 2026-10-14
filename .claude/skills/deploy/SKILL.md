@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Deploy ClearPing - check the work, decide the version number, push to main, and confirm the new version is published and running. Use whenever the user asks to deploy, release, ship, publish or push ClearPing to main, or to check which version is deployed.
+description: Deploy ClearPing - check the work, push to main, and confirm the new version is published and running. Use when the user asks to deploy, release, ship, publish or push ClearPing to main, or to check which version is deployed. The user usually pushes themselves; the version is decided when committing (see CLAUDE.md), not here.
 ---
 
 # Deploying ClearPing
@@ -15,16 +15,16 @@ the sidebar.
 
 `MAJOR.MINOR.PATCH`:
 
-- **PATCH goes up by itself on every deployment.** CI takes the highest
-  `vMAJOR.MINOR.*` tag and adds one. Never edit it, and never create or push a
-  `v*` tag by hand: CI does both, and a hand-made tag takes a different path
-  through the workflow.
-- **MAJOR.MINOR come from `package.json`** and only change when someone
-  changes them. That is the one decision this skill exists to make every time
-  (step 2).
+- **CI counts it** (`scripts/next-version.mjs`): one more than the highest
+  `v*` release tag, as a patch, unless a commit since that release has a
+  `Release: minor` or `Release: major` trailer in its message; the biggest
+  one asked for wins. Never create or push a `v*` tag by hand: CI does that,
+  and a hand-made tag takes a different path through the workflow.
+- **The decision is made when committing**, not when deploying, because the
+  user usually pushes from GitHub Desktop without this skill. CLAUDE.md says
+  when to add the trailer.
 
-So every deploy does get a new version number; what has to be decided by hand
-is only whether it is a patch, or a new minor or major.
+`package.json`'s version is only a floor and is otherwise left alone.
 
 ## Steps
 
@@ -45,7 +45,7 @@ npm run lint
 - If any check fails, stop and report it. A failing build publishes nothing,
   but it also uses up nobody's time if it is caught here.
 
-### 2. Decide the version
+### 2. Check the version
 
 List what this deploy contains:
 
@@ -53,22 +53,10 @@ List what this deploy contains:
 git log --oneline $(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD
 ```
 
-Then pick the bump:
-
-| What changed | Bump | How |
-|---|---|---|
-| Fixes, small improvements, docs, internal changes | **patch** | nothing to do; CI counts it |
-| A new feature, a new probe type or setting, a new API or MCP tool, anything a user would notice as new | **minor** | `npm version minor --no-git-tag-version` |
-| A change that needs the user to act when upgrading: settings renamed or removed, database changes that cannot be undone, API that behaves differently | **major** | `npm version major --no-git-tag-version` |
-
-`npm version … --no-git-tag-version` sets `package.json` and
-`package-lock.json` together and makes no tag. Commit that as its own commit
-("Bump version to 0.2.0").
-
-When the choice is not obvious, recommend one and ask. Never bump MAJOR
-without the user agreeing.
-
-Then work out the number this push will get:
+If the commits deserve a bigger bump than their trailers ask for (see the
+table in CLAUDE.md), the trailer is missing: add an empty commit that carries
+it, `git commit --allow-empty -m "Release <version>" -m "Release: minor"`,
+rather than rewriting commits. Then work out the number this push will get:
 
 ```bash
 node .claude/skills/deploy/release.mjs next

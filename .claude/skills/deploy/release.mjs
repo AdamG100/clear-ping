@@ -10,11 +10,9 @@
 //   node .claude/skills/deploy/release.mjs wait <version> [--url https://…] [--minutes 30]
 //       Wait for <version> to be published, then for the live server to run it.
 //
-// The numbering rule is the one in .github/workflows/docker.yml ("Number the
-// build"); keep the two the same.
+// The numbering is scripts/next-version.mjs, the same script CI numbers with.
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { nextVersionHere } from '../../../scripts/next-version.mjs';
 
 const IMAGE = { registry: 'ghcr.io', repository: 'adamg100/clear-ping' };
 const DEFAULT_URL = process.env.CLEARPING_URL || 'https://ping.gnetworx.cloud';
@@ -25,19 +23,6 @@ const option = (name, fallback) => {
   return at >= 0 ? args[at + 1] : fallback;
 };
 const url = option('url', DEFAULT_URL).replace(/\/$/, '');
-
-function nextVersion() {
-  const base = JSON.parse(readFileSync('package.json', 'utf8')).version;
-  const majorMinor = base.split('.').slice(0, 2).join('.');
-  const tags = execFileSync('git', ['tag', '--list', `v${majorMinor}.*`], { encoding: 'utf8' }).split(/\r?\n/);
-  const patches = tags
-    .map(tag => tag.slice(`v${majorMinor}.`.length))
-    .filter(patch => /^\d+$/.test(patch))
-    .map(Number);
-  const floor = Number(base.split('.')[2]);
-  const patch = patches.length ? Math.max(floor, Math.max(...patches) + 1) : floor;
-  return { version: `${majorMinor}.${patch}`, base, lastTag: patches.length ? `v${majorMinor}.${Math.max(...patches)}` : null };
-}
 
 async function registryToken() {
   const response = await fetch(`https://${IMAGE.registry}/token?scope=repository:${IMAGE.repository}:pull`);
@@ -70,8 +55,8 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const command = args[0];
 
 if (command === 'next') {
-  const { version, base, lastTag } = nextVersion();
-  console.log(JSON.stringify({ next: version, packageJson: base, lastRelease: lastTag }, null, 2));
+  const { version, last, bump } = nextVersionHere();
+  console.log(JSON.stringify({ next: version, lastRelease: last, bump }, null, 2));
 } else if (command === 'status') {
   const [tags, server] = await Promise.all([publishedTags(), live()]);
   const versions = tags.filter(tag => /^\d+\.\d+\.\d+$/.test(tag));

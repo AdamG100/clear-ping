@@ -9,12 +9,12 @@ name: Docker image
 #                     then a git tag v<version> and a GitHub release of it
 #   tag v1.2.3        ghcr.io/<owner>/<repo>:1.2.3 and :1.2
 #
-# Every build of main is a deployment with a version number of its own:
-# MAJOR.MINOR from package.json, and the last number one more than the highest
-# release of that MAJOR.MINOR so far (starting at package.json's own). Bump
-# MAJOR or MINOR in package.json by hand; the rest counts itself. The number
-# is baked into the image, where the dashboard shows it and compares it with
-# whatever :latest is to say whether there is an update.
+# Every build of main is a deployment with a version number of its own: one
+# more than the last release, as a patch unless a commit since then asks for a
+# minor or major one with a trailer in its message, `Release: minor` or
+# `Release: major` (scripts/next-version.mjs). The number is baked into the
+# image, where the dashboard shows it and compares it with whatever :latest is
+# to say whether there is an update.
 
 on:
   push:
@@ -47,7 +47,7 @@ jobs:
       release: ${{ steps.number.outputs.release }}
 
     steps:
-      # Every tag, to count on from.
+      # Every tag, to count on from, and the commits since, for their trailers.
       - name: Check out
         uses: actions/checkout@v4
         with:
@@ -57,20 +57,14 @@ jobs:
       - name: Number the build
         id: number
         run: |
-          base=$(jq -r .version package.json)
-          major_minor=${base%.*}
-
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             # Tagged by hand: the tag is the version, and it has its release already.
             version=${GITHUB_REF_NAME#v}
             release=false
           else
-            last=$(git tag --list "v${major_minor}.*" | sed "s/^v${major_minor}\.//" | grep -E '^[0-9]+$' | sort -n | tail -n 1 || true)
-            patch=${base##*.}
-            if [ -n "$last" ] && [ "$((last + 1))" -gt "$patch" ]; then
-              patch=$((last + 1))
-            fi
-            version="${major_minor}.${patch}"
+            # The last release plus whatever the commits since ask for in a
+            # Release: trailer (scripts/next-version.mjs).
+            version=$(node scripts/next-version.mjs --explain)
 
             # Only main is deployed. Anything else is marked as not a release,
             # so it can never be mistaken for one or count as newer than one.
