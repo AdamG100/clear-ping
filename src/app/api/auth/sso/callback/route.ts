@@ -51,9 +51,9 @@ export async function GET(request: NextRequest) {
   const code = params.get('code');
   if (!code) return failed(request, `${config.label} sent no code back`);
 
-  let claims;
+  let claims, idToken;
   try {
-    claims = await redeemCode(code, pending, config);
+    ({ claims, idToken } = await redeemCode(code, pending, config));
   } catch (error) {
     return failed(request, error instanceof Error ? error.message : 'The sign-in could not be completed');
   }
@@ -91,7 +91,13 @@ export async function GET(request: NextRequest) {
   }
 
   await noteLogin(user.id);
-  const session = await createSession(user.id);
+  // Remembering which sign-in at the provider this is, so signing out there ends it.
+  const session = await createSession(user.id, {
+    issuer: claims.iss,
+    subject: claims.sub,
+    sid: typeof claims.sid === 'string' && claims.sid ? claims.sid : null,
+    idToken,
+  });
   await recordActivity({ kind: 'user', id: user.id, name: user.username }, 'dashboard', 'signin', `With ${config.label}, from ${clientAddress(request)}`);
 
   const response = go(request, pending.next);

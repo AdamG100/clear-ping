@@ -424,6 +424,21 @@ async function singleSignOn(database: Database): Promise<void> {
   );
 }
 
+/**
+ * Sessions made by signing in through the identity provider remember which
+ * sign-in there they came from, so that signing out there can end them here
+ * (back-channel logout, which names the person and the provider's session),
+ * and keep the ID token to show the provider when signing out here.
+ */
+async function singleSignOut(database: Database): Promise<void> {
+  const columns = await all<{ name: string }>(database, 'PRAGMA table_info(sessions)');
+  const has = (name: string) => columns.some(column => column.name === name);
+  for (const column of ['sso_issuer', 'sso_subject', 'sso_sid', 'sso_id_token']) {
+    if (!has(column)) await run(database, `ALTER TABLE sessions ADD COLUMN ${column} TEXT`);
+  }
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_sessions_sso ON sessions(sso_issuer, sso_subject) WHERE sso_subject IS NOT NULL');
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
@@ -432,6 +447,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'kept groups', up: keptGroups },
   { name: 'security', up: security },
   { name: 'single sign-on', up: singleSignOn },
+  { name: 'single sign-out', up: singleSignOut },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

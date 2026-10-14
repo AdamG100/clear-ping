@@ -5,7 +5,7 @@ import { recordActivity } from '@/lib/security/store';
 
 /**
  * PUT /api/security/sso - Set up single sign-on
- * Body: any of { enabled, label, issuer, clientId, clientSecret, allowedGroup, autoCreate }
+ * Body: any of { enabled, label, issuer, clientId, clientSecret, allowedGroup, autoCreate, signOutAtProvider }
  *
  * The client secret is only ever written: an empty one keeps what is saved,
  * and it is never sent back. The redirect URI is taken from the address the

@@ -200,16 +200,70 @@ export const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
 /** How stale "last seen" may get before it is written again: not on every request. */
 const TOUCH_AFTER_MS = 5 * 60 * 1000
 
-export async function createSession(userId: string): Promise<{ token: string; expiresAt: number }> {
+/** The sign-in at the identity provider a session was made from. */
+export interface SsoOrigin {
+  issuer: string
+  subject: string
+  /** The provider's id for its own session, when its ID token gives one. */
+  sid: string | null
+  idToken: string
+}
+
+export async function createSession(userId: string, sso?: SsoOrigin): Promise<{ token: string; expiresAt: number }> {
   const token = newToken()
   const now = Date.now()
   const expiresAt = now + SESSION_LIFETIME_MS
   await run(
     await getDatabase(),
-    'INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)',
-    [tokenHash(token), userId, now, expiresAt, now]
+    `INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at, sso_issuer, sso_subject, sso_sid, sso_id_token)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [tokenHash(token), userId, now, expiresAt, now, sso?.issuer ?? null, sso?.subject ?? null, sso?.sid ?? null, sso?.idToken ?? null]
   )
   return { token, expiresAt }
+}
+
+/** The provider sign-in a session came from, if it came from one. */
+export async function sessionSso(token: string): Promise<SsoOrigin | null> {
+  const row = await one<{ sso_issuer: string | null; sso_subject: string | null; sso_sid: string | null; sso_id_token: string | null }>(
+    await getDatabase(),
+    'SELECT sso_issuer, sso_subject, sso_sid, sso_id_token FROM sessions WHERE token_hash = ?',
+    [tokenHash(token)]
+  )
+  if (!row?.sso_issuer || !row.sso_subject) return null
+  return { issuer: row.sso_issuer, subject: row.sso_subject, sid: row.sso_sid, idToken: row.sso_id_token ?? '' }
+}
+
+/**
+ * End the sessions made from a sign-in at the provider that has just ended
+ * there. With the provider's session id, the session made from that sign-in;
+ * a session whose sign-in did not say its id is taken to be it too if it is
+ * the same person's, since nothing else could tell them apart. With only the
+ * person, every session they made through the provider. Sessions made with a
+ * password are left alone: signing out at the provider says nothing about them.
+ *
+ * Returns the accounts signed out, for the activity record.
+ */
+export async function endSsoSessions(issuer: string, who: { sub?: string; sid?: string }): Promise<User[]> {
+  const database = await getDatabase()
+  let where: string
+  let params: unknown[]
+  if (who.sid) {
+    where = who.sub
+      ? 'sso_issuer = ? AND sso_subject = ? AND (sso_sid = ? OR sso_sid IS NULL)'
+      : 'sso_issuer = ? AND sso_sid = ?'
+    params = who.sub ? [issuer, who.sub, who.sid] : [issuer, who.sid]
+  } else {
+    where = 'sso_issuer = ? AND sso_subject = ?'
+    params = [issuer, who.sub]
+  }
+
+  const rows = await all<UserRow>(
+    database,
+    `SELECT DISTINCT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE ${where.replace(/sso_/g, 'sessions.sso_')}`,
+    params
+  )
+  await run(database, `DELETE FROM sessions WHERE ${where}`, params)
+  return rows.map(userFrom)
 }
 
 export async function userForSession(token: string): Promise<User | null> {

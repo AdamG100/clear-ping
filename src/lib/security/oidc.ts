@@ -34,6 +34,8 @@ export interface SsoConfig {
   autoCreate: boolean
   /** Where the provider sends the browser back to, as the dashboard was reached when this was saved. */
   redirectUri: string
+  /** Signing out of ClearPing, after signing in through the provider, signs out there too. */
+  signOutAtProvider: boolean
 }
 
 const SETTING = 'sso.config'
@@ -47,6 +49,7 @@ export const SSO_DEFAULTS: SsoConfig = {
   allowedGroup: '',
   autoCreate: true,
   redirectUri: '',
+  signOutAtProvider: true,
 }
 
 export const SSO_CALLBACK_PATH = '/api/auth/sso/callback'
@@ -73,6 +76,7 @@ export async function saveSsoConfig(changes: Partial<SsoConfig>): Promise<SsoCon
 
   if (typeof changes.enabled === 'boolean') next.enabled = changes.enabled
   if (typeof changes.autoCreate === 'boolean') next.autoCreate = changes.autoCreate
+  if (typeof changes.signOutAtProvider === 'boolean') next.signOutAtProvider = changes.signOutAtProvider
   if (typeof changes.label === 'string') next.label = changes.label.trim().slice(0, 40) || SSO_DEFAULTS.label
   if (typeof changes.clientId === 'string') next.clientId = changes.clientId.trim()
   if (typeof changes.clientSecret === 'string' && changes.clientSecret.trim()) next.clientSecret = changes.clientSecret.trim()
@@ -232,14 +236,18 @@ export interface Claims {
   [claim: string]: unknown
 }
 
-/** Trade the code for the person's claims: the ID token, checked, and what the userinfo address adds to it. */
+/**
+ * Trade the code for the person's claims: the ID token, checked, and what the
+ * userinfo address adds to it. The ID token itself comes back too, to show
+ * the provider when signing out there.
+ */
 export async function redeemCode(
   code: string,
   pending: Pending,
   config: SsoConfig,
   fetchFn: FetchFn = fetch,
   now = Date.now()
-): Promise<Claims> {
+): Promise<{ claims: Claims; idToken: string }> {
   const discovery = await discover(config.issuer, fetchFn)
   const response = await fetchFn(discovery.token_endpoint, {
     method: 'POST',
@@ -260,7 +268,8 @@ export async function redeemCode(
     throw new Error(`The provider would not complete the sign-in: ${said}`)
   }
 
-  const claims = await verifyIdToken(tokens.id_token, {
+  const idToken = tokens.id_token
+  const claims = await verifyIdToken(idToken, {
     discovery,
     clientId: config.clientId,
     clientSecret: config.clientSecret,
@@ -277,9 +286,9 @@ export async function redeemCode(
     })
       .then(answer => (answer.ok ? answer.json() : null))
       .catch(() => null)
-    if (info && info.sub === claims.sub) return { ...info, ...claims, groups: claims.groups ?? info.groups }
+    if (info && info.sub === claims.sub) return { claims: { ...info, ...claims, groups: claims.groups ?? info.groups }, idToken }
   }
-  return claims
+  return { claims, idToken }
 }
 
 // ─── The ID token ───────────────────────────────────────────────────────────
@@ -292,24 +301,38 @@ function decodePart<T>(part: string): T {
   return JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) as T
 }
 
-export async function verifyIdToken(
-  token: string,
-  options: { discovery: Discovery; clientId: string; clientSecret: string; nonce: string; now?: number; fetchFn?: FetchFn }
-): Promise<Claims> {
-  const { discovery, clientId, clientSecret, nonce, fetchFn = fetch } = options
-  const now = Math.floor((options.now ?? Date.now()) / 1000)
+interface VerifyOptions {
+  discovery: Discovery
+  clientId: string
+  clientSecret: string
+  now?: number
+  fetchFn?: FetchFn
+}
+
+/**
+ * A token from the provider, with its signature, issuer and audience checked:
+ * what an ID token and a logout token have in common. `what` names it in the
+ * reasons given for refusing it.
+ */
+async function verifySigned(token: string, what: string, options: VerifyOptions): Promise<Claims> {
+  const { discovery, clientId, clientSecret, fetchFn = fetch } = options
 
   const parts = token.split('.')
-  if (parts.length !== 3) throw new Error('The ID token is not a signed token')
+  if (parts.length !== 3) throw new Error(`The ${what} is not a signed token`)
   const [headerPart, payloadPart, signaturePart] = parts
-  const header = decodePart<{ alg?: string; kid?: string }>(headerPart)
+  let header: { alg?: string; kid?: string }
+  try {
+    header = decodePart(headerPart)
+  } catch {
+    throw new Error(`The ${what} cannot be read`)
+  }
   const signed = Buffer.from(`${headerPart}.${payloadPart}`)
   const signature = Buffer.from(signaturePart, 'base64url')
 
   const alg = header.alg ?? ''
   const family = alg.slice(0, 2)
   const hash = HASH[alg.slice(2)]
-  if (!hash || !['HS', 'RS', 'PS', 'ES'].includes(family)) throw new Error(`The ID token is signed with ${alg || 'nothing'}, which is not accepted`)
+  if (!hash || !['HS', 'RS', 'PS', 'ES'].includes(family)) throw new Error(`The ${what} is signed with ${alg || 'nothing'}, which is not accepted`)
 
   let valid: boolean
   if (family === 'HS') {
@@ -321,7 +344,7 @@ export async function verifyIdToken(
     let jwk = pick(await signingKeys(discovery.jwks_uri, fetchFn))
     // A key the provider has rotated in since the list was last read.
     if (!jwk) jwk = pick(await signingKeys(discovery.jwks_uri, fetchFn, true))
-    if (!jwk) throw new Error('The ID token is signed with a key the provider does not list')
+    if (!jwk) throw new Error(`The ${what} is signed with a key the provider does not list`)
     valid = verify(
       hash,
       signed,
@@ -333,18 +356,105 @@ export async function verifyIdToken(
       signature
     )
   }
-  if (!valid) throw new Error('The ID token signature does not check out')
+  if (!valid) throw new Error(`The ${what} signature does not check out`)
 
   const claims = decodePart<Claims>(payloadPart)
-  if (claims.iss !== discovery.issuer) throw new Error('The ID token is from another issuer')
+  if (claims.iss !== discovery.issuer) throw new Error(`The ${what} is from another issuer`)
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud]
-  if (!audience.includes(clientId)) throw new Error('The ID token is for another application')
-  if (audience.length > 1 && claims.azp !== undefined && claims.azp !== clientId) throw new Error('The ID token is for another application')
+  if (!audience.includes(clientId)) throw new Error(`The ${what} is for another application`)
+  if (audience.length > 1 && claims.azp !== undefined && claims.azp !== clientId) throw new Error(`The ${what} is for another application`)
+  return claims
+}
+
+export async function verifyIdToken(token: string, options: VerifyOptions & { nonce: string }): Promise<Claims> {
+  const now = Math.floor((options.now ?? Date.now()) / 1000)
+  const claims = await verifySigned(token, 'ID token', options)
   if (typeof claims.exp !== 'number' || claims.exp + SKEW_S < now) throw new Error('The ID token has expired')
   if (typeof claims.iat === 'number' && claims.iat - SKEW_S > now) throw new Error('The ID token is dated in the future')
-  if (claims.nonce !== nonce) throw new Error('The ID token is not the answer to this sign-in')
+  if (claims.nonce !== options.nonce) throw new Error('The ID token is not the answer to this sign-in')
   if (typeof claims.sub !== 'string' || !claims.sub) throw new Error('The ID token does not say who it is for')
   return claims
+}
+
+// ─── Signing out ────────────────────────────────────────────────────────────
+
+/**
+ * Where the provider tells ClearPing someone has signed out there (OpenID
+ * Connect Back-Channel Logout). In Authentik it is the provider's Logout URI,
+ * with the logout method set to back-channel.
+ */
+export const SSO_LOGOUT_PATH = '/api/auth/sso/logout'
+
+const LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout'
+/** A logout token older than this is not taken: it is news, or it is a replay. */
+const LOGOUT_TOKEN_MAX_AGE_S = 10 * 60
+
+/** Who a logout token signs out: one session at the provider, or everything of one person's. */
+export interface LogoutClaims {
+  iss: string
+  sub?: string
+  sid?: string
+}
+
+/** Logout tokens already acted on, so that one sent again is refused. */
+const SEEN_KEY = Symbol.for('clearping.oidc-logout-seen')
+function seenLogoutTokens(): Map<string, number> {
+  const store = globalThis as typeof globalThis & { [SEEN_KEY]?: Map<string, number> }
+  return (store[SEEN_KEY] ??= new Map())
+}
+
+/**
+ * A logout token, checked as the specification asks: signed by the provider,
+ * for this application, recent, carrying the logout event, naming a person or
+ * a session, never a nonce (which would make it an ID token passed off as one),
+ * and not seen before.
+ */
+export async function verifyLogoutToken(token: string, options: VerifyOptions): Promise<LogoutClaims> {
+  const now = Math.floor((options.now ?? Date.now()) / 1000)
+  const claims = await verifySigned(token, 'logout token', options)
+
+  if (typeof claims.iat !== 'number' || claims.iat - SKEW_S > now || claims.iat + LOGOUT_TOKEN_MAX_AGE_S < now) {
+    throw new Error('The logout token is too old, or dated in the future')
+  }
+  if (typeof claims.exp === 'number' && claims.exp + SKEW_S < now) throw new Error('The logout token has expired')
+  const events = claims.events
+  if (!events || typeof events !== 'object' || !(LOGOUT_EVENT in events)) throw new Error('The token is not a logout token')
+  if ('nonce' in claims) throw new Error('A logout token has no nonce; this is not one')
+
+  const sub = typeof claims.sub === 'string' && claims.sub ? claims.sub : undefined
+  const sid = typeof claims.sid === 'string' && claims.sid ? claims.sid : undefined
+  if (!sub && !sid) throw new Error('The logout token does not say whose sign-in it ends')
+
+  if (typeof claims.jti === 'string') {
+    const seen = seenLogoutTokens()
+    for (const [id, at] of seen) if (at + LOGOUT_TOKEN_MAX_AGE_S + SKEW_S < now) seen.delete(id)
+    if (seen.has(claims.jti)) throw new Error('That logout token has been used already')
+    seen.set(claims.jti, now)
+  }
+  return { iss: claims.iss, sub, sid }
+}
+
+/**
+ * Where to send the browser to sign out at the provider as well
+ * (RP-initiated logout), or null if the provider has nowhere for it.
+ *
+ * Authentik ends this application's session there, and, if the provider's
+ * invalidation flow is one that logs out (`default-invalidation-flow`), the
+ * person's whole Authentik session. It comes back to `returnTo` only if that
+ * address is among the provider's post-logout redirect URIs; otherwise it
+ * stays on its own signed-out page.
+ */
+export function endSessionUrl(discovery: Discovery, config: SsoConfig, idToken: string | null, returnTo: string): string | null {
+  if (!discovery.end_session_endpoint) return null
+  const url = new URL(discovery.end_session_endpoint)
+  url.searchParams.set('client_id', config.clientId)
+  // Without it, a provider that keeps a list of addresses to return to will
+  // not use one: the hint is how it knows the request came from this application.
+  if (idToken) {
+    url.searchParams.set('id_token_hint', idToken)
+    url.searchParams.set('post_logout_redirect_uri', returnTo)
+  }
+  return url.href
 }
 
 // ─── Who that is ────────────────────────────────────────────────────────────

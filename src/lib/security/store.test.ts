@@ -76,6 +76,37 @@ describe('single sign-on accounts', () => {
     await store.unlinkSso(adam.id)
     expect(await store.userForSso(ISSUER, 'sub-adam')).toBeNull()
   })
+
+  it('ends the session a sign-out at the provider names, and leaves the rest', async () => {
+    const jo = await store.createSsoUser('jo', ISSUER, 'sub-jo')
+    const from = (sid: string | null) => ({ issuer: ISSUER, subject: 'sub-jo', sid, idToken: `token-${sid}` })
+    const laptop = await store.createSession(jo.id, from('sid-laptop'))
+    const phone = await store.createSession(jo.id, from('sid-phone'))
+    const password = await store.createSession(jo.id)
+
+    expect(await store.sessionSso(laptop.token)).toEqual(from('sid-laptop'))
+    expect(await store.sessionSso(password.token)).toBeNull()
+
+    const ended = await store.endSsoSessions(ISSUER, { sub: 'sub-jo', sid: 'sid-laptop' })
+    expect(ended.map(user => user.username)).toEqual(['jo'])
+    expect(await store.userForSession(laptop.token)).toBeNull()
+    expect(await store.userForSession(phone.token)).not.toBeNull()
+
+    // Without a session id, everything they signed in to through the provider; never a password session.
+    await store.endSsoSessions(ISSUER, { sub: 'sub-jo' })
+    expect(await store.userForSession(phone.token)).toBeNull()
+    expect(await store.userForSession(password.token)).not.toBeNull()
+  })
+
+  it('takes a session whose sign-in gave no id to be the one ended, when it is the same person', async () => {
+    const sam = await store.createSsoUser('sam', ISSUER, 'sub-sam')
+    const unnamed = await store.createSession(sam.id, { issuer: ISSUER, subject: 'sub-sam', sid: null, idToken: '' })
+    const other = await store.createSession((await store.listUsers())[0].id, { issuer: ISSUER, subject: 'sub-other', sid: null, idToken: '' })
+    await store.endSsoSessions(ISSUER, { sub: 'sub-sam', sid: 'sid-anything' })
+    expect(await store.userForSession(unnamed.token)).toBeNull()
+    expect(await store.userForSession(other.token)).not.toBeNull()
+    expect(await store.endSsoSessions('https://other.example/', { sub: 'sub-other' })).toEqual([])
+  })
 })
 
 describe('keys', () => {

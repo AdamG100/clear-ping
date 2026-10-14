@@ -149,6 +149,40 @@ username. If that name is already taken here, a number is added; an existing
 account is never taken over because a name matches. Off, only accounts that
 have been linked can sign in this way.
 
+### Signing out, both ways
+
+**Signing out of Authentik signs you out of ClearPing.** In the provider (Authentik
+2025.8 or later), set:
+
+- **Logout URI**: `https://<your ClearPing>/api/auth/sso/logout`, which Security →
+  SSO shows to copy.
+- **Logout method**: **Back-channel**.
+
+Authentik then tells ClearPing, server to server, whenever a sign-in there
+ends: when you log out of Authentik, when an administrator ends your session,
+and when your account is deactivated. ClearPing ends the session made from that
+sign-in, and records it in the activity. Only sessions made through Authentik
+are ended; a session signed in with a password is not Authentik's to end.
+Authentik has to be able to reach that address. On a home network it usually
+can.
+
+**Signing out of ClearPing signs you out at Authentik.** With **Signing out
+here signs out of Authentik too** on (the default), signing out of a session
+made through Authentik goes on to Authentik's end-session page. What that ends
+is the provider's **invalidation flow** (Advanced flow settings):
+
+- `default-provider-invalidation-flow`, the default, ends only ClearPing's
+  session at Authentik. You stay logged in to Authentik and its other
+  applications, so **Sign in with Authentik** signs you straight back in.
+- `default-invalidation-flow` logs you out of Authentik itself, and with it
+  every application that has back-channel logout set up.
+
+To come back to ClearPing's sign-in page afterwards rather than stay on
+Authentik's, add `https://<your ClearPing>/login` to the provider's **Post
+logout redirect URIs**. Without it, Authentik stays on its own signed-out page.
+
+With the switch off, signing out of ClearPing ends only ClearPing's session.
+
 ### How it is checked
 
 The authorization code flow with PKCE. ClearPing sends the browser to
@@ -162,6 +196,14 @@ always ties the identity to the account signed in at that moment, never to one
 named anywhere a browser could change. Everything about a sign-in goes into the
 activity record: first sign-ins, links, and people turned away for not being
 in the group.
+
+The logout address is open, since it is Authentik's server calling and not a
+signed-in browser, so the logout token is all the authority a sign-out there
+carries. It is checked the same way: signed by Authentik, for this
+application, issued in the last ten minutes, carrying the back-channel logout
+event and no nonce (so an ID token cannot be passed off as one), and never
+taken twice. A session made through Authentik keeps the ID token, which is
+shown to Authentik's end-session page so it knows the request is ClearPing's.
 
 The client secret is stored in ClearPing's database (it is needed for every
 sign-in), never sent back to the browser, and only replaced, never shown.

@@ -302,6 +302,7 @@ Everything the interface does goes through these.
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
 | `/api/security/…` | Sign-in switches, keys, accounts, single sign-on and the activity record; signed in only |
 | `GET /api/auth/sso/start`, `/callback` | Signing in with Authentik or another OpenID Connect provider |
+| `POST /api/auth/sso/logout` | Where the provider says someone signed out there (back-channel logout) |
 | `GET /api/version` | The version, commit and build time running, the same for the newest published image, and whether that is an update |
 | `POST /api/mcp` | The MCP server an AI assistant connects to; `GET /api/mcp/info` says whether it asks for a token |
 

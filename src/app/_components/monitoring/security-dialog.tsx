@@ -51,6 +51,7 @@ interface SsoSettings {
   allowedGroup: string
   autoCreate: boolean
   redirectUri: string
+  signOutAtProvider: boolean
 }
 
 interface Security {
@@ -462,6 +463,7 @@ function SsoTab({ data, reload }: { data: Security; reload: () => void }) {
     clientSecret: '',
     allowedGroup: saved.allowedGroup,
     autoCreate: saved.autoCreate,
+    signOutAtProvider: saved.signOutAtProvider,
   })
   const [busy, setBusy] = useState<'save' | 'test' | 'toggle' | null>(null)
   const [tested, setTested] = useState<{ ok: boolean; text: string } | null>(null)
@@ -469,6 +471,8 @@ function SsoTab({ data, reload }: { data: Security; reload: () => void }) {
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const redirectUri = `${origin}/api/auth/sso/callback`
+  const logoutUri = `${origin}/api/auth/sso/logout`
+  const afterLogoutUri = `${origin}/login`
   const configured = !!saved.issuer && !!saved.clientId && saved.clientSecretSet
   const usable = saved.enabled && configured
   const savedElsewhere = saved.redirectUri && saved.redirectUri !== redirectUri
@@ -520,6 +524,17 @@ function SsoTab({ data, reload }: { data: Security; reload: () => void }) {
             be the one in Authentik.
           </p>
         )}
+        <p className="pt-1 text-xs leading-relaxed text-card-foreground">
+          To be signed out here when you sign out of Authentik, set the provider&apos;s{' '}
+          <span className="font-medium">Logout URI</span> to this, with the logout method{' '}
+          <span className="font-medium">Back-channel</span> (Authentik 2025.8 or later):
+        </p>
+        <CopyField id="sso-logout" label="Logout URI" value={logoutUri} />
+        <p className="pt-1 text-xs leading-relaxed text-card-foreground">
+          And to come back to the sign-in page after signing out, add this to its{' '}
+          <span className="font-medium">Post logout redirect URIs</span>:
+        </p>
+        <CopyField id="sso-after-logout" label="Post logout redirect URI" value={afterLogoutUri} />
       </div>
 
       <form
@@ -573,6 +588,13 @@ function SsoTab({ data, reload }: { data: Security; reload: () => void }) {
           onChange={on => set('autoCreate')(on)}
           label="Make an account on first sign-in"
           detail="Off: only accounts already linked can sign in this way."
+        />
+
+        <Toggle
+          checked={form.signOutAtProvider}
+          onChange={on => set('signOutAtProvider')(on)}
+          label={`Signing out here signs out of ${form.label || 'the provider'} too`}
+          detail="For sessions signed in through it. Whether that ends only this application's session there or the whole Authentik session is the provider's invalidation flow: default-invalidation-flow logs out of Authentik."
         />
 
         {tested && (
@@ -662,6 +684,7 @@ const ACTIONS: Record<string, string> = {
   'account.sso.unlink': 'unlinked their account',
   signin: 'signed in',
   'signin.failed': 'failed to sign in',
+  signout: 'was signed out',
   'mcp.add_targets': 'added targets',
   'mcp.update_target': 'changed a target',
   'mcp.set_target_paused': 'paused or resumed a target',
@@ -753,10 +776,12 @@ function SecurityBody({ initialTab }: { initialTab: Tab }) {
   }
 
   const signOut = async () => {
-    await send('/api/auth/logout', 'POST')
+    const { body } = await send('/api/auth/logout', 'POST')
     // A full load, not a client-side move: nothing the signed-in page held
-    // in memory should outlive signing out.
-    window.location.href = new URL('/login', window.location.href).href
+    // in memory should outlive signing out. Signed in through the identity
+    // provider, on to sign out there too; it comes back to the sign-in page.
+    const providerSignOut = typeof body?.redirect === 'string' && /^https?:\/\//.test(body.redirect) ? body.redirect : null
+    window.location.href = providerSignOut ?? new URL('/login', window.location.href).href
   }
 
   const here = typeof window === 'undefined' ? '/' : window.location.pathname

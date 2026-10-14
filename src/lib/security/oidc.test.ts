@@ -5,10 +5,12 @@ import {
   decodePending,
   discover,
   encodePending,
+  endSessionUrl,
   inAllowedGroup,
   newPending,
   usernameFrom,
   verifyIdToken,
+  verifyLogoutToken,
   SSO_DEFAULTS,
   type Claims,
   type Discovery,
@@ -93,6 +95,68 @@ describe('verifyIdToken', () => {
     const fresh = { ...discovery, jwks_uri: 'https://auth.example/rotated/jwks/' }
     await expect(verifyIdToken(rs256(claims(), 'k2'), { ...options, discovery: fresh, fetchFn })).resolves.toMatchObject({ sub: 'abc123' })
     expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('verifyLogoutToken', () => {
+  const EVENT = { 'http://schemas.openid.net/event/backchannel-logout': {} }
+  const logoutOptions = { discovery, clientId: 'client-1', clientSecret: 'secret-1', now: NOW, fetchFn: keys as unknown as typeof fetch }
+  let n = 0
+  const logout = (overrides: Record<string, unknown> = {}) => ({
+    iss: ISSUER,
+    aud: 'client-1',
+    iat: NOW / 1000,
+    jti: `jti-${++n}`,
+    events: EVENT,
+    sub: 'abc123',
+    sid: 'session-1',
+    ...overrides,
+  })
+
+  it('takes a signed logout token for this application, naming the person and their session', async () => {
+    await expect(verifyLogoutToken(rs256(logout()), logoutOptions)).resolves.toEqual({ iss: ISSUER, sub: 'abc123', sid: 'session-1' })
+    await expect(verifyLogoutToken(hs256(logout({ sid: undefined }), 'secret-1'), logoutOptions)).resolves.toEqual({
+      iss: ISSUER,
+      sub: 'abc123',
+      sid: undefined,
+    })
+  })
+
+  it.each([
+    ['one signed by someone else', () => hs256(logout(), 'guessed'), 'signature'],
+    ['one for another application', () => rs256(logout({ aud: 'client-2' })), 'another application'],
+    ['one from another issuer', () => rs256(logout({ iss: 'https://evil.example/' })), 'another issuer'],
+    ['an ID token passed off as one', () => rs256(claims()), 'not a logout token'],
+    ['one carrying a nonce', () => rs256(logout({ nonce: 'n-1' })), 'no nonce'],
+    ['one naming nobody', () => rs256(logout({ sub: undefined, sid: undefined })), 'whose sign-in'],
+    ['an old one', () => rs256(logout({ iat: NOW / 1000 - 3600 })), 'too old'],
+    ['an unsigned one', () => `${b64({ alg: 'none' })}.${b64(logout())}.`, 'not accepted'],
+  ])('refuses %s', async (_, token, message) => {
+    await expect(verifyLogoutToken(token(), logoutOptions)).rejects.toThrow(message)
+  })
+
+  it('refuses the same token sent twice', async () => {
+    const token = rs256(logout({ jti: 'once-only' }))
+    await expect(verifyLogoutToken(token, logoutOptions)).resolves.toMatchObject({ sub: 'abc123' })
+    await expect(verifyLogoutToken(token, logoutOptions)).rejects.toThrow('used already')
+  })
+})
+
+describe('endSessionUrl', () => {
+  const config = { ...SSO_DEFAULTS, clientId: 'client-1' }
+
+  it('asks the provider to sign out, showing the ID token and where to come back to', () => {
+    const url = new URL(
+      endSessionUrl({ ...discovery, end_session_endpoint: `${ISSUER}end-session/` }, config, 'the.id.token', 'https://ping.example/login')!
+    )
+    expect(url.origin + url.pathname).toBe(`${ISSUER}end-session/`)
+    expect(url.searchParams.get('id_token_hint')).toBe('the.id.token')
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://ping.example/login')
+    expect(url.searchParams.get('client_id')).toBe('client-1')
+  })
+
+  it('has nowhere to send the browser when the provider has no end-session address', () => {
+    expect(endSessionUrl(discovery, config, 'the.id.token', 'https://ping.example/login')).toBeNull()
   })
 })
 
