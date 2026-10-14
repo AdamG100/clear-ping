@@ -35,10 +35,9 @@ import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { AlertsView, type AlertResponse } from './alerts-view'
-import { McpPage } from './mcp-page'
-import { SecurityPage } from './security-page'
+import { SettingsPage } from './settings-page'
 import { useDashboardPage } from './use-dashboard-page'
-import type { DashboardPage, SecurityTab } from '@/lib/dashboard-pages'
+import { DEFAULT_SETTINGS_SECTION, isSettingsSection, type DashboardPage } from '@/lib/dashboard-pages'
 import { ProbeDetailsPanel } from './probe-details'
 import { TraceroutePanel } from './traceroute-panel'
 import { ComparePanel } from './compare-panel'
@@ -563,8 +562,8 @@ export function Dashboard() {
   const { notify, reportError } = useToast()
   const { targets, latest, series, groups, groupOrders, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
-  // A page (alerts, security, connecting an assistant) takes the place of a
-  // target or a group in the main pane. Which one is part of the address.
+  // A page (alerts, settings) takes the place of a target or a group in the
+  // main pane. Which one is part of the address.
   const { page, goTo } = useDashboardPage()
   const showingAlerts = page?.kind === 'alerts'
   // On a narrow screen the sidebar is a drawer over the page. Choosing
@@ -631,8 +630,13 @@ export function Dashboard() {
     hideSidebar()
   }, [goTo, hideSidebar])
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
-  const openMcp = useCallback(() => openPage({ kind: 'mcp' }), [openPage])
-  const openSecurity = useCallback((tab: SecurityTab = 'access') => openPage({ kind: 'security', tab }), [openPage])
+  // Takes anything, because it is handed straight to buttons as their click
+  // handler, and an event is not a section: only a real one is taken.
+  const openSettings = useCallback(
+    (section?: unknown) =>
+      openPage({ kind: 'settings', section: isSettingsSection(section) ? section : DEFAULT_SETTINGS_SECTION }),
+    [openPage]
+  )
 
   // A group on screen keeps being on screen under its new name.
   const handleMoveGroup = useCallback(async (from: string, to: string) => {
@@ -917,10 +921,8 @@ export function Dashboard() {
         onMoveGroup={handleMoveGroup}
         alertsOpen={showingAlerts}
         onOpenAlerts={openAlerts}
-        mcpOpen={page?.kind === 'mcp'}
-        onOpenMcp={openMcp}
-        securityOpen={page?.kind === 'security'}
-        onOpenSecurity={openSecurity}
+        settingsOpen={page?.kind === 'settings'}
+        onOpenSettings={openSettings}
         firingAlerts={firingAlerts}
         onAddTarget={addTarget}
         onImportTargets={handleImportTargets}
@@ -1007,30 +1009,18 @@ export function Dashboard() {
               />
             </ErrorBoundary>
           </motion.div>
-          ) : page?.kind === 'security' ? (
+          ) : page?.kind === 'settings' ? (
           <motion.div
-            key="security"
+            key="settings"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
             transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
           >
-            <ErrorBoundary label="Security">
-              {/* The tab is part of the address but not of the history: going
-                  back leaves Security rather than stepping through its tabs. */}
-              <SecurityPage tab={page.tab} onTab={tab => goTo({ kind: 'security', tab }, 'replace')} />
-            </ErrorBoundary>
-          </motion.div>
-          ) : page?.kind === 'mcp' ? (
-          <motion.div
-            key="mcp"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
-            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
-          >
-            <ErrorBoundary label="Connect an AI assistant">
-              <McpPage onMakeKey={() => openSecurity('keys')} />
+            <ErrorBoundary label="Settings">
+              {/* The section is part of the address but not of the history:
+                  going back leaves Settings rather than stepping through it. */}
+              <SettingsPage section={page.section} onSection={section => goTo({ kind: 'settings', section }, 'replace')} />
             </ErrorBoundary>
           </motion.div>
           ) : groupTargets ? (

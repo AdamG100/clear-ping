@@ -1,14 +1,14 @@
 'use client'
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, KeyRound, Loader2, LogOut, User, UserPlus } from 'lucide-react'
+import { Bot, History, KeyRound, Loader2, LogIn, LogOut, ShieldCheck, User, UserPlus, Users, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/components/ui/toast'
-import type { SecurityTab } from '@/lib/dashboard-pages'
+import type { SettingsSection } from '@/lib/dashboard-pages'
 import { cn } from '@/lib/utils'
-import { CopyField, PAGE_CARD } from './mcp-page'
+import { AssistantSettings, CopyField, PAGE_CARD } from './mcp-setup'
 import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
 
 /**
@@ -21,7 +21,6 @@ import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
  */
 
 type Access = 'read' | 'write'
-type Tab = SecurityTab
 
 interface ApiKey {
   id: string
@@ -83,14 +82,6 @@ type Loaded =
 
 const HINT = 'text-[11px] leading-relaxed text-muted-foreground'
 const SECTION_TITLE = 'text-xs font-semibold text-card-foreground'
-
-const TABS: { value: Tab; label: string }[] = [
-  { value: 'access', label: 'Access' },
-  { value: 'keys', label: 'Keys' },
-  { value: 'sso', label: 'SSO' },
-  { value: 'accounts', label: 'Accounts' },
-  { value: 'activity', label: 'Activity' },
-]
 
 function when(ms: number | null): string {
   return ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'never'
@@ -751,14 +742,29 @@ function ActivityTab() {
   )
 }
 
-interface SecurityPageProps {
-  /** The tab on screen, which is part of the address: /security/keys and so on. */
-  tab: Tab
-  onTab: (tab: Tab) => void
+/** The menu down the side of Settings, in its two groups. */
+const SECTIONS: { value: SettingsSection; label: string; icon: LucideIcon; group: string }[] = [
+  { value: 'access', label: 'Access', icon: ShieldCheck, group: 'Security' },
+  { value: 'keys', label: 'Keys', icon: KeyRound, group: 'Security' },
+  { value: 'sso', label: 'Single sign-on', icon: LogIn, group: 'Security' },
+  { value: 'accounts', label: 'Accounts', icon: Users, group: 'Security' },
+  { value: 'activity', label: 'Activity', icon: History, group: 'Security' },
+  { value: 'assistant', label: 'AI assistant', icon: Bot, group: 'Integrations' },
+]
+const GROUPS = [...new Set(SECTIONS.map(item => item.group))]
+
+interface SettingsPageProps {
+  /** The section on screen, which is part of the address: /settings/keys and so on. */
+  section: SettingsSection
+  onSection: (section: SettingsSection) => void
 }
 
-/** The dashboard's security page, at /security. */
-export function SecurityPage({ tab, onTab }: SecurityPageProps) {
+/**
+ * The dashboard's Settings page, at /settings: who may get in, keys,
+ * single sign-on, accounts, the activity record, and connecting an AI
+ * assistant, each a section of its own in the menu down the side.
+ */
+export function SettingsPage({ section, onSection }: SettingsPageProps) {
   const { reportError } = useToast()
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
 
@@ -792,14 +798,15 @@ export function SecurityPage({ tab, onTab }: SecurityPageProps) {
   }
 
   const here = typeof window === 'undefined' ? '/' : window.location.pathname
+  const current = SECTIONS.find(item => item.value === section) ?? SECTIONS[0]
 
   return (
     // Settings read best at the width of a form, not of a monitor: the whole
     // page, header and all, is kept to it, so the header lines up with the rest.
-    <div className={cn(PANE, 'max-w-5xl')}>
+    <div className={cn(PANE, 'max-w-6xl')}>
       <header className={PANE_HEADER}>
         <div className="min-w-0">
-          <h1 className={PANE_TITLE}>Security</h1>
+          <h1 className={PANE_TITLE}>Settings</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Who may open this ClearPing, keys for scripts and AI assistants, and a record of every change and who made it.
           </p>
@@ -820,55 +827,81 @@ export function SecurityPage({ tab, onTab }: SecurityPageProps) {
         )}
       </header>
 
-      {loaded.state === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+      <div className="grid items-start gap-4 @2xl/main:gap-6 @3xl/main:grid-cols-[12rem_minmax(0,1fr)]">
+        {/* A column down the side where there is room; a row that scrolls
+            sideways where there is not, its group names left out. */}
+        <nav
+          aria-label="Settings"
+          className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 scrollbar-none @3xl/main:sticky @3xl/main:top-6 @3xl/main:mx-0 @3xl/main:flex-col @3xl/main:overflow-visible @3xl/main:px-0"
+        >
+          {GROUPS.map((group, index) => (
+            <div key={group} className={cn('contents @3xl/main:block @3xl/main:space-y-0.5', index > 0 && '@3xl/main:mt-4')}>
+              <p className="hidden px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground @3xl/main:block">
+                {group}
+              </p>
+              {SECTIONS.filter(item => item.group === group).map(item => {
+                const Icon = item.icon
+                const active = item.value === current.value
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => onSection(item.value)}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm outline-none transition-colors touch:py-2.5 @3xl/main:w-full',
+                      'focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                      active
+                        ? 'bg-secondary font-medium text-secondary-foreground'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {item.label}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </nav>
 
-      {loaded.state === 'failed' && <p className="text-sm text-destructive">{loaded.error}</p>}
-
-      {(loaded.state === 'needsAccount' || loaded.state === 'needsSignIn') && (
-        <div className={PAGE_CARD}>
-          <p className="text-sm leading-relaxed text-card-foreground">
-            {loaded.state === 'needsAccount'
-              ? 'Security is set up with an account: it is what turns sign-in on, makes keys, and is the name changes are recorded under. There is none yet.'
-              : 'Security settings are changed signed in.'}
-          </p>
-          <Button asChild size="sm">
-            <a href={`/login?next=${encodeURIComponent(here)}`}>{loaded.state === 'needsAccount' ? 'Create an account' : 'Sign in'}</a>
-          </Button>
-        </div>
-      )}
-
-      {loaded.state === 'ready' && (
         <div className="min-w-0 space-y-4">
-          <div className="flex gap-0.5 overflow-x-auto rounded-lg border border-border bg-muted/30 p-0.5 scrollbar-none" role="tablist" aria-label="Security">
-            {TABS.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                role="tab"
-                id={`security-tab-${option.value}`}
-                aria-selected={tab === option.value}
-                aria-controls={`security-panel-${option.value}`}
-                onClick={() => onTab(option.value)}
-                className={cn(
-                  'flex-1 cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-sm outline-none transition-colors touch:py-2.5',
-                  'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                  tab === option.value ? 'bg-primary font-medium text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <h2 className="text-base font-semibold tracking-tight text-foreground">{current.label}</h2>
 
-          <div role="tabpanel" id={`security-panel-${tab}`} aria-labelledby={`security-tab-${tab}`} className={PAGE_CARD}>
-            {tab === 'access' && <AccessTab data={loaded.data} onChange={change} />}
-            {tab === 'keys' && <KeysTab data={loaded.data} reload={reload} />}
-            {tab === 'sso' && <SsoTab data={loaded.data} reload={reload} />}
-            {tab === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}
-            {tab === 'activity' && <ActivityTab />}
-          </div>
+          {current.value === 'assistant' ? (
+            <AssistantSettings onMakeKey={() => onSection('keys')} />
+          ) : (
+            <>
+              {loaded.state === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+
+              {loaded.state === 'failed' && <p className="text-sm text-destructive">{loaded.error}</p>}
+
+              {(loaded.state === 'needsAccount' || loaded.state === 'needsSignIn') && (
+                <div className={PAGE_CARD}>
+                  <p className="text-sm leading-relaxed text-card-foreground">
+                    {loaded.state === 'needsAccount'
+                      ? 'Security is set up with an account: it is what turns sign-in on, makes keys, and is the name changes are recorded under. There is none yet.'
+                      : 'Security settings are changed signed in.'}
+                  </p>
+                  <Button asChild size="sm">
+                    <a href={`/login?next=${encodeURIComponent(here)}`}>{loaded.state === 'needsAccount' ? 'Create an account' : 'Sign in'}</a>
+                  </Button>
+                </div>
+              )}
+
+              {loaded.state === 'ready' && (
+                <div className={PAGE_CARD}>
+                  {current.value === 'access' && <AccessTab data={loaded.data} onChange={change} />}
+                  {current.value === 'keys' && <KeysTab data={loaded.data} reload={reload} />}
+                  {current.value === 'sso' && <SsoTab data={loaded.data} reload={reload} />}
+                  {current.value === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}
+                  {current.value === 'activity' && <ActivityTab />}
+                </div>
+              )}
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 }

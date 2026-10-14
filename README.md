@@ -213,7 +213,7 @@ The Docker image includes Apprise. Running from source, install it with
 
 ### An AI assistant
 
-**Connect an AI assistant**, at the foot of the sidebar, gives the address to
+**Settings → AI assistant** (the cog at the foot of the sidebar) gives the address to
 hand to an assistant and what to do with it. For Claude Code that is one
 command:
 
@@ -233,7 +233,7 @@ Then ask it in your own words:
 
 As it comes it can only read: nothing an assistant does changes a target or
 sends anything, and alerts are never shown to it. Give an assistant a key of
-its own that may read and change (Security → Keys) and it can also add
+its own that may read and change (Settings → Keys) and it can also add
 targets, change them, pause them and probe one now (*add my router and 1.1.1.1
 as ping targets, in a group called Network*), though never delete one; what it
 changes is recorded under its key's name. A key is only taken over HTTPS or
@@ -270,7 +270,7 @@ All optional. With Docker, pass them with `-e`.
 | `CLEARPING_RETENTION_DAYS` | `90` | Days of measurements to keep; `0` keeps everything |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes, for when `npm run probe` runs as its own process |
 | `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made: for getting back in after a lost password ([docs/security.md](docs/security.md#locked-out)) |
-| `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard. Still works, as a key that can change things; keys made under Security are better, one per assistant |
+| `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard. Still works, as a key that can change things; keys made in Settings are better, one per assistant |
 | `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes the token over plain HTTP from anywhere, for when a VPN or tunnel does the encrypting. Otherwise it is taken only over HTTPS or from ClearPing's own network |
 | `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check of the registry for a newer image. The dashboard then shows the version it runs but not whether it is the latest |
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Bell, Bot, PanelLeftOpen, Plus, Share2, ShieldCheck } from 'lucide-react'
+import { Bell, PanelLeftOpen, Plus, Settings, Share2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Target } from '@/types/probe'
 import { describeGroupHealth, groupIsOnline, groupIsPaused, summarizeGroupHealth } from '@/lib/group-health'
@@ -33,12 +33,9 @@ interface SidebarRailProps {
   /** How many alerts are firing on at least one target. */
   firingAlerts: number
   onShare: () => void
-  /** Whether the page for connecting an AI assistant is open. */
-  mcpOpen?: boolean
-  onConnectAssistant: () => void
-  /** Whether the security page is open. */
-  securityOpen?: boolean
-  onOpenSecurity: () => void
+  /** Whether Settings is open. */
+  settingsOpen?: boolean
+  onOpenSettings: () => void
   onAddTarget: () => void
 }
 
@@ -66,10 +63,8 @@ export function SidebarRail({
   onOpenAlerts,
   firingAlerts,
   onShare,
-  mcpOpen = false,
-  onConnectAssistant,
-  securityOpen = false,
-  onOpenSecurity,
+  settingsOpen = false,
+  onOpenSettings,
   onAddTarget,
 }: SidebarRailProps) {
   const groups = useMemo(
@@ -177,16 +172,6 @@ export function SidebarRail({
         )}
         <button
           type="button"
-          onClick={onConnectAssistant}
-          aria-pressed={mcpOpen}
-          aria-label="Connect an AI assistant"
-          {...beside('Connect an AI assistant', 'MCP')}
-          className={cn(RAIL_BUTTON, mcpOpen && 'bg-sidebar-accent text-sidebar-foreground')}
-        >
-          <Bot className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
           onClick={onShare}
           aria-label="Share or import targets"
           {...beside('Share or import targets')}
@@ -196,13 +181,13 @@ export function SidebarRail({
         </button>
         <button
           type="button"
-          onClick={onOpenSecurity}
-          aria-pressed={securityOpen}
-          aria-label="Security"
-          {...beside('Security', 'Sign-in, keys and activity')}
-          className={cn(RAIL_BUTTON, securityOpen && 'bg-sidebar-accent text-sidebar-foreground')}
+          onClick={onOpenSettings}
+          aria-pressed={settingsOpen}
+          aria-label="Settings"
+          {...beside('Settings', 'Security, keys and AI assistants')}
+          className={cn(RAIL_BUTTON, settingsOpen && 'bg-sidebar-accent text-sidebar-foreground')}
         >
-          <ShieldCheck className="h-4 w-4" />
+          <Settings className="h-4 w-4" />
         </button>
         <button
           type="button"

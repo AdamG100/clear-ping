@@ -59,11 +59,10 @@ import {
   Play,
   ChartLine,
   Bell,
-  Bot,
   ListX,
   MoreVertical,
   PanelLeftClose,
-  ShieldCheck,
+  Settings,
   X,
 } from 'lucide-react'
 import { SidebarRail } from './sidebar-rail'
@@ -165,12 +164,9 @@ interface SidebarProps {
   onOpenAlerts?: () => void
   /** How many alerts are firing on at least one target. */
   firingAlerts?: number
-  /** Whether the page for connecting an AI assistant is what the main pane is showing. */
-  mcpOpen?: boolean
-  onOpenMcp?: () => void
-  /** Whether the security page is what the main pane is showing. */
-  securityOpen?: boolean
-  onOpenSecurity?: () => void
+  /** Whether Settings is what the main pane is showing. */
+  settingsOpen?: boolean
+  onOpenSettings?: () => void
   onReorderTargets?: (updates: { id: string; sortOrder: number; group?: string }[]) => void
   /** The targets have not arrived yet: there is no list to show and nothing to count. */
   loading?: boolean
@@ -840,10 +836,8 @@ export function Sidebar({
   alertsOpen = false,
   onOpenAlerts,
   firingAlerts = 0,
-  mcpOpen = false,
-  onOpenMcp,
-  securityOpen = false,
-  onOpenSecurity,
+  settingsOpen = false,
+  onOpenSettings,
   onReorderTargets,
   loading = false,
 }: SidebarProps) {
@@ -1372,23 +1366,7 @@ export function Sidebar({
       </MotionConfig>
 
       {/* Footer actions */}
-      <div className="space-y-2 border-t border-sidebar-border p-3 pb-[calc(0.75rem+var(--safe-bottom))]">
-        {/* Said in words, with a line to itself: an icon among the others
-            would be one more thing nobody presses, and this is the only place
-            the app says an assistant can be connected to it at all. */}
-        <button
-          type="button"
-          onClick={onOpenMcp}
-          aria-current={mcpOpen ? 'page' : undefined}
-          className={cn(
-            'flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-1.5 text-left text-xs text-muted-foreground outline-none transition-colors hover:border-ring/60 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 touch:py-2.5',
-            mcpOpen && 'border-solid border-sidebar-ring/50 bg-sidebar-accent text-sidebar-foreground'
-          )}
-        >
-          <Bot className="h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">Connect an AI assistant</span>
-          <span className="shrink-0 rounded border border-border px-1 py-px text-[10px] leading-none tracking-wider">MCP</span>
-        </button>
+      <div className="border-t border-sidebar-border p-3 pb-[calc(0.75rem+var(--safe-bottom))]">
         <div className="flex gap-2">
         {onOpenAlerts && (
           <Button
@@ -1429,17 +1407,20 @@ export function Sidebar({
         >
           <Share2 className="h-4 w-4" />
         </Button>
+        {/* Everything that is set up rather than monitored, in one place:
+            sign-in, keys, single sign-on, accounts, the activity record, and
+            connecting an AI assistant. */}
         <Button
-          variant={securityOpen ? 'secondary' : 'outline'}
+          variant={settingsOpen ? 'secondary' : 'outline'}
           size="icon-sm"
-          onClick={onOpenSecurity}
-          aria-pressed={securityOpen}
-          aria-label="Security"
-          data-tip="Security"
-          data-tip-detail="Sign-in, keys and activity"
+          onClick={() => onOpenSettings?.()}
+          aria-pressed={settingsOpen}
+          aria-label="Settings"
+          data-tip="Settings"
+          data-tip-detail="Security, keys and AI assistants"
           suppressHydrationWarning
         >
-          <ShieldCheck className="h-4 w-4" />
+          <Settings className="h-4 w-4" />
         </Button>
         </div>
       </div>
@@ -1468,10 +1449,8 @@ export function Sidebar({
               onOpenAlerts={onOpenAlerts}
               firingAlerts={firingAlerts}
               onShare={() => setIsShareOpen(true)}
-              mcpOpen={mcpOpen}
-              onConnectAssistant={() => onOpenMcp?.()}
-              securityOpen={securityOpen}
-              onOpenSecurity={() => onOpenSecurity?.()}
+              settingsOpen={settingsOpen}
+              onOpenSettings={() => onOpenSettings?.()}
               onAddTarget={() => openAddDialog()}
             />
           </motion.div>

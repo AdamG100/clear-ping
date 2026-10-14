@@ -17,8 +17,9 @@ The address is `/api/mcp` on wherever your ClearPing is reached:
 http://clearping.lan:3000/api/mcp
 ```
 
-**Connect an AI assistant**, at the foot of the sidebar, opens a page (`/mcp`)
-with the address for your installation and what to do with it.
+**Settings → AI assistant** (the cog at the foot of the sidebar, or
+`/settings/assistant`) shows the address for your installation and what to do
+with it.
 
 **Claude Code.** Once, in a terminal:
 
@@ -103,7 +104,7 @@ and the format wanted.
 
 ### Letting it change things
 
-Give an assistant a **read and change** key (Security → Keys, see
+Give an assistant a **read and change** key (Settings → Keys, see
 [security.md](security.md)) and it gets five more tools:
 
 | Tool | What it does |
@@ -131,7 +132,7 @@ monitored. And **alerts** cannot be seen or changed.
 Each of these tools is marked as one that changes something, so a client such
 as Claude Code asks you before it runs one. To an assistant without such a key
 they do not exist: the list it is given has only the six that read. Every call
-to one is recorded under the key's name in Security → Activity.
+to one is recorded under the key's name in Settings → Activity.
 
 ## The report
 
@@ -180,7 +181,7 @@ caveats in, and to say so if the period shows no real problem.
 
 ## Keys
 
-Each assistant gets a key of its own, made under Security → Keys: **read only**,
+Each assistant gets a key of its own, made under Settings → Keys: **read only**,
 or **read and change**. Revoke one and that assistant alone is cut off; what
 each one changes is recorded under its name. Send it with every request:
 
@@ -203,14 +204,14 @@ Claude Desktop on Windows splits an argument at its spaces:
 ```
 
 Without a key an assistant can read but never change anything, unless
-**Require a key for AI assistants** is on under Security → Access (it always is
+**Require a key for AI assistants** is on under Settings → Access (it always is
 while sign-in is on), and then it is refused altogether. A wrong or revoked key
-is refused either way. The page for connecting an assistant writes the command with a
+is refused either way. Settings → AI assistant writes the command with a
 place for the key; it is never shown a key.
 
 `CLEARPING_MCP_TOKEN`, the single token from before keys were made in the
 dashboard, still works as a read and change key, and while it is set a key is
-always asked for. Move to keys made in Security and unset it.
+always asked for. Move to keys made in Settings and unset it.
 
 ### Keys are only taken encrypted
 
@@ -228,7 +229,7 @@ is taken only if it is one of:
 
 Anything else is refused with `403` before the key is looked at, and the
 answer says that the key should be revoked and replaced, since it has already
-travelled in the clear. The page for connecting an assistant warns of this before it is
+travelled in the clear. Settings → AI assistant warns of this before it is
 tried, when the page itself was opened over plain HTTP at a public address.
 
 How it arrived is read from `X-Forwarded-Proto`, which a proxy has to pass on

@@ -3,7 +3,7 @@
 Everything here is optional and starts off. Out of the box ClearPing is as it
 always was: anyone who can reach it can use it, which is fine on your own
 network or behind a sign-in proxy such as Authentik. For anything else, the
-**Security** page (the shield button in the sidebar, or `/security`) sets up:
+**Settings** page (the cog at the foot of the sidebar, or `/settings`) sets up:
 
 - **Sign-in** for the dashboard and its API, with accounts.
 - **Keys** for scripts and AI assistants: one each, able to read or to read and
@@ -13,14 +13,16 @@ network or behind a sign-in proxy such as Authentik. For anything else, the
 
 ## Setting it up
 
-1. Open **Security** (the shield, bottom of the sidebar) and choose **Create an
-   account**. Each tab has an address of its own: `/security/keys`,
-   `/security/sso`, `/security/accounts`, `/security/activity`. The first account is made on the sign-in page; after that the
-   page offers only to sign in, and more accounts are added from Security.
+1. Open **Settings** (the cog, bottom of the sidebar) and choose **Create an
+   account**. The first account is made on the sign-in page; after that the
+   page offers only to sign in, and more accounts are added in Settings →
+   Accounts. Each section has an address of its own: `/settings/keys`,
+   `/settings/sso`, `/settings/accounts`, `/settings/activity`,
+   `/settings/assistant`.
 2. Under **Access**, turn on **Require sign-in for the dashboard and API**.
 3. Under **Keys**, make a key for each assistant or script that needs one.
 
-Changing anything under Security always takes being signed in, even while
+Changing anything under Settings always takes being signed in, even while
 sign-in is off for the dashboard. Otherwise anyone who could open the page could
 make themselves a key. A key can never change these settings.
 
@@ -75,12 +77,12 @@ a quarter of an hour.
 
 `CLEARPING_MCP_TOKEN`, from before keys were made in the dashboard, still
 works, as a key that can change things, and while it is set the MCP address
-always asks for a key. Keys made in Security are better: one per assistant,
+always asks for a key. Keys made in Settings are better: one per assistant,
 revocable without a restart, named in the record. Move to them and unset it.
 
 ## Activity
 
-**Security → Activity** lists, newest first:
+**Settings → Activity** lists, newest first:
 
 - targets added, imported, changed, paused, resumed and deleted;
 - groups made, renamed and deleted; alerts made, changed and deleted;
@@ -115,7 +117,7 @@ button on the sign-in page, with no password to keep for ClearPing.
 
 1. **Applications → Providers → Create → OAuth2/OpenID Provider.**
    - Client type: **Confidential**.
-   - Redirect URI: the one shown under Security → SSO in ClearPing, which is
+   - Redirect URI: the one shown under Settings → Single sign-on in ClearPing, which is
      `https://<your ClearPing>/api/auth/sso/callback`. Open that page at the
      address people will use, since the URI is taken from it.
    - Signing key: pick one (the self-signed certificate is fine). Without one
@@ -130,7 +132,7 @@ button on the sign-in page, with no password to keep for ClearPing.
 
 ### In ClearPing
 
-1. Security → **SSO**: paste the issuer, client ID and client secret.
+1. Settings → **Single sign-on**: paste the issuer, client ID and client secret.
    **Test the issuer** checks that Authentik can be reached there.
 2. Optionally, **Only members of this group**: an Authentik group name. Every
    account in ClearPing can do everything, these settings included, so keep
@@ -155,8 +157,8 @@ have been linked can sign in this way.
 **Signing out of Authentik signs you out of ClearPing.** In the provider (Authentik
 2025.8 or later), set:
 
-- **Logout URI**: `https://<your ClearPing>/api/auth/sso/logout`, which Security →
-  SSO shows to copy.
+- **Logout URI**: `https://<your ClearPing>/api/auth/sso/logout`, which Settings →
+  Single sign-on shows to copy.
 - **Logout method**: **Back-channel**.
 
 Authentik then tells ClearPing, server to server, whenever a sign-in there

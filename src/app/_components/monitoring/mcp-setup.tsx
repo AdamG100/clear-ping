@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { isLocalHost } from '@/lib/host'
 import { cn } from '@/lib/utils'
-import { PANE, PANE_HEADER, PANE_TITLE } from './pane-layout'
 
 /**
  * How to connect an AI assistant to this ClearPing.
@@ -270,7 +269,7 @@ function McpSetup({ onMakeKey }: { onMakeKey?: () => void }) {
   )
 
   return (
-    <div className="grid items-start gap-4 @2xl/main:gap-6 @5xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+    <div className="space-y-4">
       <section className={PAGE_CARD} aria-labelledby="mcp-setup-title">
         <h2 id="mcp-setup-title" className={PAGE_CARD_TITLE}>Set it up</h2>
         <CopyField id="mcp-url" label="MCP server address" value={url} />
@@ -394,71 +393,63 @@ function McpSetup({ onMakeKey }: { onMakeKey?: () => void }) {
         </div>
       </section>
 
-      <div className="min-w-0 space-y-4 @2xl/main:space-y-6">
-        <section className={PAGE_CARD} aria-labelledby="mcp-keys-title">
-          <h2 id="mcp-keys-title" className={PAGE_CARD_TITLE}>A key for each assistant</h2>
-          <p className="text-xs leading-relaxed text-card-foreground">
-            Give each assistant a key of its own, and put it where it says{' '}
-            <span className="font-mono">{TOKEN_PLACEHOLDER}</span>. A <span className="font-medium">read-only</span> key
-            lets it read; a <span className="font-medium">read and change</span> key lets it add and change targets as
-            well. Whatever it changes is recorded under the key&apos;s name, and revoking the key cuts that assistant
-            off alone.
-          </p>
-          <p className={HINT}>
-            {tokenRequired
-              ? 'This ClearPing asks for a key on every connection.'
-              : 'Without a key an assistant can still read, but not change anything.'}
-          </p>
-          {onMakeKey && (
-            <Button type="button" variant="outline" size="sm" onClick={onMakeKey}>
-              <KeyRound className="h-4 w-4" />
-              Make a key
-            </Button>
-          )}
-        </section>
+      <section className={PAGE_CARD} aria-labelledby="mcp-keys-title">
+        <h2 id="mcp-keys-title" className={PAGE_CARD_TITLE}>A key for each assistant</h2>
+        <p className="text-xs leading-relaxed text-card-foreground">
+          Give each assistant a key of its own, and put it where it says{' '}
+          <span className="font-mono">{TOKEN_PLACEHOLDER}</span>. A <span className="font-medium">read-only</span> key
+          lets it read; a <span className="font-medium">read and change</span> key lets it add and change targets as
+          well. Whatever it changes is recorded under the key&apos;s name, and revoking the key cuts that assistant
+          off alone.
+        </p>
+        <p className={HINT}>
+          {tokenRequired
+            ? 'This ClearPing asks for a key on every connection.'
+            : 'Without a key an assistant can still read, but not change anything.'}
+        </p>
+        {onMakeKey && (
+          <Button type="button" variant="outline" size="sm" onClick={onMakeKey}>
+            <KeyRound className="h-4 w-4" />
+            Make a key
+          </Button>
+        )}
+      </section>
 
-        <section className={PAGE_CARD} aria-labelledby="mcp-ask-title">
-          <h2 id="mcp-ask-title" className={PAGE_CARD_TITLE}>Then ask it something like</h2>
-          <ul className="space-y-1.5">
-            {[...EXAMPLES, WRITE_EXAMPLE].map(example => (
-              <li key={example} className="rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs text-card-foreground">
-                {example}
-              </li>
-            ))}
-          </ul>
-          <p className={HINT}>
-            The last of those needs a read and change key. With one, an assistant can add targets, change them, pause
-            them, probe one now and trace a route; it cannot delete a target, and alerts are never shown to it. The
-            report is only as good as what is monitored: with your router as a target as well as addresses beyond it,
-            the data can show whether a fault was inside your network or outside it.
-          </p>
-        </section>
-      </div>
+      <section className={PAGE_CARD} aria-labelledby="mcp-ask-title">
+        <h2 id="mcp-ask-title" className={PAGE_CARD_TITLE}>Then ask it something like</h2>
+        <ul className="space-y-1.5">
+          {[...EXAMPLES, WRITE_EXAMPLE].map(example => (
+            <li key={example} className="rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs text-card-foreground">
+              {example}
+            </li>
+          ))}
+        </ul>
+        <p className={HINT}>
+          The last of those needs a read and change key. With one, an assistant can add targets, change them, pause
+          them, probe one now and trace a route; it cannot delete a target, and alerts are never shown to it. The
+          report is only as good as what is monitored: with your router as a target as well as addresses beyond it,
+          the data can show whether a fault was inside your network or outside it.
+        </p>
+      </section>
     </div>
   )
 }
 
 /**
- * The dashboard's page for connecting an AI assistant, at /mcp.
+ * Settings → AI assistant: connecting one over MCP.
  *
  * The address it gives is the one this page was opened at, which is only
  * known in the browser: on the server the setup is not drawn yet.
  */
-export function McpPage({ onMakeKey }: { onMakeKey?: () => void }) {
+export function AssistantSettings({ onMakeKey }: { onMakeKey?: () => void }) {
   const inBrowser = useInBrowser()
 
   return (
-    <div className={PANE}>
-      <header className={PANE_HEADER}>
-        <div className="min-w-0">
-          <h1 className={PANE_TITLE}>Connect an AI assistant</h1>
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            An assistant such as Claude can read this ClearPing over MCP: what is monitored, every outage with its
-            times, the traceroutes. Give it the address below, then ask it in your own words.
-          </p>
-        </div>
-      </header>
-
+    <div className="space-y-4">
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        An assistant such as Claude can read this ClearPing over MCP: what is monitored, every outage with its times,
+        the traceroutes. Give it the address below, then ask it in your own words.
+      </p>
       {inBrowser ? <McpSetup onMakeKey={onMakeKey} /> : <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
     </div>
   )
