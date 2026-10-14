@@ -133,9 +133,7 @@ class ProbeScheduler {
 
       for (const target of activeTargets) {
         const existing = this.scheduledTargets.get(target.id);
-
-        this.scheduledTargets.set(target.id, {
-          id: target.id,
+        const settings = {
           name: target.name,
           host: target.host,
           group: target.group,
@@ -143,13 +141,24 @@ class ProbeScheduler {
           ipVersion: target.ipVersion ?? 'auto',
           probeConfig: target.probeConfig,
           interval: target.interval,
+        };
+
+        if (existing) {
+          // Updated in place, never replaced: a probe in flight holds this
+          // object and clears `isProbing` on it when it finishes. A fresh copy
+          // would inherit `isProbing: true` and be skipped forever after.
+          Object.assign(existing, settings);
           // A probe in flight has already claimed its slot; restoring the
           // stored timestamp underneath it would schedule a duplicate run.
-          lastProbeTime: existing?.isProbing
-            ? existing.lastProbeTime
-            : lastProbeTimes.get(target.id) ?? 0,
-          isProbing: existing?.isProbing ?? false,
-        });
+          if (!existing.isProbing) existing.lastProbeTime = lastProbeTimes.get(target.id) ?? 0;
+        } else {
+          this.scheduledTargets.set(target.id, {
+            id: target.id,
+            ...settings,
+            lastProbeTime: lastProbeTimes.get(target.id) ?? 0,
+            isProbing: false,
+          });
+        }
       }
 
       // Remove targets that no longer exist or are inactive

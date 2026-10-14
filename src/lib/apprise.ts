@@ -56,6 +56,9 @@ function runApprise(args: string[], urls: string[]): Promise<Run> {
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill();
+      // Not waiting for it to close: anything it started that still holds its
+      // output open would keep the probe waiting on it after all.
+      finish(null);
     }, TIMEOUT_MS);
 
     const finish = (code: number | null, missing = false) => {

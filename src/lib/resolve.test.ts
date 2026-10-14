@@ -20,6 +20,25 @@ describe('resolveHost', () => {
     expect(lookupFn).toHaveBeenCalledWith('example.com', { all: true, family: 0, order: 'verbatim' })
   })
 
+  it('stays on one server of a round-robin name whatever order the records come back in', async () => {
+    const records = ['20.70.246.20', '20.112.250.133', '20.76.201.171'].map(address => ({ address, family: 4 }))
+    const rotations = records.map((_, shift) => [...records.slice(shift), ...records.slice(0, shift)])
+
+    const chosen = await Promise.all(
+      rotations.map(async order => {
+        const outcome = await resolveHost('rr.example', 'ipv4', { lookupFn: vi.fn().mockResolvedValue(order) })
+        return outcome.ok ? outcome.address : outcome.error
+      })
+    )
+    expect(new Set(chosen).size).toBe(1)
+  })
+
+  it('keeps the family the system prefers when choosing among several addresses', async () => {
+    const V6b = { address: '2001:db8::0', family: 6 }
+    const outcome = await resolveHost('example.com', 'auto', { lookupFn: vi.fn().mockResolvedValue([V6, V4, V6b]) })
+    expect(outcome).toMatchObject({ ok: true, family: 6, address: V6b.address })
+  })
+
   it.each([
     ['ipv4', 4, V4],
     ['ipv6', 6, V6],

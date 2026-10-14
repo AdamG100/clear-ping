@@ -41,8 +41,16 @@ const RECORD_NAME: Record<AddressFamily, string> = { 4: 'IPv4 address (A record)
  *
  * Uses the system resolver (`getaddrinfo`) rather than querying DNS directly,
  * so the hosts file, search domains and mDNS names behave exactly as they do
- * for every other program on the machine. With `auto` the first address the
- * system returns is used, in the system's own order of preference.
+ * for every other program on the machine. With `auto` the family is the one
+ * the system prefers, going by the first address it lists.
+ *
+ * Within that family the address is chosen the same way every time, not taken
+ * from the top of the list. A name served round-robin comes back in a new
+ * order from one lookup to the next, and taking the first address moved the
+ * probe between servers, on other continents for some names: a chart of that
+ * shows the distance between servers as latency swinging on a path that is
+ * steady. Chosen this way the probe stays on one server for as long as the
+ * name's records stay the same, and moves only when they change.
  */
 export async function resolveHost(
   hostname: string,
@@ -66,10 +74,12 @@ export async function resolveHost(
     if (usable.length === 0) {
       return { ok: false, error: noAddressMessage(hostname, family) }
     }
+    const preferred = usable[0].family as AddressFamily
+    const address = steadyChoice(usable.filter(entry => entry.family === preferred).map(entry => entry.address))
     return {
       ok: true,
-      address: usable[0].address,
-      family: usable[0].family as AddressFamily,
+      address,
+      family: preferred,
       addresses: usable.map(entry => entry.address),
     }
   } catch (error) {
@@ -85,6 +95,11 @@ export async function resolveHost(
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** The same one of a set of addresses whatever order they arrive in. */
+function steadyChoice(addresses: string[]): string {
+  return addresses.reduce((chosen, address) => (address < chosen ? address : chosen))
 }
 
 function noAddressMessage(hostname: string, family: 0 | 4 | 6): string {

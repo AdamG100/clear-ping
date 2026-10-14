@@ -130,6 +130,70 @@ function systemSession(name: string, recordType: DnsRecordType, timeout: number)
   };
 }
 
+// ─── Keeping a connection ───────────────────────────────────────────────────
+
+/**
+ * The connection went before the question was answered: never sent, or cut
+ * off with no reply at all. Not the resolver failing to answer, which is a
+ * timeout, an error status or an error code.
+ */
+export class ConnectionLost extends Error {}
+
+const CLOSED_BY_RESOLVER = 'Resolver closed the connection';
+
+/** One open connection to a resolver, for asking questions down. */
+export interface Link {
+  /** Send one DNS message and wait for the reply. Rejects with `ConnectionLost` when the connection goes first. */
+  exchange: (message: Buffer) => Promise<Buffer>;
+  /** Whether a question can still be sent down it. */
+  usable: () => boolean;
+  close: () => void;
+}
+
+/**
+ * A connection that is opened again when the resolver lets go of it.
+ *
+ * Resolvers close idle and busy connections as a matter of course, and every
+ * client that keeps one open reconnects when that happens: nobody's lookup
+ * fails for it. Counting the questions that were never sent as unanswered
+ * reported a resolver closing a connection as several failed lookups. So a
+ * question that loses its connection is asked once more on a fresh one, and
+ * the time that takes is part of its time, since a client would wait for it.
+ *
+ * A resolver that cannot be reached again has failed for real; the questions
+ * still to come fail with it, at once, rather than each waiting out a timeout.
+ */
+export function reconnecting(first: Link, open: () => Promise<Link>): Pick<Link, 'exchange' | 'close'> {
+  let link = first;
+  let unreachable: Error | null = null;
+
+  const reopen = async () => {
+    link.close();
+    try {
+      link = await open();
+    } catch (error) {
+      unreachable = error instanceof Error ? error : new Error(String(error));
+      throw unreachable;
+    }
+  };
+
+  return {
+    exchange: async message => {
+      if (unreachable) throw unreachable;
+      if (!link.usable()) await reopen();
+      try {
+        return await link.exchange(message);
+      } catch (error) {
+        if (!(error instanceof ConnectionLost)) throw error;
+        await reopen();
+        // Lost a second time running, it is the answer that is missing.
+        return link.exchange(message);
+      }
+    },
+    close: () => link.close(),
+  };
+}
+
 // ─── DNS over TLS ───────────────────────────────────────────────────────────
 
 /**
@@ -146,6 +210,27 @@ async function dotSession(
   if (!where) throw new Error(`${server} is not a DNS over TLS resolver`);
 
   const startedAt = performance.now();
+  const first = await openDotLink(where, timeout);
+  const connectMs = elapsedSince(startedAt);
+  const connection = reconnecting(first, () => openDotLink(where, timeout));
+
+  let nextId = Math.floor(Math.random() * 0xffff);
+
+  return {
+    connectMs,
+    query: async () => {
+      try {
+        nextId = (nextId + 1) & 0xffff;
+        return outcomeOf(await connection.exchange(encodeQuery(name, recordType, nextId)), recordType);
+      } catch (error) {
+        return { answered: false, error: reasonFor(error, 'DNS over TLS query failed') };
+      }
+    },
+    close: connection.close,
+  };
+}
+
+async function openDotLink(where: { host: string; port: number }, timeout: number): Promise<Link> {
   const socket = await new Promise<tls.TLSSocket>((resolve, reject) => {
     const connecting = tls.connect({
       host: where.host,
@@ -169,16 +254,15 @@ async function dotSession(
       reject(error);
     });
   });
-  const connectMs = elapsedSince(startedAt);
 
   // One question at a time, so what arrives next is the reply to it.
   let received: Buffer = Buffer.alloc(0);
   let waiting: { resolve: (message: Buffer) => void; reject: (error: Error) => void } | null = null;
-  let closedBy: Error | null = null;
+  let closed = false;
 
-  const fail = (error: Error) => {
-    closedBy = closedBy ?? error;
-    waiting?.reject(closedBy);
+  const lost = (reason: string) => {
+    closed = true;
+    waiting?.reject(new ConnectionLost(reason));
     waiting = null;
   };
 
@@ -190,45 +274,37 @@ async function dotSession(
     waiting.resolve(framed.message);
     waiting = null;
   });
-  socket.on('error', fail);
-  socket.on('close', () => fail(new Error('Resolver closed the connection')));
-
-  const exchange = (message: Buffer) =>
-    new Promise<Buffer>((resolve, reject) => {
-      if (closedBy) {
-        reject(closedBy);
-        return;
-      }
-      const timer = setTimeout(() => {
-        waiting = null;
-        // The reply may still arrive, and would then be read as the answer to
-        // the next question. The connection is of no more use, and the
-        // questions still to come fail for the reason this one did.
-        closedBy = new Error(`No answer within ${timeout}ms`);
-        socket.destroy();
-        reject(closedBy);
-      }, timeout);
-
-      waiting = {
-        resolve: reply => { clearTimeout(timer); resolve(reply); },
-        reject: error => { clearTimeout(timer); reject(error); },
-      };
-      socket.write(frameMessage(message));
-    });
-
-  let nextId = Math.floor(Math.random() * 0xffff);
+  socket.on('error', error => lost(error.message || CLOSED_BY_RESOLVER));
+  socket.on('close', () => lost(CLOSED_BY_RESOLVER));
 
   return {
-    connectMs,
-    query: async () => {
-      try {
-        nextId = (nextId + 1) & 0xffff;
-        return outcomeOf(await exchange(encodeQuery(name, recordType, nextId)), recordType);
-      } catch (error) {
-        return { answered: false, error: reasonFor(error, 'DNS over TLS query failed') };
-      }
+    usable: () => !closed && !socket.destroyed,
+    exchange: message =>
+      new Promise<Buffer>((resolve, reject) => {
+        if (closed || socket.destroyed) {
+          reject(new ConnectionLost(CLOSED_BY_RESOLVER));
+          return;
+        }
+        const timer = setTimeout(() => {
+          waiting = null;
+          // The reply may still arrive, and would then be read as the answer
+          // to the next question. This connection is of no more use; the next
+          // question goes down a new one.
+          closed = true;
+          socket.destroy();
+          reject(new Error(`No answer within ${timeout}ms`));
+        }, timeout);
+
+        waiting = {
+          resolve: reply => { clearTimeout(timer); resolve(reply); },
+          reject: error => { clearTimeout(timer); reject(error); },
+        };
+        socket.write(frameMessage(message));
+      }),
+    close: () => {
+      closed = true;
+      socket.destroy();
     },
-    close: () => socket.destroy(),
   };
 }
 
@@ -310,100 +386,124 @@ async function dohSession(
   if (!url) throw new Error(`${server} is not a DNS over HTTPS resolver`);
 
   const startedAt = performance.now();
-  const connection = await connectDoh(url, timeout);
+  const first = await openDohLink(url, timeout);
   const connectMs = elapsedSince(startedAt);
+  const connection = reconnecting(first, () => openDohLink(url, timeout));
 
   // The id is zero for every question, as the standard asks, so that the same
   // question is the same request to any cache in between.
   const body = encodeQuery(name, recordType, 0);
-  const headers = { 'content-type': DNS_MESSAGE, accept: DNS_MESSAGE, 'content-length': body.length };
 
-  let exchange: () => Promise<Buffer>;
-  let close: () => void;
+  return {
+    connectMs,
+    query: async () => {
+      try {
+        return outcomeOf(await connection.exchange(body), recordType);
+      } catch (error) {
+        return { answered: false, error: reasonFor(error, 'DNS over HTTPS query failed') };
+      }
+    },
+    close: connection.close,
+  };
+}
+
+async function openDohLink(url: URL, timeout: number): Promise<Link> {
+  const connection = await connectDoh(url, timeout);
+  const headersFor = (body: Buffer) => ({ 'content-type': DNS_MESSAGE, accept: DNS_MESSAGE, 'content-length': body.length });
 
   if (connection.http2) {
     const session = http2.connect(url.origin, { createConnection: () => connection.socket });
     // Without a listener a broken connection would be an uncaught error; each
     // question finds out for itself when it is asked.
     session.on('error', () => {});
+    // Told to stop sending: questions after this go down a new connection.
+    let goneAway = false;
+    session.on('goaway', () => { goneAway = true; });
+    const usable = () => !goneAway && !session.closed && !session.destroyed;
 
-    exchange = () =>
+    return {
+      usable,
+      exchange: body =>
+        new Promise<Buffer>((resolve, reject) => {
+          if (!usable()) {
+            reject(new ConnectionLost(CLOSED_BY_RESOLVER));
+            return;
+          }
+
+          const stream = session.request({ ':method': 'POST', ':path': url.pathname + url.search, ...headersFor(body) });
+          let status: number | undefined;
+
+          stream.setTimeout(timeout, () => {
+            stream.close(http2.constants.NGHTTP2_CANCEL);
+            reject(new Error(`No answer within ${timeout}ms`));
+          });
+          stream.on('response', responseHeaders => {
+            status = Number(responseHeaders[':status']);
+          });
+          // A stream that ends without so much as a status line was cut off
+          // (reset, refused, or the connection went), not answered badly.
+          const failed = (error: Error) =>
+            reject(status === undefined ? new ConnectionLost(CLOSED_BY_RESOLVER) : error);
+          collectReply(stream, () => status, resolve, failed);
+          stream.end(body);
+        }),
+      close: () => session.destroy(),
+    };
+  }
+
+  const secure = url.protocol === 'https:';
+  const agent = secure
+    ? new https.Agent({ keepAlive: true, maxSockets: 1 })
+    : new http.Agent({ keepAlive: true, maxSockets: 1 });
+  // The connection already opened is the one the agent is to use, and being
+  // kept alive it is the one every question goes down. Set on the agent: a
+  // request's own `createConnection` is ignored once it has an agent.
+  Object.assign(agent, { createConnection: () => connection.socket });
+  // Once the one connection is gone, or given up on, the agent would be handed
+  // the same dead socket again; the next question needs a new connection.
+  let gaveUp = false;
+  const usable = () => !gaveUp && !connection.socket.destroyed;
+
+  return {
+    usable,
+    exchange: body =>
       new Promise<Buffer>((resolve, reject) => {
-        if (session.closed || session.destroyed) {
-          reject(new Error('Resolver closed the connection'));
+        if (!usable()) {
+          reject(new ConnectionLost(CLOSED_BY_RESOLVER));
           return;
         }
 
-        const stream = session.request({ ':method': 'POST', ':path': url.pathname + url.search, ...headers });
-        let status: number | undefined;
-
-        stream.setTimeout(timeout, () => {
-          stream.close(http2.constants.NGHTTP2_CANCEL);
-          reject(new Error(`No answer within ${timeout}ms`));
-        });
-        stream.on('response', responseHeaders => {
-          status = Number(responseHeaders[':status']);
-        });
-        collectReply(stream, () => status, resolve, reject);
-        stream.end(body);
-      });
-    close = () => session.destroy();
-  } else {
-    const secure = url.protocol === 'https:';
-    const agent = secure
-      ? new https.Agent({ keepAlive: true, maxSockets: 1 })
-      : new http.Agent({ keepAlive: true, maxSockets: 1 });
-    // The connection already opened is the one the agent is to use, and being
-    // kept alive it is the one every question goes down. Set on the agent: a
-    // request's own `createConnection` is ignored once it has an agent.
-    Object.assign(agent, { createConnection: () => connection.socket });
-    let gaveUp: Error | null = null;
-
-    exchange = () =>
-      new Promise<Buffer>((resolve, reject) => {
-        // Once the one connection is gone there is nothing to ask down, and
-        // the agent would be handed the same dead socket again. Given up on,
-        // the questions still to come fail for the reason the first did.
-        if (gaveUp || connection.socket.destroyed) {
-          reject(gaveUp ?? new Error('Resolver closed the connection'));
-          return;
-        }
-
+        let responded = false;
+        let timedOut = false;
         const request = (secure ? https : http).request(
           url,
-          { method: 'POST', agent, headers },
-          response => collectReply(response, () => response.statusCode, finish(resolve), finish(reject))
+          { method: 'POST', agent, headers: headersFor(body) },
+          response => {
+            responded = true;
+            collectReply(response, () => response.statusCode, finish(resolve), finish(reject));
+          }
         );
         // Timed here and not by the socket: a socket that was already open
         // when the request was given it is never told the request's timeout.
         const timer = setTimeout(() => {
-          gaveUp = new Error(`No answer within ${timeout}ms`);
-          request.destroy(gaveUp);
+          timedOut = true;
+          gaveUp = true;
+          request.destroy(new Error(`No answer within ${timeout}ms`));
         }, timeout);
         const finish = <T,>(settle: (value: T) => void) => (value: T) => {
           clearTimeout(timer);
           settle(value);
         };
 
-        request.on('error', finish(reject));
+        request.on('error', error =>
+          finish(reject)(responded || timedOut ? error : new ConnectionLost(error.message || CLOSED_BY_RESOLVER))
+        );
         request.end(body);
-      });
-    close = () => {
+      }),
+    close: () => {
       agent.destroy();
       connection.socket.destroy();
-    };
-  }
-
-  return {
-    connectMs,
-    query: async () => {
-      try {
-        return outcomeOf(await exchange(), recordType);
-      } catch (error) {
-        return { answered: false, error: reasonFor(error, 'DNS over HTTPS query failed') };
-      }
     },
-    close,
   };
 }
 
