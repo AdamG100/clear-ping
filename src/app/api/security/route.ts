@@ -2,8 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { securityPolicy } from '@/lib/security/access';
 import { requireAdmin, requireUser } from '@/lib/security/http';
 import { getSsoConfig, publicSsoConfig, ssoUsable } from '@/lib/security/oidc';
+import { describeOwed, factorsOwed, isFactorPolicy, REQUIREMENT_LABEL, type FactorPolicy } from '@/lib/security/factors';
 import { canAdminister } from '@/lib/security/roles';
-import { getSecuritySettings, getUser, listApiKeys, listUsers, recordActivity, setSecuritySettings } from '@/lib/security/store';
+import {
+  getFactorPolicy,
+  getSecuritySettings,
+  getUser,
+  listApiKeys,
+  listUsers,
+  recordActivity,
+  setFactorPolicy,
+  setSecuritySettings,
+  signedIn,
+} from '@/lib/security/store';
 
 /**
  * GET /api/security - Everything Settings shows the account signed in
@@ -19,17 +30,19 @@ export async function GET(request: NextRequest) {
   if (user instanceof NextResponse) return user;
 
   const admin = canAdminister(user.role);
-  const [settings, policy, users, keys, sso] = await Promise.all([
+  const [settings, policy, users, keys, sso, factorPolicy] = await Promise.all([
     getSecuritySettings(),
     securityPolicy(),
     listUsers(),
     listApiKeys(admin ? undefined : user.id),
     getSsoConfig(),
+    getFactorPolicy(),
   ]);
   const me = users.find(each => each.id === user.id);
   return NextResponse.json({
     me: { id: user.id, username: user.name, ...(me ?? {}), role: user.role },
     settings,
+    factorPolicy,
     inForce: { loginRequired: policy.loginRequired, mcpKeyRequired: policy.mcpKeyRequired },
     environment: { recovery: policy.recovery, legacyMcpToken: policy.legacyMcpToken !== null },
     users: admin ? users : me ? [me] : [],
@@ -42,9 +55,11 @@ export async function GET(request: NextRequest) {
 
 /**
  * PUT /api/security - Turn sign-in, keys for the MCP address, or password sign-in on or off
- * Body: { loginRequired?: boolean, mcpKeyRequired?: boolean, passwordLogin?: boolean }
+ * Body: { loginRequired?: boolean, mcpKeyRequired?: boolean, passwordLogin?: boolean,
+ *         factorPolicy?: { require: 'none' | 'either' | 'totp' | 'passkey' | 'both', appliesTo: 'everyone' | 'others' } }
  *
- * Admins only.
+ * `factorPolicy` is the second factors required of accounts that sign in to
+ * ClearPing itself (factors.ts). Admins only.
  */
 export async function PUT(request: NextRequest) {
   const user = await requireAdmin(request);
@@ -55,6 +70,32 @@ export async function PUT(request: NextRequest) {
   for (const name of ['loginRequired', 'mcpKeyRequired', 'passwordLogin'] as const) {
     if (typeof body?.[name] === 'boolean') changes[name] = body[name];
   }
+
+  if (body?.factorPolicy !== undefined) {
+    if (!isFactorPolicy(body.factorPolicy)) {
+      return NextResponse.json({ error: 'factorPolicy is { require, appliesTo }' }, { status: 400 });
+    }
+    const next: FactorPolicy = { require: body.factorPolicy.require, appliesTo: body.factorPolicy.appliesTo };
+    // Never a rule the admin setting it does not meet: they would be sent
+    // straight to add what they may not be able to add here (a passkey, at an
+    // address passkeys do not work at), with Settings out of reach.
+    const [session, me] = await Promise.all([signedIn(request.headers), getUser(user.id)]);
+    const owed = me && factorsOwed(next, { role: me.role, totp: me.twoFactor, passkeys: me.passkeys }, { viaSso: session?.viaSso ?? false });
+    if (owed) {
+      return NextResponse.json({ error: `${describeOwed(owed)} before requiring it: it would apply to you too.` }, { status: 400 });
+    }
+    await setFactorPolicy(next);
+    await recordActivity(
+      user,
+      'dashboard',
+      'security.factors',
+      next.require === 'none'
+        ? 'No second factor required'
+        : `${REQUIREMENT_LABEL[next.require]}, required of ${next.appliesTo === 'others' ? 'every account but the admins' : 'every account'}`
+    );
+    if (Object.keys(changes).length === 0) return NextResponse.json({ factorPolicy: next });
+  }
+
   if (Object.keys(changes).length === 0) {
     return NextResponse.json({ error: 'Nothing to change' }, { status: 400 });
   }

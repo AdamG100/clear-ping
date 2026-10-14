@@ -1,10 +1,13 @@
 'use client'
 
 import { useEffect, useState, type FormEvent } from 'react'
-import { KeyRound } from 'lucide-react'
+import { Fingerprint, KeyRound } from 'lucide-react'
+import { browserSupportsWebAuthn, startAuthentication } from '@simplewebauthn/browser'
 import { Alert } from '@/components/arc/alert/alert'
 import { Button } from '@/components/arc/button/button'
+import { Checkbox } from '@/components/arc/checkbox/checkbox'
 import { Input } from '@/components/arc/input/input'
+import { OtpInput } from '@/components/arc/otp-input/otp-input'
 import { PasswordField } from '@/components/arc/password-field/password-field'
 import { BrandMark } from '../_components/monitoring/brand-mark'
 
@@ -14,6 +17,10 @@ import { BrandMark } from '../_components/monitoring/brand-mark'
  * Which of the two is up to the server: an install with no account yet
  * offers to make one, and so does one started with CLEARPING_AUTH=off to get
  * back in after a lost password.
+ *
+ * An account with an authenticator app is asked for its code after the
+ * password; one with a passkey can sign in with that alone. Both are Better
+ * Auth's, through /api/auth/two-factor and /api/auth/passkey.
  */
 
 interface Status {
@@ -22,6 +29,7 @@ interface Status {
   registrationOpen: boolean
   recovery: boolean
   passwordLogin: boolean
+  passkeys: boolean
   sso: { label: string } | null
   signedIn: { username: string } | null
 }
@@ -36,6 +44,11 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(initialError)
   const [busy, setBusy] = useState(false)
+  // After a right password, for an account with an authenticator app.
+  const [step, setStep] = useState<'password' | 'code'>('password')
+  const [code, setCode] = useState('')
+  const [backup, setBackup] = useState(false)
+  const [trustDevice, setTrustDevice] = useState(false)
 
   useEffect(() => {
     fetch('/api/auth/status')
@@ -71,6 +84,10 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
         setError(body.error ?? 'That did not work. Try again.')
         return
       }
+      if (body.twoFactor) {
+        setStep('code')
+        return
+      }
       // A full load, so the dashboard starts from scratch as the signed-in user.
       window.location.assign(next)
     } catch {
@@ -80,6 +97,141 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
     }
   }
 
+
+  const sendCode = async (typed: string) => {
+    setError(null)
+    setBusy(true)
+    try {
+      const response = await fetch('/api/auth/two-factor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: typed, backup, trustDevice }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setError(body.error ?? 'That code is not right')
+        setCode('')
+        if (body.restart) {
+          setStep('password')
+          setPassword('')
+        }
+        return
+      }
+      window.location.assign(next)
+    } catch {
+      setError('ClearPing could not be reached. Try again in a moment.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const withPasskey = async () => {
+    setError(null)
+    setBusy(true)
+    try {
+      const post = (body: unknown) =>
+        fetch('/api/auth/passkey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const options = await post({ step: 'options' })
+      const optionsJSON = await options.json().catch(() => ({}))
+      if (!options.ok) {
+        setError(optionsJSON.error ?? 'Could not start signing in with a passkey')
+        return
+      }
+      let response
+      try {
+        response = await startAuthentication({ optionsJSON })
+      } catch (problem) {
+        // Closing the browser's prompt is a choice, not a failure.
+        if ((problem as Error).name !== 'NotAllowedError') setError('The passkey could not be used. Try again, or sign in with your password.')
+        return
+      }
+      const verified = await post({ step: 'verify', response })
+      const body = await verified.json().catch(() => ({}))
+      if (!verified.ok) {
+        setError(body.error ?? 'That passkey was not accepted')
+        return
+      }
+      window.location.assign(next)
+    } catch {
+      setError('ClearPing could not be reached. Try again in a moment.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const passkeyOffered = !registering && step === 'password' && !!status?.passkeys && typeof window !== 'undefined' && browserSupportsWebAuthn()
+
+  if (step === 'code') {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="flex items-center gap-2.5">
+            <BrandMark />
+            <div>
+              <p className="text-sm font-medium text-foreground">ClearPing</p>
+              <p className="text-xs text-muted-foreground">Path monitor</p>
+            </div>
+          </div>
+          <form
+            onSubmit={event => { event.preventDefault(); void sendCode(code) }}
+            className="space-y-5 rounded-3xl border border-border bg-card p-6"
+            noValidate
+          >
+            <div className="space-y-1">
+              <h1 className="text-lg font-medium text-card-foreground">{backup ? 'Use a backup code' : 'Type your code'}</h1>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {backup
+                  ? 'One of the codes you kept when you set up your authenticator app. Each works once.'
+                  : 'The six digits your authenticator app shows for ClearPing.'}
+              </p>
+            </div>
+            {backup ? (
+              <Input
+                label="Backup code"
+                autoComplete="one-time-code"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoFocus
+                value={code}
+                onChange={event => setCode(event.target.value)}
+                style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
+              />
+            ) : (
+              <OtpInput
+                label="Code from the app"
+                value={code}
+                disabled={busy}
+                autoFocus
+                onChange={typed => {
+                  setCode(typed)
+                  if (typed.length === 6) void sendCode(typed)
+                }}
+              />
+            )}
+            <Checkbox
+              label="Trust this browser for 30 days"
+              description="It will not ask for a code here again until then."
+              checked={trustDevice}
+              onCheckedChange={checked => setTrustDevice(checked === true)}
+            />
+            {error && <Alert tone="danger" title="You are not signed in">{error}</Alert>}
+            <Button type="submit" className="w-full" loading={busy} disabled={!code}>
+              Sign in
+            </Button>
+            {/* The two ways out of this step, kept together under the one way on. */}
+            <div className="space-y-1">
+              <Button type="button" variant="ghost" className="w-full" onClick={() => { setBackup(!backup); setCode(''); setError(null) }}>
+                {backup ? 'Use a code from the app instead' : 'Use a backup code instead'}
+              </Button>
+              <Button type="button" variant="ghost" className="w-full" onClick={() => { setStep('password'); setPassword(''); setCode(''); setError(null) }}>
+                Back
+              </Button>
+            </div>
+          </form>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10">
@@ -179,6 +331,13 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
           {passwordForm && (
             <Button type="submit" className="w-full" loading={busy} disabled={!status || !username || !password}>
               {registering ? 'Create account' : 'Sign in'}
+            </Button>
+          )}
+
+          {passkeyOffered && (
+            <Button type="button" variant="secondary" className="w-full" onClick={withPasskey} disabled={busy}>
+              <Fingerprint size={16} strokeWidth={1.75} aria-hidden="true" />
+              Sign in with a passkey
             </Button>
           )}
 

@@ -1,5 +1,6 @@
 import type sqlite3 from 'sqlite3'
 import { getDatabase } from '../database'
+import { isFactorPolicy, NO_FACTOR_POLICY, type FactorPolicy } from './factors'
 import type { Actor, Via } from './store'
 
 /**
@@ -90,6 +91,16 @@ export async function setJsonSetting(key: string, value: unknown): Promise<void>
     key,
     JSON.stringify(value),
   ])
+}
+
+/** Which second factors an admin requires of the accounts that sign in to ClearPing itself. */
+export async function getFactorPolicy(): Promise<FactorPolicy> {
+  const stored = await getJsonSetting<unknown>('security.factorPolicy')
+  return isFactorPolicy(stored) ? stored : NO_FACTOR_POLICY
+}
+
+export async function setFactorPolicy(policy: FactorPolicy): Promise<void> {
+  await setJsonSetting('security.factorPolicy', policy)
 }
 
 // ─── What was done, and by whom ─────────────────────────────────────────────

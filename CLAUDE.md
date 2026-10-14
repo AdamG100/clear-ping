@@ -17,6 +17,16 @@ One trailer is enough for everything going out together: the biggest one asked
 for since the last release wins. Do not edit `package.json`'s version or make
 `v*` tags.
 
+## Security: Better Auth
+
+Everything to do with signing in is Better Auth's (`src/lib/security/auth.ts`)
+and its plugins: accounts, passwords, sessions, keys, roles (admin), Authentik
+(generic OAuth), authenticator apps (two-factor) and passkeys. Add a feature
+by adding the Better Auth plugin that does it, called from ClearPing's own
+routes on the server; never write sign-in, session or credential handling by
+hand. Better Auth's HTTP endpoints stay closed to the browser (the `before`
+hook), so ClearPing's rules always apply.
+
 ## UI: Arc
 
 The UI is built from Arc UI (https://uiarc.dev) components in

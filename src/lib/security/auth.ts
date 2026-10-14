@@ -4,7 +4,8 @@ import { SqliteDialect } from 'kysely'
 import { betterAuth, type BetterAuthOptions } from 'better-auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { getMigrations } from 'better-auth/db/migration'
-import { admin as adminPlugin, genericOAuth, username as usernamePlugin } from 'better-auth/plugins'
+import { admin as adminPlugin, genericOAuth, twoFactor, username as usernamePlugin } from 'better-auth/plugins'
+import { passkey } from '@better-auth/passkey'
 import { createAccessControl } from 'better-auth/plugins/access'
 import { adminAc, defaultStatements, userAc } from 'better-auth/plugins/admin/access'
 import { apiKey } from '@better-auth/api-key'
@@ -32,6 +33,9 @@ import type { Actor, Via } from './store'
  *   give, and which of a person's provider sessions a ClearPing session came
  *   from, so that signing out there ends it here (back-channel logout).
  * - The activity record.
+ * - Which second factors an account must have (factors.ts). The factors
+ *   themselves, an authenticator app's codes and passkeys, are Better Auth's
+ *   two-factor and passkey plugins.
  *
  * Its HTTP endpoints are not opened to the browser, apart from the provider's
  * callback (/api/auth/sso/callback hands it over). Everything else is called
@@ -230,7 +234,18 @@ function adminCount(db: Database.Database): number {
   return (db.prepare("SELECT COUNT(*) AS count FROM user WHERE role = 'admin'").get() as { count: number }).count
 }
 
-function buildOptions(db: Database.Database, secret: string, sso: SsoConfig) {
+/**
+ * The site name passkeys are made for and checked against, when the instance
+ * is not made for one in particular. A passkey belongs to a site name, and
+ * Better Auth's plugin takes it when an instance is made, so passkeys are
+ * made and used through an instance for the name the browser is on
+ * (getAuth(site)).
+ */
+function defaultSite(sso: SsoConfig): string {
+  return sso.redirectUri ? new URL(sso.redirectUri).hostname : 'localhost'
+}
+
+function buildOptions(db: Database.Database, secret: string, sso: SsoConfig, site: string) {
   const usable = ssoUsable(sso)
 
   return {
@@ -319,15 +334,27 @@ function buildOptions(db: Database.Database, secret: string, sso: SsoConfig) {
         rateLimit: { enabled: false },
       }),
       ...(usable ? [genericOAuth({ config: [ssoProvider(db, sso)] })] : []),
+      // Codes from an authenticator app, asked for after the password. Signing
+      // in through the provider or with a passkey is not asked for one: the
+      // provider has its own, and a passkey is already two factors in one.
+      twoFactor({
+        issuer: 'ClearPing',
+        backupCodeOptions: { amount: 10, length: 10 },
+        // Ten wrong codes in a row lock the account's second step for a quarter of an hour.
+        accountLockout: { enabled: true, maxFailedAttempts: 10, durationSeconds: 15 * 60 },
+      }),
+      passkey({ rpName: 'ClearPing', rpID: site, origin: null }),
     ],
     hooks: {
       before: createAuthMiddleware(async ctx => {
         // Only the provider's callback comes from a browser; everything else
         // is called by ClearPing's own routes.
         if (ctx.request && ctx.path !== '/callback/:id') throw new APIError('NOT_FOUND')
-        if (ctx.path === '/sign-in/username') {
+        // A passkey signs in an account of ClearPing's own, as a password
+        // does: with single sign-on the only way in, neither does.
+        if (ctx.path === '/sign-in/username' || ctx.path === '/passkey/verify-authentication') {
           const { passwordLogin } = await securitySwitches()
-          if (!passwordLogin) throw new APIError('FORBIDDEN', { message: `Signing in with a password is turned off. Sign in with ${sso.label}.` })
+          if (!passwordLogin) throw new APIError('FORBIDDEN', { message: `Signing in here is turned off. Sign in with ${sso.label}.` })
         }
       }),
     },
@@ -435,20 +462,24 @@ interface Instance {
 interface Holder {
   /** One connection for as long as the process runs. */
   db: Database.Database | null
-  current: Instance | null
-  /** An instance being made, which every request in the meantime waits for. */
-  building: { key: string; done: Promise<Instance> } | null
+  /** The instances made, by the site name they are for ('' for the general one). */
+  instances: Map<string, Instance>
+  /** Instances being made, which every request in the meantime waits for. */
+  building: Map<string, { key: string; done: Promise<Instance> }>
 }
 
-const INSTANCE_KEY = Symbol.for('clearping.auth')
+const INSTANCE_KEY = Symbol.for('clearping.auth.v2')
 function holder(): Holder {
   const store = globalThis as typeof globalThis & { [INSTANCE_KEY]?: Holder }
-  return (store[INSTANCE_KEY] ??= { db: null, current: null, building: null })
+  return (store[INSTANCE_KEY] ??= { db: null, instances: new Map(), building: new Map() })
 }
 
+/** How many site names get an instance of their own before the oldest are let go. */
+const MAX_SITE_INSTANCES = 8
+
 /** Make an instance: Better Auth's tables first (it checks them as soon as it starts), then the accounts moved across. */
-async function build(db: Database.Database, secret: string, sso: SsoConfig, key: string): Promise<Instance> {
-  const options = buildOptions(db, secret, sso)
+async function build(db: Database.Database, secret: string, sso: SsoConfig, key: string, site: string): Promise<Instance> {
+  const options = buildOptions(db, secret, sso, site)
   const { runMigrations } = await getMigrations(options)
   await runMigrations()
   const { moveLegacyAccounts } = await import('./auth-migration')
@@ -461,8 +492,12 @@ async function build(db: Database.Database, secret: string, sso: SsoConfig, key:
  * now. Saving those settings makes a new one: providers are read when an
  * instance is made. One whose provider could not be reached is made again a
  * minute later, rather than leaving sign-in through it off until a restart.
+ *
+ * With `site`, the instance that makes and checks passkeys for that site
+ * name (see defaultSite). Every instance shares the one database and secret,
+ * so a session made by any of them is a session to all.
  */
-export async function getAuth(): Promise<Auth> {
+export async function getAuth(site?: string): Promise<Auth> {
   // ClearPing's own tables first: the settings, and the accounts to move across.
   await getDatabase()
   const sso = await getSsoConfig()
@@ -470,32 +505,40 @@ export async function getAuth(): Promise<Auth> {
   state.db ??= openDatabase()
   const db = state.db
   const secret = authSecret(db)
-  const key = JSON.stringify([secret, sso, databasePath()])
+  const slot = site ?? ''
+  const key = JSON.stringify([secret, sso, databasePath(), slot])
 
-  if (state.current?.key === key) return state.current.auth
-  if (state.building?.key !== key) {
-    const done = build(db, secret, sso, key).then(instance => {
-      state.current = instance
-      if (ssoUsable(sso)) scheduleProviderCheck(instance)
+  const current = state.instances.get(slot)
+  if (current?.key === key) return current.auth
+  let building = state.building.get(slot)
+  if (building?.key !== key) {
+    // A site name comes from the request, so there is a limit to how many are kept.
+    if (slot && !state.instances.has(slot) && state.instances.size > MAX_SITE_INSTANCES) {
+      for (const name of state.instances.keys()) if (name) { state.instances.delete(name); break }
+    }
+    const done = build(db, secret, sso, key, site ?? defaultSite(sso)).then(instance => {
+      state.instances.set(slot, instance)
+      if (ssoUsable(sso)) scheduleProviderCheck(slot, instance)
       return instance
     })
-    state.building = { key, done }
+    building = { key, done }
+    state.building.set(slot, building)
     done.finally(() => {
-      if (state.building?.done === done) state.building = null
+      if (state.building.get(slot)?.done === done) state.building.delete(slot)
     }).catch(() => {})
   }
-  return (await state.building!.done).auth
+  return (await building.done).auth
 }
 
 /** Drop an instance whose provider was not reached, so the next request makes one that tries again. */
-function scheduleProviderCheck(instance: Instance) {
+function scheduleProviderCheck(slot: string, instance: Instance) {
   void (async () => {
     try {
       const context = await instance.auth.$context
       if (context.socialProviders.some(provider => provider.id === SSO_PROVIDER_ID)) return
       setTimeout(() => {
         const state = holder()
-        if (state.current === instance) state.current = { ...instance, key: '' }
+        if (state.instances.get(slot) === instance) state.instances.set(slot, { ...instance, key: '' })
       }, 60_000)
     } catch {
       // A failed check leaves the instance as it is.
@@ -514,8 +557,8 @@ export function closeAuth(): void {
   const state = holder()
   state.db?.close()
   state.db = null
-  state.current = null
-  state.building = null
+  state.instances.clear()
+  state.building.clear()
 }
 
 /** Whether sign-in through the provider is set up and its configuration was read. */

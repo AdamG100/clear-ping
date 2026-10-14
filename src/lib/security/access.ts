@@ -1,8 +1,9 @@
 import { originAllowed } from '../mcp-protocol'
 import { KEY_PREFIX, sameSecret } from './secrets'
 import { canChange, ROLE_LABEL } from './roles'
-import { getSecuritySettings, recoveryMode } from './settings-store'
-import { actorOf, ANONYMOUS, apiKeyFor, userForHeaders, type Actor, type Via } from './store'
+import { describeOwed, factorsOwed } from './factors'
+import { getFactorPolicy, getSecuritySettings, recoveryMode } from './settings-store'
+import { actorOf, ANONYMOUS, apiKeyFor, signedIn, type Actor, type Via } from './store'
 
 export { recoveryMode }
 
@@ -19,6 +20,10 @@ export { recoveryMode }
  * CLEARPING_AUTH=off overrides the switch, for whoever has locked themselves
  * out: sign-in is not asked for, and a new account can be made, for as long as
  * it is set.
+ *
+ * An admin can require second factors of the accounts that sign in to
+ * ClearPing itself (factors.ts). One signed in without them is sent to add
+ * them, and can reach nothing else until it has.
  */
 
 export interface Policy {
@@ -90,8 +95,12 @@ export async function identify(request: Request, legacyMcpToken = process.env.CL
 
   // Better Auth reads its own cookie, checks its signature and the session behind it.
   if (request.headers.get('cookie')) {
-    const user = await userForHeaders(request.headers)
-    if (user) return { actor: actorOf(user), invalidKey: false }
+    const found = await signedIn(request.headers)
+    if (found) {
+      // Not while CLEARPING_AUTH=off is set: that is for getting back in.
+      const owes = recoveryMode() ? null : factorsOwed(await getFactorPolicy(), { role: found.user.role, totp: found.user.twoFactor, passkeys: found.user.passkeys }, { viaSso: found.viaSso })
+      return { actor: { ...actorOf(found.user), ...(owes ? { owes } : {}) }, invalidKey: false }
+    }
   }
   return { actor: null, invalidKey: false }
 }
@@ -108,6 +117,12 @@ export async function actorFor(request: Request): Promise<{ actor: Actor; via: V
 export type RouteKind = 'open' | 'api' | 'page'
 
 const OPEN_PATHS = new Set(['/login', '/api/health', '/api/mcp', '/api/mcp/info'])
+
+/** Where an account sent to add second factors is let through to: the page that does it, and what it calls. */
+export const FACTOR_SETUP_PAGE = '/security-setup'
+function setupRoute(pathname: string): boolean {
+  return pathname === FACTOR_SETUP_PAGE || pathname === '/api/security/me' || pathname.startsWith('/api/security/me/')
+}
 
 /**
  * `open` is let through here and, where it needs guarding, guards itself:
@@ -126,6 +141,7 @@ export type Decision =
   | { allow: true }
   | { allow: false; status: 401 | 403; message: string }
   | { allow: false; signIn: true }
+  | { allow: false; setup: true }
 
 export function decide(input: {
   pathname: string
@@ -140,6 +156,12 @@ export function decide(input: {
 
   const { actor, invalidKey } = input.identity
   const reading = READING.has(input.method.toUpperCase())
+
+  // Signed in, and owing a second factor an admin requires: that first.
+  if (actor?.kind === 'user' && actor.owes && !setupRoute(input.pathname)) {
+    if (kind === 'page') return { allow: false, setup: true }
+    return { allow: false, status: 403, message: `${describeOwed(actor.owes)} first: an admin requires it` }
+  }
 
   if (kind === 'page') {
     return input.policy.loginRequired && actor?.kind !== 'user' ? { allow: false, signIn: true } : { allow: true }

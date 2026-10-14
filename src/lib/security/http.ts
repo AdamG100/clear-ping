@@ -26,6 +26,33 @@ export function passCookies(from: Response, to: NextResponse, request: Request):
   return to
 }
 
+/**
+ * The site name a passkey made or used here belongs to: the name the browser
+ * has this page open at, from the page's own origin. Null where passkeys
+ * cannot work: a browser makes them only for a name (never an address such as
+ * 192.168.1.10) and only over HTTPS, apart from localhost.
+ */
+export function passkeySite(request: Request): string | null {
+  // A browser sends its origin with a POST; a GET from the same site may
+  // come without one, and then it is the address the request was made to.
+  const host = request.headers.get('x-forwarded-host')?.split(',')[0].trim() || request.headers.get('host')
+  const origin = request.headers.get('origin') ?? (host ? `${isHttps(request) ? 'https' : 'http'}://${host}` : null)
+  if (!origin) return null
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    return null
+  }
+  const name = url.hostname.toLowerCase()
+  if (name === 'localhost' || name.endsWith('.localhost')) return name
+  if (url.protocol !== 'https:' || !/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(name) || /^[\d.]+$/.test(name)) return null
+  return name
+}
+
+export const NO_PASSKEY_HERE =
+  'Passkeys need ClearPing opened at a name over HTTPS, such as https://clearping.example.com, not at an address like 192.168.1.10.'
+
 /** Why Better Auth refused, in words fit to show. */
 export async function refusal(response: Response, fallback: string): Promise<string> {
   const body = (await response.clone().json().catch(() => null)) as { message?: string } | null

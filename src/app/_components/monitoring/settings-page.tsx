@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, History, KeyRound, LogIn, LogOut, ShieldAlert, ShieldCheck, Trash2, User, UserPlus, Users, type LucideIcon } from 'lucide-react'
+import { Bot, Fingerprint, History, KeyRound, LogIn, LogOut, ShieldAlert, ShieldCheck, Trash2, User, UserPlus, Users, type LucideIcon } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -21,7 +21,9 @@ import { Timeline } from '@/components/arc/timeline/timeline'
 import { useToast } from '@/components/notifications'
 import type { SettingsSection } from '@/lib/dashboard-pages'
 import { canAdminister, DEFAULT_NEW_ROLE, maxKeyAccess, ROLE_DETAIL, ROLE_LABEL, ROLES, type Role } from '@/lib/security/roles'
+import type { FactorPolicy } from '@/lib/security/factors'
 import { cn } from '@/lib/utils'
+import { FactorPolicyForm, SignInFactors, useMyFactors } from '../security/sign-in-factors'
 import { AssistantSettings, CopyField, PAGE_CARD } from './mcp-setup'
 import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
 
@@ -56,6 +58,8 @@ interface Account {
   sso: boolean
   hasPassword: boolean
   role: Role
+  twoFactor: boolean
+  passkeys: number
 }
 
 interface SsoSettings {
@@ -76,6 +80,7 @@ interface SsoSettings {
 interface Security {
   me: Account
   settings: { loginRequired: boolean; mcpKeyRequired: boolean; passwordLogin: boolean }
+  factorPolicy: FactorPolicy
   sso: SsoSettings
   inForce: { loginRequired: boolean; mcpKeyRequired: boolean }
   environment: { recovery: boolean; legacyMcpToken: boolean }
@@ -210,6 +215,43 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
         Changes to these settings, to keys and to accounts are always made signed in, even while the dashboard does not
         ask for it. Locked out? Start ClearPing with CLEARPING_AUTH=off to turn sign-in off and make a new account.
       </Alert>
+    </div>
+  )
+}
+
+/**
+ * Your second factors, and for an admin, which of them every account must
+ * have. A rule that would apply to the admin setting it is only taken once
+ * their own account meets it.
+ */
+function SignInTab({ data, reload }: { data: Security; reload: () => void }) {
+  const { notify, reportError } = useToast()
+  const { mine, error, reload: reloadMine } = useMyFactors()
+  const [policy, setPolicy] = useState(data.factorPolicy)
+
+  const changePolicy = async (next: FactorPolicy) => {
+    const before = policy
+    setPolicy(next)
+    const { ok, body } = await send('/api/security', 'PUT', { factorPolicy: next })
+    if (!ok) {
+      setPolicy(before)
+      return reportError('Could not change what is required', body.error)
+    }
+    notify({ tone: 'success', title: 'Saved', detail: 'Accounts without it are asked to add it the next time they open ClearPing.' })
+    reload()
+  }
+
+  return (
+    <div className="space-y-8">
+      {error && <Alert tone="danger" title="Could not load your second factors">{error}</Alert>}
+      {!mine && !error && <Skeleton label="Loading your second factors" lines={4} />}
+      {mine && <SignInFactors mine={mine} reload={reloadMine} />}
+      {canAdminister(data.me.role) && (
+        <>
+          <div className="border-t border-border" />
+          <FactorPolicyForm policy={policy} onChange={changePolicy} />
+        </>
+      )}
     </div>
   )
 }
@@ -468,6 +510,22 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
                 {account.sso && <Badge size="sm">{data.sso.label}</Badge>}
               </span>
             ),
+          },
+          {
+            key: 'factors',
+            label: 'Second factors',
+            sortable: false,
+            render: (_, { account }) =>
+              account.twoFactor || account.passkeys > 0 ? (
+                <span className="flex flex-wrap gap-1">
+                  {account.twoFactor && <Badge size="sm" tone="success">App</Badge>}
+                  {account.passkeys > 0 && (
+                    <Badge size="sm" tone="success">{account.passkeys === 1 ? 'Passkey' : `${account.passkeys} passkeys`}</Badge>
+                  )}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">{account.hasPassword ? 'None' : 'Through the provider'}</span>
+              ),
           },
           {
             key: 'lastLoginAt',
@@ -841,6 +899,12 @@ const ACTIONS: Record<string, string> = {
   'account.add': 'added an account',
   'account.remove': 'removed an account',
   'account.password': 'changed their password',
+  'account.2fa.enable': 'turned on their authenticator app',
+  'account.2fa.disable': 'turned off their authenticator app',
+  'account.2fa.codes': 'made new backup codes',
+  'account.passkey.add': 'added a passkey',
+  'account.passkey.remove': 'removed a passkey',
+  'security.factors': 'changed the second factors required',
   'security.on': 'turned on',
   'security.off': 'turned off',
   'sso.change': 'changed single sign-on',
@@ -919,6 +983,7 @@ function ActivityTab() {
 /** The sections of Settings, Security's first. */
 const SECTIONS: { value: SettingsSection; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
   { value: 'access', label: 'Access', icon: ShieldCheck, adminOnly: true },
+  { value: 'sign-in', label: 'Sign-in', icon: Fingerprint },
   { value: 'keys', label: 'Keys', icon: KeyRound },
   { value: 'sso', label: 'Single sign-on', icon: LogIn },
   { value: 'accounts', label: 'Accounts', icon: Users },
@@ -1059,6 +1124,7 @@ export function SettingsPage({ section, onSection }: SettingsPageProps) {
               {loaded.state === 'ready' && (
                 <div className={PAGE_CARD}>
                   {current.value === 'access' && <AccessTab data={loaded.data} onChange={change} />}
+                  {current.value === 'sign-in' && <SignInTab data={loaded.data} reload={reload} />}
                   {current.value === 'keys' && <KeysTab data={loaded.data} reload={reload} />}
                   {current.value === 'sso' && <SsoTab data={loaded.data} reload={reload} />}
                   {current.value === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}

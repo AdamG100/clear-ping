@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { identify, securityPolicy } from '@/lib/security/access';
 import { getSsoConfig, ssoUsable } from '@/lib/security/oidc';
-import { countUsers } from '@/lib/security/store';
+import { passkeySite } from '@/lib/security/http';
+import { countPasskeys, countUsers } from '@/lib/security/store';
 
 /**
  * GET /api/auth/status - What the sign-in page needs to know
@@ -11,7 +12,13 @@ import { countUsers } from '@/lib/security/store';
  * anyone: the page that asks is the one shown to people who are not signed in.
  */
 export async function GET(request: NextRequest) {
-  const [policy, accounts, { actor }, sso] = await Promise.all([securityPolicy(), countUsers(), identify(request), getSsoConfig()]);
+  const [policy, accounts, { actor }, sso, passkeys] = await Promise.all([
+    securityPolicy(),
+    countUsers(),
+    identify(request),
+    getSsoConfig(),
+    countPasskeys(),
+  ]);
   return NextResponse.json({
     loginRequired: policy.loginRequired,
     accountExists: accounts > 0,
@@ -20,6 +27,8 @@ export async function GET(request: NextRequest) {
     registrationOpen: accounts === 0 || policy.recovery,
     recovery: policy.recovery,
     passwordLogin: policy.passwordLogin,
+    // Offered once there is a passkey to use, at an address passkeys work at.
+    passkeys: policy.passwordLogin && passkeys > 0 && passkeySite(request) !== null,
     sso: ssoUsable(sso) ? { label: sso.label } : null,
     signedIn: actor?.kind === 'user' ? { username: actor.name, role: actor.role } : null,
   });

@@ -303,7 +303,8 @@ Everything the interface does goes through these.
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
 | `GET /api/health` | Whether the server is up; open even with sign-in on |
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
-| `/api/security/…` | Sign-in switches, keys, accounts and their roles (`PATCH /api/security/users/:id`), single sign-on and the activity record; signed in only, and most of it for admins ([docs/security.md](docs/security.md#roles)) |
+| `POST /api/auth/two-factor`, `/passkey` | The code after a password, and signing in with a passkey ([docs/security.md](docs/security.md#second-factors)) |
+| `/api/security/…` | Sign-in switches, keys, accounts and their roles (`PATCH /api/security/users/:id`), single sign-on, the activity record, and your own second factors (`/api/security/me`); signed in only, and most of it for admins ([docs/security.md](docs/security.md#roles)) |
 | `GET /api/auth/sso/start`, `/callback` | Signing in with Authentik or another OpenID Connect provider |
 | `POST /api/auth/sso/logout` | Where the provider says someone signed out there (back-channel logout) |
 | `GET /api/version` | The version, commit and build time running, the same for the newest published image, and whether that is an update |

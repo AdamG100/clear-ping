@@ -11,6 +11,10 @@ import { actorOf, getUser, recordActivity } from '@/lib/security/store';
  * Better Auth checks the password and makes the session. One answer for a
  * wrong username and a wrong password, so the page says nothing about which
  * accounts exist; and repeated failures are slowed down.
+ *
+ * An account with an authenticator app is not signed in yet: Better Auth
+ * answers { twoFactor: true } with a cookie that lets the code be checked
+ * next, at /api/auth/two-factor, unless this browser was trusted then.
  */
 export async function POST(request: NextRequest) {
   if (!(await securityPolicy()).passwordLogin) {
@@ -39,7 +43,15 @@ export async function POST(request: NextRequest) {
           .signInUsername({ body: { username, password, rememberMe: true }, headers: request.headers, asResponse: true })
           .catch(() => null)
       : null;
-  const signedIn = answer?.ok ? ((await answer.clone().json().catch(() => null)) as { user?: { id: string } } | null) : null;
+  const signedIn = answer?.ok
+    ? ((await answer.clone().json().catch(() => null)) as { user?: { id: string }; twoFactorRedirect?: boolean } | null)
+    : null;
+
+  // The password was right; the code is next.
+  if (answer?.ok && signedIn?.twoFactorRedirect) {
+    noteLoginSuccess(keys);
+    return passCookies(answer, NextResponse.json({ twoFactor: true }), request);
+  }
   const user = signedIn?.user ? await getUser(signedIn.user.id) : null;
 
   if (!answer?.ok || !user) {

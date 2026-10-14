@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { decide, identify, routeKind, securityPolicy } from '@/lib/security/access'
+import { decide, FACTOR_SETUP_PAGE, identify, routeKind, securityPolicy } from '@/lib/security/access'
 
 /**
  * The one place every page and API request passes through first, and so the
@@ -24,6 +24,11 @@ export async function proxy(request: NextRequest) {
   })
 
   if (decision.allow) return NextResponse.next()
+  if ('setup' in decision) {
+    const setup = new URL(FACTOR_SETUP_PAGE, request.url)
+    if (pathname !== '/') setup.searchParams.set('next', pathname + search)
+    return NextResponse.redirect(setup)
+  }
   if ('signIn' in decision) {
     const login = new URL('/login', request.url)
     if (pathname !== '/') login.searchParams.set('next', pathname + search)

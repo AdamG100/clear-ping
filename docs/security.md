@@ -115,6 +115,50 @@ everything across, once.
 - The old tables (`users`, `sessions`, `api_keys`) are left in the database,
   unread, in case the upgrade has to be undone.
 
+## Second factors
+
+Accounts that sign in with a password can add a second factor under
+**Settings → Sign-in**. Accounts that sign in through Authentik use
+Authentik's own second factor instead, and are not shown these.
+
+- **An authenticator app.** Scan the QR code with 1Password, Google
+  Authenticator, Authy or the like, and type a code from it to turn it on.
+  From then on, signing in asks for a code after the password. Ten backup
+  codes are shown once, at setup, each good for one sign-in if the phone is
+  lost; new ones can be made, which ends the old. *Trust this browser* skips the
+  code there for 30 days. Ten wrong codes in a row stop the account finishing a
+  sign-in for a quarter of an hour.
+- **Passkeys.** Sign in with a fingerprint, face or device PIN, with no
+  password or code to type. Browsers make passkeys only for a site name over
+  HTTPS, or for `localhost`: not at an address such as `192.168.1.10`. A
+  passkey works at the name it was made at, so make it at the address you
+  normally use. The sign-in page offers passkeys once one exists. Adding one
+  is done within a day of signing in; after that, sign in again first.
+
+### Requiring them
+
+An admin chooses, under **Settings → Sign-in**, what every account that signs
+in with a password must have:
+
+| Required | Satisfied by |
+|---|---|
+| Nothing more than a password | anything |
+| An authenticator app or a passkey | either one |
+| An authenticator app | the app |
+| A passkey | at least one passkey |
+| An authenticator app and a passkey | both |
+
+and whose accounts: **editors and viewers**, or **everyone, admins too**.
+An account without what is required is sent to a page that asks for it the
+next time it opens ClearPing, and until it has added it, the dashboard and API
+answer it with nothing else. Nobody can remove a factor they are required to
+have, and an admin cannot require of everyone something their own account does
+not have yet: that is how an admin would lock themselves out. If it happens
+anyway, `CLEARPING_AUTH=off` (below) lifts the requirement while it is set.
+
+Both factors are Better Auth's, its two-factor and passkey plugins, called
+from ClearPing's routes like the rest of sign-in.
+
 ## Keys
 
 | | Read only | Read and change |
@@ -155,7 +199,10 @@ revocable without a restart, named in the record. Move to them and unset it.
 - keys made and revoked, accounts added and removed, roles changed (and by
   whom: an admin, or the person's groups at Authentik), passwords changed,
   sign-in turned on and off;
-- sign-ins, and failed sign-ins with the address they came from.
+- authenticator apps turned on and off, backup codes remade, passkeys added
+  and removed, and changes to what is required;
+- sign-ins, with how (a password, an authenticator code, a backup code, a
+  passkey), and failed sign-ins with the address they came from.
 
 Each entry says who (the account, the key, or *Anonymous* while sign-in is off)
 and how it arrived: the dashboard, the API or MCP. Entries are kept for a year.

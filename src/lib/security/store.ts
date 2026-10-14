@@ -1,4 +1,5 @@
 import { authDatabase, getAuth, placeholderEmail, SSO_PROVIDER_ID } from './auth'
+import type { FactorsOwed } from './factors'
 import { effectiveKeyAccess, isRole, type KeyAccess, type Role } from './roles'
 import { verifyPassword } from './secrets'
 import { recordSecurityActivity } from './settings-store'
@@ -16,9 +17,11 @@ import { recordSecurityActivity } from './settings-store'
  */
 
 export {
+  getFactorPolicy,
   getJsonSetting,
   getSecuritySettings,
   listActivity,
+  setFactorPolicy,
   setJsonSetting,
   setSecuritySettings,
   type ActivityEntry,
@@ -32,7 +35,8 @@ export const recordActivity = recordSecurityActivity
 export type { KeyAccess, Role }
 
 export type Actor =
-  | { kind: 'user'; id: string; name: string; role: Role }
+  /** `owes`: second factors an admin requires that the account has yet to add (factors.ts). */
+  | { kind: 'user'; id: string; name: string; role: Role; owes?: FactorsOwed }
   | { kind: 'key'; id: string; name: string; access: KeyAccess }
   | { kind: 'anonymous'; name: string }
 
@@ -59,6 +63,10 @@ export interface User {
   /** Can also sign in with a password. An account made by signing in through the provider cannot. */
   hasPassword: boolean
   role: Role
+  /** Asked for a code from an authenticator app after its password. */
+  twoFactor: boolean
+  /** How many passkeys it can sign in with. */
+  passkeys: number
 }
 
 interface UserRow {
@@ -71,12 +79,16 @@ interface UserRow {
   role: string | null
   hasPassword: number
   sso: number
+  twoFactorEnabled: number | null
+  passkeys: number
 }
 
 const USER_SELECT = `
   SELECT u.id, u.username, u.displayUsername, u.name, u.createdAt, u.lastLoginAt, u.role,
     EXISTS (SELECT 1 FROM account a WHERE a.userId = u.id AND a.providerId = 'credential' AND a.password IS NOT NULL AND a.password != '') AS hasPassword,
-    EXISTS (SELECT 1 FROM account a WHERE a.userId = u.id AND a.providerId = '${SSO_PROVIDER_ID}') AS sso
+    EXISTS (SELECT 1 FROM account a WHERE a.userId = u.id AND a.providerId = '${SSO_PROVIDER_ID}') AS sso,
+    u.twoFactorEnabled,
+    (SELECT COUNT(*) FROM passkey p WHERE p.userId = u.id) AS passkeys
   FROM "user" u`
 
 const userFrom = (row: UserRow): User => ({
@@ -89,6 +101,8 @@ const userFrom = (row: UserRow): User => ({
   hasPassword: row.hasPassword === 1,
   // Anything unrecognised is the least, never the most.
   role: isRole(row.role) ? row.role : 'viewer',
+  twoFactor: row.twoFactorEnabled === 1,
+  passkeys: row.passkeys ?? 0,
 })
 
 /** The user as the one making a change: what the activity record and the checks take. */
@@ -101,6 +115,12 @@ export const USERNAME = /^[A-Za-z0-9._@-]{1,64}$/
 export async function countUsers(): Promise<number> {
   const db = await authDatabase()
   return (db.prepare('SELECT COUNT(*) AS count FROM "user"').get() as { count: number }).count
+}
+
+/** How many passkeys there are, on every account: none, and the sign-in page does not offer them. */
+export async function countPasskeys(): Promise<number> {
+  const db = await authDatabase()
+  return (db.prepare('SELECT COUNT(*) AS count FROM passkey').get() as { count: number }).count
 }
 
 export async function listUsers(): Promise<User[]> {
@@ -200,9 +220,17 @@ export const SESSION_COOKIE = 'clearping.session_token'
 
 /** The account signed in with these request headers, if any. */
 export async function userForHeaders(headers: Headers): Promise<User | null> {
+  return (await signedIn(headers))?.user ?? null
+}
+
+/** The account signed in with these request headers, and whether its session came through single sign-on. */
+export async function signedIn(headers: Headers): Promise<{ user: User; viaSso: boolean } | null> {
   const auth = await getAuth()
   const found = await auth.api.getSession({ headers }).catch(() => null)
-  return found ? getUser(found.user.id) : null
+  if (!found) return null
+  const user = await getUser(found.user.id)
+  const session = found.session as { viaSso?: boolean | number | null }
+  return user ? { user, viaSso: !!session.viaSso } : null
 }
 
 /** The sign-in at the identity provider the signed-in session came from, if it came from one. */
