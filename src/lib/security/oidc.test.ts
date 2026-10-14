@@ -1,15 +1,11 @@
 import { createHmac, generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  authorizationUrl,
-  decodePending,
   discover,
-  encodePending,
   endSessionUrl,
   inAllowedGroup,
-  newPending,
+  safeNext,
   usernameFrom,
-  verifyIdToken,
   verifyLogoutToken,
   SSO_DEFAULTS,
   type Claims,
@@ -57,46 +53,6 @@ function hs256(payload: object, secret: string): string {
 }
 
 const keys = vi.fn(async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200 }))
-const options = { discovery, clientId: 'client-1', clientSecret: 'secret-1', nonce: 'n-1', now: NOW, fetchFn: keys as unknown as typeof fetch }
-
-describe('verifyIdToken', () => {
-  it('accepts a token signed with the provider\'s key, for this application and this sign-in', async () => {
-    await expect(verifyIdToken(rs256(claims()), options)).resolves.toMatchObject({ sub: 'abc123' })
-  })
-
-  it('accepts one signed with the client secret, which is how Authentik signs without a key', async () => {
-    await expect(verifyIdToken(hs256(claims(), 'secret-1'), options)).resolves.toMatchObject({ sub: 'abc123' })
-    await expect(verifyIdToken(hs256(claims(), 'guessed'), options)).rejects.toThrow('signature')
-  })
-
-  it('refuses a token whose contents were changed after signing', async () => {
-    const [head, , signature] = rs256(claims()).split('.')
-    await expect(verifyIdToken(`${head}.${b64(claims({ sub: 'someone-else' }))}.${signature}`, options)).rejects.toThrow('signature')
-  })
-
-  it('refuses an unsigned token', async () => {
-    await expect(verifyIdToken(`${b64({ alg: 'none' })}.${b64(claims())}.`, options)).rejects.toThrow('not accepted')
-  })
-
-  it.each([
-    ['another issuer', { iss: 'https://evil.example/' }, 'another issuer'],
-    ['another application', { aud: 'client-2' }, 'another application'],
-    ['another sign-in', { nonce: 'n-2' }, 'not the answer'],
-    ['an expired token', { exp: NOW / 1000 - 3600 }, 'expired'],
-  ])('refuses %s', async (_, change, message) => {
-    await expect(verifyIdToken(rs256(claims(change)), options)).rejects.toThrow(message)
-  })
-
-  it('looks again for a key it has not seen, as after the provider rotates its keys', async () => {
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ keys: [] })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ keys: [{ ...jwk, kid: 'k2' }] })))
-    const fresh = { ...discovery, jwks_uri: 'https://auth.example/rotated/jwks/' }
-    await expect(verifyIdToken(rs256(claims(), 'k2'), { ...options, discovery: fresh, fetchFn })).resolves.toMatchObject({ sub: 'abc123' })
-    expect(fetchFn).toHaveBeenCalledTimes(2)
-  })
-})
 
 describe('verifyLogoutToken', () => {
   const EVENT = { 'http://schemas.openid.net/event/backchannel-logout': {} }
@@ -135,6 +91,16 @@ describe('verifyLogoutToken', () => {
     await expect(verifyLogoutToken(token(), logoutOptions)).rejects.toThrow(message)
   })
 
+  it('looks again for a key it has not seen, as after the provider rotates its keys', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ keys: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ keys: [{ ...jwk, kid: 'k2' }] })))
+    const fresh = { ...discovery, jwks_uri: 'https://auth.example/rotated/jwks/' }
+    await expect(verifyLogoutToken(rs256(logout(), 'k2'), { ...logoutOptions, discovery: fresh, fetchFn })).resolves.toMatchObject({ sub: 'abc123' })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
   it('refuses the same token sent twice', async () => {
     const token = rs256(logout({ jti: 'once-only' }))
     await expect(verifyLogoutToken(token, logoutOptions)).resolves.toMatchObject({ sub: 'abc123' })
@@ -167,20 +133,12 @@ describe('discover', () => {
   })
 })
 
-describe('the way there and back', () => {
-  it('asks with PKCE, a state and a nonce', () => {
-    const pending = newPending('/', false)
-    const url = new URL(authorizationUrl(discovery, { ...SSO_DEFAULTS, clientId: 'client-1', redirectUri: 'https://ping.example/api/auth/sso/callback' }, pending))
-    expect(url.searchParams.get('code_challenge_method')).toBe('S256')
-    expect(url.searchParams.get('state')).toBe(pending.state)
-    expect(url.searchParams.get('nonce')).toBe(pending.nonce)
-    expect(url.searchParams.get('scope')).toContain('openid')
-  })
-
-  it('carries only a path on this site to come back to', () => {
-    const elsewhere = encodePending({ ...newPending('/', false), next: '//evil.example' })
-    expect(decodePending(elsewhere)?.next).toBe('/')
-    expect(decodePending('not a cookie')).toBeNull()
+describe('coming back', () => {
+  it('goes back only to a path on this site', () => {
+    expect(safeNext('/alerts')).toBe('/alerts')
+    for (const elsewhere of ['//evil.example', 'https://evil.example/', '/\\evil.example', 42, undefined]) {
+      expect(safeNext(elsewhere)).toBe('/')
+    }
   })
 })
 

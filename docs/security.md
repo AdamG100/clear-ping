@@ -81,12 +81,39 @@ With **Require sign-in** on:
   health check; it says nothing about what is monitored), `/api/mcp/info`, and
   the icons, manifest and offline page the sign-in page needs.
 
-Sessions last 30 days from the last visit, are kept as a hash on the server,
-and end on the server when you sign out. The cookie is `HttpOnly`,
+Sessions last 30 days from the last visit, and end on the server when you
+sign out. The cookie, `clearping.session_token`, is signed, `HttpOnly`,
 `SameSite=Lax`, and `Secure` over HTTPS. A change made with the cookie has to
 come from a page of this site; one sent from another site is refused. Sign-in
 failures are slowed down after five tries, per address and per username, up to
 a quarter of an hour.
+
+### Better Auth
+
+Accounts, passwords, sessions, keys and the sign-in through Authentik are run
+by [Better Auth](https://better-auth.com), kept in its own tables in
+ClearPing's database. ClearPing adds its rules on top: the roles, the last
+admin, keys that never outdo their maker, who may sign in through Authentik and
+as what, signing out together with Authentik, and the activity record. Better
+Auth's own HTTP endpoints are not open to the browser; ClearPing's routes call
+it on the server, so nothing gets round those rules.
+
+The cookies are signed with `BETTER_AUTH_SECRET` where that is set. Otherwise
+a secret is made at the first start and kept in the database, so nothing has
+to be set. Set it yourself only to keep sessions working across a database
+that is replaced.
+
+**Upgrading from a version before it** (0.1.x): the first start moves
+everything across, once.
+
+- Accounts keep their passwords, roles and links to Authentik.
+- Keys keep working, unchanged.
+- Everyone signs in once more: sessions are not moved.
+- Nothing changes in Authentik: the redirect URI stays
+  `/api/auth/sso/callback`. Its provider does need a signing key now (see
+  below).
+- The old tables (`users`, `sessions`, `api_keys`) are left in the database,
+  unread, in case the upgrade has to be undone.
 
 ## Keys
 
@@ -159,8 +186,10 @@ button on the sign-in page, with no password to keep for ClearPing.
    - Redirect URI: the one shown under Settings → Single sign-on in ClearPing, which is
      `https://<your ClearPing>/api/auth/sso/callback`. Open that page at the
      address people will use, since the URI is taken from it.
-   - Signing key: pick one (the self-signed certificate is fine). Without one
-     Authentik signs with the client secret, which ClearPing also accepts.
+   - Signing key: pick one (the self-signed certificate is fine). ClearPing
+     checks every sign-in against Authentik's published keys, so one is
+     needed: without it Authentik signs with the client secret, which is not
+     accepted.
    - Scopes: the defaults (`openid`, `email`, `profile`). `profile` is where
      Authentik puts the username and the person's groups.
 2. **Applications → Applications → Create**, using that provider. Optionally
@@ -243,15 +272,20 @@ With the switch off, signing out of ClearPing ends only ClearPing's session.
 
 ### How it is checked
 
-The authorization code flow with PKCE. ClearPing sends the browser to
-Authentik with a random state, nonce and PKCE challenge, kept in a short-lived
-cookie that only the callback reads. The answer is taken only if its state
-matches that cookie. The code is then traded for an ID token directly with
-Authentik, using the client secret and the PKCE verifier. The token's
-signature (Authentik's published key, or the client secret for HS256), issuer,
-audience, expiry and nonce are all checked before anyone is signed in. Linking
-always ties the identity to the account signed in at that moment, never to one
-named anywhere a browser could change. Everything about a sign-in goes into the
+The authorization code flow with PKCE, run by Better Auth. The browser goes
+to Authentik with a random state, nonce and PKCE challenge, and the answer is
+taken only if its state is the one this browser was given. The code is traded
+for an ID token directly with Authentik, using the client secret and the PKCE
+verifier, and the token's signature (against Authentik's published keys),
+issuer, audience and nonce are checked before anyone is signed in. ClearPing
+then turns away anyone outside the allowed group and sets the role from the
+groups.
+
+Linking always ties the identity to the account signed in at that moment.
+Every account's email address, as far as Better Auth is concerned, is a
+placeholder of its own on the reserved `.invalid` domain, never the address
+Authentik gives: no two ever match, so an account is never linked, or taken
+over, because of a matching email. Everything about a sign-in goes into the
 activity record: first sign-ins, links, and people turned away for not being
 in the group.
 

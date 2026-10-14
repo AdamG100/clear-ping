@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { identify } from './access'
 import { canAdminister, ROLE_LABEL } from './roles'
-import { countUsers, SESSION_COOKIE, type Actor } from './store'
+import { countUsers, type Actor } from './store'
 
 /** What the security routes have in common. */
 
@@ -12,21 +12,24 @@ export function isHttps(request: Request): boolean {
 }
 
 /**
- * The session cookie: unreadable by scripts, sent only by this site's own
- * pages and links, and only over HTTPS where the site is reached that way.
+ * Hand on the cookies Better Auth set (the session, and the state of a sign-in
+ * through the provider) to the browser. They are `HttpOnly` and
+ * `SameSite=Lax`, and `Secure` where the request came over HTTPS: decided per
+ * request, as ClearPing is reached over plain HTTP on a home network as often
+ * as over HTTPS, where a cookie marked `Secure` would never be kept.
  */
-export function setSessionCookie(response: NextResponse, request: Request, token: string, expiresAt: number): void {
-  response.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isHttps(request),
-    path: '/',
-    expires: new Date(expiresAt),
-  })
+export function passCookies(from: Response, to: NextResponse, request: Request): NextResponse {
+  const secure = isHttps(request)
+  for (const line of from.headers.getSetCookie()) {
+    to.headers.append('set-cookie', secure && !/;\s*secure/i.test(line) ? `${line}; Secure` : line)
+  }
+  return to
 }
 
-export function clearSessionCookie(response: NextResponse, request: Request): void {
-  response.cookies.set(SESSION_COOKIE, '', { httpOnly: true, sameSite: 'lax', secure: isHttps(request), path: '/', maxAge: 0 })
+/** Why Better Auth refused, in words fit to show. */
+export async function refusal(response: Response, fallback: string): Promise<string> {
+  const body = (await response.clone().json().catch(() => null)) as { message?: string } | null
+  return body?.message || fallback
 }
 
 export type UserActor = Extract<Actor, { kind: 'user' }>

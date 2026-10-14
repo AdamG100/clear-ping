@@ -1,19 +1,17 @@
-import { createHash, createHmac, createPublicKey, constants, timingSafeEqual, verify, type JsonWebKeyInput } from 'node:crypto'
+import { createHmac, createPublicKey, constants, timingSafeEqual, verify, type JsonWebKeyInput } from 'node:crypto'
 
 /** One of the provider's public keys, as its key set lists it. */
 type JsonWebKey = { kid?: string; use?: string; kty?: string; [field: string]: unknown }
 import { DEFAULT_NEW_ROLE, isRole, roleFromGroups, type Role } from './roles'
-import { newToken } from './secrets'
-import { getJsonSetting, setJsonSetting } from './store'
+import { getJsonSetting, setJsonSetting } from './settings-store'
 
 /**
  * Single sign-on with Authentik, or any OpenID Connect provider.
  *
- * The authorization code flow with PKCE: ClearPing sends the browser to the
- * provider, the provider sends it back with a code, and ClearPing trades the
- * code for an ID token directly with the provider, checks the token's
- * signature, issuer, audience, expiry and nonce, and signs in the account
- * linked to the person it names.
+ * The sign-in itself, the authorization code flow with PKCE and the checks of
+ * the ID token, is Better Auth's (see auth.ts). What is here is the rest: the
+ * settings, the provider's own description of itself, who may sign in and as
+ * what, and signing out together with the provider, both ways.
  *
  * In Authentik: Applications → Providers → Create → OAuth2/OpenID Provider,
  * confidential client, with the redirect URI the dashboard shows. Its
@@ -181,58 +179,11 @@ async function signingKeys(jwksUri: string, fetchFn: FetchFn, fresh = false): Pr
   return keys
 }
 
-// ─── Going there and coming back ────────────────────────────────────────────
-
-/** What the browser carries to the provider and back, in a cookie only the callback reads. */
-export interface Pending {
-  state: string
-  nonce: string
-  verifier: string
-  next: string
-  /** Signing in to link the provider to the account already signed in, rather than to sign in. */
-  link: boolean
-}
-
-export const PENDING_COOKIE = 'clearping_sso'
-export const PENDING_LIFETIME_S = 10 * 60
-
-export function newPending(next: string, link: boolean): Pending {
-  return { state: newToken(), nonce: newToken(), verifier: newToken(), next, link }
-}
-
-export function encodePending(pending: Pending): string {
-  return Buffer.from(JSON.stringify(pending)).toString('base64url')
-}
-
-export function decodePending(value: string | null): Pending | null {
-  if (!value) return null
-  try {
-    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'))
-    return typeof parsed?.state === 'string' && typeof parsed?.verifier === 'string' && typeof parsed?.nonce === 'string'
-      ? { state: parsed.state, nonce: parsed.nonce, verifier: parsed.verifier, next: safeNext(parsed.next), link: parsed.link === true }
-      : null
-  } catch {
-    return null
-  }
-}
+// ─── Coming back ────────────────────────────────────────────────────────────
 
 /** A path on this site, or the dashboard. */
 export function safeNext(next: unknown): string {
   return typeof next === 'string' && /^\/(?![/\\])/.test(next) ? next : '/'
-}
-
-export function authorizationUrl(discovery: Discovery, config: SsoConfig, pending: Pending): string {
-  const url = new URL(discovery.authorization_endpoint)
-  url.searchParams.set('response_type', 'code')
-  url.searchParams.set('client_id', config.clientId)
-  url.searchParams.set('redirect_uri', config.redirectUri)
-  // `profile` is where Authentik puts the username and the person's groups.
-  url.searchParams.set('scope', 'openid profile email')
-  url.searchParams.set('state', pending.state)
-  url.searchParams.set('nonce', pending.nonce)
-  url.searchParams.set('code_challenge', createHash('sha256').update(pending.verifier).digest('base64url'))
-  url.searchParams.set('code_challenge_method', 'S256')
-  return url.href
 }
 
 export interface Claims {
@@ -251,62 +202,7 @@ export interface Claims {
   [claim: string]: unknown
 }
 
-/**
- * Trade the code for the person's claims: the ID token, checked, and what the
- * userinfo address adds to it. The ID token itself comes back too, to show
- * the provider when signing out there.
- */
-export async function redeemCode(
-  code: string,
-  pending: Pending,
-  config: SsoConfig,
-  fetchFn: FetchFn = fetch,
-  now = Date.now()
-): Promise<{ claims: Claims; idToken: string }> {
-  const discovery = await discover(config.issuer, fetchFn)
-  const response = await fetchFn(discovery.token_endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: config.redirectUri,
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      code_verifier: pending.verifier,
-    }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  })
-  const tokens = (await response.json().catch(() => ({}))) as Record<string, unknown>
-  if (!response.ok || typeof tokens.id_token !== 'string') {
-    const said = typeof tokens.error_description === 'string' ? tokens.error_description : typeof tokens.error === 'string' ? tokens.error : `HTTP ${response.status}`
-    throw new Error(`The provider would not complete the sign-in: ${said}`)
-  }
-
-  const idToken = tokens.id_token
-  const claims = await verifyIdToken(idToken, {
-    discovery,
-    clientId: config.clientId,
-    clientSecret: config.clientSecret,
-    nonce: pending.nonce,
-    now,
-    fetchFn,
-  })
-
-  // The ID token may leave out the profile; the userinfo address has it.
-  if (discovery.userinfo_endpoint && typeof tokens.access_token === 'string') {
-    const info = await fetchFn(discovery.userinfo_endpoint, {
-      headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-      .then(answer => (answer.ok ? answer.json() : null))
-      .catch(() => null)
-    if (info && info.sub === claims.sub) return { claims: { ...info, ...claims, groups: claims.groups ?? info.groups }, idToken }
-  }
-  return { claims, idToken }
-}
-
-// ─── The ID token ───────────────────────────────────────────────────────────
+// ─── Tokens from the provider ───────────────────────────────────────────────
 
 const HASH: Record<string, string> = { '256': 'sha256', '384': 'sha384', '512': 'sha512' }
 /** Clocks differ; this much is forgiven. */
@@ -378,16 +274,6 @@ async function verifySigned(token: string, what: string, options: VerifyOptions)
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud]
   if (!audience.includes(clientId)) throw new Error(`The ${what} is for another application`)
   if (audience.length > 1 && claims.azp !== undefined && claims.azp !== clientId) throw new Error(`The ${what} is for another application`)
-  return claims
-}
-
-export async function verifyIdToken(token: string, options: VerifyOptions & { nonce: string }): Promise<Claims> {
-  const now = Math.floor((options.now ?? Date.now()) / 1000)
-  const claims = await verifySigned(token, 'ID token', options)
-  if (typeof claims.exp !== 'number' || claims.exp + SKEW_S < now) throw new Error('The ID token has expired')
-  if (typeof claims.iat === 'number' && claims.iat - SKEW_S > now) throw new Error('The ID token is dated in the future')
-  if (claims.nonce !== options.nonce) throw new Error('The ID token is not the answer to this sign-in')
-  if (typeof claims.sub !== 'string' || !claims.sub) throw new Error('The ID token does not say who it is for')
   return claims
 }
 

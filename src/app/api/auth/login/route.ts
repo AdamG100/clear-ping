@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, setSessionCookie } from '@/lib/security/http';
+import { getAuth } from '@/lib/security/auth';
+import { clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies } from '@/lib/security/http';
 import { securityPolicy } from '@/lib/security/access';
-import { actorOf, checkLogin, createSession, recordActivity } from '@/lib/security/store';
+import { actorOf, getUser, recordActivity } from '@/lib/security/store';
 
 /**
  * POST /api/auth/login - Sign in
  * Body: { username, password }
  *
- * One answer for a wrong username and a wrong password, so the page says
- * nothing about which accounts exist; and repeated failures are slowed down.
+ * Better Auth checks the password and makes the session. One answer for a
+ * wrong username and a wrong password, so the page says nothing about which
+ * accounts exist; and repeated failures are slowed down.
  */
 export async function POST(request: NextRequest) {
   if (!(await securityPolicy()).passwordLogin) {
@@ -29,18 +31,24 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const user = username && password ? await checkLogin(username, password) : null;
-  if (!user) {
+  const auth = await getAuth();
+  // A refusal from one of ClearPing's hooks arrives as a throw, not an answer.
+  const answer =
+    username && password
+      ? await auth.api
+          .signInUsername({ body: { username, password, rememberMe: true }, headers: request.headers, asResponse: true })
+          .catch(() => null)
+      : null;
+  const signedIn = answer?.ok ? ((await answer.clone().json().catch(() => null)) as { user?: { id: string } } | null) : null;
+  const user = signedIn?.user ? await getUser(signedIn.user.id) : null;
+
+  if (!answer?.ok || !user) {
     noteLoginFailure(keys);
     await recordActivity({ kind: 'anonymous', name: username || 'Unknown' }, 'dashboard', 'signin.failed', `From ${address}`);
     return NextResponse.json({ error: 'Wrong username or password' }, { status: 401 });
   }
 
   noteLoginSuccess(keys);
-  const session = await createSession(user.id);
   await recordActivity(actorOf(user), 'dashboard', 'signin', `From ${address}`);
-
-  const response = NextResponse.json({ username: user.username });
-  setSessionCookie(response, request, session.token, session.expiresAt);
-  return response;
+  return passCookies(answer, NextResponse.json({ username: user.username }), request);
 }

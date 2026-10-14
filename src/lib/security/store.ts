@@ -1,35 +1,31 @@
-import { randomUUID } from 'node:crypto'
-import type sqlite3 from 'sqlite3'
-import { getDatabase } from '../database'
+import { authDatabase, getAuth, placeholderEmail, SSO_PROVIDER_ID } from './auth'
 import { effectiveKeyAccess, isRole, type KeyAccess, type Role } from './roles'
-import { decoyHash, hashPassword, KEY_PREFIX, newToken, tokenHash, verifyPassword } from './secrets'
+import { verifyPassword } from './secrets'
+import { recordSecurityActivity } from './settings-store'
 
 /**
- * Where accounts, sessions, keys, the security switches and the activity
- * record are kept. Everything that reads or writes those tables goes through
- * here.
+ * Accounts, sessions and keys: ClearPing's view of what Better Auth keeps
+ * (see auth.ts), with ClearPing's rules on top. That there is always an
+ * admin; that a key never does more than the account that made it; that a
+ * key revoked stays listed, so the activity it was used for still says
+ * whose it was. Everything that reads or writes those tables goes through
+ * here, or through auth.ts.
+ *
+ * Better Auth keeps its dates as ISO strings; they are milliseconds here, as
+ * everywhere else in ClearPing.
  */
 
-type Database = sqlite3.Database
+export {
+  getJsonSetting,
+  getSecuritySettings,
+  listActivity,
+  setJsonSetting,
+  setSecuritySettings,
+  type ActivityEntry,
+  type SecuritySettings,
+} from './settings-store'
 
-function run(database: Database, sql: string, params: unknown[] = []): Promise<number> {
-  return new Promise((resolve, reject) => {
-    database.run(sql, params, function (error) {
-      if (error) reject(error)
-      else resolve(this.changes)
-    })
-  })
-}
-
-function all<T>(database: Database, sql: string, params: unknown[] = []): Promise<T[]> {
-  return new Promise((resolve, reject) => {
-    database.all(sql, params, (error, rows) => (error ? reject(error) : resolve((rows ?? []) as T[])))
-  })
-}
-
-async function one<T>(database: Database, sql: string, params: unknown[] = []): Promise<T | undefined> {
-  return (await all<T>(database, sql, params))[0]
-}
+export const recordActivity = recordSecurityActivity
 
 // ─── Who did something ──────────────────────────────────────────────────────
 
@@ -41,6 +37,15 @@ export type Actor =
   | { kind: 'anonymous'; name: string }
 
 export const ANONYMOUS: Actor = { kind: 'anonymous', name: 'Anonymous' }
+
+/** How the change arrived. */
+export type Via = 'dashboard' | 'api' | 'mcp'
+
+const ms = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = typeof value === 'number' ? value : Date.parse(String(value))
+  return Number.isFinite(parsed) ? parsed : null
+}
 
 // ─── Accounts ───────────────────────────────────────────────────────────────
 
@@ -58,41 +63,55 @@ export interface User {
 
 interface UserRow {
   id: string
-  username: string
-  password_hash: string
-  created_at: number
-  last_login_at: number | null
-  sso_issuer: string | null
-  sso_subject: string | null
-  role: string
+  username: string | null
+  displayUsername: string | null
+  name: string
+  createdAt: string
+  lastLoginAt: string | null
+  role: string | null
+  hasPassword: number
+  sso: number
 }
+
+const USER_SELECT = `
+  SELECT u.id, u.username, u.displayUsername, u.name, u.createdAt, u.lastLoginAt, u.role,
+    EXISTS (SELECT 1 FROM account a WHERE a.userId = u.id AND a.providerId = 'credential' AND a.password IS NOT NULL AND a.password != '') AS hasPassword,
+    EXISTS (SELECT 1 FROM account a WHERE a.userId = u.id AND a.providerId = '${SSO_PROVIDER_ID}') AS sso
+  FROM "user" u`
 
 const userFrom = (row: UserRow): User => ({
   id: row.id,
-  username: row.username,
-  createdAt: row.created_at,
-  lastLoginAt: row.last_login_at,
-  sso: !!row.sso_subject,
-  hasPassword: row.password_hash !== '',
+  // As it was typed; the username itself is kept in lower case, for matching.
+  username: row.displayUsername || row.username || row.name,
+  createdAt: ms(row.createdAt) ?? 0,
+  lastLoginAt: ms(row.lastLoginAt),
+  sso: row.sso === 1,
+  hasPassword: row.hasPassword === 1,
   // Anything unrecognised is the least, never the most.
   role: isRole(row.role) ? row.role : 'viewer',
 })
 
 /** The user as the one making a change: what the activity record and the checks take. */
-export function actorOf(user: User): Extract<Actor, { kind: 'user' }> {
+export function actorOf(user: Pick<User, 'id' | 'username' | 'role'>): Extract<Actor, { kind: 'user' }> {
   return { kind: 'user', id: user.id, name: user.username, role: user.role }
 }
 
 export const USERNAME = /^[A-Za-z0-9._@-]{1,64}$/
 
 export async function countUsers(): Promise<number> {
-  const row = await one<{ count: number }>(await getDatabase(), 'SELECT COUNT(*) AS count FROM users')
-  return row?.count ?? 0
+  const db = await authDatabase()
+  return (db.prepare('SELECT COUNT(*) AS count FROM "user"').get() as { count: number }).count
 }
 
 export async function listUsers(): Promise<User[]> {
-  const rows = await all<UserRow>(await getDatabase(), 'SELECT * FROM users ORDER BY created_at')
-  return rows.map(userFrom)
+  const db = await authDatabase()
+  return (db.prepare(`${USER_SELECT} ORDER BY u.createdAt`).all() as UserRow[]).map(userFrom)
+}
+
+export async function getUser(userId: string): Promise<User | null> {
+  const db = await authDatabase()
+  const row = db.prepare(`${USER_SELECT} WHERE u.id = ?`).get(userId) as UserRow | undefined
+  return row ? userFrom(row) : null
 }
 
 /** Throws with a reason fit to show when the name is taken or not allowed. */
@@ -100,110 +119,32 @@ export async function createUser(username: string, password: string, role: Role)
   if (!USERNAME.test(username)) {
     throw new Error('A username is 1 to 64 letters, digits, dots, dashes, underscores or @')
   }
-  const database = await getDatabase()
-  if (await one(database, 'SELECT 1 FROM users WHERE username = ?', [username])) {
+  const db = await authDatabase()
+  if (db.prepare('SELECT 1 FROM "user" WHERE username = ?').get(username.toLowerCase())) {
     throw new Error('That username is taken')
   }
-  const row: UserRow = {
-    id: randomUUID(),
-    username,
-    password_hash: await hashPassword(password),
-    created_at: Date.now(),
-    last_login_at: null,
-    sso_issuer: null,
-    sso_subject: null,
-    role,
-  }
-  await run(database, 'INSERT INTO users (id, username, password_hash, created_at, role) VALUES (?, ?, ?, ?, ?)', [
-    row.id,
-    row.username,
-    row.password_hash,
-    row.created_at,
-    role,
-  ])
-  return userFrom(row)
+  let email = placeholderEmail(username)
+  for (let n = 2; db.prepare('SELECT 1 FROM "user" WHERE email = ?').get(email); n++) email = placeholderEmail(`${username}-${n}`)
+
+  const auth = await getAuth()
+  const { user } = await auth.api.createUser({
+    body: { email, password, name: username, role, data: { username: username.toLowerCase(), displayUsername: username } },
+  })
+  return (await getUser(user.id))!
 }
 
-/** The user, if the name and password are right. Takes as long either way. */
-export async function checkLogin(username: string, password: string): Promise<User | null> {
-  const database = await getDatabase()
-  const row = await one<UserRow>(database, 'SELECT * FROM users WHERE username = ?', [username])
-  const matches = await verifyPassword(password, row?.password_hash ?? (await decoyHash()))
-  if (!row || !matches) return null
-  await run(database, 'UPDATE users SET last_login_at = ? WHERE id = ?', [Date.now(), row.id])
-  return userFrom(row)
-}
-
-// ─── Single sign-on ─────────────────────────────────────────────────────────
-
-/** The account a person at the identity provider signs in as, if there is one. */
-export async function userForSso(issuer: string, subject: string): Promise<User | null> {
-  const row = await one<UserRow>(await getDatabase(), 'SELECT * FROM users WHERE sso_issuer = ? AND sso_subject = ?', [issuer, subject])
-  return row ? userFrom(row) : null
-}
-
-/**
- * A new account for someone signing in through the provider for the first
- * time, under the name the provider gives them, or that name with a number if
- * an account here already has it: an existing account is never taken over by
- * a name that happens to match.
- */
-export async function createSsoUser(wanted: string, issuer: string, subject: string, role: Role): Promise<User> {
-  const database = await getDatabase()
-  const base = wanted.replace(/[^A-Za-z0-9._@-]/g, '').slice(0, 56) || 'user'
-  let username = base
-  for (let n = 2; await one(database, 'SELECT 1 FROM users WHERE username = ?', [username]); n++) username = `${base}-${n}`
-
-  const row: UserRow = {
-    id: randomUUID(),
-    username,
-    password_hash: '',
-    created_at: Date.now(),
-    last_login_at: null,
-    sso_issuer: issuer,
-    sso_subject: subject,
-    role,
-  }
-  await run(
-    database,
-    'INSERT INTO users (id, username, password_hash, created_at, sso_issuer, sso_subject, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [row.id, row.username, row.password_hash, row.created_at, issuer, subject, role]
-  )
-  return userFrom(row)
-}
-
-/** Have an existing account sign in as this person at the provider. Throws if another account already does. */
-export async function linkSso(userId: string, issuer: string, subject: string): Promise<void> {
-  const other = await userForSso(issuer, subject)
-  if (other && other.id !== userId) throw new Error(`That identity already signs in as ${other.username}`)
-  await run(await getDatabase(), 'UPDATE users SET sso_issuer = ?, sso_subject = ? WHERE id = ?', [issuer, subject, userId])
-}
-
-export async function unlinkSso(userId: string): Promise<void> {
-  await run(await getDatabase(), 'UPDATE users SET sso_issuer = NULL, sso_subject = NULL WHERE id = ?', [userId])
-}
-
-export async function noteLogin(userId: string): Promise<void> {
-  await run(await getDatabase(), 'UPDATE users SET last_login_at = ? WHERE id = ?', [Date.now(), userId])
-}
-
-export async function getUser(userId: string): Promise<User | null> {
-  const row = await one<UserRow>(await getDatabase(), 'SELECT * FROM users WHERE id = ?', [userId])
-  return row ? userFrom(row) : null
-}
-
+/** Whether this is the account's password. */
 export async function checkPassword(userId: string, password: string): Promise<boolean> {
-  const row = await one<UserRow>(await getDatabase(), 'SELECT * FROM users WHERE id = ?', [userId])
-  return !!row && (await verifyPassword(password, row.password_hash))
-}
-
-export async function setPassword(userId: string, password: string): Promise<void> {
-  await run(await getDatabase(), 'UPDATE users SET password_hash = ? WHERE id = ?', [await hashPassword(password), userId])
+  const db = await authDatabase()
+  const row = db.prepare("SELECT password FROM account WHERE userId = ? AND providerId = 'credential'").get(userId) as
+    | { password: string | null }
+    | undefined
+  return !!row?.password && (await verifyPassword(password, row.password))
 }
 
 export async function countAdmins(): Promise<number> {
-  const row = await one<{ count: number }>(await getDatabase(), "SELECT COUNT(*) AS count FROM users WHERE role = 'admin'")
-  return row?.count ?? 0
+  const db = await authDatabase()
+  return (db.prepare(`SELECT COUNT(*) AS count FROM "user" WHERE role = 'admin'`).get() as { count: number }).count
 }
 
 /** Would taking this account's admin role away, or the account itself, leave no admin? */
@@ -219,60 +160,62 @@ export async function setRole(userId: string, role: Role): Promise<User> {
   if (user.role === 'admin' && role !== 'admin' && (await isLastAdmin(userId))) {
     throw new Error('This is the only admin. Make another account an admin first')
   }
-  await run(await getDatabase(), 'UPDATE users SET role = ? WHERE id = ?', [role, userId])
+  const db = await authDatabase()
+  db.prepare('UPDATE "user" SET role = ?, updatedAt = ? WHERE id = ?').run(role, new Date().toISOString(), userId)
   return { ...user, role }
 }
 
 /**
- * Remove an account. Its keys are revoked with it: a key does what the account
- * that made it may, and that account is gone. Throws if it is the last admin.
+ * Remove an account, its sessions and its links to the provider. Its keys are
+ * revoked with it: a key does what the account that made it may, and that
+ * account is gone. Throws if it is the last admin.
  */
 export async function deleteUser(userId: string): Promise<boolean> {
   if (await isLastAdmin(userId)) throw new Error('This is the only admin. Make another account an admin first')
-  const database = await getDatabase()
-  await run(database, 'UPDATE api_keys SET revoked_at = ? WHERE owner_id = ? AND revoked_at IS NULL', [Date.now(), userId])
-  return (await run(database, 'DELETE FROM users WHERE id = ?', [userId])) > 0
+  const db = await authDatabase()
+  const remove = db.transaction(() => {
+    for (const key of db.prepare('SELECT id FROM apikey WHERE referenceId = ? AND enabled = 1').all(userId) as { id: string }[]) {
+      revokeKeyRow(db, key.id)
+    }
+    db.prepare('DELETE FROM session WHERE userId = ?').run(userId)
+    db.prepare('DELETE FROM account WHERE userId = ?').run(userId)
+    return db.prepare('DELETE FROM "user" WHERE id = ?').run(userId).changes > 0
+  })
+  return remove()
+}
+
+// ─── Single sign-on ─────────────────────────────────────────────────────────
+
+/** Stop an account signing in through the provider. */
+export async function unlinkSso(userId: string): Promise<void> {
+  const db = await authDatabase()
+  db.prepare('DELETE FROM account WHERE userId = ? AND providerId = ?').run(userId, SSO_PROVIDER_ID)
+  db.prepare('UPDATE session SET viaSso = 0, ssoSid = NULL WHERE userId = ?').run(userId)
 }
 
 // ─── Sessions ───────────────────────────────────────────────────────────────
 
-export const SESSION_COOKIE = 'clearping_session'
-/** Signed in for 30 days from the last visit. */
-export const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
-/** How stale "last seen" may get before it is written again: not on every request. */
-const TOUCH_AFTER_MS = 5 * 60 * 1000
+/** The cookie a session travels in (Better Auth's, under ClearPing's prefix). */
+export const SESSION_COOKIE = 'clearping.session_token'
 
-/** The sign-in at the identity provider a session was made from. */
-export interface SsoOrigin {
-  issuer: string
-  subject: string
-  /** The provider's id for its own session, when its ID token gives one. */
-  sid: string | null
-  idToken: string
+/** The account signed in with these request headers, if any. */
+export async function userForHeaders(headers: Headers): Promise<User | null> {
+  const auth = await getAuth()
+  const found = await auth.api.getSession({ headers }).catch(() => null)
+  return found ? getUser(found.user.id) : null
 }
 
-export async function createSession(userId: string, sso?: SsoOrigin): Promise<{ token: string; expiresAt: number }> {
-  const token = newToken()
-  const now = Date.now()
-  const expiresAt = now + SESSION_LIFETIME_MS
-  await run(
-    await getDatabase(),
-    `INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at, sso_issuer, sso_subject, sso_sid, sso_id_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [tokenHash(token), userId, now, expiresAt, now, sso?.issuer ?? null, sso?.subject ?? null, sso?.sid ?? null, sso?.idToken ?? null]
-  )
-  return { token, expiresAt }
-}
-
-/** The provider sign-in a session came from, if it came from one. */
-export async function sessionSso(token: string): Promise<SsoOrigin | null> {
-  const row = await one<{ sso_issuer: string | null; sso_subject: string | null; sso_sid: string | null; sso_id_token: string | null }>(
-    await getDatabase(),
-    'SELECT sso_issuer, sso_subject, sso_sid, sso_id_token FROM sessions WHERE token_hash = ?',
-    [tokenHash(token)]
-  )
-  if (!row?.sso_issuer || !row.sso_subject) return null
-  return { issuer: row.sso_issuer, subject: row.sso_subject, sid: row.sso_sid, idToken: row.sso_id_token ?? '' }
+/** The sign-in at the identity provider the signed-in session came from, if it came from one. */
+export async function sessionSso(headers: Headers): Promise<{ sid: string | null; idToken: string | null } | null> {
+  const auth = await getAuth()
+  const found = await auth.api.getSession({ headers }).catch(() => null)
+  const session = found?.session as { id: string; userId: string; viaSso?: boolean | number | null; ssoSid?: string | null } | undefined
+  if (!session || !session.viaSso) return null
+  const db = await authDatabase()
+  const account = db.prepare('SELECT idToken FROM account WHERE userId = ? AND providerId = ?').get(session.userId, SSO_PROVIDER_ID) as
+    | { idToken: string | null }
+    | undefined
+  return { sid: session.ssoSid ?? null, idToken: account?.idToken ?? null }
 }
 
 /**
@@ -285,65 +228,31 @@ export async function sessionSso(token: string): Promise<SsoOrigin | null> {
  *
  * Returns the accounts signed out, for the activity record.
  */
-export async function endSsoSessions(issuer: string, who: { sub?: string; sid?: string }): Promise<User[]> {
-  const database = await getDatabase()
-  let where: string
-  let params: unknown[]
-  if (who.sid) {
-    where = who.sub
-      ? 'sso_issuer = ? AND sso_subject = ? AND (sso_sid = ? OR sso_sid IS NULL)'
-      : 'sso_issuer = ? AND sso_sid = ?'
-    params = who.sub ? [issuer, who.sub, who.sid] : [issuer, who.sid]
+export async function endSsoSessions(who: { sub?: string; sid?: string }): Promise<User[]> {
+  const db = await authDatabase()
+  const owners = who.sub
+    ? (db.prepare('SELECT userId FROM account WHERE providerId = ? AND accountId = ?').all(SSO_PROVIDER_ID, who.sub) as { userId: string }[])
+    : null
+
+  let rows: { id: string; userId: string }[]
+  if (who.sid && owners) {
+    rows = owners.flatMap(({ userId }) =>
+      db
+        .prepare('SELECT id, userId FROM session WHERE userId = ? AND viaSso = 1 AND (ssoSid = ? OR ssoSid IS NULL)')
+        .all(userId, who.sid) as { id: string; userId: string }[]
+    )
+  } else if (who.sid) {
+    rows = db.prepare('SELECT id, userId FROM session WHERE viaSso = 1 AND ssoSid = ?').all(who.sid) as { id: string; userId: string }[]
   } else {
-    where = 'sso_issuer = ? AND sso_subject = ?'
-    params = [issuer, who.sub]
+    rows = (owners ?? []).flatMap(({ userId }) =>
+      db.prepare('SELECT id, userId FROM session WHERE userId = ? AND viaSso = 1').all(userId) as { id: string; userId: string }[]
+    )
   }
 
-  const rows = await all<UserRow>(
-    database,
-    `SELECT DISTINCT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE ${where.replace(/sso_/g, 'sessions.sso_')}`,
-    params
-  )
-  await run(database, `DELETE FROM sessions WHERE ${where}`, params)
-  return rows.map(userFrom)
-}
-
-export async function userForSession(token: string): Promise<User | null> {
-  const database = await getDatabase()
-  const hash = tokenHash(token)
-  const row = await one<UserRow & { expires_at: number; last_seen_at: number }>(
-    database,
-    `SELECT users.*, sessions.expires_at, sessions.last_seen_at
-       FROM sessions JOIN users ON users.id = sessions.user_id
-      WHERE sessions.token_hash = ?`,
-    [hash]
-  )
-  const now = Date.now()
-  if (!row) return null
-  if (row.expires_at <= now) {
-    await run(database, 'DELETE FROM sessions WHERE token_hash = ?', [hash])
-    return null
-  }
-  if (now - row.last_seen_at > TOUCH_AFTER_MS) {
-    await run(database, 'UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token_hash = ?', [
-      now,
-      now + SESSION_LIFETIME_MS,
-      hash,
-    ]).catch(() => {})
-  }
-  return userFrom(row)
-}
-
-export async function endSession(token: string): Promise<void> {
-  await run(await getDatabase(), 'DELETE FROM sessions WHERE token_hash = ?', [tokenHash(token)])
-}
-
-/** Sign a user out everywhere, but for the session given. */
-export async function endOtherSessions(userId: string, keepToken?: string): Promise<void> {
-  await run(await getDatabase(), 'DELETE FROM sessions WHERE user_id = ? AND token_hash != ?', [
-    userId,
-    keepToken ? tokenHash(keepToken) : '',
-  ])
+  const remove = db.prepare('DELETE FROM session WHERE id = ?')
+  for (const row of rows) remove.run(row.id)
+  const users = await Promise.all([...new Set(rows.map(row => row.userId))].map(getUser))
+  return users.filter((user): user is User => user !== null)
 }
 
 // ─── Keys ───────────────────────────────────────────────────────────────────
@@ -356,7 +265,7 @@ export interface ApiKey {
   access: KeyAccess
   createdAt: number
   createdBy: string | null
-  /** The account that made it, which it can never do more than. Null for keys from before roles. */
+  /** The account that made it, which it can never do more than. */
   ownerId: string | null
   lastUsedAt: number | null
   revokedAt: number | null
@@ -364,50 +273,58 @@ export interface ApiKey {
 
 interface KeyRow {
   id: string
-  name: string
-  prefix: string
-  key_hash: string
-  access: KeyAccess
-  created_at: number
-  created_by: string | null
-  owner_id: string | null
-  last_used_at: number | null
-  revoked_at: number | null
+  name: string | null
+  start: string | null
+  referenceId: string
+  enabled: number | null
+  lastRequest: string | null
+  createdAt: string
+  permissions: string | null
+  metadata: string | null
 }
 
-const keyFrom = (row: KeyRow): ApiKey => ({
-  id: row.id,
-  name: row.name,
-  prefix: row.prefix,
-  access: row.access,
-  createdAt: row.created_at,
-  createdBy: row.created_by,
-  ownerId: row.owner_id,
-  lastUsedAt: row.last_used_at,
-  revokedAt: row.revoked_at,
-})
+function parse<T>(text: string | null): T | null {
+  if (!text) return null
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
+}
+
+/** What a key was made to do, from its permissions. */
+function madeFor(permissions: unknown): KeyAccess {
+  const granted = (permissions as { clearping?: unknown } | null)?.clearping
+  return Array.isArray(granted) && granted.includes('write') ? 'write' : 'read'
+}
+
+const keyFrom = (row: KeyRow): ApiKey => {
+  const metadata = parse<{ createdBy?: string; revokedAt?: number }>(row.metadata)
+  return {
+    id: row.id,
+    name: row.name ?? '',
+    prefix: row.start ?? '',
+    access: madeFor(parse(row.permissions)),
+    createdAt: ms(row.createdAt) ?? 0,
+    createdBy: metadata?.createdBy ?? null,
+    ownerId: row.referenceId,
+    lastUsedAt: ms(row.lastRequest),
+    revokedAt: row.enabled ? null : (metadata?.revokedAt ?? ms(row.createdAt)),
+  }
+}
 
 /** The new key itself, which is shown this once and kept only as a hash. */
-export async function createApiKey(name: string, access: KeyAccess, owner: { id: string; name: string } | null): Promise<{ key: string; record: ApiKey }> {
-  const key = newToken(KEY_PREFIX)
-  const row: KeyRow = {
-    id: randomUUID(),
-    name,
-    prefix: key.slice(0, KEY_PREFIX.length + 6),
-    key_hash: tokenHash(key),
-    access,
-    created_at: Date.now(),
-    created_by: owner?.name ?? null,
-    owner_id: owner?.id ?? null,
-    last_used_at: null,
-    revoked_at: null,
-  }
-  await run(
-    await getDatabase(),
-    'INSERT INTO api_keys (id, name, prefix, key_hash, access, created_at, created_by, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [row.id, row.name, row.prefix, row.key_hash, row.access, row.created_at, row.created_by, row.owner_id]
-  )
-  return { key, record: keyFrom(row) }
+export async function createApiKey(name: string, access: KeyAccess, owner: { id: string; name: string }): Promise<{ key: string; record: ApiKey }> {
+  const auth = await getAuth()
+  const made = await auth.api.createApiKey({
+    body: {
+      name,
+      userId: owner.id,
+      permissions: { clearping: access === 'write' ? ['read', 'write'] : ['read'] },
+      metadata: { createdBy: owner.name },
+    },
+  })
+  return { key: made.key, record: (await getApiKey(made.id))! }
 }
 
 /**
@@ -415,159 +332,46 @@ export async function createApiKey(name: string, access: KeyAccess, owner: { id:
  * never more than the account that made it may do (see effectiveKeyAccess).
  */
 export async function apiKeyFor(key: string): Promise<ApiKey | null> {
-  const database = await getDatabase()
-  const row = await one<KeyRow & { owner_role: string | null }>(
-    database,
-    `SELECT api_keys.*, users.role AS owner_role FROM api_keys LEFT JOIN users ON users.id = api_keys.owner_id
-      WHERE api_keys.key_hash = ? AND api_keys.revoked_at IS NULL`,
-    [tokenHash(key)]
-  )
-  if (!row) return null
-  // A maker on record who is no longer here: the key went with them.
-  if (row.owner_id && row.owner_role === null) return null
-  const now = Date.now()
-  if (!row.last_used_at || now - row.last_used_at > TOUCH_AFTER_MS) {
-    await run(database, 'UPDATE api_keys SET last_used_at = ? WHERE id = ?', [now, row.id]).catch(() => {})
-  }
-  const makerRole = row.owner_role === null ? null : isRole(row.owner_role) ? row.owner_role : 'viewer'
-  return { ...keyFrom(row), access: effectiveKeyAccess(row.access, makerRole) }
+  const auth = await getAuth()
+  const checked = await auth.api.verifyApiKey({ body: { key } }).catch(() => null)
+  if (!checked?.valid || !checked.key) return null
+  const owner = await getUser(checked.key.referenceId)
+  // A maker no longer here: the key went with them.
+  if (!owner) return null
+  const record = await getApiKey(checked.key.id)
+  if (!record) return null
+  return { ...record, access: effectiveKeyAccess(madeFor(checked.key.permissions), owner.role) }
 }
 
 export async function getApiKey(id: string): Promise<ApiKey | null> {
-  const row = await one<KeyRow>(await getDatabase(), 'SELECT * FROM api_keys WHERE id = ?', [id])
+  const db = await authDatabase()
+  const row = db.prepare('SELECT * FROM apikey WHERE id = ?').get(id) as KeyRow | undefined
   return row ? keyFrom(row) : null
 }
 
 /** Every key, or with `ownerId` only the keys that account made. */
 export async function listApiKeys(ownerId?: string): Promise<ApiKey[]> {
-  const rows = await all<KeyRow>(
-    await getDatabase(),
-    `SELECT * FROM api_keys ${ownerId ? 'WHERE owner_id = ?' : ''} ORDER BY revoked_at IS NOT NULL, created_at DESC`,
-    ownerId ? [ownerId] : []
-  )
+  const db = await authDatabase()
+  const rows = (ownerId
+    ? db.prepare('SELECT * FROM apikey WHERE referenceId = ? ORDER BY enabled DESC, createdAt DESC').all(ownerId)
+    : db.prepare('SELECT * FROM apikey ORDER BY enabled DESC, createdAt DESC').all()) as KeyRow[]
   return rows.map(keyFrom)
 }
 
+function revokeKeyRow(db: Awaited<ReturnType<typeof authDatabase>>, id: string) {
+  const row = db.prepare('SELECT metadata FROM apikey WHERE id = ?').get(id) as { metadata: string | null } | undefined
+  if (!row) return
+  const metadata = { ...(parse<Record<string, unknown>>(row.metadata) ?? {}), revokedAt: Date.now() }
+  db.prepare('UPDATE apikey SET enabled = 0, metadata = ?, updatedAt = ? WHERE id = ? AND enabled = 1').run(
+    JSON.stringify(metadata),
+    new Date().toISOString(),
+    id
+  )
+}
+
+/** Stop a key working, at once. It stays listed, marked revoked. */
 export async function revokeApiKey(id: string): Promise<ApiKey | null> {
-  const database = await getDatabase()
-  await run(database, 'UPDATE api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL', [Date.now(), id])
-  const row = await one<KeyRow>(database, 'SELECT * FROM api_keys WHERE id = ?', [id])
-  return row ? keyFrom(row) : null
-}
-
-// ─── The switches ───────────────────────────────────────────────────────────
-
-export interface SecuritySettings {
-  /** The dashboard and its API need a signed-in user or a key. */
-  loginRequired: boolean
-  /** The MCP address needs a key, even to read. Implied by `loginRequired`. */
-  mcpKeyRequired: boolean
-  /** Accounts may sign in with a password. Off leaves single sign-on as the only way in. */
-  passwordLogin: boolean
-}
-
-const DEFAULTS: SecuritySettings = { loginRequired: false, mcpKeyRequired: false, passwordLogin: true }
-
-export async function getSecuritySettings(): Promise<SecuritySettings> {
-  const rows = await all<{ key: string; value: string }>(
-    await getDatabase(),
-    `SELECT key, value FROM settings WHERE key IN ('security.loginRequired', 'security.mcpKeyRequired', 'security.passwordLogin')`
-  )
-  const stored = new Map(rows.map(row => [row.key, row.value === 'true']))
-  return {
-    loginRequired: stored.get('security.loginRequired') ?? DEFAULTS.loginRequired,
-    mcpKeyRequired: stored.get('security.mcpKeyRequired') ?? DEFAULTS.mcpKeyRequired,
-    passwordLogin: stored.get('security.passwordLogin') ?? DEFAULTS.passwordLogin,
-  }
-}
-
-export async function setSecuritySettings(changes: Partial<SecuritySettings>): Promise<SecuritySettings> {
-  const database = await getDatabase()
-  for (const [name, value] of Object.entries(changes)) {
-    if (typeof value !== 'boolean' || !(name in DEFAULTS)) continue
-    await run(database, 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [
-      `security.${name}`,
-      String(value),
-    ])
-  }
-  return getSecuritySettings()
-}
-
-/** A setting stored as JSON: the single sign-on configuration. */
-export async function getJsonSetting<T>(key: string): Promise<T | null> {
-  const row = await one<{ value: string }>(await getDatabase(), 'SELECT value FROM settings WHERE key = ?', [key])
-  if (!row) return null
-  try {
-    return JSON.parse(row.value) as T
-  } catch {
-    return null
-  }
-}
-
-export async function setJsonSetting(key: string, value: unknown): Promise<void> {
-  await run(await getDatabase(), 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [
-    key,
-    JSON.stringify(value),
-  ])
-}
-
-// ─── What was done, and by whom ─────────────────────────────────────────────
-
-/** How the change arrived. */
-export type Via = 'dashboard' | 'api' | 'mcp'
-
-export interface ActivityEntry {
-  id: number
-  at: number
-  actor: { kind: Actor['kind']; id: string | null; name: string }
-  via: Via
-  action: string
-  detail: string | null
-}
-
-/** Kept for a year, then dropped as new entries arrive. */
-const KEEP_ACTIVITY_MS = 365 * 24 * 60 * 60 * 1000
-
-/**
- * Note a change in the record. Never throws: failing to write down that
- * something happened must not undo or fail the thing itself.
- */
-export async function recordActivity(actor: Actor, via: Via, action: string, detail?: string): Promise<void> {
-  try {
-    const database = await getDatabase()
-    const now = Date.now()
-    await run(
-      database,
-      'INSERT INTO activity (at, actor_kind, actor_id, actor_name, via, action, detail) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [now, actor.kind, actor.kind === 'anonymous' ? null : actor.id, actor.name, via, action, detail?.slice(0, 2000) ?? null]
-    )
-    await run(database, 'DELETE FROM activity WHERE at < ?', [now - KEEP_ACTIVITY_MS])
-  } catch (error) {
-    console.error('[Activity] Could not record:', action, error)
-  }
-}
-
-export async function listActivity(limit = 100, before?: number): Promise<ActivityEntry[]> {
-  const rows = await all<{
-    id: number
-    at: number
-    actor_kind: Actor['kind']
-    actor_id: string | null
-    actor_name: string
-    via: Via
-    action: string
-    detail: string | null
-  }>(
-    await getDatabase(),
-    `SELECT * FROM activity ${before ? 'WHERE id < ?' : ''} ORDER BY id DESC LIMIT ?`,
-    before ? [before, limit] : [limit]
-  )
-  return rows.map(row => ({
-    id: row.id,
-    at: row.at,
-    actor: { kind: row.actor_kind, id: row.actor_id, name: row.actor_name },
-    via: row.via,
-    action: row.action,
-    detail: row.detail,
-  }))
+  const db = await authDatabase()
+  revokeKeyRow(db, id)
+  return getApiKey(id)
 }

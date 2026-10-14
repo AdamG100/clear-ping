@@ -661,8 +661,10 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
         <p className="text-xs leading-relaxed text-card-foreground">
           Sign in with Authentik, or any OpenID Connect provider. In Authentik:{' '}
           <span className="font-medium">Applications → Providers → Create → OAuth2/OpenID Provider</span>, client type{' '}
-          <span className="font-medium">Confidential</span>, with this redirect URI; then an application for it. The
-          issuer is on the provider&apos;s page: <span className="font-mono">https://&lt;authentik&gt;/application/o/&lt;slug&gt;/</span>.
+          <span className="font-medium">Confidential</span>, with this redirect URI and a{' '}
+          <span className="font-medium">Signing Key</span> (the self-signed certificate will do: sign-in checks
+          Authentik&apos;s signature with it); then an application for it. The issuer is on the provider&apos;s page:{' '}
+          <span className="font-mono">https://&lt;authentik&gt;/application/o/&lt;slug&gt;/</span>.
         </p>
         <CopyField id="sso-redirect" label="Redirect URI" value={redirectUri} />
         {savedElsewhere && (

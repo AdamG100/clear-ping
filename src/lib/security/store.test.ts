@@ -8,17 +8,31 @@ process.env.CLEARPING_DB_PATH = path.join(dir, 'test.db')
 
 const { initDatabase, closeDatabase } = await import('../database')
 const store = await import('./store')
+const { authDatabase, closeAuth, getAuth } = await import('./auth')
 const { identify, securityPolicy } = await import('./access')
+
+const PASSWORD = 'a long password'
 
 function request(headers: Record<string, string> = {}) {
   return new Request('https://ping.example/api/targets', { headers })
 }
+
+/** Sign in as Better Auth does for the login route; the cookie it sets, as a browser would send it back. */
+async function signIn(username: string, password = PASSWORD): Promise<string | null> {
+  const auth = await getAuth()
+  const answer = await auth.api.signInUsername({ body: { username, password }, asResponse: true }).catch(() => null)
+  if (!answer?.ok) return null
+  return answer.headers.getSetCookie().map(line => line.split(';')[0]).join('; ')
+}
+
+const as = (cookie: string | null) => identify(request(cookie ? { cookie } : {}))
 
 beforeAll(async () => {
   await initDatabase()
 })
 
 afterAll(async () => {
+  closeAuth()
   await closeDatabase()
   fs.rmSync(dir, { recursive: true, force: true })
 })
@@ -27,99 +41,110 @@ afterEach(() => vi.unstubAllEnvs())
 
 describe('accounts and sessions', () => {
   it('makes an account, signs it in, and knows it by its cookie', async () => {
-    const user = await store.createUser('adam', 'a long password', 'admin')
+    const user = await store.createUser('Adam', PASSWORD, 'admin')
+    expect(user).toMatchObject({ username: 'Adam', role: 'admin', hasPassword: true, sso: false })
     expect(await store.countUsers()).toBe(1)
 
-    expect(await store.checkLogin('adam', 'wrong password!')).toBeNull()
-    expect(await store.checkLogin('nobody', 'a long password')).toBeNull()
-    expect((await store.checkLogin('ADAM', 'a long password'))?.id).toBe(user.id)
+    expect(await signIn('adam', 'wrong password!')).toBeNull()
+    expect(await signIn('nobody')).toBeNull()
+    const cookie = await signIn('ADAM')
+    expect(cookie).toContain(store.SESSION_COOKIE)
+    expect((await as(cookie)).actor).toEqual({ kind: 'user', id: user.id, name: 'Adam', role: 'admin' })
 
-    const { token } = await store.createSession(user.id)
-    const { actor } = await identify(request({ cookie: `${store.SESSION_COOKIE}=${token}` }))
-    expect(actor).toEqual({ kind: 'user', id: user.id, name: 'adam', role: 'admin' })
-
-    await store.endSession(token)
-    expect((await identify(request({ cookie: `${store.SESSION_COOKIE}=${token}` }))).actor).toBeNull()
+    const auth = await getAuth()
+    await auth.api.signOut({ headers: new Headers({ cookie: cookie! }) })
+    expect((await as(cookie)).actor).toBeNull()
   })
 
   it('will not make two accounts of one name, whatever the case', async () => {
-    await expect(store.createUser('Adam', 'another long one', 'viewer')).rejects.toThrow('taken')
+    await expect(store.createUser('adam', 'another long one', 'viewer')).rejects.toThrow('taken')
     await expect(store.createUser('bad name!', 'another long one', 'viewer')).rejects.toThrow('A username')
   })
 
-  it('signs every other session out when told to', async () => {
-    const [user] = await store.listUsers()
-    const kept = await store.createSession(user.id)
-    const other = await store.createSession(user.id)
-    await store.endOtherSessions(user.id, kept.token)
-    expect(await store.userForSession(kept.token)).not.toBeNull()
-    expect(await store.userForSession(other.token)).toBeNull()
+  it('refuses a cookie that was tampered with', async () => {
+    const cookie = await signIn('adam')
+    expect((await as(cookie!.replace(/=([^.]+)\./, '=x$1.'))).actor).toBeNull()
+  })
+
+  it('checks a password without signing in', async () => {
+    const [adam] = await store.listUsers()
+    expect(await store.checkPassword(adam.id, PASSWORD)).toBe(true)
+    expect(await store.checkPassword(adam.id, 'not it at all')).toBe(false)
   })
 })
 
-describe('single sign-on accounts', () => {
-  const ISSUER = 'https://auth.example/application/o/clearping/'
+describe('sessions made through the identity provider', () => {
+  /** A session as a sign-in through the provider leaves one: marked, with the provider's session id. */
+  async function viaSso(username: string, sub: string, sid: string | null) {
+    const cookie = await signIn(username)
+    const db = await authDatabase()
+    const user = (await store.listUsers()).find(each => each.username.toLowerCase() === username.toLowerCase())!
+    if (!db.prepare("SELECT 1 FROM account WHERE userId = ? AND providerId = 'sso'").get(user.id)) {
+      db.prepare(
+        "INSERT INTO account (id, accountId, providerId, userId, idToken, createdAt, updatedAt) VALUES (?, ?, 'sso', ?, 'the.id.token', ?, ?)"
+      ).run(`acct-${sub}`, sub, user.id, new Date().toISOString(), new Date().toISOString())
+    }
+    const token = decodeURIComponent(cookie!.split('=')[1].split('.')[0])
+    db.prepare('UPDATE session SET viaSso = 1, ssoSid = ? WHERE token = ?').run(sid, token)
+    return cookie
+  }
 
-  it('makes an account with no password, and never takes over one that has the name', async () => {
-    const made = await store.createSsoUser('adam', ISSUER, 'sub-1', 'viewer')
-    expect(made).toMatchObject({ username: 'adam-2', sso: true, hasPassword: false })
-    expect((await store.userForSso(ISSUER, 'sub-1'))?.id).toBe(made.id)
-    // No password matches the empty hash an account like this has.
-    expect(await store.checkLogin('adam-2', '')).toBeNull()
-  })
-
-  it('links an existing account, but not to an identity another account has', async () => {
-    const [adam] = await store.listUsers()
-    await expect(store.linkSso(adam.id, ISSUER, 'sub-1')).rejects.toThrow('already signs in as adam-2')
-    await store.linkSso(adam.id, ISSUER, 'sub-adam')
-    expect((await store.userForSso(ISSUER, 'sub-adam'))?.username).toBe('adam')
-    await store.unlinkSso(adam.id)
-    expect(await store.userForSso(ISSUER, 'sub-adam')).toBeNull()
+  it('says which sign-in at the provider a session came from', async () => {
+    await store.createUser('jo', PASSWORD, 'editor')
+    const sso = await viaSso('jo', 'sub-jo', 'sid-laptop')
+    const password = await signIn('jo')
+    expect(await store.sessionSso(new Headers({ cookie: sso! }))).toEqual({ sid: 'sid-laptop', idToken: 'the.id.token' })
+    expect(await store.sessionSso(new Headers({ cookie: password! }))).toBeNull()
+    expect((await store.listUsers()).find(user => user.username === 'jo')).toMatchObject({ sso: true, hasPassword: true })
   })
 
   it('ends the session a sign-out at the provider names, and leaves the rest', async () => {
-    const jo = await store.createSsoUser('jo', ISSUER, 'sub-jo', 'editor')
-    const from = (sid: string | null) => ({ issuer: ISSUER, subject: 'sub-jo', sid, idToken: `token-${sid}` })
-    const laptop = await store.createSession(jo.id, from('sid-laptop'))
-    const phone = await store.createSession(jo.id, from('sid-phone'))
-    const password = await store.createSession(jo.id)
+    const laptop = await viaSso('jo', 'sub-jo', 'sid-laptop-2')
+    const phone = await viaSso('jo', 'sub-jo', 'sid-phone')
+    const password = await signIn('jo')
 
-    expect(await store.sessionSso(laptop.token)).toEqual(from('sid-laptop'))
-    expect(await store.sessionSso(password.token)).toBeNull()
-
-    const ended = await store.endSsoSessions(ISSUER, { sub: 'sub-jo', sid: 'sid-laptop' })
+    const ended = await store.endSsoSessions({ sub: 'sub-jo', sid: 'sid-laptop-2' })
     expect(ended.map(user => user.username)).toEqual(['jo'])
-    expect(await store.userForSession(laptop.token)).toBeNull()
-    expect(await store.userForSession(phone.token)).not.toBeNull()
+    expect((await as(laptop)).actor).toBeNull()
+    expect((await as(phone)).actor).not.toBeNull()
 
     // Without a session id, everything they signed in to through the provider; never a password session.
-    await store.endSsoSessions(ISSUER, { sub: 'sub-jo' })
-    expect(await store.userForSession(phone.token)).toBeNull()
-    expect(await store.userForSession(password.token)).not.toBeNull()
+    await store.endSsoSessions({ sub: 'sub-jo' })
+    expect((await as(phone)).actor).toBeNull()
+    expect((await as(password)).actor).not.toBeNull()
   })
 
   it('takes a session whose sign-in gave no id to be the one ended, when it is the same person', async () => {
-    const sam = await store.createSsoUser('sam', ISSUER, 'sub-sam', 'viewer')
-    const unnamed = await store.createSession(sam.id, { issuer: ISSUER, subject: 'sub-sam', sid: null, idToken: '' })
-    const other = await store.createSession((await store.listUsers())[0].id, { issuer: ISSUER, subject: 'sub-other', sid: null, idToken: '' })
-    await store.endSsoSessions(ISSUER, { sub: 'sub-sam', sid: 'sid-anything' })
-    expect(await store.userForSession(unnamed.token)).toBeNull()
-    expect(await store.userForSession(other.token)).not.toBeNull()
-    expect(await store.endSsoSessions('https://other.example/', { sub: 'sub-other' })).toEqual([])
+    await store.createUser('sam', PASSWORD, 'viewer')
+    const unnamed = await viaSso('sam', 'sub-sam', null)
+    const someoneElse = await viaSso('adam', 'sub-adam', null)
+    await store.endSsoSessions({ sub: 'sub-sam', sid: 'sid-anything' })
+    expect((await as(unnamed)).actor).toBeNull()
+    expect((await as(someoneElse)).actor).not.toBeNull()
+    expect(await store.endSsoSessions({ sub: 'nobody-at-all' })).toEqual([])
+  })
+
+  it('unlinks an account from the provider', async () => {
+    const sam = (await store.listUsers()).find(user => user.username === 'sam')!
+    await store.unlinkSso(sam.id)
+    expect(await store.getUser(sam.id)).toMatchObject({ sso: false })
   })
 })
 
 describe('keys', () => {
   it('knows a key by itself, keeps only its hash, and stops knowing it once revoked', async () => {
-    const { key, record } = await store.createApiKey('Claude', 'read', null)
+    const [adam] = await store.listUsers()
+    const { key, record } = await store.createApiKey('Claude', 'read', { id: adam.id, name: adam.username })
+    expect(key).toMatch(/^cp_[A-Za-z0-9_-]{43}$/)
     expect(key.startsWith(record.prefix)).toBe(true)
+    expect(record).toMatchObject({ name: 'Claude', access: 'read', createdBy: 'Adam', ownerId: adam.id, revokedAt: null })
 
-    expect((await identify(request({ authorization: `Bearer ${key}` }))).actor).toEqual({
-      kind: 'key',
-      id: record.id,
-      name: 'Claude',
-      access: 'read',
-    })
+    expect((await identify(request({ authorization: `Bearer ${key}` }))).actor).toEqual({ kind: 'key', id: record.id, name: 'Claude', access: 'read' })
+    expect((await identify(request({ 'x-api-key': key }))).actor).toMatchObject({ name: 'Claude' })
+
+    // Only its hash is kept.
+    const db = await authDatabase()
+    expect(JSON.stringify(db.prepare('SELECT * FROM apikey WHERE id = ?').get(record.id))).not.toContain(key)
 
     await store.revokeApiKey(record.id)
     expect(await identify(request({ authorization: `Bearer ${key}` }))).toEqual({ actor: null, invalidKey: true })
@@ -138,12 +163,12 @@ describe('keys', () => {
 
 describe('roles', () => {
   it('never leaves no admin, by a change of role or by removing the account', async () => {
-    const [adam] = await store.listUsers()
+    const adam = (await store.listUsers()).find(user => user.username === 'Adam')!
     expect(adam.role).toBe('admin')
     await expect(store.setRole(adam.id, 'viewer')).rejects.toThrow('only admin')
     await expect(store.deleteUser(adam.id)).rejects.toThrow('only admin')
 
-    const second = await store.createUser('second-admin', 'a long password', 'admin')
+    const second = await store.createUser('second-admin', PASSWORD, 'admin')
     expect((await store.setRole(adam.id, 'editor')).role).toBe('editor')
     await expect(store.setRole(second.id, 'viewer')).rejects.toThrow('only admin')
     await store.setRole(adam.id, 'admin')
@@ -151,29 +176,31 @@ describe('roles', () => {
   })
 
   it('takes a role change at once, on the next request of a session already signed in', async () => {
-    const pat = await store.createUser('pat', 'a long password', 'editor')
-    const { token } = await store.createSession(pat.id)
+    const pat = await store.createUser('pat', PASSWORD, 'editor')
+    const cookie = await signIn('pat')
     await store.setRole(pat.id, 'viewer')
-    expect((await identify(request({ cookie: `${store.SESSION_COOKIE}=${token}` }))).actor).toMatchObject({ role: 'viewer' })
+    expect((await as(cookie)).actor).toMatchObject({ role: 'viewer' })
   })
 
   it('never lets a key do more than the account that made it, now', async () => {
-    const lee = await store.createUser('lee', 'a long password', 'editor')
-    const { key } = await store.createApiKey('Lee\'s GPT', 'write', { id: lee.id, name: lee.username })
+    const lee = await store.createUser('lee', PASSWORD, 'editor')
+    const { key } = await store.createApiKey("Lee's GPT", 'write', { id: lee.id, name: lee.username })
     const asKey = async () => (await identify(request({ authorization: `Bearer ${key}` }))).actor
     expect(await asKey()).toMatchObject({ access: 'write' })
 
     await store.setRole(lee.id, 'viewer')
     expect(await asKey()).toMatchObject({ access: 'read' })
 
-    // Gone with the account that made it.
+    // Gone with the account that made it, and its sessions with it.
+    const cookie = await signIn('lee')
     await store.deleteUser(lee.id)
     expect(await identify(request({ authorization: `Bearer ${key}` }))).toEqual({ actor: null, invalidKey: true })
+    expect((await as(cookie)).actor).toBeNull()
   })
 
   it('lists only the keys an account made, when asked for its own', async () => {
-    const kim = await store.createUser('kim', 'a long password', 'viewer')
-    await store.createApiKey('Kim\'s script', 'read', { id: kim.id, name: kim.username })
+    const kim = await store.createUser('kim', PASSWORD, 'viewer')
+    await store.createApiKey("Kim's script", 'read', { id: kim.id, name: kim.username })
     expect((await store.listApiKeys(kim.id)).map(key => key.name)).toEqual(["Kim's script"])
     expect((await store.listApiKeys()).length).toBeGreaterThan(1)
   })
@@ -193,6 +220,14 @@ describe('the switches', () => {
     vi.stubEnv('CLEARPING_AUTH', 'off')
     expect(await securityPolicy()).toMatchObject({ loginRequired: false, recovery: true })
     await store.setSecuritySettings({ loginRequired: false })
+  })
+
+  it('stop password sign-in when it is turned off, and CLEARPING_AUTH=off brings it back', async () => {
+    await store.setSecuritySettings({ passwordLogin: false })
+    expect(await signIn('kim')).toBeNull()
+    vi.stubEnv('CLEARPING_AUTH', 'off')
+    expect(await signIn('kim')).not.toBeNull()
+    await store.setSecuritySettings({ passwordLogin: true })
   })
 })
 

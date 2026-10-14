@@ -50,6 +50,13 @@ RUN node -e "require('sqlite3')" \
    && npm rebuild sqlite3 --build-from-source \
    && node -e "require('sqlite3')" )
 
+# The same for better-sqlite3, which sign-in (Better Auth) opens the database
+# with. It carries binaries for linux x64 and arm64 in the package itself.
+RUN node -e "new (require('better-sqlite3'))(':memory:').close()" \
+ || ( echo "The prebuilt better-sqlite3 binary does not load on this image; compiling it instead" \
+   && npm rebuild better-sqlite3 --build-from-source \
+   && node -e "new (require('better-sqlite3'))(':memory:').close()" )
+
 # ── Build ────────────────────────────────────────────────────────────────────
 FROM deps AS build
 

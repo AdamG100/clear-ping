@@ -271,6 +271,7 @@ All optional. With Docker, pass them with `-e`.
 | `CLEARPING_DB_PATH` | `./data/clearping.db` (`/data/clearping.db` in the image) | Where the database is kept |
 | `CLEARPING_RETENTION_DAYS` | `90` | Days of measurements to keep; `0` keeps everything |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes, for when `npm run probe` runs as its own process |
+| `BETTER_AUTH_SECRET` | made and kept in the database | What sign-in cookies are signed with. Nothing needs it set; set it to keep sessions across a replaced database |
 | `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made: for getting back in after a lost password ([docs/security.md](docs/security.md#locked-out)) |
 | `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard. Still works, as a key that can change things; keys made in Settings are better, one per assistant |
 | `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes the token over plain HTTP from anywhere, for when a VPN or tunnel does the encrypting. Otherwise it is taken only over HTTPS or from ClearPing's own network |

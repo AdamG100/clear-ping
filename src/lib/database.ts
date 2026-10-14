@@ -249,6 +249,20 @@ let db: Database | null = null;
 let dbInitPromise: Promise<Database> | null = null;
 
 /**
+ * Where the database file is. Configurable so the standalone prober (which may
+ * run from a different working directory) and the tests can point at their own
+ * file; sign-in (security/auth.ts) opens the same file.
+ */
+export function databasePath(): string {
+  return process.env.CLEARPING_DB_PATH
+    ? path.resolve(process.env.CLEARPING_DB_PATH)
+    // The comment keeps the bundler from reading this as a file the build
+    // depends on. Without it a standalone build copies ./data/clearping.db,
+    // the live database, into its output.
+    : path.join(/* turbopackIgnore: true */ process.cwd(), 'data', 'clearping.db');
+}
+
+/**
  * Initialize the SQLite database and create tables
  */
 export async function initDatabase(): Promise<Database> {
@@ -261,12 +275,7 @@ export async function initDatabase(): Promise<Database> {
     // Ensure data directory exists
     // Configurable so the standalone prober (which may run from a different
     // working directory) and the tests can point at their own file.
-    const dbPath = process.env.CLEARPING_DB_PATH
-      ? path.resolve(process.env.CLEARPING_DB_PATH)
-      // The comment keeps the bundler from reading this as a file the build
-      // depends on. Without it a standalone build copies ./data/clearping.db,
-      // the live database, into its output.
-      : path.join(/* turbopackIgnore: true */ process.cwd(), 'data', 'clearping.db');
+    const dbPath = databasePath();
 
     const dataDir = path.dirname(dbPath);
     if (!fs.existsSync(dataDir)) {

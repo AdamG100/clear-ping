@@ -1,122 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { identify, readCookie } from '@/lib/security/access';
-import { clientAddress, isHttps, setSessionCookie } from '@/lib/security/http';
-import {
-  decodePending,
-  getSsoConfig,
-  inAllowedGroup,
-  PENDING_COOKIE,
-  redeemCode,
-  ssoRole,
-  ssoUsable,
-  usernameFrom,
-  type Pending,
-} from '@/lib/security/oidc';
-import { sameSecret } from '@/lib/security/secrets';
-import { ROLE_LABEL } from '@/lib/security/roles';
-import { actorOf, createSession, createSsoUser, linkSso, noteLogin, recordActivity, setRole, userForSso } from '@/lib/security/store';
+import { getAuth, SSO_PROVIDER_ID } from '@/lib/security/auth';
+import { passCookies } from '@/lib/security/http';
+import { getSsoConfig } from '@/lib/security/oidc';
 
-/** Somewhere on this site, with the pending sign-in's cookie gone. */
-function go(request: NextRequest, path: string) {
-  const response = new NextResponse(null, { status: 303, headers: { Location: path } });
-  response.cookies.set(PENDING_COOKIE, '', { httpOnly: true, sameSite: 'lax', secure: isHttps(request), path: '/api/auth/sso', maxAge: 0 });
-  return response;
-}
-
-function failed(request: NextRequest, message: string) {
-  return go(request, `/login?error=${encodeURIComponent(message)}`);
+/** Better Auth's reasons for not signing someone in, said for the sign-in page. */
+function reason(code: string | null, label: string, allowedGroup: string): string {
+  switch (code) {
+    case 'state_mismatch':
+    case 'state_not_found':
+    case 'invalid_state':
+    case 'please_restart_the_process':
+      return 'That sign-in had expired, or was not started here. Try again.';
+    case 'unable_to_get_user_info':
+      return allowedGroup
+        ? `Your ${label} account is not in the group allowed to use ClearPing (${allowedGroup}), or ${label} did not say who you are.`
+        : `${label} did not say who you are.`;
+    case 'signup_disabled':
+      return `No ClearPing account is linked to your ${label} account. Sign in with a password and link it from Settings, or ask an admin to have accounts made on first sign-in.`;
+    case 'account_already_linked_to_different_user':
+      return `That ${label} account already signs in as someone else here.`;
+    case 'unable_to_link_account':
+      return `Your account could not be linked to ${label}. Sign in, then link it from Settings.`;
+    case 'access_denied':
+      return `${label} did not sign you in.`;
+    default:
+      return `${label} could not sign you in${code ? ` (${code})` : ''}.`;
+  }
 }
 
 /**
  * GET /api/auth/sso/callback - Back from the identity provider
  *
- * The answer is taken only for the sign-in this browser started: the state
- * has to match the cookie set on the way out. The code is then traded for an
- * ID token directly with the provider, and the token checked, before anyone
- * is signed in.
+ * The address the provider was given as the redirect URI before sign-in moved
+ * to Better Auth, and still the one it is given, so nothing has to change in
+ * Authentik. The answer is handed to Better Auth's own callback, which checks
+ * it was the sign-in this browser started (the state), trades the code for
+ * tokens with the provider, checks the ID token's signature, issuer, audience
+ * and nonce, and signs in, links, or makes the account (see auth.ts for what
+ * ClearPing adds: the group, the role, the provider's session id).
+ *
+ * It answers with a redirect: to where the sign-in was headed, or to the
+ * sign-in page saying why not.
  */
 export async function GET(request: NextRequest) {
-  const config = await getSsoConfig();
-  const params = request.nextUrl.searchParams;
-  const pending: Pending | null = decodePending(readCookie(request.headers.get('cookie'), PENDING_COOKIE));
-  const state = params.get('state') ?? '';
+  const auth = await getAuth();
+  const target = new URL(`/api/auth/callback/${SSO_PROVIDER_ID}${request.nextUrl.search}`, request.url);
+  const answer = await auth.handler(new Request(target, { method: 'GET', headers: request.headers }));
 
-  if (!pending || !state || !sameSecret(state, pending.state)) {
-    return failed(request, 'That sign-in had expired, or was not started here. Try again.');
+  // Better Auth sends a refusal to /login?error=<code>, or to its own error
+  // page when it cannot tell where the sign-in came from. Either way, to the
+  // sign-in page, in words.
+  const location = answer.headers.get('location');
+  const destination = location ? new URL(location, request.url) : null;
+  const error = destination?.searchParams.get('error') ?? (destination ? null : 'sign_in_failed');
+  let to: string;
+  if (error || !destination || destination.pathname.startsWith('/api/auth/error')) {
+    const { label, allowedGroup } = await getSsoConfig();
+    to = `/login?error=${encodeURIComponent(reason(error, label, allowedGroup))}`;
+  } else {
+    // A path on this site, kept relative so it is right behind any proxy.
+    to = destination.origin === new URL(request.url).origin ? `${destination.pathname}${destination.search}` : location!;
   }
-  const refused = params.get('error');
-  if (refused) {
-    return failed(request, `${config.label} did not sign you in: ${params.get('error_description') || refused}`);
-  }
-  if (!ssoUsable(config)) return failed(request, 'Single sign-on is not set up');
-
-  const code = params.get('code');
-  if (!code) return failed(request, `${config.label} sent no code back`);
-
-  let claims, idToken;
-  try {
-    ({ claims, idToken } = await redeemCode(code, pending, config));
-  } catch (error) {
-    return failed(request, error instanceof Error ? error.message : 'The sign-in could not be completed');
-  }
-
-  const who = usernameFrom(claims);
-  if (!inAllowedGroup(claims, config.allowedGroup)) {
-    await recordActivity({ kind: 'anonymous', name: who }, 'dashboard', 'signin.failed', `${config.label}: not in ${config.allowedGroup}`);
-    return failed(request, `Your ${config.label} account is not in the group allowed to use ClearPing (${config.allowedGroup})`);
-  }
-
-  // Linking: to the account signed in now, never to one named in the cookie.
-  if (pending.link) {
-    const { actor } = await identify(request);
-    if (actor?.kind !== 'user') return failed(request, 'Sign in first, then link your account from Security');
-    try {
-      await linkSso(actor.id, claims.iss, claims.sub);
-    } catch (error) {
-      return failed(request, error instanceof Error ? error.message : 'Could not link the account');
-    }
-    await recordActivity(actor, 'dashboard', 'account.sso.link', `${config.label}: ${who}`);
-    return go(request, pending.next);
-  }
-
-  // The groups at the provider decide the role, when the settings map them.
-  const groupRole = ssoRole(claims, config);
-
-  let user = await userForSso(claims.iss, claims.sub);
-  if (!user) {
-    if (!config.autoCreate) {
-      await recordActivity({ kind: 'anonymous', name: who }, 'dashboard', 'signin.failed', `${config.label}: no linked account`);
-      return failed(
-        request,
-        `No ClearPing account is linked to ${who}. Sign in with a password and link it from Security, or have new accounts made on first sign-in.`
-      );
-    }
-    user = await createSsoUser(who, claims.iss, claims.sub, groupRole ?? config.newAccountRole);
-    await recordActivity(actorOf(user), 'dashboard', 'account.create', `First sign-in with ${config.label}, as ${ROLE_LABEL[user.role]}`);
-  } else if (groupRole && groupRole !== user.role) {
-    // Kept in step at every sign-in, so a change of groups at the provider is
-    // a change of role here. Never the last admin's: that would leave no one
-    // able to change it back.
-    try {
-      const before = user.role;
-      user = await setRole(user.id, groupRole);
-      await recordActivity(actorOf(user), 'dashboard', 'account.role', `${ROLE_LABEL[before]} to ${ROLE_LABEL[groupRole]}, by their groups at ${config.label}`);
-    } catch (error) {
-      await recordActivity(actorOf(user), 'dashboard', 'account.role', `Kept as ${ROLE_LABEL[user.role]}: ${error instanceof Error ? error.message : 'could not change'}`);
-    }
-  }
-
-  await noteLogin(user.id);
-  // Remembering which sign-in at the provider this is, so signing out there ends it.
-  const session = await createSession(user.id, {
-    issuer: claims.iss,
-    subject: claims.sub,
-    sid: typeof claims.sid === 'string' && claims.sid ? claims.sid : null,
-    idToken,
-  });
-  await recordActivity(actorOf(user), 'dashboard', 'signin', `With ${config.label}, from ${clientAddress(request)}`);
-
-  const response = go(request, pending.next);
-  setSessionCookie(response, request, session.token, session.expiresAt);
-  return response;
+  return passCookies(answer, new NextResponse(null, { status: 303, headers: { Location: to } }), request);
 }

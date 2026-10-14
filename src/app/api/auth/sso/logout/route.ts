@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     return answer(400, error instanceof Error ? error.message : 'The logout token was refused');
   }
 
-  const users = await endSsoSessions(who.iss, who);
+  const users = await endSsoSessions(who);
   for (const user of users) {
     await recordActivity(actorOf(user), 'dashboard', 'signout', `Signed out at ${config.label}`);
   }

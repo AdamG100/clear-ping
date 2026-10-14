@@ -1,7 +1,10 @@
 import { originAllowed } from '../mcp-protocol'
 import { KEY_PREFIX, sameSecret } from './secrets'
 import { canChange, ROLE_LABEL } from './roles'
-import { actorOf, ANONYMOUS, apiKeyFor, getSecuritySettings, SESSION_COOKIE, userForSession, type Actor, type Via } from './store'
+import { getSecuritySettings, recoveryMode } from './settings-store'
+import { actorOf, ANONYMOUS, apiKeyFor, userForHeaders, type Actor, type Via } from './store'
+
+export { recoveryMode }
 
 /**
  * Who a request is from, and what they may do.
@@ -29,10 +32,6 @@ export interface Policy {
   recovery: boolean
   /** The single key from before keys were made in the dashboard. Still honoured, as a key that can change things. */
   legacyMcpToken: string | null
-}
-
-export function recoveryMode(): boolean {
-  return /^(off|0|false|no)$/i.test(process.env.CLEARPING_AUTH?.trim() ?? '')
 }
 
 export async function securityPolicy(): Promise<Policy> {
@@ -89,9 +88,9 @@ export async function identify(request: Request, legacyMcpToken = process.env.CL
     return { actor: null, invalidKey: true }
   }
 
-  const session = readCookie(request.headers.get('cookie'), SESSION_COOKIE)
-  if (session) {
-    const user = await userForSession(session)
+  // Better Auth reads its own cookie, checks its signature and the session behind it.
+  if (request.headers.get('cookie')) {
+    const user = await userForHeaders(request.headers)
     if (user) return { actor: actorOf(user), invalidKey: false }
   }
   return { actor: null, invalidKey: false }
