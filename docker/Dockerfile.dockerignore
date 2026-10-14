@@ -25,6 +25,7 @@ data
 # Not needed to build.
 .git
 .github
+.claude
 .vscode
 docs
 *.md
