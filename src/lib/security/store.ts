@@ -48,6 +48,10 @@ export interface User {
   username: string
   createdAt: number
   lastLoginAt: number | null
+  /** Signs in through the identity provider. */
+  sso: boolean
+  /** Can also sign in with a password. An account made by signing in through the provider cannot. */
+  hasPassword: boolean
 }
 
 interface UserRow {
@@ -56,6 +60,8 @@ interface UserRow {
   password_hash: string
   created_at: number
   last_login_at: number | null
+  sso_issuer: string | null
+  sso_subject: string | null
 }
 
 const userFrom = (row: UserRow): User => ({
@@ -63,6 +69,8 @@ const userFrom = (row: UserRow): User => ({
   username: row.username,
   createdAt: row.created_at,
   lastLoginAt: row.last_login_at,
+  sso: !!row.sso_subject,
+  hasPassword: row.password_hash !== '',
 })
 
 export const USERNAME = /^[A-Za-z0-9._@-]{1,64}$/
@@ -92,6 +100,8 @@ export async function createUser(username: string, password: string): Promise<Us
     password_hash: await hashPassword(password),
     created_at: Date.now(),
     last_login_at: null,
+    sso_issuer: null,
+    sso_subject: null,
   }
   await run(database, 'INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)', [
     row.id,
@@ -110,6 +120,63 @@ export async function checkLogin(username: string, password: string): Promise<Us
   if (!row || !matches) return null
   await run(database, 'UPDATE users SET last_login_at = ? WHERE id = ?', [Date.now(), row.id])
   return userFrom(row)
+}
+
+// ─── Single sign-on ─────────────────────────────────────────────────────────
+
+/** The account a person at the identity provider signs in as, if there is one. */
+export async function userForSso(issuer: string, subject: string): Promise<User | null> {
+  const row = await one<UserRow>(await getDatabase(), 'SELECT * FROM users WHERE sso_issuer = ? AND sso_subject = ?', [issuer, subject])
+  return row ? userFrom(row) : null
+}
+
+/**
+ * A new account for someone signing in through the provider for the first
+ * time, under the name the provider gives them, or that name with a number if
+ * an account here already has it: an existing account is never taken over by
+ * a name that happens to match.
+ */
+export async function createSsoUser(wanted: string, issuer: string, subject: string): Promise<User> {
+  const database = await getDatabase()
+  const base = wanted.replace(/[^A-Za-z0-9._@-]/g, '').slice(0, 56) || 'user'
+  let username = base
+  for (let n = 2; await one(database, 'SELECT 1 FROM users WHERE username = ?', [username]); n++) username = `${base}-${n}`
+
+  const row: UserRow = {
+    id: randomUUID(),
+    username,
+    password_hash: '',
+    created_at: Date.now(),
+    last_login_at: null,
+    sso_issuer: issuer,
+    sso_subject: subject,
+  }
+  await run(
+    database,
+    'INSERT INTO users (id, username, password_hash, created_at, sso_issuer, sso_subject) VALUES (?, ?, ?, ?, ?, ?)',
+    [row.id, row.username, row.password_hash, row.created_at, issuer, subject]
+  )
+  return userFrom(row)
+}
+
+/** Have an existing account sign in as this person at the provider. Throws if another account already does. */
+export async function linkSso(userId: string, issuer: string, subject: string): Promise<void> {
+  const other = await userForSso(issuer, subject)
+  if (other && other.id !== userId) throw new Error(`That identity already signs in as ${other.username}`)
+  await run(await getDatabase(), 'UPDATE users SET sso_issuer = ?, sso_subject = ? WHERE id = ?', [issuer, subject, userId])
+}
+
+export async function unlinkSso(userId: string): Promise<void> {
+  await run(await getDatabase(), 'UPDATE users SET sso_issuer = NULL, sso_subject = NULL WHERE id = ?', [userId])
+}
+
+export async function noteLogin(userId: string): Promise<void> {
+  await run(await getDatabase(), 'UPDATE users SET last_login_at = ? WHERE id = ?', [Date.now(), userId])
+}
+
+export async function getUser(userId: string): Promise<User | null> {
+  const row = await one<UserRow>(await getDatabase(), 'SELECT * FROM users WHERE id = ?', [userId])
+  return row ? userFrom(row) : null
 }
 
 export async function checkPassword(userId: string, password: string): Promise<boolean> {
@@ -272,32 +339,53 @@ export interface SecuritySettings {
   loginRequired: boolean
   /** The MCP address needs a key, even to read. Implied by `loginRequired`. */
   mcpKeyRequired: boolean
+  /** Accounts may sign in with a password. Off leaves single sign-on as the only way in. */
+  passwordLogin: boolean
 }
 
-const DEFAULTS: SecuritySettings = { loginRequired: false, mcpKeyRequired: false }
+const DEFAULTS: SecuritySettings = { loginRequired: false, mcpKeyRequired: false, passwordLogin: true }
 
 export async function getSecuritySettings(): Promise<SecuritySettings> {
   const rows = await all<{ key: string; value: string }>(
     await getDatabase(),
-    `SELECT key, value FROM settings WHERE key IN ('security.loginRequired', 'security.mcpKeyRequired')`
+    `SELECT key, value FROM settings WHERE key IN ('security.loginRequired', 'security.mcpKeyRequired', 'security.passwordLogin')`
   )
   const stored = new Map(rows.map(row => [row.key, row.value === 'true']))
   return {
     loginRequired: stored.get('security.loginRequired') ?? DEFAULTS.loginRequired,
     mcpKeyRequired: stored.get('security.mcpKeyRequired') ?? DEFAULTS.mcpKeyRequired,
+    passwordLogin: stored.get('security.passwordLogin') ?? DEFAULTS.passwordLogin,
   }
 }
 
 export async function setSecuritySettings(changes: Partial<SecuritySettings>): Promise<SecuritySettings> {
   const database = await getDatabase()
   for (const [name, value] of Object.entries(changes)) {
-    if (typeof value !== 'boolean') continue
+    if (typeof value !== 'boolean' || !(name in DEFAULTS)) continue
     await run(database, 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [
       `security.${name}`,
       String(value),
     ])
   }
   return getSecuritySettings()
+}
+
+/** A setting stored as JSON: the single sign-on configuration. */
+export async function getJsonSetting<T>(key: string): Promise<T | null> {
+  const row = await one<{ value: string }>(await getDatabase(), 'SELECT value FROM settings WHERE key = ?', [key])
+  if (!row) return null
+  try {
+    return JSON.parse(row.value) as T
+  } catch {
+    return null
+  }
+}
+
+export async function setJsonSetting(key: string, value: unknown): Promise<void> {
+  await run(await getDatabase(), 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [
+    key,
+    JSON.stringify(value),
+  ])
 }
 
 // ─── What was done, and by whom ─────────────────────────────────────────────

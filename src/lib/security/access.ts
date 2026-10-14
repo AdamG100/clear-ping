@@ -22,6 +22,8 @@ export interface Policy {
   loginRequired: boolean
   /** The MCP address needs a key, even to read. */
   mcpKeyRequired: boolean
+  /** Accounts may sign in with a password, rather than only through single sign-on. */
+  passwordLogin: boolean
   /** CLEARPING_AUTH=off is set. */
   recovery: boolean
   /** The single key from before keys were made in the dashboard. Still honoured, as a key that can change things. */
@@ -42,6 +44,8 @@ export async function securityPolicy(): Promise<Policy> {
     // A protected dashboard with an open MCP address would hand its data to
     // anyone who asked there instead.
     mcpKeyRequired: settings.mcpKeyRequired || loginRequired || legacyMcpToken !== null,
+    // A provider that is down, or set up wrong, must not lock everyone out.
+    passwordLogin: settings.passwordLogin || recovery,
     recovery,
     legacyMcpToken,
   }

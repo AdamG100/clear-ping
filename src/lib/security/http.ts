@@ -5,7 +5,7 @@ import { countUsers, SESSION_COOKIE, type Actor } from './store'
 /** What the security routes have in common. */
 
 /** Over HTTPS, as the server or the proxy in front of it saw it. */
-function isHttps(request: Request): boolean {
+export function isHttps(request: Request): boolean {
   const forwarded = request.headers.get('x-forwarded-proto')?.split(',')[0].trim().toLowerCase()
   return forwarded ? forwarded === 'https' : new URL(request.url).protocol === 'https:'
 }

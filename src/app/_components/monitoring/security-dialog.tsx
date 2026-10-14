@@ -20,7 +20,7 @@ import { CopyField } from './mcp-dialog'
  */
 
 type Access = 'read' | 'write'
-type Tab = 'access' | 'keys' | 'accounts' | 'activity'
+type Tab = 'access' | 'keys' | 'sso' | 'accounts' | 'activity'
 
 interface ApiKey {
   id: string
@@ -38,11 +38,25 @@ interface Account {
   username: string
   createdAt: number
   lastLoginAt: number | null
+  sso: boolean
+  hasPassword: boolean
+}
+
+interface SsoSettings {
+  enabled: boolean
+  label: string
+  issuer: string
+  clientId: string
+  clientSecretSet: boolean
+  allowedGroup: string
+  autoCreate: boolean
+  redirectUri: string
 }
 
 interface Security {
-  me: { id: string; username: string }
-  settings: { loginRequired: boolean; mcpKeyRequired: boolean }
+  me: Account
+  settings: { loginRequired: boolean; mcpKeyRequired: boolean; passwordLogin: boolean }
+  sso: SsoSettings
   inForce: { loginRequired: boolean; mcpKeyRequired: boolean }
   environment: { recovery: boolean; legacyMcpToken: boolean }
   users: Account[]
@@ -71,6 +85,7 @@ const SECTION_TITLE = 'text-xs font-semibold text-card-foreground'
 const TABS: { value: Tab; label: string }[] = [
   { value: 'access', label: 'Access' },
   { value: 'keys', label: 'Keys' },
+  { value: 'sso', label: 'SSO' },
   { value: 'accounts', label: 'Accounts' },
   { value: 'activity', label: 'Activity' },
 ]
@@ -389,6 +404,11 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
                 <p className="truncate text-xs font-medium text-card-foreground">
                   {account.username}
                   {account.id === data.me.id && <span className="font-normal text-muted-foreground"> (you)</span>}
+                  {account.sso && (
+                    <span className="ml-1.5 rounded border border-border px-1 py-px text-[10px] font-normal text-muted-foreground">
+                      {data.sso.label}
+                    </span>
+                  )}
                 </p>
                 <p className="text-[10px] text-muted-foreground">Last signed in {when(account.lastLoginAt)}</p>
               </div>
@@ -415,7 +435,7 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
         <p className={HINT}>Every account can do everything, these settings included.</p>
       </form>
 
-      <form onSubmit={changePassword} className="space-y-2">
+      {data.me.hasPassword && <form onSubmit={changePassword} className="space-y-2">
         <p className={SECTION_TITLE}>Change your password</p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input aria-label="Current password" placeholder="Current password" type="password" autoComplete="current-password" value={current} onChange={event => setCurrent(event.target.value)} />
@@ -425,10 +445,196 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
             Change
           </Button>
         </div>
-      </form>
+      </form>}
     </div>
   )
 }
+
+const SSO_FIELD = 'space-y-1.5'
+
+function SsoTab({ data, reload }: { data: Security; reload: () => void }) {
+  const { notify, reportError } = useToast()
+  const saved = data.sso
+  const [form, setForm] = useState({
+    label: saved.label,
+    issuer: saved.issuer,
+    clientId: saved.clientId,
+    clientSecret: '',
+    allowedGroup: saved.allowedGroup,
+    autoCreate: saved.autoCreate,
+  })
+  const [busy, setBusy] = useState<'save' | 'test' | 'toggle' | null>(null)
+  const [tested, setTested] = useState<{ ok: boolean; text: string } | null>(null)
+  const set = (field: keyof typeof form) => (value: string | boolean) => setForm(previous => ({ ...previous, [field]: value }))
+
+  const origin = typeof window === 'undefined' ? '' : window.location.origin
+  const redirectUri = `${origin}/api/auth/sso/callback`
+  const configured = !!saved.issuer && !!saved.clientId && saved.clientSecretSet
+  const usable = saved.enabled && configured
+  const savedElsewhere = saved.redirectUri && saved.redirectUri !== redirectUri
+
+  const save = async (changes: Record<string, unknown>, what: 'save' | 'toggle') => {
+    setBusy(what)
+    const { ok, body } = await send('/api/security/sso', 'PUT', changes)
+    setBusy(null)
+    if (!ok) return reportError('Could not save single sign-on', body.error)
+    if (what === 'save') notify({ tone: 'success', title: 'Single sign-on saved' })
+    setForm(previous => ({ ...previous, clientSecret: '' }))
+    reload()
+  }
+
+  const test = async () => {
+    setBusy('test')
+    const { body } = await send('/api/security/sso/test', 'POST', { issuer: form.issuer })
+    setBusy(null)
+    setTested(body.ok ? { ok: true, text: `Found ${body.issuer}` } : { ok: false, text: String(body.error ?? 'Could not reach it') })
+  }
+
+  const unlink = async () => {
+    const { ok, body } = await send('/api/security/sso/link', 'DELETE')
+    if (!ok) return reportError('Could not unlink', body.error)
+    reload()
+  }
+
+  const changePasswordLogin = async (on: boolean) => {
+    const { ok, body } = await send('/api/security', 'PUT', { passwordLogin: on })
+    if (!ok) return reportError('Could not change password sign-in', body.error)
+    reload()
+  }
+
+  const passwordLocked = data.settings.passwordLogin && !(usable && data.me.sso)
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+        <p className="text-xs leading-relaxed text-card-foreground">
+          Sign in with Authentik, or any OpenID Connect provider. In Authentik:{' '}
+          <span className="font-medium">Applications → Providers → Create → OAuth2/OpenID Provider</span>, client type{' '}
+          <span className="font-medium">Confidential</span>, with this redirect URI; then an application for it. The
+          issuer is on the provider&apos;s page: <span className="font-mono">https://&lt;authentik&gt;/application/o/&lt;slug&gt;/</span>.
+        </p>
+        <CopyField id="sso-redirect" label="Redirect URI" value={redirectUri} />
+        {savedElsewhere && (
+          <p className={HINT}>
+            Saved from another address ({saved.redirectUri}). Saving here changes it to the one above, which then has to
+            be the one in Authentik.
+          </p>
+        )}
+      </div>
+
+      <form
+        onSubmit={event => {
+          event.preventDefault()
+          void save(form, 'save')
+        }}
+        className="space-y-3"
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className={SSO_FIELD}>
+            <Label htmlFor="sso-issuer" className="text-xs text-card-foreground">Issuer</Label>
+            <Input
+              id="sso-issuer"
+              placeholder="https://auth.example.com/application/o/clearping/"
+              value={form.issuer}
+              onChange={event => set('issuer')(event.target.value)}
+            />
+          </div>
+          <div className={SSO_FIELD}>
+            <Label htmlFor="sso-label" className="text-xs text-card-foreground">Name on the button</Label>
+            <Input id="sso-label" placeholder="Authentik" value={form.label} maxLength={40} onChange={event => set('label')(event.target.value)} />
+          </div>
+          <div className={SSO_FIELD}>
+            <Label htmlFor="sso-client" className="text-xs text-card-foreground">Client ID</Label>
+            <Input id="sso-client" autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
+          </div>
+          <div className={SSO_FIELD}>
+            <Label htmlFor="sso-secret" className="text-xs text-card-foreground">Client secret</Label>
+            <Input
+              id="sso-secret"
+              type="password"
+              autoComplete="new-password"
+              placeholder={saved.clientSecretSet ? 'Saved; leave empty to keep it' : ''}
+              value={form.clientSecret}
+              onChange={event => set('clientSecret')(event.target.value)}
+            />
+          </div>
+          <div className={cn(SSO_FIELD, 'sm:col-span-2')}>
+            <Label htmlFor="sso-group" className="text-xs text-card-foreground">Only members of this group (optional)</Label>
+            <Input id="sso-group" placeholder="clearping-users" value={form.allowedGroup} onChange={event => set('allowedGroup')(event.target.value)} />
+            <p className={HINT}>
+              Every account here can do everything, these settings included, so keep it to the people who should. Left
+              empty, anyone the provider lets through to this application can sign in.
+            </p>
+          </div>
+        </div>
+
+        <Toggle
+          checked={form.autoCreate}
+          onChange={on => set('autoCreate')(on)}
+          label="Make an account on first sign-in"
+          detail="Off: only accounts already linked can sign in this way."
+        />
+
+        {tested && (
+          <p className={cn('text-xs', tested.ok ? 'text-signal-perfect' : 'text-destructive')} role="status">
+            {tested.text}
+          </p>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" disabled={busy !== null}>
+            {busy === 'save' && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save
+          </Button>
+          <Button type="button" variant="outline" disabled={busy !== null || !form.issuer} onClick={test}>
+            {busy === 'test' && <Loader2 className="h-4 w-4 animate-spin" />}
+            Test the issuer
+          </Button>
+        </div>
+      </form>
+
+      <div className="space-y-4 border-t border-border pt-4">
+        <Toggle
+          checked={saved.enabled}
+          disabled={busy !== null || (!saved.enabled && !configured)}
+          onChange={on => save({ enabled: on }, 'toggle')}
+          label={`Sign in with ${saved.label}`}
+          detail={configured ? 'Shows the button on the sign-in page.' : 'Save an issuer, client ID and client secret first.'}
+        />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="min-w-0 flex-1 text-xs text-card-foreground">
+            {data.me.sso ? `Your account signs in with ${saved.label}.` : `Your account is not linked to ${saved.label} yet.`}
+          </p>
+          {data.me.sso
+            ? data.me.hasPassword && (
+                <ConfirmButton confirm="Unlink it" onConfirm={unlink}>
+                  Unlink
+                </ConfirmButton>
+              )
+            : usable && (
+                <Button asChild size="sm" variant="outline">
+                  <a href="/api/auth/sso/start?link=1">Link my account</a>
+                </Button>
+              )}
+        </div>
+
+        <Toggle
+          checked={data.settings.passwordLogin}
+          disabled={passwordLocked}
+          onChange={changePasswordLogin}
+          label="Allow signing in with a password"
+          detail={
+            passwordLocked
+              ? `Can be turned off once ${saved.label} sign-in is on and your own account is linked to it.`
+              : `Off: ${saved.label} is the only way in. CLEARPING_AUTH=off turns passwords back on if it ever fails.`
+          }
+        />
+      </div>
+    </div>
+  )
+}
+
 
 const ACTIONS: Record<string, string> = {
   'target.add': 'added a target',
@@ -451,6 +657,9 @@ const ACTIONS: Record<string, string> = {
   'account.password': 'changed their password',
   'security.on': 'turned on',
   'security.off': 'turned off',
+  'sso.change': 'changed single sign-on',
+  'account.sso.link': 'linked their account',
+  'account.sso.unlink': 'unlinked their account',
   signin: 'signed in',
   'signin.failed': 'failed to sign in',
   'mcp.add_targets': 'added targets',
@@ -596,7 +805,7 @@ function SecurityBody({ initialTab }: { initialTab: Tab }) {
             </Button>
           </div>
 
-          <div className="grid grid-cols-4 gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5" role="tablist" aria-label="Security">
+          <div className="grid grid-cols-5 gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5" role="tablist" aria-label="Security">
             {TABS.map(option => (
               <button
                 key={option.value}
@@ -620,6 +829,7 @@ function SecurityBody({ initialTab }: { initialTab: Tab }) {
           <div role="tabpanel" id={`security-panel-${tab}`} aria-labelledby={`security-tab-${tab}`}>
             {tab === 'access' && <AccessTab data={loaded.data} onChange={change} />}
             {tab === 'keys' && <KeysTab data={loaded.data} reload={reload} />}
+            {tab === 'sso' && <SsoTab data={loaded.data} reload={reload} />}
             {tab === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}
             {tab === 'activity' && <ActivityTab />}
           </div>

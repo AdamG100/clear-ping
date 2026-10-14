@@ -57,6 +57,27 @@ describe('accounts and sessions', () => {
   })
 })
 
+describe('single sign-on accounts', () => {
+  const ISSUER = 'https://auth.example/application/o/clearping/'
+
+  it('makes an account with no password, and never takes over one that has the name', async () => {
+    const made = await store.createSsoUser('adam', ISSUER, 'sub-1')
+    expect(made).toMatchObject({ username: 'adam-2', sso: true, hasPassword: false })
+    expect((await store.userForSso(ISSUER, 'sub-1'))?.id).toBe(made.id)
+    // No password matches the empty hash an account like this has.
+    expect(await store.checkLogin('adam-2', '')).toBeNull()
+  })
+
+  it('links an existing account, but not to an identity another account has', async () => {
+    const [adam] = await store.listUsers()
+    await expect(store.linkSso(adam.id, ISSUER, 'sub-1')).rejects.toThrow('already signs in as adam-2')
+    await store.linkSso(adam.id, ISSUER, 'sub-adam')
+    expect((await store.userForSso(ISSUER, 'sub-adam'))?.username).toBe('adam')
+    await store.unlinkSso(adam.id)
+    expect(await store.userForSso(ISSUER, 'sub-adam')).toBeNull()
+  })
+})
+
 describe('keys', () => {
   it('knows a key by itself, keeps only its hash, and stops knowing it once revoked', async () => {
     const { key, record } = await store.createApiKey('Claude', 'read', 'adam')

@@ -407,6 +407,23 @@ async function security(database: Database): Promise<void> {
   await run(database, 'CREATE INDEX IF NOT EXISTS idx_activity_at ON activity(at)');
 }
 
+/**
+ * Accounts that sign in through an identity provider (Authentik, or any other
+ * OpenID Connect provider), known by the provider and its id for the person.
+ * An account made that way has no password: its hash is left empty, which no
+ * password matches.
+ */
+async function singleSignOn(database: Database): Promise<void> {
+  const columns = await all<{ name: string }>(database, 'PRAGMA table_info(users)');
+  const has = (name: string) => columns.some(column => column.name === name);
+  if (!has('sso_issuer')) await run(database, 'ALTER TABLE users ADD COLUMN sso_issuer TEXT');
+  if (!has('sso_subject')) await run(database, 'ALTER TABLE users ADD COLUMN sso_subject TEXT');
+  await run(
+    database,
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_sso ON users(sso_issuer, sso_subject) WHERE sso_subject IS NOT NULL'
+  );
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
@@ -414,6 +431,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'apprise notifications', up: appriseNotifications },
   { name: 'kept groups', up: keptGroups },
   { name: 'security', up: security },
+  { name: 'single sign-on', up: singleSignOn },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

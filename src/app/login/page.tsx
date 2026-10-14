@@ -11,7 +11,12 @@ function safeNext(next: string | string[] | undefined): string {
   return typeof next === 'string' && /^\/(?![/\\])/.test(next) ? next : '/'
 }
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string | string[] }> }) {
-  const { next } = await searchParams
-  return <LoginForm next={safeNext(next)} />
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string | string[]; error?: string | string[] }>
+}) {
+  const { next, error } = await searchParams
+  // Why single sign-on did not work, as the way back from the provider put it.
+  return <LoginForm next={safeNext(next)} initialError={typeof error === 'string' ? error.slice(0, 300) : null} />
 }

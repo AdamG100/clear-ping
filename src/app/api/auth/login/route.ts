@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, setSessionCookie } from '@/lib/security/http';
+import { securityPolicy } from '@/lib/security/access';
 import { checkLogin, createSession, recordActivity } from '@/lib/security/store';
 
 /**
@@ -10,6 +11,10 @@ import { checkLogin, createSession, recordActivity } from '@/lib/security/store'
  * nothing about which accounts exist; and repeated failures are slowed down.
  */
 export async function POST(request: NextRequest) {
+  if (!(await securityPolicy()).passwordLogin) {
+    return NextResponse.json({ error: 'Signing in with a password is turned off here: use single sign-on' }, { status: 403 });
+  }
+
   const body = await request.json().catch(() => null);
   const username = typeof body?.username === 'string' ? body.username.trim() : '';
   const password = typeof body?.password === 'string' ? body.password : '';

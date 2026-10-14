@@ -9,6 +9,7 @@ shield button in the sidebar sets up:
 - **Keys** for scripts and AI assistants: one each, able to read or to read and
   change.
 - **Activity**: a record of every change, and which account or key made it.
+- **Single sign-on** with Authentik, or any OpenID Connect provider.
 
 ## Setting it up
 
@@ -103,10 +104,73 @@ sign-in page offers to make a new account. Make one, sign in, change what needs
 changing (remove the old account, or change its password from that account),
 then remove the variable and restart. Nothing is deleted along the way.
 
-## Behind Authentik, or another sign-in proxy
+## Single sign-on with Authentik
 
-Leave **Require sign-in** off and let the proxy decide who gets in. Two things
-still help:
+ClearPing can sign people in through Authentik, or any other OpenID Connect
+provider (Keycloak, Entra ID, Google and so on): a **Sign in with Authentik**
+button on the sign-in page, with no password to keep for ClearPing.
+
+### In Authentik
+
+1. **Applications → Providers → Create → OAuth2/OpenID Provider.**
+   - Client type: **Confidential**.
+   - Redirect URI: the one shown under Security → SSO in ClearPing, which is
+     `https://<your ClearPing>/api/auth/sso/callback`. Open that page at the
+     address people will use, since the URI is taken from it.
+   - Signing key: pick one (the self-signed certificate is fine). Without one
+     Authentik signs with the client secret, which ClearPing also accepts.
+   - Scopes: the defaults (`openid`, `email`, `profile`). `profile` is where
+     Authentik puts the username and the person's groups.
+2. **Applications → Applications → Create**, using that provider. Optionally
+   bind a group or policy to it, so only some people can get to it at all.
+3. Note the provider's **Client ID**, **Client Secret** and **OpenID
+   Configuration Issuer**, which looks like
+   `https://auth.example.com/application/o/clearping/`.
+
+### In ClearPing
+
+1. Security → **SSO**: paste the issuer, client ID and client secret.
+   **Test the issuer** checks that Authentik can be reached there.
+2. Optionally, **Only members of this group**: an Authentik group name. Every
+   account in ClearPing can do everything, these settings included, so keep
+   it to the people who should.
+3. **Save**, then turn on **Sign in with Authentik**.
+4. **Link my account**: signs in through Authentik once and ties your existing
+   account to that identity, so it is you who signs in rather than a new
+   account.
+5. Optionally turn off **Allow signing in with a password**, leaving Authentik
+   as the only way in. It can only be turned off once your own account is
+   linked, and `CLEARPING_AUTH=off` turns passwords back on if Authentik is
+   ever unreachable.
+
+With **Make an account on first sign-in** on (the default), someone signing in
+through Authentik for the first time gets an account under their Authentik
+username. If that name is already taken here, a number is added; an existing
+account is never taken over because a name matches. Off, only accounts that
+have been linked can sign in this way.
+
+### How it is checked
+
+The authorization code flow with PKCE. ClearPing sends the browser to
+Authentik with a random state, nonce and PKCE challenge, kept in a short-lived
+cookie that only the callback reads. The answer is taken only if its state
+matches that cookie. The code is then traded for an ID token directly with
+Authentik, using the client secret and the PKCE verifier. The token's
+signature (Authentik's published key, or the client secret for HS256), issuer,
+audience, expiry and nonce are all checked before anyone is signed in. Linking
+always ties the identity to the account signed in at that moment, never to one
+named anywhere a browser could change. Everything about a sign-in goes into the
+activity record: first sign-ins, links, and people turned away for not being
+in the group.
+
+The client secret is stored in ClearPing's database (it is needed for every
+sign-in), never sent back to the browser, and only replaced, never shown.
+
+## Behind Authentik as a proxy, or another sign-in proxy
+
+If Authentik already sits in front of ClearPing as a forward-auth proxy, leave
+**Require sign-in** off and let the proxy decide who gets in. Two things still
+help:
 
 - An assistant connecting from outside cannot sign in through the proxy. Let
   `/api/mcp` through without it, and turn on **Require a key for AI assistants**

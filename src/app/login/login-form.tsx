@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, type FormEvent } from 'react'
-import { Loader2, LockKeyhole } from 'lucide-react'
+import { KeyRound, Loader2, LockKeyhole } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,18 +20,20 @@ interface Status {
   accountExists: boolean
   registrationOpen: boolean
   recovery: boolean
+  passwordLogin: boolean
+  sso: { label: string } | null
   signedIn: { username: string } | null
 }
 
 const MIN_PASSWORD = 10
 
-export function LoginForm({ next }: { next: string }) {
+export function LoginForm({ next, initialError }: { next: string; initialError: string | null }) {
   const [status, setStatus] = useState<Status | null>(null)
   const [mode, setMode] = useState<'signin' | 'register'>('signin')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -45,6 +47,9 @@ export function LoginForm({ next }: { next: string }) {
   }, [])
 
   const registering = mode === 'register'
+  // Single sign-on as the only way in: the form is not shown at all.
+  const passwordForm = registering || status?.passwordLogin !== false
+  const ssoHref = `/api/auth/sso/start?next=${encodeURIComponent(next)}`
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -102,12 +107,32 @@ export function LoginForm({ next }: { next: string }) {
             </p>
           </div>
 
+          {status?.sso && !registering && (
+            <>
+              {/* A link, not a fetch: the provider's sign-in is a page of its own. */}
+              <Button asChild className="w-full" variant={passwordForm ? 'outline' : 'default'}>
+                <a href={ssoHref}>
+                  <KeyRound className="h-4 w-4" />
+                  Sign in with {status.sso.label}
+                </a>
+              </Button>
+              {passwordForm && (
+                <div className="flex items-center gap-3 text-[11px] text-muted-foreground" aria-hidden="true">
+                  <span className="h-px flex-1 bg-border" />
+                  or with a password
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+              )}
+            </>
+          )}
+
           {status?.recovery && !registering && (
             <p className="rounded-md border border-signal-minor/40 bg-signal-minor/10 px-3 py-2 text-xs leading-relaxed text-foreground">
               CLEARPING_AUTH=off is set: sign-in is not being asked for right now.
             </p>
           )}
 
+          {passwordForm && (<>
           <div className="space-y-1.5">
             <Label htmlFor="username" className="text-xs text-card-foreground">Username</Label>
             <Input
@@ -148,16 +173,20 @@ export function LoginForm({ next }: { next: string }) {
             </div>
           )}
 
+          </>)}
+
           {error && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-foreground" role="alert">
               {error}
             </p>
           )}
 
-          <Button type="submit" className="w-full" disabled={busy || !status || !username || !password}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            {registering ? 'Create account' : 'Sign in'}
-          </Button>
+          {passwordForm && (
+            <Button type="submit" className="w-full" disabled={busy || !status || !username || !password}>
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+              {registering ? 'Create account' : 'Sign in'}
+            </Button>
+          )}
 
           {status?.registrationOpen && status.accountExists && (
             <button
