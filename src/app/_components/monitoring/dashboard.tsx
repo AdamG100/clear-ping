@@ -377,13 +377,20 @@ function useTargetMeasurements(
   // Keyed by target *and* range, so flicking between two targets is instant
   // rather than re-fetching each time. Clearing the cache whenever the target
   // changed meant every switch paid a full round trip and showed a spinner.
-  const cacheRef = useRef(new Map<string, RangeSnapshot>())
+  // Held in state, not a ref, so that what has been seen can be read while
+  // rendering: a view that has been seen before is shown in the same render
+  // that switches to it, with no frame of placeholder in between.
+  const [cache] = useState(() => new Map<string, RangeSnapshot>())
   // A family is its own series, so it owns its snapshot the way a target does:
   // IPv4's history must not sit under the IPv6 tab while IPv6 loads.
   const owner = targetId ? `${targetId}:${family ?? 'all'}` : null
   const cacheKey = `${owner}:${timeRange}:${zoom ? `${zoom.start}-${zoom.end}` : 'all'}`
 
-  const isForCurrentTarget = snapshot !== null && snapshot.owner === owner
+  // What is on screen: what was last loaded for this target and family, or
+  // failing that, what has been loaded before for exactly this view.
+  const cachedView = owner && !(snapshot !== null && snapshot.owner === owner) ? cache.get(cacheKey) : undefined
+  const shown = snapshot !== null && snapshot.owner === owner ? snapshot : cachedView ? { ...cachedView, owner: owner as string } : null
+  const isForCurrentTarget = shown !== null
 
   // Only the newest request may write state: switching ranges quickly can
   // otherwise land a slow earlier response on top of a fast later one.
@@ -397,7 +404,7 @@ function useTargetMeasurements(
     }
 
     const requestId = ++requestIdRef.current
-    const cached = cacheRef.current.get(cacheKey)
+    const cached = cache.get(cacheKey)
 
     if (cached) {
       // Show it straight away, then revalidate behind it.
@@ -434,17 +441,17 @@ function useTargetMeasurements(
 
       // Bounded: oldest entries drop out so a long session cannot grow the
       // cache without limit.
-      if (cacheRef.current.size >= 40) {
-        cacheRef.current.delete(cacheRef.current.keys().next().value!)
+      if (cache.size >= 40) {
+        cache.delete(cache.keys().next().value!)
       }
-      cacheRef.current.set(cacheKey, next)
+      cache.set(cacheKey, next)
       if (requestId === requestIdRef.current) setSnapshot({ ...next, owner })
     } catch (error) {
       reportError('Could not load measurements', error)
     } finally {
       if (requestId === requestIdRef.current) setPending(false)
     }
-  }, [targetId, owner, family, timeRange, zoom, cacheKey, probeIntervalSeconds, reportError])
+  }, [targetId, owner, family, timeRange, zoom, cache, cacheKey, probeIntervalSeconds, reportError])
 
   const loadMeasurementsRef = useRef(loadMeasurements)
   useEffect(() => {
@@ -456,10 +463,10 @@ function useTargetMeasurements(
   }, [targetId, family, timeRange, zoom, probeIntervalSeconds])
 
   return {
-    points: isForCurrentTarget ? snapshot.points : [],
-    statistics: isForCurrentTarget ? snapshot.statistics : null,
+    points: shown ? shown.points : [],
+    statistics: shown ? shown.statistics : null,
     /** The zoom window the points on screen belong to; null when unzoomed. */
-    window: isForCurrentTarget ? snapshot.window : null,
+    window: shown ? shown.window : null,
     /** A fetch is in flight with nothing cached to show for this range. */
     pending,
     /** True only before the first result for the current target has arrived. */
@@ -1186,11 +1193,19 @@ export function Dashboard() {
             {dualStack && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <FamilySwitch value={familyView} onChange={view => { setFamilyView(view); setZoom(null) }} />
-                <p className="text-xs text-muted-foreground">
-                  {comparingFamilies
-                    ? 'Probed over both address families every time. Pick one for its full readings.'
-                    : `Readings taken over ${FAMILY_LABEL[shownFamily ?? 4]} only.`}
-                </p>
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.p
+                    key={familyView}
+                    className="text-xs text-muted-foreground"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1, transition: { duration: 0.18 } }}
+                    exit={{ opacity: 0, transition: { duration: 0.08 } }}
+                  >
+                    {comparingFamilies
+                      ? 'Probed over both address families every time. Pick one for its full readings.'
+                      : `Readings taken over ${FAMILY_LABEL[shownFamily ?? 4]} only.`}
+                  </motion.p>
+                </AnimatePresence>
               </div>
             )}
 
@@ -1204,6 +1219,18 @@ export function Dashboard() {
               }
               aria-busy={pending}
             >
+              {/* The view is what is faded: the old one leaves quickly and the
+                  new one comes up, so switching between Compare, IPv4 and IPv6
+                  is a change of picture and not a cut. The route and the
+                  alerts below belong to the target, not to the view, and stay. */}
+              <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={familyView}
+                className="space-y-4 @2xl/main:space-y-6"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] } }}
+                exit={{ opacity: 0, transition: { duration: 0.1, ease: 'easeIn' } }}
+              >
               {comparingFamilies ? (
                 <>
                   <ComparePanel
@@ -1399,6 +1426,8 @@ export function Dashboard() {
                 )}
               </>
               )}
+              </motion.div>
+              </AnimatePresence>
 
                 <ErrorBoundary label="Route">
                   <TraceroutePanel
