@@ -9,7 +9,7 @@ import { BrandMark } from './brand-mark'
 import { VersionBadge } from './version-badge'
 import { Sparkline } from './sparkline'
 import { SidebarSkeleton } from './skeleton'
-import { AddTargetDialog, DeleteTargetDialog, EditTargetDialog } from './target-dialogs'
+import { DeleteTargetDialog } from './target-dialogs'
 import { GroupDialog, type GroupDialogTask } from './group-dialog'
 import { ShareDialog } from './share-dialog'
 import { DeleteTargetsDialog } from './delete-targets-dialog'
@@ -26,7 +26,7 @@ import { useTheme } from '../use-theme'
 import { StatusIndicator } from './status-indicator'
 import { addressFamilyFor, isDualStack } from '@/lib/host'
 import { targetAddressLabel } from '@/lib/probe-config'
-import { groupLabel, groupName, groupWithAncestors, normalizeGroupPath, rebaseGroupPath } from '@/lib/group-path'
+import { groupLabel, groupName, groupWithAncestors, rebaseGroupPath } from '@/lib/group-path'
 import { combineSeries } from '@/lib/group-series'
 import {
   UNGROUPED,
@@ -142,14 +142,15 @@ interface SidebarProps {
   targets: Target[]
   selectedTargetId: string | null
   onSelectTarget: (id: string) => void
-  /** Resolves to the target as it was created, or null if it was not. */
-  onAddTarget: (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => Promise<Target | null>
+  /** Open the page for adding a target: blank, started in a group, or as a copy of one. */
+  onOpenAddTarget: (options?: { group?: string; from?: string }) => void
+  /** Open the page for editing a target. */
+  onOpenEditTarget: (id: string) => void
   /** Add the targets out of a share link. Resolves to whether they were added. */
   onImportTargets: (targets: TargetDefinition[]) => Promise<boolean>
   /** Delete several at once. Resolves to whether they were deleted. */
   /** Resolves to whether the delete was started: it goes on in the background. */
   onDeleteTargets: (ids: string[]) => Promise<boolean>
-  onUpdateTarget: (id: string, updates: Partial<Target>) => void
   onDeleteTarget: (id: string) => void
   onTogglePaused: (target: Target) => void
   /** The group whose comparison chart is on screen, if one is. */
@@ -843,10 +844,10 @@ export function Sidebar({
   targets,
   selectedTargetId,
   onSelectTarget,
-  onAddTarget,
+  onOpenAddTarget,
+  onOpenEditTarget,
   onImportTargets,
   onDeleteTargets,
-  onUpdateTarget,
   onDeleteTarget,
   onTogglePaused,
   selectedGroup = null,
@@ -867,18 +868,9 @@ export function Sidebar({
   onReorderTargets,
   loading = false,
 }: SidebarProps) {
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  // The target the add dialog starts from, when it was opened to duplicate
-  // one. Left in place on close, so the dialog does not turn into a blank
-  // form on its way out, and cleared when it is next opened for a new target.
-  const [duplicating, setDuplicating] = useState<Target | null>(null)
-  // The group a new target starts in, when it was added from inside one.
-  const [addingTo, setAddingTo] = useState('')
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
   const [incomingShareCode, clearIncomingShareCode] = useIncomingShareCode()
-  const [isEditOpen, setIsEditOpen] = useState(false)
-  const [editingTarget, setEditingTarget] = useState<Target | null>(null)
   // Held by id, so the dialog always describes the target as it is now and
   // closes by itself if the target goes away underneath it.
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -1023,32 +1015,8 @@ export function Sidebar({
 
   // Stable, so that the rows they are handed to are not drawn again each time
   // the sidebar is.
-  const openEditDialog = useCallback((target: Target) => {
-    setEditingTarget(target)
-    setIsEditOpen(true)
-  }, [])
-
-  const openAddDialog = useCallback((template: Target | null = null, group = '') => {
-    setDuplicating(template)
-    setAddingTo(group)
-    setIsAddOpen(true)
-  }, [])
-
-  // A copy goes directly under what it was copied from, as long as it was
-  // left in the same group: at the far end of a long group it would look as
-  // though nothing had happened.
-  const addDuplicate = async (source: Target, copy: Parameters<SidebarProps['onAddTarget']>[0]) => {
-    const created = await onAddTarget(copy)
-    const group = normalizeGroupPath(source.group)
-    if (!created || normalizeGroupPath(created.group) !== group) return
-
-    const siblings = (savedLayout.items[group || UNGROUPED] ?? []).filter(id => id !== created.id)
-    const position = siblings.indexOf(source.id)
-    if (position === -1) return
-
-    const ordered = [...siblings.slice(0, position + 1), created.id, ...siblings.slice(position + 1)]
-    onReorderTargets?.(ordered.map((id, sortOrder) => ({ id, sortOrder })))
-  }
+  const openEdit = useCallback((target: Target) => onOpenEditTarget(target.id), [onOpenEditTarget])
+  const openDuplicate = useCallback((target: Target) => onOpenAddTarget({ from: target.id }), [onOpenAddTarget])
 
   const closeShareDialog = () => {
     setIsShareOpen(false)
@@ -1319,13 +1287,13 @@ export function Sidebar({
                 onCompare={onSelectGroup}
                 onEditGroup={onMoveGroup && !readOnly ? openEditGroup : undefined}
                 onAddGroupInside={onCreateGroup && !readOnly ? parent => setGroupTask({ kind: 'create', parent }) : undefined}
-                onAddTargetTo={group => openAddDialog(null, group)}
+                onAddTargetTo={group => onOpenAddTarget({ group })}
                 onReorderSubgroups={handleGroupReorder}
                 onGroupDragStart={handleGroupDragStart}
                 onGroupDragEnd={handleGroupDragEnd}
                 onSelectTarget={onSelectTarget}
-                onEditTarget={readOnly ? undefined : openEditDialog}
-                onDuplicateTarget={readOnly ? undefined : openAddDialog}
+                onEditTarget={readOnly ? undefined : openEdit}
+                onDuplicateTarget={readOnly ? undefined : openDuplicate}
                 onDeleteTarget={readOnly ? undefined : setDeletingId}
                 onTogglePaused={readOnly ? undefined : onTogglePaused}
                 onHandlePointerDown={readOnly ? undefined : drag.onHandlePointerDown}
@@ -1366,7 +1334,7 @@ export function Sidebar({
           were wider than the sidebar, and the label ran out of its button. */}
       <div className="flex flex-col gap-2 border-t border-sidebar-border p-3 pb-[calc(0.75rem+var(--safe-bottom))]">
         {!readOnly && (
-          <Button className="w-full" size="sm" onClick={() => openAddDialog()} suppressHydrationWarning>
+          <Button className="w-full" size="sm" onClick={() => onOpenAddTarget()} suppressHydrationWarning>
             <Plus {...ICON} />
             Add target
           </Button>
@@ -1437,30 +1405,11 @@ export function Sidebar({
               onShare={() => setIsShareOpen(true)}
               settingsOpen={settingsOpen}
               onOpenSettings={() => onOpenSettings?.()}
-              onAddTarget={readOnly ? undefined : () => openAddDialog()}
+              onAddTarget={readOnly ? undefined : () => onOpenAddTarget()}
             />
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Add Target Dialog */}
-      <AddTargetDialog
-        open={isAddOpen}
-        onOpenChange={setIsAddOpen}
-        onAddTarget={target => (duplicating ? addDuplicate(duplicating, target) : onAddTarget(target))}
-        availableGroups={availableGroups}
-        template={duplicating}
-        group={addingTo}
-      />
-
-      {/* Edit Target Dialog */}
-      <EditTargetDialog
-        open={isEditOpen}
-        onOpenChange={setIsEditOpen}
-        target={editingTarget}
-        onSave={onUpdateTarget}
-        availableGroups={availableGroups}
-      />
 
       <GroupDialog
         task={groupTask}

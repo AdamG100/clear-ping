@@ -8,7 +8,6 @@ import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
-import { Drawer, DrawerContent } from '@/components/arc/drawer/drawer'
 import { Input } from '@/components/arc/input/input'
 import { RadioCards } from '@/components/arc/radio-cards/radio-cards'
 import { SegmentedField } from '@/components/segmented-field'
@@ -91,7 +90,7 @@ function configFrom(draft: ConfigDraft): Record<string, unknown> {
   }
 }
 
-interface TargetFormValues {
+export interface TargetFormValues {
   name: string
   host: string
   probeType: ProbeType
@@ -492,7 +491,7 @@ function IntervalSelect({
 
 // ─── The form ───────────────────────────────────────────────────────────────
 
-interface TargetFormProps {
+export interface TargetFormProps {
   idPrefix: string
   initial: TargetFormValues
   availableGroups: string[]
@@ -509,7 +508,7 @@ type RequiredField = 'address' | 'port'
  * settings that already hold a sensible answer. Only the first has to be
  * answered, so an address and Enter is a whole target.
  */
-function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit, onCancel }: TargetFormProps) {
+export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit, onCancel }: TargetFormProps) {
   const initialGroupIsNew = !!initial.group && !availableGroups.includes(initial.group)
 
   const [name, setName] = useState(initial.name)
@@ -756,9 +755,9 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
         {hostKind !== 'ipv4' && hostKind !== 'ipv6' && !asksNoAddress && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
       </div>
 
-      {/* Held at the foot of the drawer, so the button is on show however long
-          the settings above it get. */}
-      <div className="sticky -bottom-6 -mx-6 -mb-6 mt-6 flex flex-col gap-3 border-t border-border bg-popover px-6 py-4">
+      {/* Held at the foot of the page as it scrolls, so the button is on show
+          however long the settings above it get. */}
+      <div className="sticky bottom-0 -mx-4 -mb-4 mt-6 flex flex-col gap-3 rounded-b-3xl border-t border-border bg-card px-4 py-4 @2xl/main:-mx-6 @2xl/main:-mb-6 @2xl/main:px-6">
         {/* What pressing the button will do, or what is stopping it. */}
         <p
           className={cn('min-w-0 text-xs', attempted && !isValid ? 'text-destructive' : 'text-muted-foreground')}
@@ -791,9 +790,9 @@ function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit,
   )
 }
 
-// ─── Add Target ─────────────────────────────────────────────────────────────
+// ─── Starting values ────────────────────────────────────────────────────────
 
-const BLANK_TARGET: TargetFormValues = {
+export const BLANK_TARGET: TargetFormValues = {
   name: '',
   host: '',
   probeType: 'ping',
@@ -804,7 +803,7 @@ const BLANK_TARGET: TargetFormValues = {
 }
 
 /** A target as the form holds it. */
-function formValuesOf(target: Target): TargetFormValues {
+export function formValuesOf(target: Target): TargetFormValues {
   return {
     name: target.name,
     host: target.host,
@@ -814,93 +813,6 @@ function formValuesOf(target: Target): TargetFormValues {
     interval: target.interval,
     group: target.group || '',
   }
-}
-
-interface AddTargetDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onAddTarget: (target: Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>) => void
-  availableGroups: string[]
-  /**
-   * A target to start the form from instead of a blank one: duplicating it.
-   * The second port on a host, or the same check against the next server
-   * along, is most of an existing target already.
-   */
-  template?: Target | null
-  /** The group a blank form starts in, when the target is being added to one. */
-  group?: string
-}
-
-/** Adding a target, in a drawer: a long form, with the page kept in view beside it. */
-export function AddTargetDialog({ open, onOpenChange, onAddTarget, availableGroups, template = null, group = '' }: AddTargetDialogProps) {
-  return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent
-        title={template ? `Duplicate ${template.name}` : 'Add a target'}
-        description={
-          template
-            ? 'A new target that starts with the same settings. Change what is different about this one. None of the history is copied.'
-            : 'Only the address is needed. Everything else starts with a sensible default.'
-        }
-      >
-        {/* The form lives inside the drawer's content, which is unmounted on
-            close, so every opening starts from a blank form without a reset. */}
-        <TargetForm
-          idPrefix="add"
-          initial={template ? { ...formValuesOf(template), name: `${template.name} copy` } : { ...BLANK_TARGET, group }}
-          availableGroups={availableGroups}
-          submitLabel="Add target"
-          onCancel={() => onOpenChange(false)}
-          onSubmit={values => {
-            onAddTarget({
-              ...values,
-              group: values.group || undefined,
-              status: 'active',
-              createdAt: new Date(),
-              updatedAt: new Date(),
-              type: targetTypeFor(values.host, values.probeType),
-            })
-            onOpenChange(false)
-          }}
-        />
-      </DrawerContent>
-    </Drawer>
-  )
-}
-
-// ─── Edit Target ────────────────────────────────────────────────────────────
-
-interface EditTargetDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  target: Target | null
-  onSave: (id: string, updates: Partial<Target>) => void
-  availableGroups: string[]
-}
-
-export function EditTargetDialog({ open, onOpenChange, target, onSave, availableGroups }: EditTargetDialogProps) {
-  if (!target) return null
-
-  return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent title={`Edit ${target.name}`}>
-        <TargetForm
-          key={target.id}
-          idPrefix="edit"
-          initial={formValuesOf(target)}
-          availableGroups={availableGroups}
-          submitLabel="Save changes"
-          onCancel={() => onOpenChange(false)}
-          onSubmit={values => {
-            // The group is sent even when empty: that is how choosing "None"
-            // takes the target out of its group.
-            onSave(target.id, { ...values, updatedAt: new Date() })
-            onOpenChange(false)
-          }}
-        />
-      </DrawerContent>
-    </Drawer>
-  )
 }
 
 // ─── Delete Target Dialog ───────────────────────────────────────────────────

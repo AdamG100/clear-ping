@@ -15,15 +15,49 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 /** Where Settings opens when no section is asked for. */
 export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'access'
 
-export type DashboardPage = { kind: 'alerts' } | { kind: 'settings'; section: SettingsSection }
+export type DashboardPage =
+  | { kind: 'alerts' }
+  | { kind: 'settings'; section: SettingsSection }
+  /** A blank form for a new target, started in `group` or as a copy of the target `from`. */
+  | { kind: 'target-new'; group?: string; from?: string }
+  | { kind: 'target-edit'; id: string }
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
   return typeof value === 'string' && (SETTINGS_SECTIONS as readonly string[]).includes(value)
 }
 
 /** The page at an address, or null for the dashboard itself (a target or a group). */
+/** A segment of an address as written, whether or not the browser left it encoded. */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
+/**
+ * The page at an address, or null for the dashboard itself (a target or a group).
+ *
+ * Adding a target is /targets/new, /targets/new/in/<group> to start in a group
+ * (the group's own path, so /targets/new/in/Home/Network) and
+ * /targets/new/copy/<id> to duplicate one. Editing is /targets/<id>/edit.
+ */
 export function pageFromPath(pathname: string): DashboardPage | null {
   const [first, second, ...rest] = pathname.split('/').filter(Boolean)
+
+  if (first === 'targets' && second) {
+    if (second === 'new') {
+      if (rest.length === 0) return { kind: 'target-new' }
+      const [how, ...value] = rest
+      if (how === 'in' && value.length > 0) return { kind: 'target-new', group: value.map(decodeSegment).join('/') }
+      if (how === 'copy' && value.length === 1) return { kind: 'target-new', from: decodeSegment(value[0]) }
+      return null
+    }
+    if (rest.length === 1 && rest[0] === 'edit') return { kind: 'target-edit', id: decodeSegment(second) }
+    return null
+  }
+
   if (rest.length > 0) return null
   if (first === 'alerts' && !second) return { kind: 'alerts' }
   if (first === 'settings') {
@@ -40,6 +74,15 @@ export function pathOf(page: DashboardPage | null): string {
     // Whatever arrives here as a section, only a real one becomes part of an address.
     const section = isSettingsSection(page.section) ? page.section : DEFAULT_SETTINGS_SECTION
     return section === DEFAULT_SETTINGS_SECTION ? '/settings' : `/settings/${section}`
+  }
+  if (page.kind === 'target-edit') return `/targets/${encodeURIComponent(page.id)}/edit`
+  if (page.kind === 'target-new') {
+    if (typeof page.from === 'string' && page.from) return `/targets/new/copy/${encodeURIComponent(page.from)}`
+    // Only a group given as a path: anything else (a click event, say) is not one.
+    if (typeof page.group === 'string' && page.group) {
+      return `/targets/new/in/${page.group.split('/').map(encodeURIComponent).join('/')}`
+    }
+    return '/targets/new'
   }
   return `/${page.kind}`
 }

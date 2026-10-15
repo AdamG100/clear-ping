@@ -30,15 +30,16 @@ import { addressFamilyFor, FAMILY_LABEL, isDualStack, targetTypeFor } from '@/li
 import { alertTitle } from '@/lib/alert-delivery'
 import { probeVocabulary } from '@/lib/probe-labels'
 import { DNS_QUERIES_PER_PROBE, nameRecordType, targetAddressLabel } from '@/lib/probe-config'
-import { groupLabel, isWithinGroup, rebaseGroupPath } from '@/lib/group-path'
-import { buildSidebarLayout, targetsWithin } from '@/lib/sidebar-layout'
+import { groupLabel, isWithinGroup, normalizeGroupPath, rebaseGroupPath } from '@/lib/group-path'
+import { buildSidebarLayout, groupsInOrder, targetsWithin, UNGROUPED } from '@/lib/sidebar-layout'
 import { useToast } from '@/components/notifications'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { AlertsView, type AlertResponse } from './alerts-view'
 import { SettingsPage } from './settings-page'
+import { AddTargetPage, EditTargetPage } from './target-page'
 import { useDashboardPage } from './use-dashboard-page'
 import { useSignedIn } from './use-signed-in'
-import { DEFAULT_SETTINGS_SECTION, isSettingsSection, type DashboardPage } from '@/lib/dashboard-pages'
+import { DEFAULT_SETTINGS_SECTION, isSettingsSection, pathOf, type DashboardPage } from '@/lib/dashboard-pages'
 import { ProbeDetailsPanel } from './probe-details'
 import { TraceroutePanel } from './traceroute-panel'
 import { ComparePanel } from './compare-panel'
@@ -180,6 +181,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
       })
       if (response.ok) {
         await loadTargets()
+        return true
       } else {
         const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
         reportError('Could not save changes', error)
@@ -187,6 +189,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     } catch (error) {
       reportError('Could not save changes', error)
     }
+    return false
   }, [loadTargets, reportError])
 
   const deleteTarget = useCallback(async (id: string) => {
@@ -559,6 +562,7 @@ export function Dashboard() {
   // main pane. Which one is part of the address.
   const { page, goTo } = useDashboardPage()
   const showingAlerts = page?.kind === 'alerts'
+  const targetPage = page?.kind === 'target-new' || page?.kind === 'target-edit' ? page : null
   // A viewer is shown everything and offered nothing to change.
   const readOnly = useSignedIn()?.role === 'viewer'
   // On a narrow screen the sidebar is a drawer over the page. Choosing
@@ -625,6 +629,47 @@ export function Dashboard() {
     hideSidebar()
   }, [goTo, hideSidebar])
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
+
+  // Adding and editing a target are pages of their own (see target-page.tsx).
+  const savedLayout = useMemo(() => buildSidebarLayout(targets, groupOrders, groups), [targets, groupOrders, groups])
+  // Every group a target could be put in, including ones that hold only other
+  // groups, in the order the sidebar lists them.
+  const availableGroups = useMemo(() => groupsInOrder(savedLayout).filter(group => group !== UNGROUPED), [savedLayout])
+  const openAddTarget = useCallback(
+    (options?: { group?: string; from?: string }) => openPage({ kind: 'target-new', group: options?.group, from: options?.from }),
+    [openPage]
+  )
+  const openEditTarget = useCallback((id: string) => openPage({ kind: 'target-edit', id }), [openPage])
+  const closeTargetPage = useCallback(() => goTo(null), [goTo])
+
+  // A copy goes directly under what it was copied from, as long as it was left
+  // in the same group: at the far end of a long group it would look as though
+  // nothing had happened. Whatever was added is then the target on screen.
+  const handleAddTarget = useCallback(
+    async (source: Target | null, copy: Parameters<typeof addTarget>[0]) => {
+      const created = await addTarget(copy)
+      if (!created) return
+
+      if (source && normalizeGroupPath(created.group) === normalizeGroupPath(source.group)) {
+        const group = normalizeGroupPath(source.group)
+        const siblings = (savedLayout.items[group || UNGROUPED] ?? []).filter(id => id !== created.id)
+        const position = siblings.indexOf(source.id)
+        if (position !== -1) {
+          const ordered = [...siblings.slice(0, position + 1), created.id, ...siblings.slice(position + 1)]
+          void reorderTargets(ordered.map((id, sortOrder) => ({ id, sortOrder })))
+        }
+      }
+      setSelectedTargetId(created.id)
+    },
+    [addTarget, savedLayout, reorderTargets, setSelectedTargetId]
+  )
+
+  const handleSaveTarget = useCallback(
+    async (id: string, updates: Partial<Target>) => {
+      if (await updateTarget(id, updates)) goTo(null)
+    },
+    [updateTarget, goTo]
+  )
   // Takes anything, because it is handed straight to buttons as their click
   // handler, and an event is not a section: only a real one is taken.
   const openSettings = useCallback(
@@ -935,10 +980,10 @@ export function Dashboard() {
         onOpenSettings={openSettings}
         readOnly={readOnly}
         firingAlerts={firingAlerts}
-        onAddTarget={addTarget}
+        onOpenAddTarget={openAddTarget}
+        onOpenEditTarget={openEditTarget}
         onImportTargets={handleImportTargets}
         onDeleteTargets={handleDeleteTargets}
-        onUpdateTarget={updateTarget}
         onDeleteTarget={deleteTarget}
         onTogglePaused={handleTogglePaused}
         series={series}
@@ -1019,6 +1064,41 @@ export function Dashboard() {
               {/* The section is part of the address but not of the history:
                   going back leaves Settings rather than stepping through it. */}
               <SettingsPage section={page.section} onSection={section => goTo({ kind: 'settings', section }, 'replace')} />
+            </ErrorBoundary>
+          </motion.div>
+          ) : targetPage ? (
+          <motion.div
+            key={`target-form:${pathOf(targetPage)}`}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+          >
+            <ErrorBoundary label="Target">
+              {readOnly ? (
+                <div className="flex h-full items-center justify-center p-6">
+                  <EmptyState title="This account can look but not change" description="Ask an admin or editor to add or change targets." />
+                </div>
+              ) : !isLoaded ? (
+                <PaneSkeleton />
+              ) : targetPage.kind === 'target-new' ? (
+                <AddTargetPage
+                  availableGroups={availableGroups}
+                  group={targetPage.group ?? ''}
+                  template={targetPage.from ? targets.find(target => target.id === targetPage.from) ?? null : null}
+                  onAddTarget={copy =>
+                    handleAddTarget(targetPage.from ? targets.find(target => target.id === targetPage.from) ?? null : null, copy)
+                  }
+                  onClose={closeTargetPage}
+                />
+              ) : (
+                <EditTargetPage
+                  target={targets.find(target => target.id === targetPage.id) ?? null}
+                  availableGroups={availableGroups}
+                  onSave={handleSaveTarget}
+                  onClose={closeTargetPage}
+                />
+              )}
             </ErrorBoundary>
           </motion.div>
           ) : groupTargets ? (
