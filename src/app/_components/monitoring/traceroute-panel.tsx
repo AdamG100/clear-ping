@@ -511,13 +511,14 @@ export function TraceroutePanel({ targetId, host, ipVersion, refreshKey, readOnl
             </p>
           )}
         </div>
-        {!readOnly && <div className="flex shrink-0 items-center gap-2">
+        {!readOnly && <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
           {olderCount > 0 && (
             <ConfirmMorph
               key={olderCount}
               label={`Delete ${olderCount} older`}
               icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
-              prompt={`Delete every route but the newest?`}
+              // Short enough, with Cancel and Delete beside it, for a phone.
+              prompt="Keep only the newest?"
               confirmLabel="Delete"
               doneLabel="Deleted"
               disabled={deleting}
@@ -574,13 +575,16 @@ export function TraceroutePanel({ targetId, host, ipVersion, refreshKey, readOnl
                     )}
                   >
                     {/* Side by side, not one inside the other: a button
-                        cannot hold another button. */}
-                    <div className="flex items-center gap-1 pr-2">
+                        cannot hold another button. On a phone, Delete gets a
+                        line of its own under the summary: beside it, the
+                        question it opens into ran off the edge of the screen,
+                        taking the button that answers it along. */}
+                    <div className="flex flex-wrap items-center gap-1 pr-2 @xl/main:flex-nowrap">
                       <button
                         type="button"
                         onClick={() => setChosenId(open ? null : item.id)}
                         aria-expanded={open}
-                        className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl px-3 py-2.5 text-left text-sm touch:py-3"
+                        className="flex min-w-0 flex-1 basis-full cursor-pointer @xl/main:basis-0 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl px-3 py-2.5 text-left text-sm touch:py-3"
                       >
                         {open
                           ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -603,16 +607,20 @@ export function TraceroutePanel({ targetId, host, ipVersion, refreshKey, readOnl
                         </span>
                       </button>
 
+                      {/* Asked in the route's own row, so "this" says which;
+                          the time it was taken made the question too wide. */}
                       {readOnly ? null : (
-                        <ConfirmMorph
-                          label="Delete"
-                          icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
-                          prompt={`Delete the route taken ${time}?`}
-                          confirmLabel="Delete"
-                          doneLabel="Deleted"
-                          disabled={deleting}
-                          onConfirm={() => removeOne(item)}
-                        />
+                        <div className="ml-auto flex max-w-full justify-end pb-2 @xl/main:pb-0">
+                          <ConfirmMorph
+                            label="Delete"
+                            icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
+                            prompt="Delete this route?"
+                            confirmLabel="Delete"
+                            doneLabel="Deleted"
+                            disabled={deleting}
+                            onConfirm={() => removeOne(item)}
+                          />
+                        </div>
                       )}
                     </div>
 

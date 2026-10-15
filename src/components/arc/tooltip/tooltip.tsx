@@ -68,7 +68,9 @@ export function Tooltip({ content, children, side = "top" }: TooltipProps) {
     return warmth.closed;
   }, [open]);
   return <TooltipPrimitive.Provider delayDuration={DELAY} skipDelayDuration={0}>
-    <TooltipPrimitive.Root open={open} delayDuration={isWarm ? 0 : DELAY} onOpenChange={next => { if (next) setInstant(warmth.get()); setOpen(next); }}>
+    {/* Not hoverable: a tooltip that stays open under the pointer sits on top of whatever is next to its trigger (the next
+        group or row in the sidebar) and swallows the press meant for it. Every tooltip here is text, with nothing to reach. */}
+    <TooltipPrimitive.Root open={open} delayDuration={isWarm ? 0 : DELAY} disableHoverableContent onOpenChange={next => { if (next) setInstant(warmth.get()); setOpen(next); }}>
       <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content className={styles.tooltip} data-instant={instant || undefined} side={side} sideOffset={8} collisionPadding={12}>

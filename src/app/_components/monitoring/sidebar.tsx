@@ -315,7 +315,7 @@ function TargetRow({
           <div className="flex items-center gap-2">
             {/* An IPv6 address rarely fits; the tooltip carries it in full,
                 along with where a domain last resolved to. */}
-            <Tooltip content={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address}>
+            <Tooltip side="right" content={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address}>
               <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{address}</span>
             </Tooltip>
             {/* The family sits with the address it describes, and off the
@@ -336,7 +336,7 @@ function TargetRow({
             and a touchscreen has no hover to reveal them. */}
         {actions.length > 0 && !floating && (
           <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
-            <Tooltip content="Pause, edit, duplicate or delete">
+            <Tooltip content="Pause, edit, duplicate or delete" side="right">
               <PopoverTrigger asChild>
                 <Button
                   type="button"
@@ -462,6 +462,57 @@ function TargetDragOverlay({
       </motion.div>
     </motion.div>,
     document.body
+  )
+}
+
+// ─── Group Actions ──────────────────────────────────────────────────────────
+
+/**
+ * What can be done to a group, behind one button as a target's actions are.
+ * Two buttons of their own beside every header left the name a few letters
+ * wide, and none at all a group nested a level or two down.
+ */
+function GroupActions({
+  name,
+  onAddGroupInside,
+  onEditGroup,
+}: {
+  name: string
+  onAddGroupInside?: () => void
+  onEditGroup?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const actions = [
+    // Nesting, from the group that is to hold the new one: no path to type,
+    // and no doubt about where it will land.
+    { label: 'New group inside', icon: FolderPlus, run: onAddGroupInside },
+    { label: 'Rename, move or delete', icon: Pencil, run: onEditGroup },
+  ].filter((action): action is typeof action & { run: () => void } => action.run !== undefined)
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="ghost" size="sm" aria-label={`Actions for the group ${name}`}>
+          <MoreHorizontal {...ICON} />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end">
+        <div className="flex min-w-40 flex-col gap-1">
+          {actions.map(action => (
+            <Button
+              key={action.label}
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => { setOpen(false); action.run() }}
+            >
+              <action.icon {...ICON} />
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -624,53 +675,44 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
             </span>
           </button>
 
-          {/* Nesting, as a button on the group that is to hold the new one:
-              no path to type, and no doubt about where it will land. */}
-          {onAddGroupInside && group !== UNGROUPED && (
-            <Tooltip content="New group inside this one">
-              <Button type="button" variant="ghost" size="sm" onClick={() => onAddGroupInside(group)} aria-label={`New group inside ${name}`}>
-                <FolderPlus {...ICON} />
-              </Button>
-            </Tooltip>
-          )}
-
-          {/* Ungrouped is where targets without a group are listed, not a
-              group that can be renamed or put inside another. */}
-          {onEditGroup && group !== UNGROUPED && (
-            <Tooltip content="Rename this group, move it inside another, or delete it">
-              <Button type="button" variant="ghost" size="sm" onClick={() => onEditGroup(group)} aria-label={`Rename, move or delete ${name}`}>
-                <Pencil {...ICON} />
-              </Button>
-            </Tooltip>
-          )}
-
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
             {memberIds.length}
           </span>
 
-          {/* A comparison needs at least two lines to compare. Labelled and
-              in the accent colour: as a bare grey icon it read as decoration,
-              and nobody found the group chart without being told where it was.
-              A chip the height of the header's text, not one of Arc's buttons:
-              the smallest of those is a pill as tall as a target's row. */}
+          {/* A comparison needs at least two lines to compare. In the accent
+              colour and set in a chip: as a bare grey icon it read as
+              decoration, and nobody found the group chart without being told
+              where it was. Not labelled: the word "Compare" took 50 pixels
+              from the name, and a nested group's name was down to a letter or
+              two. A chip the height of the header's text, not one of Arc's
+              buttons: the smallest of those is a pill as tall as a target's row. */}
           {onCompare && memberIds.length > 1 && (
-            <Tooltip content="Show every target in this group on one chart">
+            <Tooltip content="Show every target in this group on one chart" side="right">
               <button
                 type="button"
                 onClick={() => onCompare(group)}
                 aria-pressed={isCompared}
                 aria-label={`Compare the targets in ${name} on one chart`}
                 className={cn(
-                  'ml-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium leading-none transition-colors touch:py-2',
+                  'ml-1 flex shrink-0 cursor-pointer items-center rounded-full border px-1.5 py-1 leading-none transition-colors touch:px-2 touch:py-2',
                   isCompared
                     ? 'border-primary bg-primary text-primary-foreground'
                     : 'border-primary/40 bg-primary/10 text-primary hover:border-primary/70 hover:bg-primary/20'
                 )}
               >
                 <ChartLine size={13} strokeWidth={1.75} aria-hidden="true" />
-                Compare
               </button>
             </Tooltip>
+          )}
+
+          {/* Ungrouped is where targets without a group are listed, not a
+              group that can be renamed or put inside another. */}
+          {group !== UNGROUPED && (onAddGroupInside || onEditGroup) && (
+            <GroupActions
+              name={name}
+              onAddGroupInside={onAddGroupInside && (() => onAddGroupInside(group))}
+              onEditGroup={onEditGroup && (() => onEditGroup(group))}
+            />
           )}
         </div>
 
@@ -685,7 +727,9 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <Tooltip content={`${name}: mean latency across its ${memberIds.length} target${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}>
+              {/* To the right, out over the page: above, it covered the
+                  header of the very group it describes. */}
+              <Tooltip side="right" content={`${name}: mean latency across its ${memberIds.length} target${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}>
                 <div className="px-2 pb-2">
                   <Sparkline points={groupTrace} width={240} height={22} stretch />
                 </div>
