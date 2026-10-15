@@ -1,7 +1,7 @@
 import type { AddressFamily, Traceroute } from '@/types/probe'
 import { mean, round } from './metrics'
 import { findGaps, findIncidents, type Incident, type MonitoringGap, type ProbeReading } from './outages'
-import { firstDeadHop, hopLoss } from './traceroute-parse'
+import { firstDeadHop, hopLoss, pathLoss } from './traceroute-parse'
 
 /**
  * What the readings amount to, said the way it would be said to someone else.
@@ -358,10 +358,13 @@ export function describeTrace(trace: Traceroute, target: string, timeZone: strin
     reachedTheTarget: trace.reached,
     repliesStopAtHop: firstDeadHop(trace.hops, trace.reached),
     ...(trace.errorMessage ? { error: trace.errorMessage } : {}),
-    hops: trace.hops.map(hop => {
+    hops: trace.hops.map((hop, index) => {
       const who = hop.address ? (hop.hostname ? `${hop.address} (${hop.hostname})` : hop.address) : '*'
       const time = mean(hop.rtts)
-      return `${hop.hop}  ${who}  ${time === null ? 'no reply' : `${round(time, 1)} ms`}  loss ${round(hopLoss(hop), 0)}%`
+      const counted = pathLoss(trace.hops)[index]
+      // Replies missing from a router that the later hops show was not losing traffic.
+      const limited = hopLoss(hop) > counted ? ' (router slow to answer probes; later hops answered in full)' : ''
+      return `${hop.hop}  ${who}  ${time === null ? 'no reply' : `${round(time, 1)} ms`}  loss ${round(counted, 0)}%${limited}`
     }),
   }
 }

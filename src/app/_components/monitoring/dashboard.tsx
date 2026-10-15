@@ -17,6 +17,7 @@ import type {
 } from '@/types/probe'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
 import { Sidebar } from './sidebar'
+import { DeleteProgress } from './delete-progress'
 import { MobileTopBar } from './mobile-top-bar'
 import { useSidebarDrawer } from './use-sidebar-drawer'
 import { PANE, PANE_ACTION, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
@@ -58,6 +59,8 @@ const FADE_IN = {
 } as const
 
 const REFRESH_INTERVAL_MS = 30_000
+/** How many targets one delete request carries, and so how often the progress moves. */
+const DELETE_BATCH = 5
 
 function useTargets(reportError: (title: string, error?: unknown) => void) {
   const [targets, setTargets] = useState<Target[]>([])
@@ -201,24 +204,40 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     }
   }, [loadTargets, reportError])
 
-  const deleteTargets = useCallback(async (ids: string[]): Promise<number | null> => {
+  const deleteTargets = useCallback(async (
+    ids: string[],
+    onProgress?: (done: number, total: number) => void
+  ): Promise<number | null> => {
+    // In batches rather than one request: a long list takes the server a while,
+    // and a request per batch is what lets the progress be told as it goes.
+    let deleted = 0
+    let failed = false
     try {
-      const response = await fetch('/api/targets', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids }),
-      })
-      if (response.ok) {
-        const { deleted } = await response.json()
+      for (let start = 0; start < ids.length; start += DELETE_BATCH) {
+        const response = await fetch('/api/targets', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: ids.slice(start, start + DELETE_BATCH) }),
+        })
+        if (!response.ok) {
+          const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
+          reportError('Could not delete the targets', error)
+          failed = true
+          break
+        }
+        deleted += (await response.json()).deleted
+        // The list follows along, so the targets and the groups they leave
+        // empty drop out of the sidebar as they go.
         await loadTargets()
-        return deleted
+        onProgress?.(Math.min(start + DELETE_BATCH, ids.length), ids.length)
       }
-      const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
-      reportError('Could not delete the targets', error)
     } catch (error) {
       reportError('Could not delete the targets', error)
+      failed = true
     }
-    return null
+    // Whatever was deleted before a failure is gone, so the list is shown as it is.
+    await loadTargets()
+    return failed ? null : deleted
   }, [loadTargets, reportError])
 
   const reorderGroups = useCallback(async (orders: GroupOrder[]) => {
@@ -534,6 +553,8 @@ export function Dashboard() {
   const { notify, reportError } = useToast()
   const { targets, latest, series, groups, groupOrders, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
+  // A bulk delete under way, which carries on in the background.
+  const [deleteJob, setDeleteJob] = useState<{ done: number; total: number } | null>(null)
   // A page (alerts, settings) takes the place of a target or a group in the
   // main pane. Which one is part of the address.
   const { page, goTo } = useDashboardPage()
@@ -723,6 +744,8 @@ export function Dashboard() {
 
   useEffect(() => {
     const interval = setInterval(async () => {
+      // Nobody is looking at a hidden tab; it catches up when it is shown again.
+      if (document.hidden) return
       await reloadTargetsRef.current()
       await reloadRef.current()
       await reloadAlertsRef.current()
@@ -796,16 +819,28 @@ export function Dashboard() {
 
   const handleDeleteTargets = useCallback(
     async (ids: string[]) => {
-      const deleted = await deleteTargets(ids)
-      if (deleted === null) return false
-      notify({
-        tone: 'info',
-        title: `Deleted ${deleted} target${deleted === 1 ? '' : 's'}`,
-        detail: 'Their history, alert rules and saved routes went with them.',
+      // One at a time: a second would be competing with the first for the
+      // database, and the progress shown is the one's.
+      if (deleteJob) {
+        reportError('Targets are already being deleted', 'Wait for that to finish first.')
+        return false
+      }
+
+      // Runs on in the background; the caller is told it has started.
+      setDeleteJob({ done: 0, total: ids.length })
+      void deleteTargets(ids, (done, total) => setDeleteJob({ done, total })).then(deleted => {
+        setDeleteJob(null)
+        // A failure was reported where it happened.
+        if (deleted === null) return
+        notify({
+          tone: 'info',
+          title: `Deleted ${deleted} target${deleted === 1 ? '' : 's'}`,
+          detail: 'Their history, alert rules, saved routes and any group left empty went with them.',
+        })
       })
       return true
     },
-    [deleteTargets, notify]
+    [deleteJob, deleteTargets, notify, reportError]
   )
 
   const current = useMemo(() => currentReadings(points), [points])
@@ -881,6 +916,7 @@ export function Dashboard() {
     // `dvh`, not `vh`: on a phone `vh` is the height with the browser's bars
     // tucked away, so the bottom of the page sat underneath them.
     <div className="flex h-dvh bg-background">
+      {deleteJob && <DeleteProgress done={deleteJob.done} total={deleteJob.total} />}
       <Sidebar
         open={sidebarOpen}
         onClose={hideSidebar}

@@ -152,6 +152,35 @@ export function hopLoss(hop: TracerouteHop): number {
 }
 
 /**
+ * The loss at each hop that is a loss of traffic, as against a router being
+ * slow to answer.
+ *
+ * A router answers a traceroute probe from its control plane, which most limit
+ * to a few a second, so one reply in three goes missing at a hop that forwards
+ * everything it is sent. The tell is that the loss stops there: packets lost
+ * on the way are lost for every hop beyond, so a hop's loss counts only as far
+ * as the replies from the hops after it show it. With three probes a hop, a
+ * single dropped reply is also 33%, which a tool that sends hundreds, as WinMTR
+ * does, would show as the 1% or 2% it is.
+ *
+ * Hops that never answer say nothing either way and are passed over.
+ */
+export function pathLoss(hops: TracerouteHop[]): number[] {
+  const counted = new Array<number>(hops.length)
+  let beyond = Infinity
+  for (let index = hops.length - 1; index >= 0; index--) {
+    const own = hopLoss(hops[index])
+    if (hops[index].rtts.length === 0) {
+      counted[index] = own
+      continue
+    }
+    counted[index] = Math.min(own, beyond)
+    beyond = Math.min(beyond, own)
+  }
+  return counted
+}
+
+/**
  * The hop where the path stops working: the first one from which nothing
  * further answers. Null when the trace arrived, or when loss is scattered.
  *

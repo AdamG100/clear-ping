@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, Fingerprint, History, KeyRound, LogIn, LogOut, ShieldAlert, ShieldCheck, Trash2, User, UserPlus, Users, type LucideIcon } from 'lucide-react'
+import { Bot, Fingerprint, History, KeyRound, LogIn, LogOut, ShieldAlert, ShieldCheck, Trash2, User, UserPlus, Users, Wrench, type LucideIcon } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -24,6 +24,7 @@ import { canAdminister, DEFAULT_NEW_ROLE, maxKeyAccess, ROLE_DETAIL, ROLE_LABEL,
 import type { FactorPolicy } from '@/lib/security/factors'
 import { cn } from '@/lib/utils'
 import { FactorPolicyForm, SignInFactors, useMyFactors } from '../security/sign-in-factors'
+import { MaintenanceTab } from './maintenance-tab'
 import { AssistantSettings, CopyField, PAGE_CARD } from './mcp-setup'
 import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
 
@@ -918,6 +919,8 @@ const ACTIONS: Record<string, string> = {
   'mcp.set_target_paused': 'paused or resumed a target',
   'mcp.probe_now': 'probed a target',
   'mcp.run_traceroute': 'traced a route',
+  'maintenance.run': 'ran maintenance',
+  'maintenance.settings': 'changed the maintenance schedule',
 }
 
 const VIA: Record<ActivityEntry['via'], string> = { dashboard: 'dashboard', api: 'API', mcp: 'MCP' }
@@ -988,6 +991,7 @@ const SECTIONS: { value: SettingsSection; label: string; icon: LucideIcon; admin
   { value: 'sso', label: 'Single sign-on', icon: LogIn },
   { value: 'accounts', label: 'Accounts', icon: Users },
   { value: 'activity', label: 'Activity', icon: History, adminOnly: true },
+  { value: 'maintenance', label: 'Maintenance', icon: Wrench, adminOnly: true },
   { value: 'assistant', label: 'AI assistant', icon: Bot },
 ]
 
@@ -1129,6 +1133,7 @@ export function SettingsPage({ section, onSection }: SettingsPageProps) {
                   {current.value === 'sso' && <SsoTab data={loaded.data} reload={reload} />}
                   {current.value === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}
                   {current.value === 'activity' && <ActivityTab />}
+                  {current.value === 'maintenance' && <MaintenanceTab />}
                 </div>
               )}
             </>

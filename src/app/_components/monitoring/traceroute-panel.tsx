@@ -24,7 +24,7 @@ import {
   type AddressFamily,
   type TraceFamilies,
 } from '@/lib/host'
-import { firstDeadHop, hopLoss, newestPerFamily } from '@/lib/traceroute-parse'
+import { firstDeadHop, hopLoss, newestPerFamily, pathLoss } from '@/lib/traceroute-parse'
 import type { IpVersion, Traceroute, TracerouteHop } from '@/types/probe'
 
 /**
@@ -123,11 +123,11 @@ const ms = (value: number) => value.toFixed(value < 10 ? 1 : 0)
  */
 type HopState = 'answered' | 'lossy' | 'silent' | 'dead' | 'destination'
 
-function hopState(hop: TracerouteHop, trace: Traceroute, dead: number | null): HopState {
+function hopState(hop: TracerouteHop, trace: Traceroute, dead: number | null, loss: number): HopState {
   if (dead !== null && hop.hop >= dead) return 'dead'
   if (hop.rtts.length === 0) return 'silent'
   if (trace.reached && hop === trace.hops.at(-1)) return 'destination'
-  return hopLoss(hop) > 0 ? 'lossy' : 'answered'
+  return loss > 0 ? 'lossy' : 'answered'
 }
 
 const NODE_STYLE: Record<HopState, string> = {
@@ -230,11 +230,15 @@ function TracingRow({ family, startedAt }: { family: AddressFamily | null; start
 function HopTable({ trace }: { trace: Traceroute }) {
   const dead = firstDeadHop(trace.hops, trace.reached)
   const scale = Math.max(1, ...trace.hops.flatMap(hop => hop.rtts))
-  const states = trace.hops.map(hop => hopState(hop, trace, dead))
+  // The loss that is traffic being lost; see pathLoss.
+  const losses = pathLoss(trace.hops)
+  const states = trace.hops.map((hop, index) => hopState(hop, trace, dead, losses[index]))
 
   const row = (hop: TracerouteHop, index: number) => {
     const state = states[index]
-    const loss = hopLoss(hop)
+    const loss = losses[index]
+    // Replies that did not come, from a router the traffic got through.
+    const limited = hopLoss(hop) > loss
     const average = mean(hop.rtts)
     const silent = hop.rtts.length === 0
 
@@ -297,7 +301,14 @@ function HopTable({ trace }: { trace: Traceroute }) {
         </td>
 
         <td className="whitespace-nowrap py-2 pr-4 text-right font-mono">
-          {loss === 0 ? (
+          {limited ? (
+            <Tooltip
+              side="left"
+              content={`${hop.sent - hop.rtts.length} of ${hop.sent} replies from this router did not come, but every router after it answered in full. It is slow to answer traceroute probes; it is not losing traffic.`}
+            >
+              <span className="text-muted-foreground/70">0%*</span>
+            </Tooltip>
+          ) : loss === 0 ? (
             <span className="text-muted-foreground/70">0%</span>
           ) : state === 'silent' ? (
             // Every probe unanswered, and not a loss of traffic: left quiet.

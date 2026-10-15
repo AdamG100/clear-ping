@@ -8,6 +8,7 @@
 
 import { startScheduler } from './scheduler';
 import { initDatabase } from './database';
+import { startMaintenanceSchedule } from './maintenance';
 
 /**
  * Held on globalThis for the same reason the scheduler is: route handlers are
@@ -39,6 +40,13 @@ export function initializeServer(): Promise<void> {
       } else {
         await startScheduler();
       }
+
+      // Whichever process probes, this one holds the settings and the database.
+      startMaintenanceSchedule();
+
+      // Whichever process does the probing, this one holds the settings and
+      // the database the schedule is read from.
+      startMaintenanceSchedule();
 
       console.log('[Init] Server initialization complete');
     })().catch(error => {

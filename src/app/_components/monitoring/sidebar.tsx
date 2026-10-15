@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { memo, useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
@@ -147,6 +147,7 @@ interface SidebarProps {
   /** Add the targets out of a share link. Resolves to whether they were added. */
   onImportTargets: (targets: TargetDefinition[]) => Promise<boolean>
   /** Delete several at once. Resolves to whether they were deleted. */
+  /** Resolves to whether the delete was started: it goes on in the background. */
   onDeleteTargets: (ids: string[]) => Promise<boolean>
   onUpdateTarget: (id: string, updates: Partial<Target>) => void
   onDeleteTarget: (id: string) => void
@@ -384,10 +385,17 @@ function TargetRow({
  * the slot is exactly the height of the row that will fill it. `layout` is
  * what makes neighbouring rows slide rather than jump when the slot moves.
  */
-function SortableTarget({ isDragSource, ...row }: TargetRowProps & { isDragSource: boolean }) {
+const SortableTarget = memo(function SortableTarget({
+  isDragSource,
+  dragging,
+  ...row
+}: TargetRowProps & { isDragSource: boolean; dragging: boolean }) {
   return (
     <motion.li
-      layout="position"
+      // Only while a drag is on. A layout animation makes every row measure
+      // itself after every render, and with a hundred rows that, not the
+      // rows, was most of what a group opening or the list refreshing cost.
+      layout={dragging ? 'position' : false}
       transition={DRAG_SPRING}
       data-target-id={row.target.id}
       className="relative list-none select-none"
@@ -406,7 +414,7 @@ function SortableTarget({ isDragSource, ...row }: TargetRowProps & { isDragSourc
       </div>
     </motion.li>
   )
-}
+})
 
 // ─── Drag Overlay ───────────────────────────────────────────────────────────
 
@@ -761,6 +769,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
                       selected={selectedTargetId === targetId}
                       trace={series?.[targetId]}
                       isDragSource={drag?.id === targetId}
+                      dragging={!!drag}
                       onSelectTarget={onSelectTarget}
                       onEditTarget={onEditTarget}
                       onDuplicateTarget={onDuplicateTarget}
@@ -1012,16 +1021,18 @@ export function Sidebar({
     onMoveGroup?.(from, to)
   }
 
-  const openEditDialog = (target: Target) => {
+  // Stable, so that the rows they are handed to are not drawn again each time
+  // the sidebar is.
+  const openEditDialog = useCallback((target: Target) => {
     setEditingTarget(target)
     setIsEditOpen(true)
-  }
+  }, [])
 
-  const openAddDialog = (template: Target | null = null, group = '') => {
+  const openAddDialog = useCallback((template: Target | null = null, group = '') => {
     setDuplicating(template)
     setAddingTo(group)
     setIsAddOpen(true)
-  }
+  }, [])
 
   // A copy goes directly under what it was copied from, as long as it was
   // left in the same group: at the far end of a long group it would look as

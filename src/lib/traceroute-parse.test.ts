@@ -3,6 +3,7 @@ import {
   firstDeadHop,
   hopLoss,
   newestPerFamily,
+  pathLoss,
   parseTraceroute,
   traceReached,
   tracerouteCommand,
@@ -171,5 +172,33 @@ describe('tracerouteCommand', () => {
     expect(tracerouteCommand('2001:db8::1', 6, 'darwin').command).toBe('traceroute6')
     expect(tracerouteCommand('192.0.2.1', 4, 'darwin').command).toBe('traceroute')
     expect(tracerouteCommand('2001:db8::1', 6, 'darwin').args).not.toContain('-6')
+  })
+})
+
+describe('pathLoss', () => {
+  const hop = (n: number, answered: number, sent = 3) => ({
+    hop: n,
+    address: `10.0.0.${n}`,
+    rtts: Array.from({ length: answered }, () => 5),
+    sent,
+  })
+
+  it('does not count a dropped reply at a hop the later hops answered fully past', () => {
+    // The router answering one probe in three, the path beyond it clean.
+    expect(pathLoss([hop(1, 2), hop(2, 3), hop(3, 3)])).toEqual([0, 0, 0])
+  })
+
+  it('counts loss that carries on to the hops after it', () => {
+    expect(pathLoss([hop(1, 3), hop(2, 2), hop(3, 2)])).toEqual([0, 33.33333333333333, 33.33333333333333])
+  })
+
+  it('counts a hop only at the loss the hops beyond it still show', () => {
+    // 66% at hop 2, but only 33% by the end: 33% is what was lost on the way.
+    expect(pathLoss([hop(1, 3), hop(2, 1), hop(3, 2)]).map(Math.round)).toEqual([0, 33, 33])
+  })
+
+  it('passes over hops that never answer', () => {
+    const silent = { hop: 2, address: null, rtts: [], sent: 3 }
+    expect(pathLoss([hop(1, 2), silent, hop(3, 3)])).toEqual([0, 100, 0])
   })
 })

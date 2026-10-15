@@ -335,10 +335,18 @@ class ProbeScheduler {
 
       const results = await executeProbes(target);
 
+      // Deleted while it was being probed: nothing to record against.
+      if (this.scheduledTargets.get(targetId) !== target) return;
+
       await this.recordResults(target, results);
       saveDatabaseToDisk();
     } catch (error) {
-      console.error(`[Scheduler] Error probing target ${target.name}:`, error);
+      // A result stored just as its target was deleted fails the foreign key;
+      // that is the delete winning the race, not an error.
+      const removed = this.scheduledTargets.get(targetId) !== target;
+      if (!(removed && (error as { code?: string })?.code === 'SQLITE_CONSTRAINT')) {
+        console.error(`[Scheduler] Error probing target ${target.name}:`, error);
+      }
     } finally {
       target.isProbing = false;
     }
@@ -355,6 +363,15 @@ class ProbeScheduler {
     }
 
     await this.probeTarget(targetId);
+  }
+
+  /**
+   * Stop probing these targets now, ahead of their rows being deleted. A probe
+   * already under way finds its target gone and drops the result instead of
+   * writing a measurement for a target that no longer exists.
+   */
+  forget(ids: string[]): void {
+    for (const id of ids) this.scheduledTargets.delete(id);
   }
 
   /**

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTargets, createTarget, deleteTargets, getLatestMeasurementForAllTargets, getGroupOrders, getGroups, getRecentSeriesForAllTargets } from '@/lib/database';
+import { getAllTargets, createTarget, deleteTargets, getLatestMeasurementForAllTargets, pruneEmptyGroups, getGroupOrders, getGroups, getRecentSeriesForAllTargets } from '@/lib/database';
 import { randomUUID } from 'crypto';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
@@ -90,8 +90,13 @@ export async function DELETE(request: NextRequest) {
     }
 
     const wanted = new Set(ids as string[]);
-    const names = (await getAllTargets()).filter(target => wanted.has(target.id)).map(target => target.name);
+    const going = (await getAllTargets()).filter(target => wanted.has(target.id));
+    const names = going.map(target => target.name);
+    // Before the rows go, so no probe is started or stored for them meanwhile.
+    getScheduler().forget([...wanted]);
     const deleted = await deleteTargets([...wanted]);
+    // The groups they leave empty go with them, nested ones included.
+    const groupsRemoved = await pruneEmptyGroups(going.map(target => target.group ?? ''));
     if (deleted > 0) {
       const { actor, via } = await actorFor(request);
       await recordActivity(actor, via, 'target.delete', names.join(', '));
@@ -100,7 +105,7 @@ export async function DELETE(request: NextRequest) {
     // Once, for all of them.
     if (deleted > 0) await getScheduler().reloadTargets();
 
-    return NextResponse.json({ deleted });
+    return NextResponse.json({ deleted, groupsRemoved: groupsRemoved.length });
   } catch (error) {
     console.error('Error deleting targets:', error);
     return NextResponse.json({ error: 'Failed to delete targets' }, { status: 500 });

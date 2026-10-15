@@ -29,7 +29,7 @@ interface DeleteTargetsDialogProps {
   onOpenChange: (open: boolean) => void
   targets: Target[]
   groupOrders: GroupOrder[]
-  /** Resolves to whether they were deleted. */
+  /** Resolves to whether the delete was started; it goes on in the background. */
   onDelete: (ids: string[]) => Promise<boolean>
 }
 
@@ -40,9 +40,11 @@ function DeleteTargetsBody({ targets, groupOrders, onDelete, onClose }: Omit<Del
   const chosen = targets.filter(target => selected.has(target.id))
   const everything = chosen.length === targets.length && targets.length > 0
 
+  // Starts the delete and is done: it carries on in the background, with its
+  // progress shown beside the dashboard, so the dialog is not kept open for it.
   const remove = async () => {
-    const deleted = await onDelete(chosen.map(target => target.id))
-    if (!deleted) throw new Error('Not deleted')
+    const started = await onDelete(chosen.map(target => target.id))
+    if (!started) throw new Error('Not deleted')
     onClose()
   }
 
@@ -53,12 +55,12 @@ function DeleteTargetsBody({ targets, groupOrders, onDelete, onClose }: Omit<Del
       {chosen.length > 0 ? (
         <Alert tone="danger" title={everything ? 'Every target there is' : `${plural(chosen.length)} and their history`}>
           This deletes everything recorded for {chosen.length === 1 ? 'it' : 'them'}: measurement history, alert rules
-          and saved routes. It cannot be undone.
+          and saved routes, and any group left empty. It cannot be undone.
         </Alert>
       ) : (
         <p className="text-xs leading-relaxed text-muted-foreground">
-          A target&apos;s whole history goes with it. Groups are left in place, empty. To stop probing a target but keep
-          what it has recorded, pause it instead.
+          A target&apos;s whole history goes with it, and so do the groups, nested ones included, that are left with
+          nothing in them. To stop probing a target but keep what it has recorded, pause it instead.
         </p>
       )}
 
@@ -80,8 +82,8 @@ function DeleteTargetsBody({ targets, groupOrders, onDelete, onClose }: Omit<Del
             icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
             prompt={`Delete ${plural(chosen.length)}?`}
             confirmLabel="Hold to delete"
-            pendingLabel="Deleting"
-            doneLabel="Deleted"
+            pendingLabel="Starting"
+            doneLabel="Started"
             confirmMode="hold"
             onConfirm={remove}
           />

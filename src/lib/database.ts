@@ -393,8 +393,18 @@ export async function initDatabase(): Promise<Database> {
       });
     });
 
+    // What finds the newest reading of each family of each target without
+    // reading the history behind it.
     await new Promise<void>((resolve, reject) => {
-      db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_timestamp 
+      db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_target_family_timestamp
+              ON measurements(target_id, family, timestamp DESC)`, function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
               ON measurements(timestamp DESC)`, function(err) {
         if (err) reject(err);
         else resolve();
@@ -717,12 +727,52 @@ export async function deleteTarget(id: string): Promise<boolean> {
  * many there were to delete: an id that is not a target's is passed over.
  */
 export async function deleteTargets(ids: string[]): Promise<number> {
+  const database = await getDatabase();
+  const run = (sql: string, params: unknown[]) =>
+    withBusyRetry(
+      () =>
+        new Promise<number>((resolve, reject) => {
+          database.run(sql, params, function (err) {
+            if (err) reject(err);
+            else resolve(this.changes);
+          });
+        })
+    );
+
   let deleted = 0;
-  // One after another: each is two statements that belong together.
   for (const id of ids) {
-    if (await deleteTarget(id)) deleted++;
+    // The history first, a few thousand rows at a time. Left to the cascade,
+    // one statement removes all of it, and a target with months of readings
+    // holds the write lock for many seconds: everything else that writes,
+    // the prober included, waits out its busy timeout and fails.
+    while ((await run(
+      'DELETE FROM measurements WHERE rowid IN (SELECT rowid FROM measurements WHERE target_id = ? LIMIT 5000)',
+      [id]
+    )) > 0) {
+      // Let whatever is waiting for the lock have it.
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    deleted += await run('DELETE FROM targets WHERE id = ?', [id]);
   }
+  saveDatabase();
   return deleted;
+}
+
+/**
+ * Run a write again when another writer held the database past the busy
+ * timeout. Clearing out a long list of targets takes the write lock for a
+ * while, and the prober is writing results at the same time.
+ */
+export async function withBusyRetry<T>(work: () => Promise<T>, attempts = 5): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await work();
+    } catch (error) {
+      const busy = (error as { code?: string })?.code === 'SQLITE_BUSY';
+      if (!busy || attempt >= attempts) throw error;
+      await new Promise(resolve => setTimeout(resolve, 200 * attempt));
+    }
+  }
 }
 
 /**
@@ -1013,19 +1063,23 @@ export async function getLatestMeasurementForAllTargets(): Promise<Record<string
   const database = await getDatabase();
 
   const rows = await new Promise<LatestRow[]>((resolve, reject) => {
-    database.all(`
+    // The newest reading of each family of each target is one lookup through
+    // idx_measurements_target_family_timestamp. Grouping the whole table for it
+    // took longer the more history there was, on every refresh of the
+    // dashboard. CROSS JOIN keeps the targets as the outer loop: left to
+    // itself SQLite walked the measurements instead.
+    const newestOf = (family: string) => `
       SELECT m.target_id, m.family, m.timestamp, m.packet_loss, m.latency, m.success, m.error_message, m.details,
              t.host, t.ip_version
-      FROM measurements m
-      JOIN targets t ON t.id = m.target_id
-      JOIN (
-        SELECT target_id, COALESCE(family, 0) AS fam, MAX(timestamp) AS max_ts
-        FROM measurements
-        GROUP BY target_id, COALESCE(family, 0)
-      ) latest ON latest.target_id = m.target_id
-              AND latest.fam = COALESCE(m.family, 0)
-              AND latest.max_ts = m.timestamp
-      ORDER BY m.timestamp DESC
+      FROM targets t
+      CROSS JOIN measurements m ON m.target_id = t.id AND m.family ${family}
+        AND m.timestamp = (SELECT MAX(timestamp) FROM measurements WHERE target_id = t.id AND family ${family})`;
+
+    database.all(`
+      SELECT * FROM (
+        ${newestOf('IS NULL')} UNION ALL ${newestOf('= 4')} UNION ALL ${newestOf('= 6')}
+      )
+      ORDER BY timestamp DESC
     `, [], (err, result) => {
       if (err) reject(err);
       else resolve((result ?? []) as LatestRow[]);
@@ -1271,6 +1325,57 @@ export async function deleteGroup(group: string): Promise<boolean> {
 }
 
 /**
+ * Remove the groups that deleting targets left empty. Given the groups the
+ * deleted targets were in, it takes away each of those, and each group they
+ * sat inside, that now has no target anywhere beneath it.
+ *
+ * Only those groups are looked at: an empty group somebody made and has not
+ * filled yet is not touched. A group is kept for as long as one of its
+ * subgroups is, so the tree is never left with a gap in it. Returns the groups
+ * that went.
+ */
+export async function pruneEmptyGroups(groups: string[]): Promise<string[]> {
+  const database = await getDatabase();
+
+  const candidates = new Set(groups.flatMap(group => groupWithAncestors(normalizeGroupPath(group))));
+  if (candidates.size === 0) return [];
+
+  const inUse = (await allSql<{ group_name: string }>(database, 'SELECT DISTINCT group_name FROM targets'))
+    .map(row => row.group_name)
+    .filter(Boolean);
+  const kept = (await allSql<{ group_name: string }>(database, 'SELECT group_name FROM target_groups'))
+    .map(row => row.group_name);
+
+  const prune = new Set([...candidates].filter(group => !inUse.some(used => isWithinGroup(used, group))));
+
+  // A group with a subgroup that is staying stays too, and so does every group
+  // above it; going round again until nothing more is put back.
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const group of [...prune]) {
+      if (kept.some(other => other !== group && isWithinGroup(other, group) && !prune.has(other))) {
+        prune.delete(group);
+        changed = true;
+      }
+    }
+  }
+  if (prune.size === 0) return [];
+
+  await runSql(database, 'BEGIN IMMEDIATE');
+  try {
+    for (const group of prune) {
+      await runSql(database, 'DELETE FROM target_groups WHERE group_name = ?', [group]);
+      await runSql(database, 'DELETE FROM group_orders WHERE group_name = ?', [group]);
+    }
+    await runSql(database, 'COMMIT');
+  } catch (error) {
+    await runSql(database, 'ROLLBACK').catch(() => {});
+    throw error;
+  }
+  return [...prune];
+}
+
+/**
  * Update sort_order for multiple targets in a batch
  */
 export async function updateTargetSortOrders(updates: { id: string; sortOrder: number; group?: string }[]): Promise<void> {
@@ -1482,14 +1587,23 @@ export async function getRecentSeriesForAllTargets(
                MAX(COALESCE(m.packet_loss, CASE WHEN m.success = 1 THEN 0 ELSE 100 END)) AS packet_loss,
                MIN(m.success) AS success,
                ROW_NUMBER() OVER (PARTITION BY m.target_id ORDER BY m.timestamp DESC) AS rn
-        FROM measurements m
-        JOIN targets t ON t.id = m.target_id
+        FROM targets t
+        -- Only the newest rows of each target are looked at, found through the
+        -- (target_id, timestamp) index. A target probed over both families
+        -- has two rows per reading, so twice the limit is read and the
+        -- ROW_NUMBER below keeps the newest readings among them. Looking at
+        -- every row there is took longer the more history was kept.
+        CROSS JOIN measurements m ON m.target_id = t.id
+          AND m.timestamp >= COALESCE(
+            (SELECT timestamp FROM measurements WHERE target_id = t.id ORDER BY timestamp DESC LIMIT 1 OFFSET ?),
+            0
+          )
         GROUP BY m.target_id, m.timestamp
       )
       WHERE rn <= ?
       ORDER BY target_id ASC, timestamp ASC
       `,
-      [limit],
+      [limit * 2 - 1, limit],
       (err, rows) => {
         if (err) {
           reject(err);
