@@ -4,7 +4,9 @@
 # and arm64, Python 3.13). Dependabot keeps it current; to rebuild it by hand,
 # download the wheels for both platforms (pip download --only-binary=:all:
 # --platform manylinux_2_28_x86_64 / manylinux_2_28_aarch64 --python-version 3.13)
-# and hash them.
+# and hash them. pgpy is the exception: it has no wheel, so its source archive is
+# hashed instead, and the Dockerfile lets pip build that one package (0.5.4, the
+# last wheel, breaks against cryptography 50).
 
 aiodns==4.0.4 \
     --hash=sha256:c24dd605bac70a1676ce503f967a98483ff163507198557d8e9db16267e6cfd2
@@ -36,8 +38,8 @@ oauthlib==4.0.0 \
     --hash=sha256:624c28c13a0a59cabf9747dfa52af63be3e512a7f2714df16e91b5b3a145e6cd
 paho-mqtt==2.1.0 \
     --hash=sha256:6db9ba9b34ed5bc6b6e3812718c7e06e2fd7444540df2455d2c51bd58808feee
-pgpy==0.5.4 \
-    --hash=sha256:c29ad9b2bcba6575c3773410894e77a7552b6a3de184fd99b4da3995986f26a9
+pgpy==0.6.0 \
+    --hash=sha256:279c2e353f4c3a319f00bd9bd582456e420f8a3ac6de2b4e9731444746828383
 pyasn1==0.6.4 \
     --hash=sha256:deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b
 pyasn1-modules==0.4.2 \

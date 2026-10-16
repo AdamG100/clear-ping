@@ -105,11 +105,11 @@ RUN apt-get update \
 # packages that some of its services need on top of the rest (MQTT, XMPP,
 # Growl, SMPP, web push and the like), and everything those pull in, each at
 # one version and checked against a hash, so that what is installed is what
-# was reviewed. All of them come as wheels for both architectures, so there is
-# nothing to compile.
+# was reviewed. All of them come as wheels for both architectures except PGPy,
+# which is published as source only and is built here (pure Python).
 COPY docker/apprise-requirements.txt /tmp/apprise-requirements.txt
 RUN python3 -m venv /opt/apprise \
- && /opt/apprise/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: -r /tmp/apprise-requirements.txt \
+ && /opt/apprise/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: --no-binary=pgpy -r /tmp/apprise-requirements.txt \
  && rm /tmp/apprise-requirements.txt \
  && ln -s /opt/apprise/bin/apprise /usr/local/bin/apprise \
  && apprise --version
