@@ -24,7 +24,7 @@
 # is linked against glibc 2.38, and Debian 12 stops at 2.36. The build and
 # runtime stages must stay on the same release for the same reason.
 
-ARG NODE_VERSION=24
+ARG NODE_VERSION=26
 ARG DEBIAN_RELEASE=trixie
 # What sends the alerts: https://github.com/caronc/apprise
 ARG APPRISE_VERSION=2.0.1
