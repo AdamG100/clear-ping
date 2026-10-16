@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { decide, FACTOR_SETUP_PAGE, identify, routeKind, securityPolicy } from '@/lib/security/access'
+import { decide, FACTOR_SETUP_PAGE, hostAllowed, identify, routeKind, securityPolicy } from '@/lib/security/access'
 
 /**
  * The one place every page and API request passes through first, and so the
@@ -11,9 +11,21 @@ import { decide, FACTOR_SETUP_PAGE, identify, routeKind, securityPolicy } from '
  */
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl
-  if (routeKind(pathname) === 'open') return NextResponse.next()
 
-  const [policy, identity] = await Promise.all([securityPolicy(), identify(request)])
+  // The health check is asked by the container itself, at 127.0.0.1.
+  if (pathname !== '/api/health') {
+    const forwarded = request.headers.get('x-forwarded-host')?.split(',')[0].trim() || null
+    if (!hostAllowed(request.headers.get('host')) || (forwarded && !hostAllowed(forwarded))) {
+      return NextResponse.json({ error: 'This address is not one ClearPing was set up to answer to (CLEARPING_ALLOWED_HOSTS)' }, { status: 421 })
+    }
+  }
+
+  const open = routeKind(pathname) === 'open'
+
+  // Open paths need no identity, only to not be a way in for another site.
+  const [policy, identity] = open
+    ? [{ loginRequired: false }, { actor: null, invalidKey: false }]
+    : await Promise.all([securityPolicy(), identify(request)])
   const decision = decide({
     pathname,
     method: request.method,
@@ -21,6 +33,7 @@ export async function proxy(request: NextRequest) {
     identity,
     origin: request.headers.get('origin'),
     host: request.headers.get('host'),
+    fetchSite: request.headers.get('sec-fetch-site'),
   })
 
   if (decision.allow) return NextResponse.next()
@@ -45,6 +58,6 @@ export const config = {
   // styles the sign-in page is built from, the icons and manifest that make it
   // installable, and the service worker with the page it shows offline.
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|icons/|manifest\\.webmanifest|sw\\.js|offline\\.html|robots\\.txt).*)',
+    '/((?!_next/static|favicon\\.ico|icons/|manifest\\.webmanifest|sw\\.js|offline\\.html|robots\\.txt).*)',
   ],
 }

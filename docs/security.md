@@ -27,6 +27,27 @@ Changing anything under Settings always takes being signed in, even while
 sign-in is off for the dashboard. Otherwise anyone who could open the page could
 make themselves a key. A key can never change these settings.
 
+## Before anyone can reach it
+
+Sign-in is off until it is turned on, so a new install is open to whoever
+reaches it. These close what that leaves:
+
+- **The first account asks for a setup code.** Made at start-up and written to
+  the server's log (`docker logs clear_ping`), or `CLEARPING_SETUP_CODE` if you
+  set it. Without it, whoever got to the sign-in page first would be the admin.
+- **Changes from other websites are refused,** signed in or not. A browser says
+  which site a request came from (`Origin`, `Sec-Fetch-Site`), and one from
+  anywhere but ClearPing's own pages is turned away. Keys and scripts, which
+  send neither, are not affected.
+- **`CLEARPING_ALLOWED_HOSTS`** lists the names ClearPing answers to. Set it,
+  and a page that points its own domain at your machine (DNS rebinding) is
+  refused.
+- **`CLEARPING_TRUST_PROXY`** says how many proxies in front of ClearPing can be
+  believed about the address a request came from. Left at 0, `X-Forwarded-For`
+  is ignored and failed sign-ins are counted per username only.
+- **Where alerts are sent is hidden from anyone not signed in,** since the URLs
+  carry tokens. Saving an alert you were shown redacted keeps its real URLs.
+
 ## Roles
 
 Every account has one of three roles, set by an admin in **Settings →

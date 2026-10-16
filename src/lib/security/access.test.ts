@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decide, presentedKey, readCookie, routeKind, type Identity } from './access'
+import { crossSite, decide, hostAllowed, presentedKey, readCookie, routeKind, type Identity } from './access'
 
 const nobody: Identity = { actor: null, invalidKey: false }
 const user: Identity = { actor: { kind: 'user', id: 'u1', name: 'adam', role: 'admin' }, invalidKey: false }
@@ -109,5 +109,58 @@ describe('reading credentials', () => {
     expect(presentedKey(new Headers({ Authorization: 'Bearer cp_abc' }))).toBe('cp_abc')
     expect(presentedKey(new Headers({ 'X-API-Key': 'cp_def' }))).toBe('cp_def')
     expect(presentedKey(new Headers())).toBeNull()
+  })
+})
+
+describe('changes from another site', () => {
+  const evil = { origin: 'https://evil.example', host: 'ping.example' }
+
+  it('are refused with sign-in off too, where there is no cookie to wait for', () => {
+    expect(ask('/api/alerts', 'POST', off, nobody, evil)).toMatchObject({ allow: false, status: 403 })
+  })
+
+  it('are refused by Sec-Fetch-Site even when no Origin is sent', () => {
+    for (const fetchSite of ['cross-site', 'same-site']) {
+      expect(decide({ pathname: '/api/targets', method: 'POST', policy: off, identity: nobody, origin: null, host: 'ping.example', fetchSite })).toMatchObject({ allow: false, status: 403 })
+    }
+    expect(decide({ pathname: '/api/targets', method: 'POST', policy: off, identity: nobody, origin: null, host: 'ping.example', fetchSite: 'same-origin' })).toEqual({ allow: true })
+  })
+
+  it('are refused on the sign-in API, which would otherwise make the first account', () => {
+    expect(ask('/api/auth/register', 'POST', off, nobody, evil)).toMatchObject({ allow: false, status: 403 })
+    expect(ask('/api/auth/register', 'POST', off, nobody)).toEqual({ allow: true })
+  })
+
+  it('do not stop keys, which a browser does not send on its own', () => {
+    expect(ask('/api/targets', 'POST', on, writer, evil)).toEqual({ allow: true })
+  })
+
+  it('do not stop reading', () => {
+    expect(ask('/api/targets', 'GET', off, nobody, evil)).toEqual({ allow: true })
+  })
+})
+
+describe('crossSite', () => {
+  it('trusts a script that sends neither header', () => {
+    expect(crossSite(null, 'ping.example', null)).toBe(false)
+  })
+})
+
+describe('hostAllowed', () => {
+  it('accepts anything when no list is set', () => {
+    expect(hostAllowed('anything.example', undefined)).toBe(true)
+    expect(hostAllowed(null, '')).toBe(true)
+  })
+
+  it('accepts a listed name with or without its port, in any case', () => {
+    expect(hostAllowed('Ping.Example', 'ping.example')).toBe(true)
+    expect(hostAllowed('ping.example:8443', 'ping.example')).toBe(true)
+    expect(hostAllowed('192.168.1.5:3000', 'ping.example, 192.168.1.5:3000')).toBe(true)
+  })
+
+  it('refuses another name, a missing one, and a listed name on a port that is not', () => {
+    expect(hostAllowed('evil.example', 'ping.example')).toBe(false)
+    expect(hostAllowed(null, 'ping.example')).toBe(false)
+    expect(hostAllowed('192.168.1.5:9999', '192.168.1.5:3000')).toBe(false)
   })
 })

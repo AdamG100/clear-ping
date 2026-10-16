@@ -83,6 +83,13 @@ scheduler, `ping` and `traceroute`.
 Keep the volume: the database lives at `/data/clearping.db`, and without a
 volume the history goes when the container does.
 
+> **Turn sign-in on, or keep it private.** Sign-in is off until you turn it on
+> (Settings → Access), and while it is off anyone who can reach ClearPing can use
+> all of it, including the tokens in your alerts' notification URLs. Create the
+> first account straight away (the setup code is in `docker logs clear_ping`),
+> turn sign-in on, and set `CLEARPING_ALLOWED_HOSTS`. If you cannot, keep it
+> behind a VPN or a proxy that signs people in.
+
 For Compose, [compose.example.yaml](compose.example.yaml) runs the same image
 behind Traefik. Copy it to `compose.yaml` and change the hostname and network
 to yours.
@@ -273,6 +280,9 @@ All optional. With Docker, pass them with `-e`.
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes, for when `npm run probe` runs as its own process |
 | `BETTER_AUTH_SECRET` | made and kept in the database | What sign-in cookies are signed with. Nothing needs it set; set it to keep sessions across a replaced database |
 | `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made: for getting back in after a lost password ([docs/security.md](docs/security.md#locked-out)) |
+| `CLEARPING_SETUP_CODE` | made at start-up, written to the log | What the first account asks for besides a password, so that whoever reaches a new install first cannot take it over. Read it with `docker logs clear_ping`, or set it yourself |
+| `CLEARPING_ALLOWED_HOSTS` | unset (any) | Comma-separated hostnames ClearPing answers to, such as `ping.example.com`; a request addressed to another name is refused. Stops a web page from pointing its own domain at your machine to read the API (DNS rebinding) |
+| `CLEARPING_TRUST_PROXY` | `0` | How many proxies in front of ClearPing add to `X-Forwarded-For` (`1` for Traefik). Without it the header is ignored, and sign-in attempts are counted per username only |
 | `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard. Still works, as a key that can change things; keys made in Settings are better, one per assistant |
 | `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes the token over plain HTTP from anywhere, for when a VPN or tunnel does the encrypting. Otherwise it is taken only over HTTPS or from ClearPing's own network |
 | `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check of the registry for a newer image. The dashboard then shows the version it runs but not whether it is the latest |

@@ -3,13 +3,14 @@ import { recoveryMode } from '@/lib/security/access';
 import { getAuth } from '@/lib/security/auth';
 import { passCookies } from '@/lib/security/http';
 import { passwordProblem } from '@/lib/security/secrets';
+import { setupCodeMatches } from '@/lib/security/setup-code';
 import { actorOf, countUsers, createUser, recordActivity } from '@/lib/security/store';
 
 /**
  * POST /api/auth/register - Make the first account, and sign in with it
  * Body: { username, password }
  *
- * Only while there is no account at all, or while CLEARPING_AUTH=off is set
+ * Only while there is no account at all, and with the setup code, or while CLEARPING_AUTH=off is set
  * to get back into an install whose password is lost. Every other account is
  * added by an admin, in Settings → Accounts.
  *
@@ -23,6 +24,11 @@ export async function POST(request: NextRequest) {
 
   if ((await countUsers()) > 0 && !recoveryMode()) {
     return NextResponse.json({ error: 'There is already an account. Sign in, and add others from the security settings.' }, { status: 403 });
+  }
+  // The first account is an admin, so it is not for whoever gets here first:
+  // the code is in the server's log (see setup-code.ts).
+  if (!recoveryMode() && !setupCodeMatches(body?.setupCode)) {
+    return NextResponse.json({ error: 'The setup code is missing or wrong. It is in the ClearPing server log, or is CLEARPING_SETUP_CODE if you set that.' }, { status: 403 });
   }
   const problem = passwordProblem(password);
   if (problem) return NextResponse.json({ error: problem }, { status: 400 });

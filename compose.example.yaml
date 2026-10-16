@@ -4,6 +4,12 @@
 #   docker compose up -d
 #
 # Change the hostname and the network name below to match your setup.
+#
+# Sign-in is off until you turn it on, and while it is off anyone who can reach
+# ClearPing can use all of it. After `docker compose up -d`, read the setup code
+# with `docker logs clear_ping`, create the first account, then turn on
+# Settings -> Access -> Require sign-in. Or keep it behind a VPN or a proxy that
+# signs people in.
 
 services:
   clearping:
@@ -17,6 +23,11 @@ services:
     # Without Traefik, drop the labels and publish the port instead:
     # ports:
     #   - "3000:3000"
+    environment:
+      # The names ClearPing answers to. Keep it the same as the Host rule above.
+      CLEARPING_ALLOWED_HOSTS: ping.example.com
+      # One proxy (Traefik) sits in front, so its X-Forwarded-For can be believed.
+      CLEARPING_TRUST_PROXY: 1
     volumes:
       # The database. The container runs as uid 1000, so on Linux create the
       # directory first and hand it over, or the app cannot write to it:

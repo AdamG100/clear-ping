@@ -39,6 +39,23 @@ interface Run {
   timedOut: boolean;
 }
 
+/**
+ * What Apprise and its plugins may see of ClearPing's environment: where to
+ * find programs and files, and how to reach the network. Not the rest, which
+ * holds BETTER_AUTH_SECRET, CLEARPING_MCP_TOKEN and the like.
+ */
+const APPRISE_ENV = [
+  'PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'USERPROFILE',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy',
+  'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
+];
+
+export function appriseEnvironment(source: NodeJS.ProcessEnv, urls: string): NodeJS.ProcessEnv {
+  const kept: Record<string, string> = { APPRISE_URLS: urls };
+  for (const name of APPRISE_ENV) { const value = source[name]; if (value !== undefined) kept[name] = value; }
+  return kept as unknown as NodeJS.ProcessEnv;
+}
+
 function runApprise(args: string[], urls: string[]): Promise<Run> {
   return new Promise(resolve => {
     let output = '';
@@ -48,7 +65,7 @@ function runApprise(args: string[], urls: string[]): Promise<Run> {
       // The URLs go in the environment rather than on the command line. They
       // are as good as passwords, and a command line can be read by anything
       // else on the machine for as long as the program runs.
-      env: { ...process.env, APPRISE_URLS: urls.join(' ') },
+      env: appriseEnvironment(process.env, urls.join(' ')),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });

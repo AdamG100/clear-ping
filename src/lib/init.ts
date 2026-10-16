@@ -9,6 +9,9 @@
 import { startScheduler } from './scheduler';
 import { initDatabase } from './database';
 import { startMaintenanceSchedule } from './maintenance';
+import { recoveryMode } from './security/settings-store';
+import { announceSetupCode } from './security/setup-code';
+import { countUsers } from './security/store';
 
 /**
  * Held on globalThis for the same reason the scheduler is: route handlers are
@@ -47,6 +50,8 @@ export function initializeServer(): Promise<void> {
       // Whichever process does the probing, this one holds the settings and
       // the database the schedule is read from.
       startMaintenanceSchedule();
+
+      if ((await countUsers()) === 0 && !recoveryMode()) announceSetupCode();
 
       console.log('[Init] Server initialization complete');
     })().catch(error => {

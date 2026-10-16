@@ -7,6 +7,7 @@ import {
   notifyUrlLabel,
   parseNotifyUrls,
   redactNotifyUrl,
+  restoreRedacted,
 } from './alert-delivery'
 
 function event(over: Partial<AlertEvent> = {}, rule: Partial<AlertEvent['rule']> = {}): AlertEvent {
@@ -178,5 +179,17 @@ describe('notificationFor', () => {
 
   it('marks a test as a test', () => {
     expect(notificationFor(event(), { test: true }).title).toBe('Test: Router: packet loss is too high')
+  })
+})
+
+describe('restoreRedacted', () => {
+  const real = ['discord://1234/secret-token', 'https://hooks.example/abc/def']
+
+  it('puts back the URL a redacted one was made from', () => {
+    expect(restoreRedacted(real.map(redactNotifyUrl), real)).toEqual(real)
+  })
+
+  it('takes a URL that was typed as it is, and keeps one that is already whole', () => {
+    expect(restoreRedacted(['tgram://new/token', real[0]], real)).toEqual(['tgram://new/token', real[0]])
   })
 })

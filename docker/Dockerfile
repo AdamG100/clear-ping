@@ -23,14 +23,13 @@
 # Debian 13 (trixie) rather than 12, because of sqlite3: its prebuilt binary
 # is linked against glibc 2.38, and Debian 12 stops at 2.36. The build and
 # runtime stages must stay on the same release for the same reason.
-
-ARG NODE_VERSION=26
-ARG DEBIAN_RELEASE=trixie
-# What sends the alerts: https://github.com/caronc/apprise
-ARG APPRISE_VERSION=2.0.1
+#
+# The base image is pinned by digest, so a tag that is moved or replaced cannot
+# change what is built. Dependabot proposes the new digest as a pull request;
+# the tag in the FROM line says which Node and Debian it is.
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
-FROM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS deps
+FROM node:26-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS deps
 WORKDIR /app
 
 # sqlite3 downloads a prebuilt binary and only compiles when there is none for
@@ -91,8 +90,7 @@ RUN found="$(find .next/standalone .next/static public -path '*/node_modules' -p
     fi
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
-FROM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS runtime
-ARG APPRISE_VERSION
+FROM node:26-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS runtime
 
 # The programs the probes run, and Python for Apprise. Nothing else is needed
 # at run time.
@@ -100,14 +98,19 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends iputils-ping traceroute python3 python3-venv \
  && rm -rf /var/lib/apt/lists/*
 
-# Apprise, which alerts are sent with, in an environment of its own: Debian
-# does not let pip install into the system's Python, and its own apprise
-# package is a release behind. `all-plugins` brings the packages that some of
-# its services need on top of the rest (MQTT, XMPP, Growl, SMPP, web push and
-# the like), so that every service that can work from a container does. All
-# of them come as wheels for both architectures, so there is nothing to compile.
+# Apprise, which alerts are sent with (https://github.com/caronc/apprise), in an
+# environment of its own: Debian does not let pip install into the system's
+# Python, and its own apprise package is a release behind. The list is
+# docker/apprise-requirements.txt: Apprise with `all-plugins`, which brings the
+# packages that some of its services need on top of the rest (MQTT, XMPP,
+# Growl, SMPP, web push and the like), and everything those pull in, each at
+# one version and checked against a hash, so that what is installed is what
+# was reviewed. All of them come as wheels for both architectures, so there is
+# nothing to compile.
+COPY docker/apprise-requirements.txt /tmp/apprise-requirements.txt
 RUN python3 -m venv /opt/apprise \
- && /opt/apprise/bin/pip install --no-cache-dir "apprise[all-plugins]==${APPRISE_VERSION}" \
+ && /opt/apprise/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: -r /tmp/apprise-requirements.txt \
+ && rm /tmp/apprise-requirements.txt \
  && ln -s /opt/apprise/bin/apprise /usr/local/bin/apprise \
  && apprise --version
 

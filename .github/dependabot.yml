@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # The actions the release workflow runs, pinned to commit SHAs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # The Node base image, pinned by digest.
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+  # Apprise and what it pulls in, pinned by hash.
+  - package-ecosystem: pip
+    directory: /docker
+    schedule:
+      interval: weekly

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import http from 'node:http'
-import { checkNotifyUrls, readAppriseLog, sendNotification } from './apprise'
+import { appriseEnvironment, checkNotifyUrls, readAppriseLog, sendNotification } from './apprise'
 
 const configured = process.env.CLEARPING_APPRISE_BIN
 const installed = spawnSync(configured || 'apprise', ['--version']).status === 0
@@ -145,4 +145,14 @@ describe.skipIf(!installed)('with Apprise installed', () => {
 
     expect(received).toHaveLength(before)
   }, 30_000)
+})
+
+describe('appriseEnvironment', () => {
+  it('gives Apprise the way to the network and its URLs, and none of the app secrets', () => {
+    const env = appriseEnvironment(
+      { PATH: '/usr/bin', HOME: '/home/node', HTTPS_PROXY: 'http://proxy:3128', BETTER_AUTH_SECRET: 's3cret', CLEARPING_MCP_TOKEN: 'tok' } as unknown as NodeJS.ProcessEnv,
+      'discord://x/y'
+    )
+    expect(env).toEqual({ PATH: '/usr/bin', HOME: '/home/node', HTTPS_PROXY: 'http://proxy:3128', APPRISE_URLS: 'discord://x/y' })
+  })
 })

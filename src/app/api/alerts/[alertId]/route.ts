@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { deleteAlert, getAlert, parseAlertInput, updateAlert } from '@/lib/alerts';
 import { checkNotifyUrls } from '@/lib/apprise';
 import { initializeServer } from '@/lib/init';
+import { restoreRedacted } from '@/lib/alert-delivery';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
 
@@ -20,6 +21,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     if (Object.keys(parsed.input).length === 0) {
       return NextResponse.json({ error: 'No supported fields to update' }, { status: 400 });
+    }
+
+    // The page may only have been shown them redacted (see GET /api/alerts).
+    if (parsed.input.notifyUrls) {
+      const existing = await getAlert(alertId);
+      if (existing) parsed.input.notifyUrls = restoreRedacted(parsed.input.notifyUrls, existing.notifyUrls);
     }
 
     const usable = await checkNotifyUrls(parsed.input.notifyUrls ?? []);

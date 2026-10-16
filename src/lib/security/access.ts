@@ -137,6 +137,34 @@ export function routeKind(pathname: string): RouteKind {
 
 const READING = new Set(['GET', 'HEAD', 'OPTIONS'])
 
+/**
+ * Whether a change was asked for by a page of another site. A browser says so
+ * itself: `Origin` is sent with every cross-site POST, even one made with
+ * `no-cors` and a `text/plain` body, and `Sec-Fetch-Site` with every request
+ * from a browser made this decade. Neither is sent by a script or a key, so
+ * those pass.
+ */
+export function crossSite(origin: string | null, host: string | null, fetchSite: string | null): boolean {
+  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') return true
+  return !originAllowed(origin, host)
+}
+
+/**
+ * The hostnames ClearPing answers to: CLEARPING_ALLOWED_HOSTS, comma
+ * separated, each with or without a port. Unset, any is accepted. Set, a
+ * request addressed to another name is refused, which is what stops a page
+ * from pointing its own domain at this machine (DNS rebinding) and reading the
+ * API as if it were its own.
+ */
+export function hostAllowed(host: string | null, allowed = process.env.CLEARPING_ALLOWED_HOSTS): boolean {
+  const list = (allowed ?? '').split(',').map(entry => entry.trim().toLowerCase()).filter(Boolean)
+  if (list.length === 0) return true
+  if (!host) return false
+  const full = host.trim().toLowerCase()
+  const name = full.startsWith('[') ? full.slice(0, full.indexOf(']') + 1) : full.replace(/:\d+$/, '')
+  return list.includes(full) || list.includes(name)
+}
+
 export type Decision =
   | { allow: true }
   | { allow: false; status: 401 | 403; message: string }
@@ -150,12 +178,23 @@ export function decide(input: {
   identity: Identity
   origin: string | null
   host: string | null
+  /** The `Sec-Fetch-Site` header. */
+  fetchSite?: string | null
 }): Decision {
   const kind = routeKind(input.pathname)
-  if (kind === 'open') return { allow: true }
+  const reading = READING.has(input.method.toUpperCase())
+  const fromAnotherSite = !reading && crossSite(input.origin, input.host, input.fetchSite ?? null)
+  if (kind === 'open') {
+    // The sign-in API guards itself, but not against another site making it
+    // do something: making the first account, say. The MCP address and the
+    // health check are for scripts, and have rules of their own.
+    if (fromAnotherSite && input.pathname.startsWith('/api/auth/')) {
+      return { allow: false, status: 403, message: 'That request came from another site' }
+    }
+    return { allow: true }
+  }
 
   const { actor, invalidKey } = input.identity
-  const reading = READING.has(input.method.toUpperCase())
 
   // Signed in, and owing a second factor an admin requires: that first.
   if (actor?.kind === 'user' && actor.owes && !setupRoute(input.pathname)) {
@@ -184,9 +223,10 @@ export function decide(input: {
     return { allow: false, status: 401, message: 'Sign in, or send an API key as "Authorization: Bearer <key>"' }
   }
   // A browser sends its cookie with whatever page asks, so a change made with
-  // one has to come from a page of this site. Keys are not sent by browsers on
-  // their own and need no such check.
-  if (actor?.kind === 'user' && !reading && !originAllowed(input.origin, input.host)) {
+  // one has to come from a page of this site. And with sign-in off there is no
+  // cookie to wait for: any page the user visits could make the change. Keys
+  // are not sent by browsers on their own and need no such check.
+  if (actor?.kind !== 'key' && fromAnotherSite) {
     return { allow: false, status: 403, message: 'That request came from another site' }
   }
   return { allow: true }

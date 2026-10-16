@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { securityPolicy } from '@/lib/security/access';
 import { getAuth } from '@/lib/security/auth';
-import { clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, NO_PASSKEY_HERE, passCookies, passkeySite } from '@/lib/security/http';
+import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, NO_PASSKEY_HERE, passCookies, passkeySite } from '@/lib/security/http';
 import { actorOf, getUser, recordActivity } from '@/lib/security/store';
 
 /**
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   }
 
   const address = clientAddress(request);
-  const keys = [`address:${address}`];
+  const keys = addressKeys(address);
   const wait = loginLockedFor(keys);
   if (wait > 0) {
     return NextResponse.json(

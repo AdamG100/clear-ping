@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from '@/lib/security/auth';
-import { clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies } from '@/lib/security/http';
+import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies } from '@/lib/security/http';
 import { securityPolicy } from '@/lib/security/access';
 import { actorOf, getUser, recordActivity } from '@/lib/security/store';
 
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   const username = typeof body?.username === 'string' ? body.username.trim() : '';
   const password = typeof body?.password === 'string' ? body.password : '';
   const address = clientAddress(request);
-  const keys = [`address:${address}`, `user:${username.toLowerCase()}`];
+  const keys = [...addressKeys(address), `user:${username.toLowerCase()}`];
 
   const wait = loginLockedFor(keys);
   if (wait > 0) {

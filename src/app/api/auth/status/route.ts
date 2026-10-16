@@ -26,6 +26,8 @@ export async function GET(request: NextRequest) {
     // someone already signed in, except while CLEARPING_AUTH=off is set.
     registrationOpen: accounts === 0 || policy.recovery,
     recovery: policy.recovery,
+    // The first account asks for the code in the server's log.
+    setupCodeRequired: accounts === 0 && !policy.recovery,
     passwordLogin: policy.passwordLogin,
     // Offered once there is a passkey to use, at an address passkeys work at.
     passkeys: policy.passwordLogin && passkeys > 0 && passkeySite(request) !== null,

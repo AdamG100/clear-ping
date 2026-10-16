@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from '@/lib/security/auth';
-import { clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies, refusal } from '@/lib/security/http';
+import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies, refusal } from '@/lib/security/http';
 import { actorOf, getUser, recordActivity } from '@/lib/security/store';
 
 /**
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   const backup = body?.backup === true;
   const trustDevice = body?.trustDevice === true;
   const address = clientAddress(request);
-  const keys = [`address:${address}`];
+  const keys = addressKeys(address);
 
   const wait = loginLockedFor(keys);
   if (wait > 0) {

@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
   // uses. Left off otherwise, because `npm start` does not serve that output.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
 
+  // Nothing here uses next/image, and its /_next/image endpoint is an
+  // attack surface of its own (it decodes whatever it is sent). Off, so the
+  // endpoint is not there to be reached.
+  images: { unoptimized: true },
+
   async headers() {
     return [
       {

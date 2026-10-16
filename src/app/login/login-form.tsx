@@ -27,6 +27,7 @@ interface Status {
   loginRequired: boolean
   accountExists: boolean
   registrationOpen: boolean
+  setupCodeRequired: boolean
   recovery: boolean
   passwordLogin: boolean
   passkeys: boolean
@@ -42,6 +43,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [setupCode, setSetupCode] = useState('')
   const [error, setError] = useState<string | null>(initialError)
   const [busy, setBusy] = useState(false)
   // After a right password, for an account with an authenticator app.
@@ -77,7 +79,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
       const response = await fetch(registering ? '/api/auth/register' : '/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(registering ? { username, password, setupCode } : { username, password }),
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -310,6 +312,18 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
                 required
                 minLength={registering ? MIN_PASSWORD : undefined}
               />
+              {registering && status?.setupCodeRequired && (
+                <Input
+                  label="Setup code"
+                  description="Printed in the ClearPing server log when it started: docker logs clear_ping"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={setupCode}
+                  onChange={event => setSetupCode(event.target.value)}
+                  required
+                />
+              )}
               {registering && (
                 <PasswordField
                   label="Password again"

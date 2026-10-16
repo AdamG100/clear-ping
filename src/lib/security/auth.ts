@@ -313,7 +313,8 @@ function buildOptions(db: Database.Database, secret: string, sso: SsoConfig, sit
       // passCookies): a ClearPing on a home network is reached over plain
       // HTTP, where a cookie marked Secure is never kept, and sign-in with it.
       useSecureCookies: false,
-      ipAddress: { ipAddressHeaders: ['x-forwarded-for', 'x-real-ip'] },
+      // Not read from headers unless a proxy we trust writes them (see clientAddress).
+      ipAddress: { ipAddressHeaders: [] },
     },
     rateLimit: { enabled: false },
     plugins: [

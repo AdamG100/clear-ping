@@ -103,13 +103,39 @@ const FREE_ATTEMPTS = 5
 const MAX_LOCK_MS = 15 * 60 * 1000
 const attempts = new Map<string, Attempts>()
 
-/** The address a request came from, as the proxy in front reports it. */
+/**
+ * How many proxies stand in front of ClearPing and add to `X-Forwarded-For`:
+ * CLEARPING_TRUST_PROXY, a number (`true` is 1). 0 by default, when the header
+ * is whatever the sender wrote and counts for nothing.
+ */
+function trustedProxies(): number {
+  const set = process.env.CLEARPING_TRUST_PROXY?.trim().toLowerCase()
+  if (!set || set === 'false' || set === '0') return 0
+  if (set === 'true') return 1
+  const hops = Number.parseInt(set, 10)
+  return Number.isInteger(hops) && hops > 0 ? hops : 0
+}
+
+/**
+ * The address a request came from, or 'unknown'. Only as a proxy we trust
+ * reports it: each proxy appends the address it was reached from, so the
+ * entries to believe are the last ones, as many as there are proxies. What
+ * comes before them was written by the client, and anyone can write anything.
+ */
 export function clientAddress(request: Request): string {
-  return (
-    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
-    request.headers.get('x-real-ip')?.trim() ||
-    'unknown'
-  )
+  const hops = trustedProxies()
+  if (hops === 0) return 'unknown'
+  const chain = (request.headers.get('x-forwarded-for') ?? '').split(',').map(part => part.trim()).filter(Boolean)
+  return chain[chain.length - hops] || request.headers.get('x-real-ip')?.trim() || 'unknown'
+}
+
+/**
+ * What guesses are counted against besides the username. Not the address when
+ * there is none to trust: every request would share one, and anyone could lock
+ * everybody out with five wrong passwords.
+ */
+export function addressKeys(address: string): string[] {
+  return address === 'unknown' ? [] : [`address:${address}`]
 }
 
 /**

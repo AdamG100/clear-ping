@@ -92,6 +92,16 @@ export function redactNotifyUrl(url: string): string {
   return scheme === 'http' || scheme === 'https' ? `${scheme}://${label}/…` : `${scheme}://…`;
 }
 
+/**
+ * A redacted URL sent back in place of the one it hides: the edit form is
+ * filled with what the page was shown, so saving an alert without touching its
+ * URLs sends them back redacted. Each such URL is swapped for the real one it
+ * was made from; anything else is taken as typed.
+ */
+export function restoreRedacted(submitted: string[], existing: string[]): string[] {
+  return submitted.map(url => existing.includes(url) ? url : (existing.find(real => redactNotifyUrl(real) === url) ?? url));
+}
+
 // ─── What it says ───────────────────────────────────────────────────────────
 
 /**

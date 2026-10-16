@@ -11,15 +11,15 @@ import { recordActivity } from '@/lib/security/store';
  * GET /api/alerts - Every alert, with the state of each target it is ticked for
  *
  * Where each is sent is shown whole only to whoever may change alerts: the
- * URLs carry the services' tokens. A viewer, or a key that only reads, sees
- * which service and no more.
+ * URLs carry the services' tokens. A viewer, a key that only reads, and anyone
+ * not signed in (sign-in may be off) see which service and no more.
  */
 export async function GET(request: NextRequest) {
   try {
     await initializeServer();
     const alerts = await getAlerts();
     const { actor } = await identify(request);
-    const mayChange = actor?.kind === 'user' ? canChange(actor.role) : actor?.kind === 'key' ? actor.access === 'write' : true;
+    const mayChange = actor?.kind === 'user' ? canChange(actor.role) : actor?.kind === 'key' ? actor.access === 'write' : false;
     return NextResponse.json({
       alerts: mayChange ? alerts : alerts.map(alert => ({ ...alert, notifyUrls: alert.notifyUrls.map(redactNotifyUrl) })),
     });
