@@ -570,7 +570,9 @@ export function Dashboard() {
   // A page (alerts, settings) takes the place of a target or a group in the
   // main pane. Which one is part of the address.
   const { page, goTo } = useDashboardPage()
-  const showingAlerts = page?.kind === 'alerts'
+  // The list of alerts, or the form for one in its place.
+  const showingAlerts = page?.kind === 'alerts' || page?.kind === 'alert-new' || page?.kind === 'alert-edit'
+  const alertEditor = page?.kind === 'alert-new' ? 'new' : page?.kind === 'alert-edit' ? page.id : null
   const targetPage = page?.kind === 'target-new' || page?.kind === 'target-edit' ? page : null
   // A viewer is shown everything and offered nothing to change.
   const readOnly = useSignedIn()?.role === 'viewer'
@@ -638,6 +640,11 @@ export function Dashboard() {
     hideSidebar()
   }, [goTo, hideSidebar])
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
+  const openAlertEditor = useCallback(
+    (which: 'new' | string) => goTo(which === 'new' ? { kind: 'alert-new' } : { kind: 'alert-edit', id: which }),
+    [goTo]
+  )
+  const closeAlertEditor = useCallback(() => goTo({ kind: 'alerts' }), [goTo])
 
   // Adding and editing a target are pages of their own (see target-page.tsx).
   const savedLayout = useMemo(() => buildSidebarLayout(targets, groupOrders, groups), [targets, groupOrders, groups])
@@ -1043,7 +1050,9 @@ export function Dashboard() {
           <AnimatePresence mode="wait" initial={false}>
           {showingAlerts ? (
           <motion.div
-            key="alerts"
+            // The list and each form are pages of their own, and change over
+            // as the other pages do.
+            key={pathOf(page)}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
@@ -1058,6 +1067,9 @@ export function Dashboard() {
                 onChanged={reloadAlerts}
                 onSelectTarget={setSelectedTargetId}
                 readOnly={readOnly}
+                editor={alertEditor}
+                onOpenEditor={openAlertEditor}
+                onCloseEditor={closeAlertEditor}
               />
             </ErrorBoundary>
           </motion.div>

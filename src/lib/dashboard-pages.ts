@@ -17,6 +17,9 @@ export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'access'
 
 export type DashboardPage =
   | { kind: 'alerts' }
+  /** The form for a new alert, in the main pane rather than a panel over it. */
+  | { kind: 'alert-new' }
+  | { kind: 'alert-edit'; id: string }
   | { kind: 'settings'; section: SettingsSection }
   /** A blank form for a new target, started in `group` or as a copy of the target `from`. */
   | { kind: 'target-new'; group?: string; from?: string }
@@ -42,9 +45,16 @@ function decodeSegment(segment: string): string {
  * Adding a target is /targets/new, /targets/new/in/<group> to start in a group
  * (the group's own path, so /targets/new/in/Home/Network) and
  * /targets/new/copy/<id> to duplicate one. Editing is /targets/<id>/edit.
+ * Alerts are the same: /alerts/new, and /alerts/<id>/edit.
  */
 export function pageFromPath(pathname: string): DashboardPage | null {
   const [first, second, ...rest] = pathname.split('/').filter(Boolean)
+
+  if (first === 'alerts' && second) {
+    if (second === 'new' && rest.length === 0) return { kind: 'alert-new' }
+    if (rest.length === 1 && rest[0] === 'edit') return { kind: 'alert-edit', id: decodeSegment(second) }
+    return null
+  }
 
   if (first === 'targets' && second) {
     if (second === 'new') {
@@ -76,6 +86,8 @@ export function pathOf(page: DashboardPage | null): string {
     return section === DEFAULT_SETTINGS_SECTION ? '/settings' : `/settings/${section}`
   }
   if (page.kind === 'target-edit') return `/targets/${encodeURIComponent(page.id)}/edit`
+  if (page.kind === 'alert-new') return '/alerts/new'
+  if (page.kind === 'alert-edit') return `/alerts/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'target-new') {
     if (typeof page.from === 'string' && page.from) return `/targets/new/copy/${encodeURIComponent(page.from)}`
     // Only a group given as a path: anything else (a click event, say) is not one.

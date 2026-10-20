@@ -1,7 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { Button } from '@/components/arc/button/button'
+import { ExpandableCard } from '@/components/arc/expandable-card/expandable-card'
 import { Input } from '@/components/arc/input/input'
 import { SegmentedField } from '@/components/segmented-field'
 import { Select } from '@/components/arc/select/select'
@@ -43,6 +45,22 @@ const PLACEHOLDER: Record<AskedProtocol, string> = {
   doh: 'https://dns.example.net/dns-query',
 }
 
+/**
+ * Past this many, each resolver folds down to a line saying who it is, how it
+ * is asked and where, and opens to be changed. Five rows of a picker, a
+ * switch and an address each ran the form several screens long, and the
+ * settings under the list out of sight.
+ */
+const COLLAPSE_AFTER = 2
+
+/** A row that is not finished: asked of somewhere, but nowhere given yet. */
+const unfinished = (row: DnsResolver) => row.protocol !== 'system' && !(row.server ?? '').trim()
+
+/** A folded row's second line: how it is asked, and where. */
+function rowSummary(row: DnsResolver): string {
+  if (row.protocol === 'system') return 'Whatever this machine uses for every other lookup'
+  return `${DNS_PROTOCOL_NAME[row.protocol]} · ${row.server?.trim() || 'no address yet'}`
+}
 
 /**
  * The provider a row is showing, if it is showing one. A row that has a name
@@ -75,12 +93,22 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
   // The system resolver alone is not stored as a list of one, but it is shown
   // as one: a row to change, and something to add to.
   const rows = resolvers.length > 0 ? resolvers : [SYSTEM]
+  const collapsible = rows.length > COLLAPSE_AFTER
+  // Rows added since the form opened, by position. They are being filled in,
+  // so they start open where the others start folded.
+  const [added, setAdded] = useState<ReadonlySet<number>>(() => new Set())
+  const markAdded = (from: number, count: number) =>
+    setAdded(current => new Set([...current, ...Array.from({ length: count }, (_, at) => from + at)]))
 
   const commit = (next: DnsResolver[]) => {
     onChange(next.length === 1 && next[0].protocol === 'system' ? [] : next)
   }
   const setRow = (index: number, resolver: DnsResolver) => commit(rows.map((row, at) => (at === index ? resolver : row)))
-  const removeRow = (index: number) => commit(rows.filter((_, at) => at !== index))
+  const removeRow = (index: number) => {
+    // The rows after it move up a place, and what was added moves with them.
+    setAdded(current => new Set([...current].filter(at => at !== index).map(at => (at > index ? at - 1 : at))))
+    commit(rows.filter((_, at) => at !== index))
+  }
 
   // The protocol a new row starts with: whatever the last one was asked over,
   // since a list is usually all one kind.
@@ -92,6 +120,7 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
     const next = DNS_PROVIDERS.map(provider => providerResolver(provider, protocol)).find(
       resolver => !listed.has(resolverLabel(resolver))
     )
+    markAdded(rows.length, 1)
     commit([...rows, next ?? { protocol, server: '', name: '' }])
   }
 
@@ -100,6 +129,7 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
   const hasAnyOfThem = rows.some(row => bigThree.some(provider => providerOf(row)?.id === provider.id))
   const addBigThree = () => {
     const protocol = lastProtocol ?? 'udp'
+    markAdded(rows.length, bigThree.length)
     commit([...rows, ...bigThree.map(provider => providerResolver(provider, protocol))])
   }
 
@@ -116,10 +146,8 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
           const isCustom = who === CUSTOM_VALUE
           const position = `Resolver ${index + 1}`
 
-          return (
-            // By position: a row has nothing else that stays the same while it
-            // is being typed in, and rows are only ever added at the end.
-            <li key={index} className="space-y-3 rounded-2xl border border-border p-3">
+          const fields = (
+            <>
               <div className="flex items-end gap-2">
                 <div className="min-w-0 flex-1">
                   <Select
@@ -178,6 +206,26 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
                   />
                 </>
               )}
+            </>
+          )
+
+          // By position: a row has nothing else that stays the same while it
+          // is being typed in. The layout is part of the key, so that crossing
+          // into or out of folded rows starts each as it should be.
+          return collapsible ? (
+            <li key={`${index}:folded`}>
+              <ExpandableCard
+                title={resolverLabel(row) || position}
+                description={rowSummary(row)}
+                leading={<span className="w-4 shrink-0 text-center font-mono text-[11px] text-muted-foreground" aria-hidden="true">{index + 1}</span>}
+                defaultExpanded={added.has(index) || unfinished(row)}
+              >
+                <div className="space-y-3 border-t border-border p-3">{fields}</div>
+              </ExpandableCard>
+            </li>
+          ) : (
+            <li key={`${index}:open`} className="space-y-3 rounded-2xl border border-border p-3">
+              {fields}
             </li>
           )
         })}
@@ -197,6 +245,7 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
       </div>
 
       <p className="text-xs leading-relaxed text-muted-foreground">
+        {collapsible && 'Open a resolver to change it. '}
         {rows.length > 1
           ? 'Each is asked on every probe and timed by itself, so the same lookup can be seen as each of them answers it.'
           : 'Add more to see the same lookup as each of them answers it.'}{' '}

@@ -30,6 +30,17 @@ describe('dashboard pages', () => {
   })
 })
 
+describe('the pages for making and editing an alert', () => {
+  it('reads each from its address, and gives each an address that reads back as itself', () => {
+    expect(pageFromPath('/alerts/new')).toEqual({ kind: 'alert-new' })
+    expect(pageFromPath('/alerts/abc-123/edit')).toEqual({ kind: 'alert-edit', id: 'abc-123' })
+    for (const page of [{ kind: 'alert-new' }, { kind: 'alert-edit', id: 'a b/c' }] as DashboardPage[]) {
+      expect(pageFromPath(pathOf(page))).toEqual(page)
+    }
+    for (const path of ['/alerts/new/x', '/alerts/abc-123', '/alerts/abc-123/edit/x']) expect(pageFromPath(path)).toBeNull()
+  })
+})
+
 describe('the pages for adding and editing a target', () => {
   it('reads each from its address', () => {
     expect(pageFromPath('/targets/new')).toEqual({ kind: 'target-new' })

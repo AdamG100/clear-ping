@@ -8,7 +8,6 @@ import { Button } from '@/components/arc/button/button'
 import { Card } from '@/components/arc/card/card'
 import { Checkbox } from '@/components/arc/checkbox/checkbox'
 import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
-import { Drawer, DrawerContent } from '@/components/arc/drawer/drawer'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { Input } from '@/components/arc/input/input'
 import { NumberField } from '@/components/arc/number-field/number-field'
@@ -20,6 +19,7 @@ import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useToast } from '@/components/notifications'
 import { alertTitle, describeCondition, notifyUrlLabel, parseNotifyUrls } from '@/lib/alert-delivery'
 import { PANE, PANE_TITLE } from './pane-layout'
+import { PageFrame } from './target-page'
 import { TargetChecklist } from './target-checklist'
 import type { Alert, AlertMetric, AlertTargetState, GroupOrder, Target } from '@/types/probe'
 import {
@@ -117,6 +117,7 @@ function AlertForm({
   groupOrders,
   saving,
   onSubmit,
+  onCancel,
 }: {
   /** The alert being edited; absent for a new one. */
   alert: AlertResponse | null
@@ -124,6 +125,7 @@ function AlertForm({
   groupOrders: GroupOrder[]
   saving: boolean
   onSubmit: (payload: AlertPayload) => void
+  onCancel: () => void
 }) {
   const [name, setName] = useState(alert?.name ?? '')
   const [metric, setMetric] = useState<AlertMetric>(alert?.metric ?? 'unreachable')
@@ -332,9 +334,14 @@ function AlertForm({
 
       <div className="space-y-3">
         {attempted && problems.length > 0 && <Notice tone="danger" title="Not saved yet">{problems[0]}</Notice>}
-        <Button type="submit" className="w-full" loading={saving} aria-disabled={problems.length > 0}>
-          {alert ? 'Save changes' : 'Create alert'}
-        </Button>
+        <div className="flex gap-2">
+          <Button type="button" variant="secondary" className="flex-1" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" className="flex-1" loading={saving} aria-disabled={problems.length > 0}>
+            {alert ? 'Save changes' : 'Create alert'}
+          </Button>
+        </div>
       </div>
     </form>
   )
@@ -352,14 +359,39 @@ interface AlertsViewProps {
   onSelectTarget: (id: string) => void
   /** The account signed in may look but not change anything: the alerts are shown, not offered for editing. */
   readOnly?: boolean
+  /**
+   * The alert whose form is open in place of the list: `'new'`, or an
+   * alert's id. Null for the list. Part of the address (/alerts/new,
+   * /alerts/<id>/edit), so a form can be reloaded and left with Back.
+   */
+  editor: 'new' | string | null
+  onOpenEditor: (which: 'new' | string) => void
+  onCloseEditor: () => void
 }
 
 /** `'new'` for an alert that does not exist yet. */
 type Editing = AlertResponse | 'new' | null
 
-export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, onSelectTarget, readOnly = false }: AlertsViewProps) {
+/**
+ * The list of alerts, or the form for one in its place. The form used to be
+ * a panel sliding in over the right edge of the page: narrow, cut off from
+ * the list behind it, and gone at a reload. It is a page of the pane now,
+ * like adding a target.
+ */
+export function AlertsView({
+  alerts,
+  loaded,
+  targets,
+  groupOrders,
+  onChanged,
+  onSelectTarget,
+  readOnly = false,
+  editor,
+  onOpenEditor,
+  onCloseEditor,
+}: AlertsViewProps) {
   const { notify, reportError } = useToast()
-  const [editing, setEditing] = useState<Editing>(null)
+  const editing: Editing = editor === null ? null : editor === 'new' ? 'new' : alerts.find(alert => alert.id === editor) ?? null
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
 
@@ -395,7 +427,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
     setSaving(false)
 
     if (ok) {
-      setEditing(null)
+      onCloseEditor()
       notify({ tone: 'success', title: existing ? 'Alert saved' : 'Alert created', detail: alertTitle(payload) })
     }
   }
@@ -436,6 +468,56 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
     alert => alert.enabled && alert.targets.some(entry => entry.state === 'firing')
   ).length
 
+  if (editor !== null) {
+    if (readOnly) {
+      return (
+        <div className="flex h-full items-center justify-center p-6">
+          <EmptyState
+            title="This account can look but not change"
+            description="Ask an admin or editor to make or change alerts."
+            action={<Button type="button" onClick={onCloseEditor}>Back to the alerts</Button>}
+          />
+        </div>
+      )
+    }
+    if (!loaded) {
+      return (
+        <div className={PANE}>
+          <Skeleton label="Loading the alert" lines={4} />
+        </div>
+      )
+    }
+    if (editing === null) {
+      return (
+        <div className="flex h-full items-center justify-center p-6">
+          <EmptyState
+            title="That alert is not here"
+            description="It may have been deleted."
+            action={<Button type="button" onClick={onCloseEditor}>Back to the alerts</Button>}
+          />
+        </div>
+      )
+    }
+
+    return (
+      <PageFrame
+        title={editing === 'new' ? 'New alert' : `Edit ${alertTitle(editing)}`}
+        description="One condition, watched on every target you tick. Each target fires and clears on its own."
+        onBack={onCloseEditor}
+      >
+        <AlertForm
+          key={editing === 'new' ? 'new' : editing.id}
+          alert={editing === 'new' ? null : editing}
+          targets={targets}
+          groupOrders={groupOrders}
+          saving={saving}
+          onSubmit={save}
+          onCancel={onCloseEditor}
+        />
+      </PageFrame>
+    )
+  }
+
   return (
     <div className={PANE}>
       <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
@@ -447,7 +529,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
           </p>
         </div>
         {!readOnly && (
-          <Button size="sm" onClick={() => setEditing('new')}>
+          <Button size="sm" onClick={() => onOpenEditor('new')}>
             <Plus {...ICON} />
             New alert
           </Button>
@@ -463,7 +545,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
           description="An alert is a condition, such as a target not responding, and the targets to watch for it on. Make one, tick the targets it applies to, and choose where it is sent."
           action={
             readOnly ? undefined : (
-              <Button onClick={() => setEditing('new')}>
+              <Button onClick={() => onOpenEditor('new')}>
                 <Plus {...ICON} />
                 New alert
               </Button>
@@ -511,7 +593,7 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
                           />
                         </Tooltip>
                         <Tooltip content="Edit">
-                          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(alert)} aria-label={`Edit ${title}`}>
+                          <Button variant="ghost" size="sm" disabled={busy} onClick={() => onOpenEditor(alert.id)} aria-label={`Edit ${title}`}>
                             <Pencil {...ICON} />
                           </Button>
                         </Tooltip>
@@ -550,24 +632,6 @@ export function AlertsView({ alerts, loaded, targets, groupOrders, onChanged, on
           })}
         </ul>
       )}
-
-      <Drawer open={editing !== null} onOpenChange={open => { if (!open) setEditing(null) }}>
-        <DrawerContent
-          title={editing === 'new' ? 'New alert' : 'Edit alert'}
-          description="One condition, watched on every target you tick. Each target fires and clears on its own."
-        >
-          {editing !== null && (
-            <AlertForm
-              key={editing === 'new' ? 'new' : editing.id}
-              alert={editing === 'new' ? null : editing}
-              targets={targets}
-              groupOrders={groupOrders}
-              saving={saving}
-              onSubmit={save}
-            />
-          )}
-        </DrawerContent>
-      </Drawer>
     </div>
   )
 }

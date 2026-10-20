@@ -20,7 +20,8 @@ import { BLANK_TARGET, formValuesOf, TargetForm } from './target-dialogs'
 
 type NewTarget = Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>
 
-function PageFrame({ title, description, onBack, children }: { title: string; description?: string; onBack: () => void; children: React.ReactNode }) {
+/** A form's page: a way back, what it is for, and the form in a card. Shared with the alert editor. */
+export function PageFrame({ title, description, onBack, children }: { title: string; description?: string; onBack: () => void; children: React.ReactNode }) {
   return (
     <div className={cn(PANE, 'max-w-3xl')}>
       <header className={PANE_HEADER}>
