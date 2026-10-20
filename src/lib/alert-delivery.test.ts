@@ -8,6 +8,7 @@ import {
   parseNotifyUrls,
   redactNotifyUrl,
   restoreRedacted,
+  withEmbeds,
 } from './alert-delivery'
 
 function event(over: Partial<AlertEvent> = {}, rule: Partial<AlertEvent['rule']> = {}): AlertEvent {
@@ -19,6 +20,8 @@ function event(over: Partial<AlertEvent> = {}, rule: Partial<AlertEvent['rule']>
       threshold: 5,
       consecutiveProbes: 3,
       notifyUrls: ['discord://123456789012345678/token'],
+      traceOnFire: true,
+      traceCooldownMinutes: 15,
       enabled: true,
       state: 'firing',
       streak: 0,
@@ -116,15 +119,38 @@ describe('describing an alert', () => {
   })
 })
 
+describe('withEmbeds', () => {
+  it('asks Apprise for an embed on Discord, by its own scheme or by a webhook address', () => {
+    expect(withEmbeds('discord://123/abc')).toBe('discord://123/abc?format=markdown')
+    expect(withEmbeds('discord://123/abc/?ping=%3C%40222%3E')).toBe('discord://123/abc/?ping=%3C%40222%3E&format=markdown')
+    expect(withEmbeds('guilded://123/abc')).toBe('guilded://123/abc?format=markdown')
+    expect(withEmbeds('https://discord.com/api/webhooks/123/abc')).toBe('https://discord.com/api/webhooks/123/abc?format=markdown')
+    expect(withEmbeds('https://discordapp.com/api/webhooks/123/abc?thread_id=9'))
+      .toBe('https://discordapp.com/api/webhooks/123/abc?thread_id=9&format=markdown')
+  })
+
+  it('leaves a URL that already says which format it wants', () => {
+    expect(withEmbeds('discord://123/abc/?format=text')).toBe('discord://123/abc/?format=text')
+    expect(withEmbeds('discord://123/abc/?format=markdown')).toBe('discord://123/abc/?format=markdown')
+  })
+
+  it('leaves every other service as it is', () => {
+    for (const url of ['slack://T/B/C', 'https://hooks.slack.com/services/T/B/X', 'tgram://bot/chat', 'jsons://example.com/discord/x']) {
+      expect(withEmbeds(url)).toBe(url)
+    }
+  })
+})
+
 describe('notificationFor', () => {
   it('words a firing alert as a failure, with what is wrong in the title', () => {
-    expect(notificationFor(event())).toEqual({
+    expect(notificationFor(event(), { zone: 'UTC' })).toEqual({
       title: 'Router: packet loss is too high',
       body:
         '<p><b>Packet loss above 5%</b> for 3 probes in a row.</p>' +
         '<ul>' +
         '<li><b>Address:</b> 192.0.2.1</li>' +
         '<li><b>Now:</b> 42.5%</li>' +
+        '<li><b>When:</b> 2026-08-19 22:41:43 UTC</li>' +
         '<li><b>Alert:</b> Packet loss above 5%</li>' +
         '<li><b>Group:</b> Home / Network</li>' +
         '</ul>',

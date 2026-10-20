@@ -23,6 +23,17 @@ export function isProbeType(value: unknown): value is ProbeType {
   return PROBE_TYPES.includes(value as ProbeType)
 }
 
+/**
+ * Echo requests in a ping probe. Loss is counted in whole packets, so the
+ * count is how finely it is read: 20 reads it in steps of 5%. More read it
+ * more finely and take longer, a second for each one a dead path never
+ * answers, so a target can ask for up to 100 (steps of 1%). Fewer than 5
+ * would read loss in steps too coarse to say anything.
+ */
+export const DEFAULT_PING_PACKETS = 20
+export const MIN_PING_PACKETS = 5
+export const MAX_PING_PACKETS = 100
+
 export const DEFAULT_DNS_QUERY_NAME = 'example.com'
 
 /** How many times a DNS probe puts its question, to each resolver it asks. */
@@ -114,8 +125,16 @@ export function validateProbeConfig(probeType: ProbeType, host: string, raw: unk
   const config: ProbeConfig = {}
 
   switch (probeType) {
-    case 'ping':
+    case 'ping': {
+      if (input.packets === undefined || input.packets === null) return { ok: true, config }
+      const packets = input.packets
+      if (typeof packets !== 'number' || !Number.isInteger(packets) || packets < MIN_PING_PACKETS || packets > MAX_PING_PACKETS) {
+        return { ok: false, error: `Packets per probe must be a whole number from ${MIN_PING_PACKETS} to ${MAX_PING_PACKETS}` }
+      }
+      // The usual count is left unsaid, so a target keeps up with it.
+      if (packets !== DEFAULT_PING_PACKETS) config.packets = packets
       return { ok: true, config }
+    }
 
     case 'tcp': {
       if (!isPort(input.port)) {

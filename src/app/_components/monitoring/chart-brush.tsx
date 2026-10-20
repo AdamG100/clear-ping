@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from 'react'
 import { timeTicks } from '@/lib/time-ticks'
+import { inDisplayZone } from '@/lib/time-zone'
 
 /**
  * What the time charts share: how wide they are drawn, how the axes are
@@ -132,16 +133,16 @@ export function useOutsidePress(ref: RefObject<Element | null>, active: boolean,
 export function formatTick(value: number, spanMs: number) {
   const date = new Date(value)
   if (spanMs > 48 * HOUR_MS) {
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    return date.toLocaleDateString('en-US', inDisplayZone({ month: 'short', day: 'numeric' }))
   }
   if (spanMs > 24 * HOUR_MS) {
-    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleString('en-US', inDisplayZone({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))
   }
-  return date.toLocaleTimeString('en-US', {
+  return date.toLocaleTimeString('en-US', inDisplayZone({
     hour: '2-digit',
     minute: '2-digit',
     second: spanMs < 10 * 60 * 1000 ? '2-digit' : undefined,
-  })
+  }))
 }
 
 /** The width of one character of an axis label, which is set in 10px mono. */
@@ -224,12 +225,12 @@ export function TimeAxis({ y, ...span }: TimeSpan & { y: number }) {
 
 /** One end of a zoomed period, with the date: a zoom is often into yesterday. */
 export function formatWindowEdge(time: number) {
-  return new Date(time).toLocaleString('en-US', {
+  return new Date(time).toLocaleString('en-US', inDisplayZone({
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  })
+  }))
 }
 
 export function formatDuration(ms: number) {

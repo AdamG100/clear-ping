@@ -187,6 +187,17 @@ describe('validateProbeConfig', () => {
     expect(validateProbeConfig('dns', '1.1.1.1', { resolvers: [{ protocol: 'udp', server: '9.9.9.9' }] })).toEqual({ ok: true, config: {} })
   })
 
+  it('takes how many packets a ping probe sends, and leaves the usual 20 unsaid', () => {
+    expect(validateProbeConfig('ping', 'example.com', { packets: 50 })).toEqual({ ok: true, config: { packets: 50 } })
+    expect(validateProbeConfig('ping', 'example.com', { packets: 20 })).toEqual({ ok: true, config: {} })
+    expect(validateProbeConfig('ping', 'example.com', { packets: null })).toEqual({ ok: true, config: {} })
+    for (const packets of [4, 101, 12.5, Number.NaN, '50']) {
+      expect(validateProbeConfig('ping', 'example.com', { packets })).toMatchObject({ ok: false, error: expect.stringContaining('Packets per probe') })
+    }
+    // Only a ping counts packets.
+    expect(validateProbeConfig('tcp', 'example.com', { port: 22, packets: 50 })).toEqual({ ok: true, config: { port: 22 } })
+  })
+
   it('strips settings that belong to a different probe', () => {
     // A target switched from HTTP to ping must not keep a path nobody can see.
     const leftovers = { port: 443, scheme: 'https', path: '/x', queryName: 'example.org' }

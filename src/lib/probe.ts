@@ -15,7 +15,7 @@ function runProbe(target: ProbeTarget, ipVersion: ProbeIpVersion): Promise<Probe
 
   switch (target.probeType) {
     case 'ping':
-      return executePing(id, host, { ipVersion });
+      return executePing(id, host, { ipVersion, count: config.packets });
     case 'dns':
       return executeDnsProbe(id, host, { ...config, ipVersion });
     case 'http':

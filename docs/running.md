@@ -210,6 +210,7 @@ See `.env.example`. All settings are optional.
 |---|---|---|
 | `CLEARPING_DB_PATH` | `./data/clearping.db` | Database location |
 | `CLEARPING_RETENTION_DAYS` | `90` | Measurement retention; `0` keeps everything |
+| `TZ` | unset | Time zone for every time ClearPing shows or sends (IANA name, e.g. `Europe/London`); unset, each viewer sees their own |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes |
 | `CLEARPING_APPRISE_BIN` | `apprise` | The Apprise program that sends alerts, when it is not on the `PATH` |
 | `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check for a newer image (see [Versions](#versions)) |

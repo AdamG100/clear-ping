@@ -46,6 +46,10 @@
   --color-sidebar-primary-foreground: var(--accent-foreground);
   --color-sidebar-border: var(--border);
   --color-sidebar-ring: var(--accent);
+  --color-sidebar-group: var(--sidebar-group);
+  --color-sidebar-group-nested: var(--sidebar-group-nested);
+  --color-sidebar-group-border: var(--sidebar-group-border);
+  --color-sidebar-row-hover: var(--sidebar-row-hover);
   --color-chart-1: var(--series-1);
   --color-chart-2: var(--series-2);
   --color-chart-3: var(--series-3);
@@ -121,6 +125,22 @@
   --signal-critical: oklch(0.53 0.22 25);
   --signal-none: oklch(0.65 0.02 250);
   --trace: oklch(0.30 0.02 250);
+
+  /* The sidebar's groups, each a panel a step off the sidebar's own colour,
+     and a group inside another a step further, so it is plain where one group
+     ends and which one a group sits in. Mixed from the theme's surface and
+     text rather than set, so they step the right way in both themes: darker
+     on white, lighter on the dark blue-grey. Worked out here, on the root,
+     where the theme's own values are; what inherits them is the result. */
+  --sidebar-group: color-mix(in oklab, var(--surface) 94.5%, var(--foreground));
+  --sidebar-group-nested: color-mix(in oklab, var(--surface) 89%, var(--foreground));
+  --sidebar-group-border: color-mix(in oklab, var(--border) 45%, var(--border-strong));
+  /* A row under the pointer, over whichever of those it sits on. */
+  --sidebar-row-hover: color-mix(in oklab, var(--foreground) 7%, transparent);
+  /* Buttons on the sidebar. Arc fills a secondary button with --surface,
+     which is the sidebar's colour, so they were outlines on nothing. */
+  --sidebar-control: color-mix(in oklab, var(--surface) 88%, var(--foreground));
+  --sidebar-control-hover: color-mix(in oklab, var(--surface) 81%, var(--foreground));
 }
 
 /* The dark theme on #121212, with surfaces (cards, the sidebar, fields) in
@@ -217,6 +237,16 @@
    be left out here without the server and the browser disagreeing. */
 html[data-view='group'] .skeleton-target-only {
   display: none;
+}
+
+/* Arc's buttons inside this are filled a step off the sidebar instead of in
+   its colour, and outlined more firmly. Done by giving their tokens other
+   values here: Arc's styles are unlayered and a class on the button loses to
+   them. Not on the footer itself, whose own top border is the sidebar's. */
+.sidebar-controls {
+  --surface: var(--sidebar-control);
+  --surface-muted: var(--sidebar-control-hover);
+  --border: var(--border-strong);
 }
 
 /* Custom slower ping animation for NetworkStatus indicator */

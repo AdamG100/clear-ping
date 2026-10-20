@@ -2,7 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { NotificationsProvider } from "@/components/notifications";
+import { connection } from "next/server";
 import { THEME_COLOR } from "@/lib/app-theme";
+import { configuredTimeZone } from "@/lib/time-zone";
 import { InstallPrompt } from "./_components/install-prompt";
 import { ServiceWorker } from "./_components/service-worker";
 import { SessionWatcher } from "./_components/session-watcher";
@@ -66,18 +68,31 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Drawn for each request, so that TZ is read from the container as it runs
+  // and not frozen at whatever it was when the image was built. The pages
+  // fetch everything they show after they load, so drawing them each time
+  // costs next to nothing.
+  await connection();
+  const timeZone = configuredTimeZone(process.env.TZ) ?? undefined;
+
   return (
     // suppressHydrationWarning: the inline script below sets the theme
     // before React hydrates, so the server and client markup differ by design.
     // The fonts are named on the root element, not on <body>: that is where
     // the theme's variables are worked out, and what the page's own font is
-    // taken from.
-    <html lang="en" className={`${inter.variable} ${geist.variable} ${plexMono.variable}`} suppressHydrationWarning>
+    // taken from. The time zone times are shown in rides there too (see
+    // src/lib/time-zone.ts); absent, each viewer sees their own.
+    <html
+      lang="en"
+      className={`${inter.variable} ${geist.variable} ${plexMono.variable}`}
+      data-time-zone={timeZone}
+      suppressHydrationWarning
+    >
       <head>
         <script
           // Applies the saved theme before first paint. Without this the page

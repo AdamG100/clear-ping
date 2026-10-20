@@ -11,10 +11,10 @@ import { newestPerFamily, parseTraceroute, traceReached, tracerouteCommand } fro
  * Running traceroutes and keeping them.
  *
  * The chart can show that packets were lost; a traceroute shows where. It is
- * run on request, and automatically at the moment a loss or unreachable alert
- * fires — the route through a failure can only be captured while the failure
- * is happening, and by the time anyone opens the dashboard it has usually
- * cleared.
+ * run on request, and automatically at the moment an alert set to trace fires
+ * (with a pause between those; see shouldTraceOnAlert) — the route through a
+ * failure can only be captured while the failure is happening, and by the
+ * time anyone opens the dashboard it has usually cleared.
  */
 
 /** Hard ceiling on one trace. A partial trace is still parsed and kept. */
@@ -185,6 +185,29 @@ export async function getTraceroutes(targetId: string, limit = 10): Promise<Trac
       (err, rows) => {
         if (err) reject(err);
         else resolve((rows as TracerouteRow[]).map(toTraceroute));
+      }
+    );
+  });
+}
+
+/**
+ * When the newest trace taken on an alert for a target was started, or null if
+ * there is none. Read from what is stored, so the pause between alert traces
+ * holds across a restart and between the app and a separate prober.
+ */
+export async function lastAlertTraceAt(targetId: string): Promise<Date | null> {
+  const db = await getDatabase();
+
+  return new Promise<Date | null>((resolve, reject) => {
+    db.get(
+      `SELECT MAX(timestamp) AS at FROM traceroutes WHERE target_id = ? AND trigger_source = 'alert'`,
+      [targetId],
+      (err, row) => {
+        if (err) reject(err);
+        else {
+          const at = (row as { at: number | null } | undefined)?.at;
+          resolve(at ? new Date(at) : null);
+        }
       }
     );
   });

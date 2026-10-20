@@ -166,6 +166,18 @@ describe('opening a database left by an old version', () => {
     expect(urlsOf('latency')).toEqual([])
   })
 
+  it('keeps loss and unreachable alerts tracing the route when they fire, now with a pause between traces', async () => {
+    const migrated = await alerts.getAlerts()
+    const tracingOf = (metric: string) => {
+      const alert = migrated.find(entry => entry.metric === metric)!
+      return { traceOnFire: alert.traceOnFire, traceCooldownMinutes: alert.traceCooldownMinutes }
+    }
+    expect(tracingOf('packetLoss')).toEqual({ traceOnFire: true, traceCooldownMinutes: 15 })
+    expect(tracingOf('unreachable')).toEqual({ traceOnFire: true, traceCooldownMinutes: 15 })
+    // Latency alerts never traced, and still do not unless asked to.
+    expect(tracingOf('latency')).toEqual({ traceOnFire: false, traceCooldownMinutes: 15 })
+  })
+
   it('leaves what an older version would send by where it would look for it', async () => {
     expect(await all('SELECT destination, webhook_url FROM alerts ORDER BY created_at')).toEqual([
       { destination: 'webhook', webhook_url: 'https://hooks.example/x' },

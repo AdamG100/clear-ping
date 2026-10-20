@@ -18,8 +18,10 @@ import { groupLabel, joinGroupPath } from '@/lib/group-path'
 import { describeProbe } from '@/lib/probe-labels'
 import {
   DEFAULT_DNS_QUERY_NAME,
+  DEFAULT_PING_PACKETS,
   DNS_RECORD_TYPES,
   isAddressRecord,
+  MAX_PING_PACKETS,
   nameRecordType,
   parseAddressInput,
   targetAddressLabel,
@@ -45,6 +47,7 @@ import { Globe, Network, Plug, Wifi } from 'lucide-react'
  * checked and saved.
  */
 interface ConfigDraft {
+  packets: string
   port: string
   scheme: 'http' | 'https'
   path: string
@@ -59,6 +62,7 @@ interface ConfigDraft {
 
 function draftFrom(config: ProbeConfig = {}): ConfigDraft {
   return {
+    packets: config.packets ? String(config.packets) : '',
     port: config.port ? String(config.port) : '',
     scheme: config.scheme ?? 'https',
     path: config.path ?? '/',
@@ -78,6 +82,7 @@ function numberOrUndefined(text: string): number | undefined {
 
 function configFrom(draft: ConfigDraft): Record<string, unknown> {
   return {
+    packets: numberOrUndefined(draft.packets),
     port: numberOrUndefined(draft.port),
     scheme: draft.scheme,
     path: draft.path,
@@ -184,8 +189,8 @@ function FieldHint({ children }: { children: ReactNode }) {
 const ADDRESS_RECORD = 'address'
 
 /**
- * The settings only the chosen probe has. Nothing at all for a ping, which is
- * the point: the fields that appear are the ones that mean something.
+ * The settings only the chosen probe has: the fields that appear are the ones
+ * that mean something for it.
  */
 function ProbeConfigFields({
   idPrefix,
@@ -208,7 +213,27 @@ function ProbeConfigFields({
   onChange: (changes: Partial<ConfigDraft>) => void
   onPortBlur: () => void
 }) {
-  if (probeType === 'ping') return null
+  if (probeType === 'ping') {
+    return (
+      <div className="space-y-2">
+        <div className="max-w-48">
+          <Input
+            id={`${idPrefix}-packets`}
+            label="Packets per probe"
+            inputMode="numeric"
+            placeholder={String(DEFAULT_PING_PACKETS)}
+            value={draft.packets}
+            onChange={e => onChange({ packets: e.target.value })}
+          />
+        </div>
+        <FieldHint>
+          Loss is counted in whole packets, so this is how finely it is read: {DEFAULT_PING_PACKETS} gives steps of 5%,
+          50 gives 2% and {MAX_PING_PACKETS} gives 1%. More packets take longer, up to a second for each one a failing
+          path never answers.
+        </FieldHint>
+      </div>
+    )
+  }
 
   if (probeType === 'tcp') {
     return (
@@ -637,7 +662,6 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
   // fine, and never for the port, which reports under its own field: two
   // messages for one mistake is one too many.
   const settingsError = hostValid && host && !validation.ok && probeType !== 'tcp' ? validation.error : null
-  const hasSettings = probeType !== 'ping'
   const recap = isValid && validation.ok ? recapFor(host, probeType, config, interval) : null
 
   // "New group…" picked: typing goes to the new group's name next. Once the
@@ -681,26 +705,25 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
             suggested={suggested}
             onChange={value => { setProbeType(value); setProbeChosen(true); setSuggested(null) }}
           />
-          {(hasSettings || summary) && (
-            <div className="space-y-4 rounded-2xl border border-border bg-background p-4">
-              <ProbeConfigFields
-                idPrefix={idPrefix}
-                probeType={probeType}
-                host={host}
-                ipVersion={isDomain ? ipVersion : 'auto'}
-                draft={draft}
-                portError={shown('port') ?? undefined}
-                onChange={changes => setDraft(current => ({ ...current, ...changes }))}
-                onPortBlur={() => touch('port')}
-              />
-              {settingsError && <Alert tone="danger" title="A setting is not right">{settingsError}</Alert>}
-              {summary && (
-                <div className={cn(hasSettings && 'border-t border-border pt-3')}>
-                  <ProbeSummary host={host} probeType={probeType} ipVersion={effectiveIpVersion} summary={summary} />
-                </div>
-              )}
-            </div>
-          )}
+          {/* Every method has a setting of its own, ping its packet count. */}
+          <div className="space-y-4 rounded-2xl border border-border bg-background p-4">
+            <ProbeConfigFields
+              idPrefix={idPrefix}
+              probeType={probeType}
+              host={host}
+              ipVersion={isDomain ? ipVersion : 'auto'}
+              draft={draft}
+              portError={shown('port') ?? undefined}
+              onChange={changes => setDraft(current => ({ ...current, ...changes }))}
+              onPortBlur={() => touch('port')}
+            />
+            {settingsError && <Alert tone="danger" title="A setting is not right">{settingsError}</Alert>}
+            {summary && (
+              <div className="border-t border-border pt-3">
+                <ProbeSummary host={host} probeType={probeType} ipVersion={effectiveIpVersion} summary={summary} />
+              </div>
+            )}
+          </div>
         </fieldset>
 
         {/* What to call it. */}

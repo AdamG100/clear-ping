@@ -61,6 +61,12 @@ export interface DnsResolverReading {
  * new column. Fields a target's probe does not use are never stored.
  */
 export interface ProbeConfig {
+  /**
+   * ping: echo requests sent per probe, when not the 20 most targets use.
+   * Loss is counted in whole packets, so this is how finely it is read: one
+   * lost of 20 is 5%, one of 100 is 1%.
+   */
+  packets?: number;
   /** tcp: the port to connect to. http: the port, when not the scheme's default. */
   port?: number;
   /** http */
@@ -361,8 +367,8 @@ export interface TracerouteHop {
 }
 
 /**
- * A recorded traceroute. `alert` ones are taken automatically at the moment a
- * loss or unreachable alert fires, which is the only time the route through a
+ * A recorded traceroute. `alert` ones are taken automatically at the moment an
+ * alert set to trace fires, which is the only time the route through a
  * failure can be captured: by the time anyone looks, it has usually recovered.
  */
 export interface Traceroute {
@@ -424,7 +430,35 @@ export interface AlertSettings {
    * Apprise's business. Empty for an alert that is only shown in the app.
    */
   notifyUrls: string[];
+  /**
+   * Trace the route to the target when this alert fires on it. The moment a
+   * path is losing packets or has gone dark is usually the only chance to see
+   * where; by the time anyone looks it has often mended. Only for the metrics
+   * in TRACEABLE_ALERT_METRICS.
+   */
+  traceOnFire: boolean;
+  /**
+   * The least time between traces taken on alerts for the same target, in
+   * minutes. A link that drops in and out fires again and again, and each
+   * trace through a dead path is a minute and a half of probes: one trace per
+   * spell of trouble is what is useful.
+   */
+  traceCooldownMinutes: number;
 }
+
+/** Alerts that can trace the route when they fire: the ones a path being broken or congested explains. */
+export const TRACEABLE_ALERT_METRICS: readonly AlertMetric[] = ['packetLoss', 'unreachable', 'latency', 'jitter'];
+
+/**
+ * Whether a new alert traces when it fires, unless it says otherwise: those
+ * on loss and on a target going down, which always used to.
+ */
+export function tracesByDefault(metric: AlertMetric): boolean {
+  return metric === 'packetLoss' || metric === 'unreachable';
+}
+
+export const DEFAULT_TRACE_COOLDOWN_MINUTES = 15;
+export const MAX_TRACE_COOLDOWN_MINUTES = 24 * 60;
 
 /** How one target currently stands against an alert it is ticked for. */
 export interface AlertTargetState {

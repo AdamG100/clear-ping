@@ -229,6 +229,21 @@ describe('editing an alert', () => {
     expect(await updateAlert(lossAlertId, { notifyUrls: [NOTIFY_URL] })).toMatchObject({ notifyUrls: [NOTIFY_URL] })
   })
 
+  it('traces on firing by default only for loss and a target going down, and can be told otherwise', async () => {
+    const quiet = { threshold: 100, consecutiveProbes: 1, notifyUrls: [], targetIds: [] }
+    const loss = await createAlert({ ...quiet, metric: 'packetLoss' })
+    const slow = await createAlert({ ...quiet, metric: 'latency' })
+    const down = await createAlert({ ...quiet, metric: 'unreachable', traceOnFire: false, traceCooldownMinutes: 60 })
+
+    expect(loss).toMatchObject({ traceOnFire: true, traceCooldownMinutes: 15 })
+    expect(slow).toMatchObject({ traceOnFire: false, traceCooldownMinutes: 15 })
+    expect(down).toMatchObject({ traceOnFire: false, traceCooldownMinutes: 60 })
+    expect(await updateAlert(slow.id, { traceOnFire: true, traceCooldownMinutes: 45 }))
+      .toMatchObject({ traceOnFire: true, traceCooldownMinutes: 45 })
+
+    for (const alert of [loss, slow, down]) await deleteAlert(alert.id)
+  })
+
   it('reports an alert that does not exist', async () => {
     expect(await updateAlert('no-such-alert', { enabled: false })).toBeNull()
     expect(await updateAlert('no-such-alert', { targetIds: [] })).toBeNull()
@@ -308,6 +323,15 @@ describe('parseAlertInput', () => {
     expect(errorFor({ ...valid, notifyUrls: 'my discord channel' })).toContain('notifyUrls')
     expect(errorFor({ ...valid, notifyUrls: ['discord://1/abc', 'hooks.example.com/x'] })).toContain('notifyUrls')
     expect(errorFor({ ...valid, targetIds: 'all' })).toContain('targetIds')
+  })
+
+  it('takes whether to trace when it fires, and how long to leave between traces', () => {
+    expect(parseAlertInput({ ...valid, traceOnFire: true, traceCooldownMinutes: 30 }))
+      .toMatchObject({ ok: true, input: { traceOnFire: true, traceCooldownMinutes: 30 } })
+    expect(parseAlertInput({ traceOnFire: 'yes' }, true)).toMatchObject({ ok: false })
+    for (const minutes of [0, 1.5, 1441, 'soon']) {
+      expect(parseAlertInput({ traceCooldownMinutes: minutes }, true)).toMatchObject({ ok: false })
+    }
   })
 
   it('checks only what an edit sends', () => {

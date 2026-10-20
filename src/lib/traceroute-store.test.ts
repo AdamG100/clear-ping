@@ -15,15 +15,22 @@ const {
   countTraceroutes,
   deleteTraceroute,
   deleteOlderTraceroutes,
+  lastAlertTraceAt,
 } = await import('./traceroute')
 
 /** A stored trace, `minutesAgo` old, to `address`. */
-async function keep(id: string, targetId: string, minutesAgo: number, address = '192.0.2.1'): Promise<void> {
+async function keep(
+  id: string,
+  targetId: string,
+  minutesAgo: number,
+  address = '192.0.2.1',
+  trigger: Traceroute['trigger'] = 'manual'
+): Promise<void> {
   const trace: Traceroute = {
     id,
     targetId,
     timestamp: new Date(Date.now() - minutesAgo * 60_000),
-    trigger: 'manual',
+    trigger,
     address,
     hops: [{ hop: 1, address, rtts: [1.2, 1.4, 1.1], sent: 3 }],
     reached: true,
@@ -99,6 +106,23 @@ describe('deleting the old traces', () => {
     expect(await deleteOlderTraceroutes('single')).toBe(0)
     expect(await deleteOlderTraceroutes('nobody')).toBe(0)
     expect(await listed('dual')).toEqual(['v6-new', 'v4-new'])
+  })
+})
+
+describe('the last trace taken on an alert', () => {
+  it('is none until an alert has traced the target', async () => {
+    // 'single' has only ever been traced by hand.
+    expect(await lastAlertTraceAt('single')).toBeNull()
+  })
+
+  it('is the newest of those taken on an alert, whatever was traced by hand since', async () => {
+    await keep('a-old', 'single', 40, '192.0.2.1', 'alert')
+    await keep('a-new', 'single', 25, '192.0.2.1', 'alert')
+    await keep('by-hand', 'single', 1)
+
+    const at = await lastAlertTraceAt('single')
+    expect(Date.now() - at!.getTime()).toBeGreaterThanOrEqual(25 * 60_000)
+    expect(Date.now() - at!.getTime()).toBeLessThan(26 * 60_000)
   })
 })
 

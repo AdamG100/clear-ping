@@ -11,6 +11,7 @@ import { Switch } from '@/components/arc/switch/switch'
 import { SegmentedField } from '@/components/segmented-field'
 import { useToast } from '@/components/notifications'
 import type { MaintenanceFrequency, MaintenanceNotify, MaintenanceReport, MaintenanceSettings, MaintenanceStep } from '@/lib/maintenance'
+import { inDisplayZone } from '@/lib/time-zone'
 
 /**
  * Settings → Maintenance: what the clean-up does, a button to run it now, how
@@ -61,7 +62,7 @@ const WHAT_IT_DOES = [
 ]
 
 function when(ms: number | null): string {
-  return ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'never'
+  return ms ? new Date(ms).toLocaleString(undefined, inDisplayZone({ dateStyle: 'medium', timeStyle: 'short' })) : 'never'
 }
 
 async function call(method: string, body?: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {

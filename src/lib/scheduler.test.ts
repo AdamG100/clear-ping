@@ -27,8 +27,8 @@ let finishProbe: (results: ProbeResult[]) => void = () => {}
 vi.mock('./probe', () => ({
   executeProbes: vi.fn(() => new Promise<ProbeResult[]>(resolve => { finishProbe = resolve })),
 }))
-vi.mock('./alerts', () => ({ evaluateAlerts: vi.fn(async () => []), dispatchAlert: vi.fn() }))
-vi.mock('./traceroute', () => ({ ensureTracerouteSchema: vi.fn(), cleanOldTraceroutes: vi.fn(), traceAndStore: vi.fn() }))
+vi.mock('./alerts', () => ({ evaluateAlerts: vi.fn(async () => []), dispatchAlert: vi.fn(), asksForTrace: vi.fn(() => false), shouldTraceOnAlert: vi.fn(() => false) }))
+vi.mock('./traceroute', () => ({ ensureTracerouteSchema: vi.fn(), cleanOldTraceroutes: vi.fn(), traceAndStore: vi.fn(), lastAlertTraceAt: vi.fn(async () => null) }))
 
 const { getScheduler } = await import('./scheduler')
 

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { DNS_PROTOCOL_LABEL, DNS_PROTOCOL_NAME, readingName } from '@/lib/dns-resolvers'
 import { resolversThatDiffer } from '@/lib/dns-resolver-series'
 import type { DnsResolver, DnsResolverReading, LatestMeasurement, ProbeDetails, ProbeType } from '@/types/probe'
+import { inDisplayZone } from '@/lib/time-zone'
 
 /**
  * What the latest probe learned beyond its timings.
@@ -88,7 +89,7 @@ function Certificate({ expiresAt, asOf }: { expiresAt: number; asOf: Date }) {
           : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
       </p>
       <p className="font-mono text-xs text-muted-foreground">
-        until {new Date(expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+        until {new Date(expiresAt).toLocaleDateString('en-US', inDisplayZone({ month: 'short', day: 'numeric', year: 'numeric' }))}
       </p>
     </div>
   )
@@ -118,7 +119,7 @@ function ResolverTable({
   const slowest = Math.max(1, ...readings.map(reading => reading.latency ?? 0))
   const sent = readings.find(reading => reading.sent)?.sent
   const encrypted = readings.some(reading => reading.connectMs !== undefined)
-  const time = asOf.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const time = asOf.toLocaleTimeString('en-US', inDisplayZone({ hour: '2-digit', minute: '2-digit', second: '2-digit' }))
 
   return (
     <div className="min-w-0 basis-full">

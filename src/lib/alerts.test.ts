@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isBreaching, nextRuleState, observedValue } from './alerts'
+import { isBreaching, nextRuleState, observedValue, shouldTraceOnAlert } from './alerts'
 import type { AlertRule, ProbeResult } from '@/types/probe'
 
 const rule = (over: Partial<AlertRule> = {}): AlertRule => ({
@@ -9,6 +9,8 @@ const rule = (over: Partial<AlertRule> = {}): AlertRule => ({
   threshold: 5,
   consecutiveProbes: 3,
   notifyUrls: [],
+  traceOnFire: true,
+  traceCooldownMinutes: 15,
   enabled: true,
   state: 'ok',
   streak: 0,
@@ -149,5 +151,40 @@ describe('certificate expiry', () => {
     expect(observedValue(certRule, blind)).toBeNull()
     expect(isBreaching(certRule, blind)).toBe(false)
     expect(isBreaching({ ...certRule, state: 'firing' }, blind)).toBe(true)
+  })
+})
+
+describe('shouldTraceOnAlert', () => {
+  const now = new Date('2026-10-20T12:00:00.000Z').getTime()
+  const minutesAgo = (minutes: number) => new Date(now - minutes * 60_000)
+  const fired = (over: Partial<AlertRule> = {}, transition: 'firing' | 'resolved' = 'firing') => {
+    const firing = rule(over)
+    return { transition, metric: firing.metric, rule: firing }
+  }
+
+  it('traces the first time an alert set to trace fires', () => {
+    expect(shouldTraceOnAlert([fired()], null, now)).toBe(true)
+  })
+
+  it('does not trace for an alert not set to, or one that is resolving', () => {
+    expect(shouldTraceOnAlert([fired({ traceOnFire: false })], null, now)).toBe(false)
+    expect(shouldTraceOnAlert([fired({}, 'resolved')], null, now)).toBe(false)
+    expect(shouldTraceOnAlert([], null, now)).toBe(false)
+  })
+
+  it('never traces for a certificate running out, which is not on the path', () => {
+    expect(shouldTraceOnAlert([fired({ metric: 'certExpiry' })], null, now)).toBe(false)
+  })
+
+  it('waits out the pause after the last trace taken on an alert', () => {
+    expect(shouldTraceOnAlert([fired()], minutesAgo(5), now)).toBe(false)
+    expect(shouldTraceOnAlert([fired()], minutesAgo(14.9), now)).toBe(false)
+    expect(shouldTraceOnAlert([fired()], minutesAgo(15), now)).toBe(true)
+  })
+
+  it('takes one trace for alerts firing together, after the shortest pause any of them asks for', () => {
+    const together = [fired({ traceCooldownMinutes: 60 }), fired({ id: 'r2', metric: 'unreachable', traceCooldownMinutes: 5 })]
+    expect(shouldTraceOnAlert(together, minutesAgo(10), now)).toBe(true)
+    expect(shouldTraceOnAlert(together, minutesAgo(3), now)).toBe(false)
   })
 })

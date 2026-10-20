@@ -27,6 +27,7 @@ import { FactorPolicyForm, SignInFactors, useMyFactors } from '../security/sign-
 import { MaintenanceTab } from './maintenance-tab'
 import { AssistantSettings, CopyField, PAGE_CARD } from './mcp-setup'
 import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
+import { displayTimeZone, inDisplayZone } from '@/lib/time-zone'
 
 /**
  * Who may use this ClearPing, and what they have done.
@@ -112,7 +113,7 @@ const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 const ROLE_OPTIONS = ROLES.map(role => ({ value: role, label: ROLE_LABEL[role] }))
 
 function when(ms: number | null): string {
-  return ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'never'
+  return ms ? new Date(ms).toLocaleString(undefined, inDisplayZone({ dateStyle: 'medium', timeStyle: 'short' })) : 'never'
 }
 
 async function send(url: string, method: string, body?: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -953,7 +954,7 @@ function ActivityTab() {
     return <EmptyState icon={<History size={24} strokeWidth={1.75} />} title="Nothing yet" description="Changes appear here as they are made." />
   }
 
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const timeZone = displayTimeZone() ?? Intl.DateTimeFormat().resolvedOptions().timeZone
 
   return (
     <div className="space-y-3">

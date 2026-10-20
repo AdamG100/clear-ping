@@ -13,6 +13,14 @@ export async function register() {
   // Only the Node.js runtime can spawn `ping` or open SQLite.
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
+  // A TZ that names no zone leaves Node on UTC without a word, and the page
+  // on each viewer's own clock: said here, once, rather than found out from a
+  // chart an hour or two off.
+  const { configuredTimeZone } = await import('./lib/time-zone');
+  if (process.env.TZ?.trim() && !configuredTimeZone(process.env.TZ)) {
+    console.warn(`[Init] TZ="${process.env.TZ}" is not a time zone this machine knows; use an IANA name such as Europe/London`);
+  }
+
   if (process.env.CLEARPING_EXTERNAL_PROBER === '1') {
     console.log('[Init] External prober configured; in-process scheduler disabled');
     const { initDatabase } = await import('./lib/database');

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { copyText } from "@/lib/clipboard";
 
 export type CopyFeedbackState = "idle" | "copied" | "error";
 
@@ -25,7 +26,9 @@ export function useCopyFeedback(duration = 1900) {
     if (timeout.current) clearTimeout(timeout.current);
     setActiveKey(key);
     try {
-      await navigator.clipboard.writeText(value);
+      // ClearPing: falls back to copying a selection where the page is not
+      // secure (plain HTTP on the local network), which has no Clipboard API.
+      await copyText(value);
       setState("copied");
       timeout.current = setTimeout(reset, duration);
       return true;

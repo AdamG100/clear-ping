@@ -37,8 +37,26 @@ threshold. It defaults to a single probe rather than several in a row: a
 certificate's expiry date does not flap. Only HTTPS targets have a certificate,
 so on any other target it never fires.
 
-When a **packet loss** or **unreachable** alert fires on a target, a traceroute
-to that target is taken automatically and saved to its Route panel.
+### Tracing the route when an alert fires
+
+An alert on packet loss, unreachable, latency or jitter can **trace the route**
+to the target the moment it fires (the *Trace the route* box under *When it
+fires*). The trace is saved to the target's Route panel, marked *Taken on
+alert*. It is on by default for packet loss and unreachable alerts, and off for
+latency and jitter.
+
+So that a link which keeps dropping out is not traced over and over, each alert
+sets a wait (15 minutes unless changed, up to a day) before the same target is
+traced on an alert again. The wait runs from the last trace taken on any alert
+for that target, and survives a restart. Alerts that fire together share one
+trace. Tracing by hand with *Trace route* is never held back.
+
+Any trace, however it was taken, can be passed on from the Route panel: *Copy
+as text* gives the hops in columns for a chat or a ticket, and *Save as a web
+page* gives a single HTML file, with nothing to load from anywhere, to send to
+whoever runs the network. Times in both are given in the zone ClearPing is set
+to (`TZ`) with their offset from UTC, such as `2026-10-20 11:05:07 GMT+2`, so
+they mean the same thing to whoever reads them.
 
 A target probed over **both IP versions** takes two readings each round, and its
 alerts are judged once per round on the worse of the two: the higher loss, the
@@ -112,7 +130,8 @@ Each time the alert fires or clears on a target, one message goes to every URL:
 - a title saying what happened: `Router: packet loss is too high`, or
   `Router has recovered`
 - the condition and how long it has held, then the target's address, the
-  current reading, the alert's name and the target's group
+  current reading, when it happened (in the zone set by `TZ`, with its offset
+  from UTC), the alert's name and the target's group
 - Apprise's `failure` type when it fires and `success` when it clears, which
   services that have colours or icons show as red and green
 
@@ -123,9 +142,12 @@ which with `?format=text`, `?format=markdown` or `?format=html`.
 
 Two examples of what that is for:
 
-- **Discord as an embed.** Discord gets a plain message by default. Add
-  `?format=markdown` and it is posted as an embed, coloured by whether the
-  alert fired or cleared.
+- **Discord as an embed.** Apprise sends Discord (and Guilded) an embed only
+  when the URL asks for Markdown, so ClearPing asks for it: an alert is posted
+  as an embed, red when it fires and green when it clears, with the details on
+  lines of their own. Add `?format=text` to a URL to get a plain message
+  instead. Slack and Teams get a coloured attachment or card from Apprise
+  whatever the format.
 - **A JSON endpoint that wants plain text.** `jsons://host/path?format=text`.
   The body it receives is Apprise's:
 

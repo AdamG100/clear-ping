@@ -26,6 +26,7 @@ import {
   type FactorsOwed,
 } from '@/lib/security/factors'
 import type { Role } from '@/lib/security/roles'
+import { inDisplayZone } from '@/lib/time-zone'
 import { CopyField } from '../monitoring/mcp-setup'
 
 /**
@@ -83,7 +84,7 @@ export function useMyFactors() {
 
 /** When something was added, as a date. */
 function when(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, { dateStyle: 'medium' })
+  return new Date(ms).toLocaleDateString(undefined, inDisplayZone({ dateStyle: 'medium' }))
 }
 
 /** The secret in an otpauth:// address, for typing into an app that cannot scan. */

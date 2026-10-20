@@ -83,6 +83,27 @@ describe('timeTicks', () => {
     expect(ticks[0].label).toMatch(/^\d\d:\d\d:\d\d [AP]M$/)
   })
 
+  it('marks the clock of the zone it is given, not the machine’s', () => {
+    // 09:07:30 UTC is 14:37:30 in Kolkata, half an hour off the hours of UTC.
+    const utc = Date.UTC(2026, 9, 12, 9, 7, 30)
+    // A day at this width is marked every two hours.
+    const hourly = timeTicks(utc, utc + DAY, 800, 'Asia/Kolkata')
+    expect(hourly[0].time).toBe(Date.UTC(2026, 9, 12, 10, 30))
+    expect(hourly[0].label).toBe('04:00 PM')
+    expect(hourly.find(tick => tick.label === 'Oct 13')?.time).toBe(Date.UTC(2026, 9, 12, 18, 30))
+
+    const fiveMinutes = timeTicks(utc, utc + HOUR, 800, 'Asia/Kolkata')
+    expect(fiveMinutes[0].label).toBe('02:40 PM')
+  })
+
+  it('stays on the hour across a change of the clocks', () => {
+    // New York moves its clocks back an hour early on 1 November 2026.
+    const from = Date.UTC(2026, 9, 31, 12)
+    const ticks = timeTicks(from, from + 2 * DAY, 800, 'America/New_York')
+    for (const tick of ticks) expect(tick.label).toMatch(/^(\d\d:00 [AP]M|Nov \d)$/)
+    expect(ticks.filter(tick => tick.label === 'Nov 1')).toHaveLength(1)
+  })
+
   it('has nothing to mark in a period with no length', () => {
     expect(timeTicks(start, start, 800)).toEqual([])
     expect(timeTicks(start, start - 1, 800)).toEqual([])

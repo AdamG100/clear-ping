@@ -1,7 +1,7 @@
 import type { IpVersion, ProbeConfig, ProbeType } from '@/types/probe'
 import { resolverLabel } from './dns-resolvers'
 import { classifyHost } from './host'
-import { DEFAULT_DNS_QUERY_NAME, httpUrlFor, isAddressRecord, nameRecordType } from './probe-config'
+import { DEFAULT_DNS_QUERY_NAME, DEFAULT_PING_PACKETS, httpUrlFor, isAddressRecord, nameRecordType } from './probe-config'
 
 /**
  * The words used for a target's readings, by probe type.
@@ -121,14 +121,19 @@ export function describeProbe(
   const family = isName ? familyNote(ipVersion) : ''
 
   switch (probeType) {
-    case 'ping':
-      if (!isName) return `Pings this ${kind === 'ipv6' ? 'IPv6' : 'IPv4'} address directly.`
+    case 'ping': {
+      // Said every time: it is why loss moves in the steps it does.
+      const packets = config.packets ?? DEFAULT_PING_PACKETS
+      const step = 100 / packets
+      const counted = ` ${packets} packets a probe, so loss is read in steps of ${Number.isInteger(step) ? step : step.toFixed(1)}%.`
+      if (!isName) return `Pings this ${kind === 'ipv6' ? 'IPv6' : 'IPv4'} address directly.${counted}`
       if (ipVersion === 'both') {
-        return 'Resolves the name before every probe, then pings its IPv4 and its IPv6 address separately. Charted as two lines, so one family failing shows beside the other.'
+        return `Resolves the name before every probe, then pings its IPv4 and its IPv6 address separately. Charted as two lines, so one family failing shows beside the other.${counted}`
       }
       return ipVersion === 'auto'
-        ? 'Resolves the name before every probe, then pings the address the system prefers.'
-        : `Resolves the name's ${FAMILY_NAME[ipVersion]} before every probe, then pings it.`
+        ? `Resolves the name before every probe, then pings the address the system prefers.${counted}`
+        : `Resolves the name's ${FAMILY_NAME[ipVersion]} before every probe, then pings it.${counted}`
+    }
 
     case 'tcp': {
       const port = config.port ? `port ${config.port}` : 'the port below'

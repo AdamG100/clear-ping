@@ -8,6 +8,7 @@ import {
   NO_DATA_COLOR,
 } from '@/lib/packet-loss-colors'
 import type { DataPoint, TimeRange, TimeWindow } from '@/types/probe'
+import { inDisplayZone } from '@/lib/time-zone'
 import {
   BrushBox,
   BrushLabel,
@@ -550,12 +551,12 @@ export const SmokeTrace = memo(function SmokeTrace({
           style={readingsBox}
         >
           <p className="font-mono text-[11px] text-muted-foreground">
-            {active.point.timestamp.toLocaleString('en-US', {
+            {active.point.timestamp.toLocaleString('en-US', inDisplayZone({
               month: 'short',
               day: 'numeric',
               hour: '2-digit',
               minute: '2-digit',
-            })}
+            }))}
           </p>
 
           {active.point.sampleCount === 0 ? (

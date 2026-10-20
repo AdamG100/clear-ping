@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/alerts - Create an alert
- * Body: { name?, metric, threshold, consecutiveProbes, notifyUrls?, targetIds }
+ * Body: { name?, metric, threshold, consecutiveProbes, notifyUrls?, traceOnFire?, traceCooldownMinutes?, targetIds }
  *
  * `notifyUrls` is the Apprise URLs to send it to: any service Apprise has, and
  * as many as wanted. Left out or empty, the alert is only shown in the app.

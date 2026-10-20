@@ -488,7 +488,7 @@ const traceroutes: McpTool = {
   name: 'get_traceroutes',
   title: 'Saved traceroutes',
   description:
-    'The routes ClearPing has traced to a target, or to all of them, hop by hop. The ones marked automatic were traced at the moment a loss alert fired, so they show the route through a failure and the hop at which replies stopped. The last 30 days unless a period is given.',
+    'The routes ClearPing has traced to a target, or to all of them, hop by hop. The ones marked automatic were traced at the moment an alert set to trace fired, so they show the route through a failure and the hop at which replies stopped. The last 30 days unless a period is given.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -666,7 +666,7 @@ const ispReport: McpTool = {
           : []),
         ...(unmeasured.length > 0 ? [`No readings in this period for: ${shortList(unmeasured.map(each => each.label)).join(', ')}.`] : []),
         ...(routes.total === 0
-          ? ['No traceroute was saved in this period, so there is no hop-by-hop evidence of where a failure was. One is saved automatically when a loss alert fires on a target.']
+          ? ['No traceroute was saved in this period, so there is no hop-by-hop evidence of where a failure was. One is saved automatically when an alert set to trace the route fires on a target.']
           : []),
       ],
     }
@@ -710,7 +710,7 @@ const TARGET_PROPERTIES = {
   settings: {
     type: 'object',
     description:
-      'What only that probe has. tcp: port (required unless it is in the address). http: scheme ("http" or "https"), port, path, expectedStatus, keyword (text the page must contain). ' +
+      'What only that probe has. ping: packets (echo requests per probe, 5 to 100, default 20; loss is read in steps of 100/packets percent). tcp: port (required unless it is in the address). http: scheme ("http" or "https"), port, path, expectedStatus, keyword (text the page must contain). ' +
       'dns on a server address: queryName, recordType, expectedAnswer. dns on a hostname: resolvers (a list of { protocol: "system" | "udp" | "dot" | "doh", server, name }), recordType, expectedAnswer.',
   },
 } as const

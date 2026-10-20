@@ -23,6 +23,8 @@ import { SearchField } from '@/components/arc/search-field/search-field'
 import { ThemeSwitch } from '@/components/arc/theme-switch/theme-switch'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useTheme } from '../use-theme'
+import { useToast } from '@/components/notifications'
+import { copyText } from '@/lib/clipboard'
 import { StatusIndicator } from './status-indicator'
 import { addressFamilyFor, isDualStack } from '@/lib/host'
 import { targetAddressLabel } from '@/lib/probe-config'
@@ -63,6 +65,7 @@ import {
   Play,
   ChartLine,
   Bell,
+  ClipboardCopy,
   ListX,
   MoreHorizontal,
   PanelLeftClose,
@@ -73,6 +76,20 @@ import { SidebarRail } from './sidebar-rail'
 import { SIDEBAR_COLLAPSE_BUTTON_ID } from './use-sidebar-drawer'
 
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
+
+/**
+ * A group's panel, by how deep it sits: a group at the top is a step off the
+ * sidebar, and one inside it a step further. Deeper down they take turns, so
+ * every group stands out from the one around it. With no panel of their own,
+ * groups and the groups inside them ran together on the sidebar's colour.
+ */
+const GROUP_PANEL = [
+  'rounded-xl border border-sidebar-group-border bg-sidebar-group',
+  'rounded-lg border border-sidebar-group-border bg-sidebar-group-nested',
+] as const
+
+/** How the target on show is marked in the list. */
+const SELECTED_ROW = 'bg-primary/15 ring-1 ring-inset ring-primary/35 hover:bg-primary/20'
 
 // ─── Collapsing ─────────────────────────────────────────────────────────────
 
@@ -219,10 +236,20 @@ function TargetRow({
   const usesIpv6 = addressFamilyFor(target.host, target.ipVersion) === 6
   // Whether the row's actions are open beside it.
   const [actionsOpen, setActionsOpen] = useState(false)
+  const { notify, reportError } = useToast()
 
-  // Only the actions there is a way to carry out: none, for an account that
-  // may only look.
+  // The domain or address itself, not the URL or port around it: what goes
+  // into a terminal, a ticket or another tool.
+  const copyAddress = () =>
+    copyText(target.host).then(
+      () => notify({ tone: 'success', title: 'Copied', detail: target.host }),
+      error => reportError('Could not copy the address', error)
+    )
+
+  // Only the actions there is a way to carry out. Copying changes nothing,
+  // so an account that may only look has that one.
   const actions = [
+    { label: 'Copy address', icon: ClipboardCopy, danger: false, run: floating ? undefined : copyAddress },
     { label: paused ? 'Resume' : 'Pause', icon: paused ? Play : Pause, danger: false, run: onTogglePaused && (() => onTogglePaused(target)) },
     { label: 'Edit', icon: Pencil, danger: false, run: onEditTarget && (() => onEditTarget(target)) },
     { label: 'Duplicate', icon: Copy, danger: false, run: onDuplicateTarget && (() => onDuplicateTarget(target)) },
@@ -250,13 +277,14 @@ function TargetRow({
       }}
       className={cn(
         'relative w-full text-left px-2 py-2 rounded-md transition-colors group/target cursor-pointer',
-        'hover:bg-sidebar-accent',
+        'hover:bg-sidebar-row-hover',
         // The selected row is simply the one that is lit. The highlight used
         // to be one shared element that slid from the old row to the new one,
         // which read as something chasing the click down the list, and went
         // astray altogether when the list itself was moving: a group
-        // collapsing, or the drawer sliding shut on a phone.
-        selected && 'bg-sidebar-accent'
+        // collapsing, or the drawer sliding shut on a phone. Lit in the
+        // accent: a grey a step lighter was lost on the groups' own greys.
+        selected && SELECTED_ROW
       )}
     >
       <div className="relative flex items-center gap-1.5">
@@ -338,7 +366,7 @@ function TargetRow({
             and a touchscreen has no hover to reveal them. */}
         {actions.length > 0 && !floating && (
           <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
-            <Tooltip content="Pause, edit, duplicate or delete" side="right">
+            <Tooltip content={actions.length > 1 ? 'Copy the address, pause, edit, duplicate or delete' : 'Copy the address'} side="right">
               <PopoverTrigger asChild>
                 <Button
                   type="button"
@@ -449,10 +477,10 @@ function TargetDragOverlay({
       style={{ x, y, width: drag.width }}
     >
       <motion.div
-        // The base is the sidebar's own colour: once the copy has settled it
-        // looks exactly like the row about to replace it, so the swap is not
-        // visible.
-        className="relative rounded-md bg-sidebar"
+        // The base is a group's colour, which is what rows sit on: once the
+        // copy has settled it looks like the row about to replace it, so the
+        // swap is not visible.
+        className="relative rounded-md bg-sidebar-group"
         initial={{ scale: 1, opacity: 1, boxShadow: SHADOW_RESTING }}
         animate={{
           scale: lifted ? 1.03 : absorbing ? 0.9 : 1,
@@ -462,7 +490,7 @@ function TargetDragOverlay({
         transition={DRAG_SPRING}
       >
         <motion.div
-          className="absolute inset-0 rounded-md bg-sidebar-accent outline-1 outline-sidebar-ring/50"
+          className="absolute inset-0 rounded-md bg-primary/15 outline-1 outline-sidebar-ring/50"
           initial={{ opacity: selected ? 1 : 0 }}
           animate={{ opacity: lifted || selected ? 1 : 0 }}
           transition={{ duration: 0.15 }}
@@ -566,22 +594,22 @@ interface GroupTreeProps {
  * siblings and cannot be dropped out of the group it belongs to by accident.
  * Moving a group somewhere else in the tree is done from its edit dialog.
  */
-function GroupList({ parent, ...tree }: GroupTreeProps & { parent: string }) {
+function GroupList({ parent, depth = 0, ...tree }: GroupTreeProps & { parent: string; depth?: number }) {
   return (
     <Reorder.Group
       axis="y"
       values={subgroups(tree.layout, parent)}
       onReorder={ordered => tree.onReorderSubgroups(parent, ordered)}
-      className="space-y-1"
+      className={depth === 0 ? 'space-y-2' : 'space-y-1.5'}
     >
       {subgroups(tree.layout, parent).map(group => (
-        <TargetGroup key={group} group={group} parent={parent} {...tree} />
+        <TargetGroup key={group} group={group} parent={parent} depth={depth} {...tree} />
       ))}
     </Reorder.Group>
   )
 }
 
-function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: string; parent: string }) {
+function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group: string; parent: string; depth: number }) {
   const {
     readOnly = false,
     layout,
@@ -637,7 +665,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
       value={group}
       dragListener={false}
       dragControls={dragControls}
-      className="select-none"
+      className={cn('select-none', GROUP_PANEL[depth % 2])}
       whileDrag={{ scale: 1.02, zIndex: 50 }}
       // Position only. Animating size as well scales the whole group while a
       // row enters or leaves it, which visibly stretches the header text.
@@ -651,9 +679,9 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
           they are deliberately outside this element. */}
       <div
         className={cn(
-          'rounded-lg ring-1 ring-transparent transition-[background-color,box-shadow] duration-150',
+          'rounded-[inherit] ring-1 ring-transparent transition-[background-color,box-shadow] duration-150',
           isDropDestination && 'bg-primary/5 ring-primary/40',
-          isCompared && !isDropDestination && 'bg-sidebar-accent/60 ring-sidebar-ring/40'
+          isCompared && !isDropDestination && 'bg-primary/5 ring-sidebar-ring/40'
         )}
         data-group={group}
       >
@@ -679,7 +707,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
             ) : (
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             )}
-            <span className="truncate text-xs font-medium text-muted-foreground">
+            <span className="truncate text-xs font-medium text-sidebar-foreground">
               {name}
             </span>
           </button>
@@ -759,7 +787,7 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
               exit={{ height: 0, opacity: 0, overflow: 'hidden' }}
               transition={{ duration: 0.2 }}
             >
-              <ul className="space-y-0.5 ml-1">
+              <ul className="space-y-0.5 px-1 pb-1">
                 {targetIds.map(targetId => {
                   const target = targetsById.get(targetId)
                   if (!target) return null
@@ -813,8 +841,8 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
         </AnimatePresence>
       </div>
 
-      {/* Groups inside this one, set in from it with a rule down the side so
-          the eye can follow which header they belong to. */}
+      {/* Groups inside this one, as panels within its own, set in from its
+          edge so the eye can follow which header they belong to. */}
       <AnimatePresence initial={false}>
         {!isCollapsed && inside.length > 0 && (
           <motion.div
@@ -823,8 +851,8 @@ function TargetGroup({ group, parent, ...tree }: GroupTreeProps & { group: strin
             exit={{ height: 0, opacity: 0, overflow: 'hidden' }}
             transition={{ duration: 0.2 }}
           >
-            <div className="ml-3 mt-1 border-l border-sidebar-border pl-1">
-              <GroupList parent={group} {...tree} />
+            <div className="pb-1.5 pl-2.5 pr-1.5">
+              <GroupList parent={group} depth={depth + 1} {...tree} />
             </div>
           </motion.div>
         )}
@@ -1201,9 +1229,9 @@ export function Sidebar({
               <SidebarSkeleton />
             ) : searchResults ? (
               // Search mode: plain list, no drag
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {searchResults.map(({ group, targets: matches }) => (
-                  <div key={group}>
+                  <div key={group} className={GROUP_PANEL[0]}>
                     <div className="flex items-center gap-1 px-2 py-1.5">
                       {/* The whole path: out of the tree, a name alone does
                           not say which of two same-named groups this is. */}
@@ -1214,7 +1242,7 @@ export function Sidebar({
                         <Badge size="sm">{matches.length}</Badge>
                       </span>
                     </div>
-                    <ul className="space-y-0.5 ml-1">
+                    <ul className="space-y-0.5 px-1 pb-1">
                       {matches.map(target => (
                         <li key={target.id}>
                           <div
@@ -1230,8 +1258,8 @@ export function Sidebar({
                             }}
                             className={cn(
                               'w-full text-left px-3 py-2 rounded-md transition-colors group cursor-pointer',
-                              'hover:bg-sidebar-accent',
-                              selectedTargetId === target.id && 'bg-sidebar-accent'
+                              'hover:bg-sidebar-row-hover',
+                              selectedTargetId === target.id && SELECTED_ROW
                             )}
                           >
                             <div className="flex items-center gap-2.5">
@@ -1301,8 +1329,8 @@ export function Sidebar({
               {/* Where the next group would go, and so where the way to make
                   one is. A group is made here first and filled afterwards. */}
               {onCreateGroup && !readOnly && (
-                <div className="mt-2 flex">
-                  <Button type="button" variant="ghost" size="sm" className="flex-1" onClick={() => setGroupTask({ kind: 'create', parent: '' })}>
+                <div className="sidebar-controls mt-2 flex">
+                  <Button type="button" variant="secondary" size="sm" className="flex-1" onClick={() => setGroupTask({ kind: 'create', parent: '' })}>
                     <FolderPlus {...ICON} />
                     New group
                   </Button>
@@ -1339,7 +1367,7 @@ export function Sidebar({
             Add target
           </Button>
         )}
-        <div className="flex gap-2">
+        <div className="sidebar-controls flex gap-2">
           {onOpenAlerts && (
             <Button
               className="flex-1"

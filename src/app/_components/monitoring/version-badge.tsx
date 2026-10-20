@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Badge } from '@/components/arc/badge/badge'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import type { VersionStatus } from '@/lib/version'
+import { inDisplayZone } from '@/lib/time-zone'
 
 /**
  * The version this server is running, and whether a newer one is out.
@@ -18,7 +19,7 @@ const ASK_EVERY_MS = 60 * 60 * 1000
 function when(iso: string | null): string | null {
   if (!iso) return null
   const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleString(undefined, inDisplayZone({ dateStyle: 'medium', timeStyle: 'short' }))
 }
 
 /** One line about where this build came from: when, and from which commit. */

@@ -11,8 +11,8 @@ import { executeProbes } from './probe';
 import { measurementFrom, worstOf } from './probe-result';
 import type { IpVersion, ProbeConfig, ProbeResult, ProbeType } from '@/types/probe';
 import { randomUUID } from 'crypto';
-import { dispatchAlert, evaluateAlerts } from './alerts';
-import { cleanOldTraceroutes, ensureTracerouteSchema, traceAndStore } from './traceroute';
+import { asksForTrace, dispatchAlert, evaluateAlerts, shouldTraceOnAlert } from './alerts';
+import { cleanOldTraceroutes, ensureTracerouteSchema, lastAlertTraceAt, traceAndStore } from './traceroute';
 
 /**
  * Targets probed at once, per kind. Bounded so a long target list cannot
@@ -300,19 +300,19 @@ class ProbeScheduler {
         await dispatchAlert(event);
       }
 
-      // The moment a loss alert fires is the one chance to see the route the
-      // packets are being lost on. Not awaited: a trace through a dead path
-      // can take a minute, and the next probe must not wait for it.
-      const lostPath = events.some(
-        event =>
-          event.transition === 'firing' &&
-          (event.metric === 'packetLoss' || event.metric === 'unreachable')
-      );
-      if (lostPath) {
-        console.log(`[Scheduler] Tracing route to ${target.name} after alert`);
-        void traceAndStore(target, 'alert').catch(error =>
-          console.error(`[Scheduler] Traceroute failed for ${target.name}:`, error)
-        );
+      // The moment an alert fires is the one chance to see the route through
+      // whatever went wrong, for the alerts set to trace. Not awaited: a
+      // trace through a dead path can take a minute, and the next probe must
+      // not wait for it.
+      if (events.some(asksForTrace)) {
+        if (shouldTraceOnAlert(events, await lastAlertTraceAt(target.id))) {
+          console.log(`[Scheduler] Tracing route to ${target.name} after alert`);
+          void traceAndStore(target, 'alert').catch(error =>
+            console.error(`[Scheduler] Traceroute failed for ${target.name}:`, error)
+          );
+        } else {
+          console.log(`[Scheduler] Not tracing ${target.name} again yet: a trace was taken on an alert recently`);
+        }
       }
     } catch (error) {
       console.error(`[Scheduler] Alert evaluation failed for ${target.name}:`, error);

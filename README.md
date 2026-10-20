@@ -32,8 +32,10 @@ looks different from one that is unstable.
   watches, and send it to any service [Apprise](https://github.com/caronc/apprise)
   can notify: Discord, Slack, Telegram, email, ntfy, a webhook and over a
   hundred more.
-- **Traceroute.** On demand, and automatically at the moment a loss alert
-  fires, which is the only time the route through a failure can be captured.
+- **Traceroute.** On demand, and automatically at the moment an alert set to
+  trace fires (with a wait between traces), which is the only time the route
+  through a failure can be captured. Copy one as text or save it as a web page
+  to share.
 - **Certificate expiry.** HTTPS targets record when their certificate runs
   out, and an alert can watch for it.
 - **Ask an AI assistant.** ClearPing is an MCP server as well. Give Claude,
@@ -277,6 +279,7 @@ All optional. With Docker, pass them with `-e`.
 |---|---|---|
 | `CLEARPING_DB_PATH` | `./data/clearping.db` (`/data/clearping.db` in the image) | Where the database is kept |
 | `CLEARPING_RETENTION_DAYS` | `90` | Days of measurements to keep; `0` keeps everything |
+| `TZ` | unset (each viewer's own) | The time zone every time in ClearPing is shown in, as an IANA name such as `Europe/London`: the charts, the tables, the routes, the alerts sent out and the nightly clean-up all go by it. Unset, the page shows each person their own time, and the server keeps UTC |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes, for when `npm run probe` runs as its own process |
 | `BETTER_AUTH_SECRET` | made and kept in the database | What sign-in cookies are signed with. Nothing needs it set; set it to keep sessions across a replaced database |
 | `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made: for getting back in after a lost password ([docs/security.md](docs/security.md#locked-out)) |

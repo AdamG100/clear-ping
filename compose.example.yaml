@@ -28,6 +28,11 @@ services:
       CLEARPING_ALLOWED_HOSTS: ping.example.com
       # One proxy (Traefik) sits in front, so its X-Forwarded-For can be believed.
       CLEARPING_TRUST_PROXY: 1
+      # The time zone every time in ClearPing is shown in: the charts, the
+      # routes, the alerts it sends and when the nightly clean-up runs. An IANA
+      # name (https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+      # Left out, each person sees their own time and the container keeps UTC.
+      TZ: Europe/London
     volumes:
       # The database. The container runs as uid 1000, so on Linux create the
       # directory first and hand it over, or the app cannot write to it:

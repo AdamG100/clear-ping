@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState, useRef, memo } from 'react'
 import { getPacketLossVar, isMeaningfulLoss } from '@/lib/packet-loss-colors'
 import type { DataPoint } from '@/types/probe'
+import { inDisplayZone } from '@/lib/time-zone'
 import {
   BrushBox,
   BrushLabel,
@@ -393,12 +394,12 @@ export const CompareTrace = memo(function CompareTrace({
           style={readingsBox}
         >
           <p className="font-mono text-[11px] text-muted-foreground">
-            {new Date(hoverTime).toLocaleString('en-US', {
+            {new Date(hoverTime).toLocaleString('en-US', inDisplayZone({
               month: 'short',
               day: 'numeric',
               hour: '2-digit',
               minute: '2-digit',
-            })}
+            }))}
           </p>
           <dl className="mt-1.5 space-y-0.5 text-xs">
             {readings.map(({ line, at }) => {

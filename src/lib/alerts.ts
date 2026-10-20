@@ -1,9 +1,15 @@
 import { randomUUID } from 'crypto';
 import { getDatabase } from './database';
-import { notificationFor, parseNotifyUrls } from './alert-delivery';
+import { notificationFor, parseNotifyUrls, withEmbeds } from './alert-delivery';
 import { sendNotification, type DeliveryResult } from './apprise';
 import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
-import { ALERT_METRIC_LABELS } from '@/types/probe';
+import {
+  ALERT_METRIC_LABELS,
+  DEFAULT_TRACE_COOLDOWN_MINUTES,
+  MAX_TRACE_COOLDOWN_MINUTES,
+  TRACEABLE_ALERT_METRICS,
+  tracesByDefault,
+} from '@/types/probe';
 
 export const ALERT_METRICS = Object.keys(ALERT_METRIC_LABELS) as AlertMetric[];
 
@@ -21,6 +27,8 @@ interface AlertRow {
   threshold: number;
   consecutive_probes: number;
   notify_urls: string | null;
+  trace_on_fire: number;
+  trace_cooldown_minutes: number;
   enabled: number;
   created_at: number;
 }
@@ -52,6 +60,8 @@ function settingsFromRow(row: AlertRow): AlertSettings & { id: string; enabled: 
     threshold: row.threshold,
     consecutiveProbes: row.consecutive_probes,
     notifyUrls: parseUrls(row.notify_urls),
+    traceOnFire: row.trace_on_fire === 1,
+    traceCooldownMinutes: row.trace_cooldown_minutes,
     enabled: row.enabled === 1,
     createdAt: new Date(row.created_at),
   };
@@ -119,7 +129,13 @@ export async function getAlertRules(targetId: string): Promise<AlertRule[]> {
   return rows.map(row => ({ ...settingsFromRow(row), ...stateFromRow(row) }));
 }
 
-export type AlertInput = AlertSettings & { targetIds: string[]; enabled?: boolean };
+/**
+ * What making or changing an alert takes. Whether it traces, and how often,
+ * may be left out: an alert made without saying traces if its metric is one
+ * that always used to (see tracesByDefault).
+ */
+export type AlertInput = Omit<AlertSettings, 'traceOnFire' | 'traceCooldownMinutes'> &
+  Partial<Pick<AlertSettings, 'traceOnFire' | 'traceCooldownMinutes'>> & { targetIds: string[]; enabled?: boolean };
 
 /**
  * Check and tidy what the API was sent for an alert.
@@ -169,6 +185,19 @@ export function parseAlertInput(
     input.notifyUrls = notifyUrls;
   }
 
+  if (given('traceOnFire')) {
+    if (typeof body.traceOnFire !== 'boolean') return fail('traceOnFire must be a boolean');
+    input.traceOnFire = body.traceOnFire;
+  }
+
+  if (given('traceCooldownMinutes')) {
+    const minutes = Number(body.traceCooldownMinutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_TRACE_COOLDOWN_MINUTES) {
+      return fail(`traceCooldownMinutes must be a whole number of minutes from 1 to ${MAX_TRACE_COOLDOWN_MINUTES}`);
+    }
+    input.traceCooldownMinutes = minutes;
+  }
+
   if (given('targetIds') || !partial) {
     if (!Array.isArray(body.targetIds)) return fail('targetIds must be a list of target ids');
     input.targetIds = [...new Set(body.targetIds.map(String))];
@@ -193,8 +222,8 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
 
   await run(
     `INSERT INTO alerts
-      (id, name, metric, threshold, consecutive_probes, notify_urls, enabled, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, name, metric, threshold, consecutive_probes, notify_urls, trace_on_fire, trace_cooldown_minutes, enabled, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.name ?? '',
@@ -202,6 +231,8 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
       input.threshold,
       input.consecutiveProbes,
       JSON.stringify(input.notifyUrls),
+      (input.traceOnFire ?? tracesByDefault(input.metric)) ? 1 : 0,
+      input.traceCooldownMinutes ?? DEFAULT_TRACE_COOLDOWN_MINUTES,
       input.enabled === false ? 0 : 1,
       Date.now(),
     ]
@@ -227,6 +258,8 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
   if (changes.threshold !== undefined) set('threshold', changes.threshold);
   if (changes.consecutiveProbes !== undefined) set('consecutive_probes', changes.consecutiveProbes);
   if (changes.notifyUrls !== undefined) set('notify_urls', JSON.stringify(changes.notifyUrls));
+  if (changes.traceOnFire !== undefined) set('trace_on_fire', changes.traceOnFire ? 1 : 0);
+  if (changes.traceCooldownMinutes !== undefined) set('trace_cooldown_minutes', changes.traceCooldownMinutes);
   if (changes.enabled !== undefined) set('enabled', changes.enabled ? 1 : 0);
 
   if (fields.length > 0) {
@@ -401,6 +434,37 @@ export async function evaluateAlerts(
   return events;
 }
 
+// ─── Tracing the route ──────────────────────────────────────────────────────
+
+/** An alert that has just fired, and is set to trace the route when it does. */
+export function asksForTrace(event: Pick<AlertEvent, 'transition' | 'metric' | 'rule'>): boolean {
+  return event.transition === 'firing' && event.rule.traceOnFire && TRACEABLE_ALERT_METRICS.includes(event.metric);
+}
+
+/**
+ * Whether the alerts that just fired on a target call for its route to be
+ * traced, given when a trace was last taken on an alert for it.
+ *
+ * One trace answers for every alert that fired on the same probe. The pause
+ * runs from the last trace taken on any alert for the target, since it is the
+ * same path whichever alert noticed, and is the shortest that the alerts
+ * asking for a trace want. A link that keeps dropping out fires and resolves
+ * over and over, and each trace through a dead path is a minute and a half of
+ * probes; the first trace of a spell of trouble is the one that shows where.
+ */
+export function shouldTraceOnAlert(
+  events: Pick<AlertEvent, 'transition' | 'metric' | 'rule'>[],
+  lastAlertTraceAt: Date | null,
+  now = Date.now()
+): boolean {
+  const asking = events.filter(asksForTrace);
+  if (asking.length === 0) return false;
+  if (!lastAlertTraceAt) return true;
+
+  const pauseMs = Math.min(...asking.map(event => event.rule.traceCooldownMinutes)) * 60_000;
+  return now - lastAlertTraceAt.getTime() >= pauseMs;
+}
+
 // ─── Telling someone ────────────────────────────────────────────────────────
 
 export type { DeliveryResult };
@@ -411,7 +475,7 @@ export async function deliverAlert(event: AlertEvent, options: { test?: boolean 
   if (urls.length === 0) return { ok: false, detail: 'This alert is not sent anywhere' };
 
   try {
-    return await sendNotification(urls, notificationFor(event, options));
+    return await sendNotification(urls.map(withEmbeds), notificationFor(event, options));
   } catch (error) {
     return { ok: false, detail: `Could not run Apprise: ${error instanceof Error ? error.message : String(error)}` };
   }

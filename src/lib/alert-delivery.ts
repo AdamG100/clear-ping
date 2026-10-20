@@ -1,6 +1,7 @@
 import type { AlertEvent, AlertMetric, AlertSettings } from '@/types/probe';
 import { ALERT_METRIC_LABELS } from '@/types/probe';
 import { groupLabel } from './group-path';
+import { displayTimeZone, formatMoment } from './time-zone';
 
 /**
  * What an alert says, and the URLs it is sent to.
@@ -102,6 +103,38 @@ export function restoreRedacted(submitted: string[], existing: string[]): string
   return submitted.map(url => existing.includes(url) ? url : (existing.find(real => redactNotifyUrl(real) === url) ?? url));
 }
 
+/** Discord's own addresses for a webhook, which Apprise takes as they are. */
+const DISCORD_WEBHOOK = /^https?:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\//i;
+
+/**
+ * Services Apprise posts as a card (an embed) only when the URL asks for
+ * Markdown, and as a line of plain text otherwise. Guilded is Discord's
+ * plugin under another name.
+ */
+const EMBED_SCHEMES = new Set(['discord', 'guilded']);
+
+/**
+ * A notification URL as it is handed to Apprise: one for a service that can
+ * show an alert as an embed asks for one. The embed is coloured red or green
+ * by whether the alert is firing or has cleared, and carries the title and
+ * the details on their own lines, where plain text runs them together.
+ *
+ * Only where the URL says nothing of its own about the format: one that
+ * asks for plain text (`format=text`) keeps it. What is stored is never
+ * changed; this is applied on the way out.
+ *
+ * Slack and Teams need nothing: Apprise sends them a coloured attachment or
+ * card whatever the format.
+ */
+export function withEmbeds(url: string): string {
+  const scheme = url.slice(0, Math.max(0, url.indexOf('://'))).toLowerCase();
+  if (!EMBED_SCHEMES.has(scheme) && !DISCORD_WEBHOOK.test(url)) return url;
+
+  const query = url.indexOf('?');
+  if (query !== -1 && /(?:^|&)format=/i.test(url.slice(query + 1))) return url;
+  return `${url}${query === -1 ? '?' : url.endsWith('?') || url.endsWith('&') ? '' : '&'}format=markdown`;
+}
+
 // ─── What it says ───────────────────────────────────────────────────────────
 
 /**
@@ -126,6 +159,8 @@ export interface AlertNotification {
 interface NotificationOptions {
   /** A message sent from the "Send test" button rather than by a real probe. */
   test?: boolean;
+  /** The zone to say when it happened in; the one ClearPing shows times in if left out. */
+  zone?: string;
 }
 
 // Apprise's own limit for a title, on a service that sets none of its own.
@@ -176,6 +211,10 @@ export function notificationFor(event: AlertEvent, options: NotificationOptions 
   const details = [
     ['Address', event.targetHost],
     ['Now', formatObserved(event.metric, event.observed)],
+    // A chat shows when a message arrived, not when the probe saw the
+    // trouble, and an embed carries no time of its own; with its offset, as
+    // a message is read in whatever zone its reader is in.
+    ['When', formatMoment(event.at, options.zone ?? displayTimeZone())],
     ['Alert', alertTitle(event.rule)],
   ];
   if (event.targetGroup) details.push(['Group', groupLabel(event.targetGroup)]);

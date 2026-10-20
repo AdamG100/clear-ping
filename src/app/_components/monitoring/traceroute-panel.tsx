@@ -2,11 +2,12 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { CheckCircle2, ChevronDown, ChevronRight, Route, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Download, Route, Trash2, XCircle } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
+import { CopyButton } from '@/components/arc/copy-button/copy-button'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
@@ -18,25 +19,39 @@ import { mean } from '@/lib/metrics'
 import {
   addressFamilyFor,
   canChooseTraceFamily,
-  classifyHost,
   defaultTraceFamilies,
   FAMILY_LABEL,
   type AddressFamily,
   type TraceFamilies,
 } from '@/lib/host'
-import { firstDeadHop, hopLoss, newestPerFamily, pathLoss } from '@/lib/traceroute-parse'
+import { newestPerFamily } from '@/lib/traceroute-parse'
+import {
+  endToEnd,
+  formatMs as ms,
+  readHops,
+  traceAsHtml,
+  traceAsText,
+  traceFamily,
+  traceFileName,
+  traceSummary,
+  type HopState,
+  type TraceSubject,
+} from '@/lib/traceroute-export'
 import type { IpVersion, Traceroute, TracerouteHop } from '@/types/probe'
+import { inDisplayZone } from '@/lib/time-zone'
 
 /**
  * The route to a target, hop by hop.
  *
  * The chart shows that packets were lost; this shows where. Traces are taken
- * on request, and automatically at the moment a loss alert fires, since that
+ * on request, and automatically when an alert set to trace fires, since that
  * is usually the only time the broken route can be seen at all.
  */
 
 interface TraceroutePanelProps {
   targetId: string
+  /** What the target is called, for a trace copied or saved to share. */
+  name: string
   /** What is traced, and over which families unless someone picks others. */
   host: string
   ipVersion?: IpVersion
@@ -50,33 +65,6 @@ type TraceResponse = Omit<Traceroute, 'timestamp'> & { timestamp: string }
 
 function parseTrace(trace: TraceResponse): Traceroute {
   return { ...trace, timestamp: new Date(trace.timestamp) }
-}
-
-function summarize(trace: Traceroute): { text: string; tone: 'ok' | 'bad' } {
-  if (trace.hops.length === 0) {
-    return { text: trace.errorMessage ?? 'No hops recorded', tone: 'bad' }
-  }
-  if (trace.reached) {
-    return { text: `Reached in ${trace.hops.length} hop${trace.hops.length === 1 ? '' : 's'}`, tone: 'ok' }
-  }
-
-  const dead = firstDeadHop(trace.hops, trace.reached)
-  if (dead === null) return { text: `Did not reach ${trace.address}`, tone: 'bad' }
-  return {
-    text: dead <= 1 ? 'No replies from the first hop on' : `No replies beyond hop ${dead - 1}`,
-    tone: 'bad',
-  }
-}
-
-/** How long the whole path took: the average reply from the target itself. */
-function endToEnd(trace: Traceroute): number | null {
-  return trace.reached ? mean(trace.hops.at(-1)?.rtts ?? []) : null
-}
-
-/** Which family a trace went over, read from the address it was traced to. */
-function familyOf(trace: Traceroute): AddressFamily | null {
-  const kind = classifyHost(trace.address)
-  return kind === 'ipv4' ? 4 : kind === 'ipv6' ? 6 : null
 }
 
 /** The runs a trace is made of, one per family, in the order they are run. */
@@ -97,7 +85,7 @@ const FAMILY_OPTIONS = [
 ]
 
 function formatTime(timestamp: Date): string {
-  return timestamp.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return timestamp.toLocaleString('en-US', inDisplayZone({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))
 }
 
 /** How long after a trace its hop names are still expected to be arriving. */
@@ -109,26 +97,43 @@ function isAwaitingName(hop: TracerouteHop) {
   return hop.address !== null && hop.hostname === undefined
 }
 
-const ms = (value: number) => value.toFixed(value < 10 ? 1 : 0)
+// ─── Sharing a trace ────────────────────────────────────────────────────────
 
-// ─── A hop's place on the path ──────────────────────────────────────────────
+/** Hand the browser a file to save, made here rather than fetched. */
+function saveFile(name: string, content: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  // After the click has had its turn: revoked at once, some browsers save nothing.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 /**
- * How a hop stands, which is what its mark on the path is drawn from.
- *
- * `silent` is a router that did not answer while later ones did. It is
- * forwarding traffic and declining to reply, and calling it the fault is the
- * classic misreading of a traceroute, so it is drawn as a gap in what is
- * known and not as a failure. `dead` is where replies stop for good.
+ * Ways to pass a trace on: as text for a chat or a ticket, or as a page of its
+ * own for whoever runs the network it went wrong in, who has no way into this
+ * dashboard. A trace taken during an outage is the evidence a provider asks for.
  */
-type HopState = 'answered' | 'lossy' | 'silent' | 'dead' | 'destination'
-
-function hopState(hop: TracerouteHop, trace: Traceroute, dead: number | null, loss: number): HopState {
-  if (dead !== null && hop.hop >= dead) return 'dead'
-  if (hop.rtts.length === 0) return 'silent'
-  if (trace.reached && hop === trace.hops.at(-1)) return 'destination'
-  return loss > 0 ? 'lossy' : 'answered'
+function ShareTrace({ trace, subject }: { trace: Traceroute; subject: TraceSubject }) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <CopyButton value={traceAsText(trace, subject)} label="Copy as text" />
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => saveFile(traceFileName(trace, subject), traceAsHtml(trace, subject), 'text/html')}
+      >
+        <Download size={16} strokeWidth={1.75} aria-hidden="true" />
+        Save as a web page
+      </Button>
+    </div>
+  )
 }
+
+// ─── A hop's place on the path ──────────────────────────────────────────────
 
 const NODE_STYLE: Record<HopState, string> = {
   answered: 'border-signal-perfect/50 bg-signal-perfect/10 text-foreground',
@@ -228,17 +233,13 @@ function TracingRow({ family, startedAt }: { family: AddressFamily | null; start
 }
 
 function HopTable({ trace }: { trace: Traceroute }) {
-  const dead = firstDeadHop(trace.hops, trace.reached)
+  // Each hop's loss is the traffic being lost there (see pathLoss), and
+  // `limited` marks replies that did not come from a router the traffic got
+  // through.
+  const { hops: readings, dead } = readHops(trace)
   const scale = Math.max(1, ...trace.hops.flatMap(hop => hop.rtts))
-  // The loss that is traffic being lost; see pathLoss.
-  const losses = pathLoss(trace.hops)
-  const states = trace.hops.map((hop, index) => hopState(hop, trace, dead, losses[index]))
 
-  const row = (hop: TracerouteHop, index: number) => {
-    const state = states[index]
-    const loss = losses[index]
-    // Replies that did not come, from a router the traffic got through.
-    const limited = hopLoss(hop) > loss
+  const row = ({ hop, state, loss, limited }: (typeof readings)[number], index: number) => {
     const average = mean(hop.rtts)
     const silent = hop.rtts.length === 0
 
@@ -248,7 +249,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
             the table, so the route reads as a route before any figure is read. */}
         <td className="relative w-10 p-0">
           {index > 0 && <PathLine half="above" broken={state === 'dead'} />}
-          {index < trace.hops.length - 1 && <PathLine half="below" broken={states[index + 1] === 'dead'} />}
+          {index < readings.length - 1 && <PathLine half="below" broken={readings[index + 1].state === 'dead'} />}
           {/* Solid underneath, so the line stops at the stop's edge. */}
           <span className="relative mx-auto block size-6 rounded-full bg-card">
             <span
@@ -357,7 +358,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
             </th>
           </tr>
         </thead>
-        <tbody>{trace.hops.map(row)}</tbody>
+        <tbody>{readings.map(row)}</tbody>
       </table>
       {dead !== null && (
         <div className="mt-3">
@@ -365,7 +366,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
             {/* Seen on a network whose IPv6 ends at the provider's first
                 routers: easily read as the target's fault, and a DNS target's
                 healthy IPv6 line makes it look stranger still. */}
-            {familyOf(trace) === 6 && dead <= 4
+            {traceFamily(trace) === 6 && dead <= 4
               ? "IPv6 stops inside your own provider's network, so this machine has no working IPv6 path past it. A DNS target's IPv6 line is its AAAA lookup, which can be answered over IPv4, so that can look healthy while this does not."
               : 'The fault is at that hop or just beyond the last one that replied.'}
           </Alert>
@@ -377,7 +378,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
 
 // ─── The panel ──────────────────────────────────────────────────────────────
 
-export function TraceroutePanel({ targetId, host, ipVersion, refreshKey, readOnly = false }: TraceroutePanelProps) {
+export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, readOnly = false }: TraceroutePanelProps) {
   const { notify, reportError } = useToast()
   const [traces, setTraces] = useState<Traceroute[]>([])
   // How many are kept in all, which can be more than the newest few listed.
@@ -518,7 +519,7 @@ export function TraceroutePanel({ targetId, host, ipVersion, refreshKey, readOnl
             </TextShimmer>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Where the path goes, hop by hop. Traced automatically when a loss alert fires.
+              Where the path goes, hop by hop. Traced automatically when an alert set to trace fires.
             </p>
           )}
         </div>
@@ -571,11 +572,11 @@ export function TraceroutePanel({ targetId, host, ipVersion, refreshKey, readOnl
                 tracing.map(family => <TracingRow key={family ?? 'any'} family={family} startedAt={startedAt} />)}
               {traces.map(item => {
                 const open = item.id === openId
-                const summary = summarize(item)
+                const summary = traceSummary(item)
                 const took = endToEnd(item)
                 const StatusIcon = summary.tone === 'ok' ? CheckCircle2 : XCircle
                 const time = formatTime(item.timestamp)
-                const family = familyOf(item)
+                const family = traceFamily(item)
 
                 return (
                   <li
@@ -645,6 +646,7 @@ export function TraceroutePanel({ targetId, host, ipVersion, refreshKey, readOnl
                           className="overflow-hidden"
                         >
                           <div className="border-t border-border px-3 pb-3 pt-3">
+                            <ShareTrace trace={item} subject={{ name, host }} />
                             <HopTable trace={item} />
                           </div>
                         </motion.div>

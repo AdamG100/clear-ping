@@ -455,6 +455,24 @@ async function roles(database: Database): Promise<void> {
   }
 }
 
+/**
+ * An alert says whether it traces the route when it fires, and how long it
+ * leaves before tracing the same target again. Until now every loss and
+ * unreachable alert traced each time it fired, however often that was: those
+ * go on tracing, now with a pause between traces, and the rest start off.
+ */
+async function alertTraceroutes(database: Database): Promise<void> {
+  const columns = await all<{ name: string }>(database, 'PRAGMA table_info(alerts)');
+  const has = (name: string) => columns.some(column => column.name === name);
+  if (!has('trace_on_fire')) {
+    await run(database, 'ALTER TABLE alerts ADD COLUMN trace_on_fire INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!has('trace_cooldown_minutes')) {
+    await run(database, 'ALTER TABLE alerts ADD COLUMN trace_cooldown_minutes INTEGER NOT NULL DEFAULT 15');
+  }
+  await run(database, `UPDATE alerts SET trace_on_fire = 1 WHERE metric IN ('packetLoss', 'unreachable')`);
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
@@ -465,6 +483,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'single sign-on', up: singleSignOn },
   { name: 'single sign-out', up: singleSignOut },
   { name: 'roles', up: roles },
+  { name: 'alert traceroutes', up: alertTraceroutes },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

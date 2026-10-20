@@ -49,6 +49,7 @@ Things that bite:
 - Notifications are `useToast()` from `@/components/notifications` (Arc's toast stack).
 - Some installed Arc files are edited, and `shadcn add --overwrite` would undo
   them: tooltip (dark colours), code-block (no `//` comments in shell),
-  expandable-card (a `leading` slot for a status dot), and the fields (input,
+  expandable-card (a `leading` slot for a status dot), lib/use-copy-feedback
+  (copies through `src/lib/clipboard.ts`, which works over plain HTTP), and the fields (input,
   textarea, password, search, number, tag input, select), whose focus border is
   `--focus-color`, the colour of every other focus ring, instead of white.

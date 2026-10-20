@@ -42,6 +42,7 @@ import { useSignedIn } from './use-signed-in'
 import { DEFAULT_SETTINGS_SECTION, isSettingsSection, pathOf, type DashboardPage } from '@/lib/dashboard-pages'
 import { ProbeDetailsPanel } from './probe-details'
 import { TraceroutePanel } from './traceroute-panel'
+import { CopyAddress } from './copy-address'
 import { ComparePanel } from './compare-panel'
 import { FamilySection } from './family-section'
 import { formatWindowEdge } from './chart-brush'
@@ -51,6 +52,7 @@ import { Button } from '@/components/arc/button/button'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
+import { inDisplayZone } from '@/lib/time-zone'
 
 /** Content that replaces a placeholder fades in over it instead of cutting. */
 const FADE_IN = {
@@ -1163,14 +1165,22 @@ export function Dashboard() {
                   {selectedTarget.name}
                 </h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                  <span className="break-all font-mono text-muted-foreground">{targetAddressLabel(selectedTarget)}</span>
+                  {/* Each with a way to copy it. The domain or IP alone, not
+                      the URL or port the label may wrap it in. */}
+                  <span className="flex min-w-0 items-center gap-0.5">
+                    <span className="break-all font-mono text-muted-foreground">{targetAddressLabel(selectedTarget)}</span>
+                    <CopyAddress value={selectedTarget.host} />
+                  </span>
                   {/* Where a domain pointed on its last probe: the address the
                       readings below were actually taken against. */}
                   {selectedTarget.resolvedAddress && (
-                    <span className="break-all font-mono text-muted-foreground/70">
-                      <span aria-hidden="true">→ </span>
-                      <span className="sr-only">resolves to </span>
-                      {selectedTarget.resolvedAddress}
+                    <span className="flex min-w-0 items-center gap-0.5">
+                      <span className="break-all font-mono text-muted-foreground/70">
+                        <span aria-hidden="true">→ </span>
+                        <span className="sr-only">resolves to </span>
+                        {selectedTarget.resolvedAddress}
+                      </span>
+                      <CopyAddress value={selectedTarget.resolvedAddress} />
                     </span>
                   )}
                   <Badge size="sm">{methodLabel}</Badge>
@@ -1363,11 +1373,11 @@ export function Dashboard() {
                   ) : lastUpdated && !showSpinner && (
                     <p className="font-mono text-[11px] text-muted-foreground">
                       last probe{' '}
-                      {lastUpdated.toLocaleTimeString('en-US', {
+                      {lastUpdated.toLocaleTimeString('en-US', inDisplayZone({
                         hour: '2-digit',
                         minute: '2-digit',
                         second: '2-digit',
-                      })}
+                      }))}
                     </p>
                   )}
                 </div>
@@ -1433,6 +1443,7 @@ export function Dashboard() {
                   <TraceroutePanel
                     key={selectedTarget.id}
                     targetId={selectedTarget.id}
+                    name={selectedTarget.name}
                     host={selectedTarget.host}
                     ipVersion={selectedTarget.ipVersion}
                     refreshKey={lastUpdated?.getTime()}
