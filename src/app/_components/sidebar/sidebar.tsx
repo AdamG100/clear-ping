@@ -77,6 +77,9 @@ import {
 import { SidebarRail } from './sidebar-rail'
 import { SIDEBAR_COLLAPSE_BUTTON_ID } from './use-sidebar-drawer'
 
+/** What a grey dot says for a closed-port check that has never had an answer. */
+const NEVER_ANSWERED = 'No answer yet: this server does not answer the closed-port check, so it cannot be measured this way'
+
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 
 /**
@@ -319,7 +322,7 @@ function TargetRow({
           packetLoss={target.packetLoss}
           note={target.statusNote}
           paused={paused}
-          onHold={target.onHold}
+          onHold={target.onHold ?? (target.neverAnswered ? NEVER_ANSWERED : undefined)}
         />
 
         {/* The name owns the full width of the first line; the address and the
@@ -1079,12 +1082,15 @@ export function Sidebar({
   // than lumped in with the offline ones. Paused ones are counted as neither
   // online nor offline: nobody has asked them lately.
   // Nor are those whose probe agent is down: their last reading is old news.
-  const probed = targets.filter(t => t.status !== 'paused' && !t.onHold)
+  const probed = targets.filter(t => t.status !== 'paused' && !t.onHold && !t.neverAnswered)
   const onlineCount = probed.filter(t => t.isOnline === true).length
   const offlineCount = probed.filter(t => t.isOnline === false).length
   const pendingCount = probed.filter(t => t.isOnline === undefined).length
   const pausedCount = targets.filter(t => t.status === 'paused').length
   const heldCount = targets.filter(t => t.status !== 'paused' && t.onHold).length
+  // Nor are the closed-port checks that have never had an answer: no reading
+  // says their server is down, only that this check cannot reach it.
+  const silentCount = targets.filter(t => t.status !== 'paused' && !t.onHold && t.neverAnswered).length
 
   const draggedTarget = drag.active ? targetsById.get(drag.active.id) : undefined
   const deletingTarget = deletingId ? targetsById.get(deletingId) ?? null : null
@@ -1197,6 +1203,12 @@ export function Sidebar({
             <div className="flex items-center gap-1.5">
               <StatusIndicator />
               <span className="text-muted-foreground">{pendingCount} pending</span>
+            </div>
+          )}
+          {silentCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <StatusIndicator onHold={NEVER_ANSWERED} />
+              <span className="text-muted-foreground">{silentCount} no answer</span>
             </div>
           )}
           {heldCount > 0 && (
@@ -1315,7 +1327,7 @@ export function Sidebar({
                                 isOnline={target.isOnline}
                                 packetLoss={target.packetLoss}
                                 paused={target.status === 'paused'}
-                                onHold={target.onHold}
+                                onHold={target.onHold ?? (target.neverAnswered ? NEVER_ANSWERED : undefined)}
                               />
                               <div className={cn('flex-1 min-w-0', target.status === 'paused' && 'opacity-60 grayscale')}>
                                 <div className="flex items-center gap-2">

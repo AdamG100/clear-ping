@@ -24,6 +24,7 @@ import { useSidebarDrawer } from '../sidebar/use-sidebar-drawer'
 import { PANE, PANE_ACTION, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
 import StatsCards from '../targets/stats-cards'
 import { LossBreakdown } from '../targets/loss-breakdown'
+import { SilentServerNote } from '../targets/silent-server'
 import { TimeRangeSelector } from '../charts/time-range-selector'
 import { SmokeTrace } from '../charts/smoke-trace'
 import { PaneSkeleton, ReadoutSkeleton, TraceSkeleton } from './skeleton'
@@ -1407,11 +1408,40 @@ export function Dashboard() {
                   lastUpdated={lastUpdated}
                   vocabulary={vocabulary}
                   paused={selectedTarget.status === 'paused'}
+                  unmeasured={selectedTarget.neverAnswered}
+                  period={zoom ? 'in the zoomed period' : `over the last ${TIME_RANGE_CONFIG[timeRange].label.toLowerCase().replace(/^1 /, '')}`}
+                />
+              )}
+
+              {/* A closed-port check that never got an answer has no loss to
+                  analyse, only a server that cannot be measured this way. */}
+              {!showSpinner && statistics && selectedTarget.neverAnswered && (
+                <SilentServerNote
+                  key={selectedTarget.id}
+                  target={selectedTarget}
+                  probes={statistics.sampleCount}
+                  targets={targets}
+                  readOnly={readOnly}
+                  // Pinged from where the server is probed from, and put under it in its group.
+                  onWatch={address => handleAddTarget(selectedTarget, {
+                    name: `${selectedTarget.name} (last hop)`,
+                    host: address,
+                    probeType: 'ping',
+                    ipVersion: 'auto',
+                    probeConfig: {},
+                    interval: selectedTarget.interval,
+                    status: 'active',
+                    group: selectedTarget.group,
+                    probeAgentId: selectedTarget.probeAgentId ?? null,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                  })}
+                  onShow={setSelectedTargetId}
                 />
               )}
 
               {/* Only when there is loss to find the cause of. */}
-              {!showSpinner && statistics && statistics.lossyProbes + statistics.failedProbes > 0 && (
+              {!showSpinner && statistics && statistics.lossyProbes + statistics.failedProbes > 0 && !selectedTarget.neverAnswered && (
                 <LossBreakdown
                   targetId={selectedTarget.id}
                   zoom={zoom}

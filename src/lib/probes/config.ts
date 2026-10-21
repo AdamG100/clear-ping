@@ -64,8 +64,9 @@ export const GAME_QUERY_INFO: Record<
     label: 'Any other game (Call of Duty…)',
     answers:
       'For games whose servers answer no query: Call of Duty, Valorant, League of Legends, Fortnite and the like. ' +
-      'Times the server\'s own "port closed" answer, which many servers that block ping still give, as mtr --udp does. ' +
-      'It shows that the server and the way to it are up, and how fast, not that the game on it is running. Needs ClearPing (or the probe agent) on Linux.',
+      'Sends UDP packets to ports on the server that nothing listens on, and times the "port unreachable" reply, which many servers that block ping still send. ' +
+      'It shows that the server and the way to it are up, and how fast, not that the game on it is running. ' +
+      'Servers behind a firewall that drops unknown packets, such as Google Cloud\'s, send nothing back and cannot be measured this way.',
     port: 'the game port, e.g., 44998',
     sends: 'UDP packets to ports nothing listens on',
     transport: 'UDP',
@@ -75,6 +76,16 @@ export const GAME_QUERY_INFO: Record<
 
 export function isGameQuery(value: unknown): value is GameQuery {
   return GAME_QUERIES.includes(value as GameQuery)
+}
+
+/**
+ * Whether a target is timed by its server's "port unreachable" for closed
+ * ports. A server behind a firewall that drops those packets never answers
+ * it at all, which is a server this check cannot measure, not one that is
+ * down: such a target is shown grey and raises no alerts until it answers.
+ */
+export function isClosedPortCheck(target: { probeType: ProbeType; probeConfig?: ProbeConfig }): boolean {
+  return target.probeType === 'game' && target.probeConfig?.gameQuery === 'unreachable'
 }
 
 export const DNS_RECORD_TYPES: readonly DnsRecordType[] = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT']

@@ -926,6 +926,26 @@ export async function getProbeReadings(targetId: string, startTime: Date, endTim
 }
 
 /**
+ * Which of some targets have been probed and never once answered, in all the
+ * readings kept. Asked only of the few targets it matters for: one that has
+ * answered stops being read at its first answer, but one that never has is
+ * read to the end.
+ */
+export async function getNeverAnswered(targetIds: string[]): Promise<Set<string>> {
+  if (targetIds.length === 0) return new Set();
+  const database = await getDatabase();
+  const rows = await allSql<{ id: string }>(
+    database,
+    `SELECT t.id FROM targets t
+     WHERE t.id IN (${targetIds.map(() => '?').join(', ')})
+       AND EXISTS (SELECT 1 FROM measurements m WHERE m.target_id = t.id)
+       AND NOT EXISTS (SELECT 1 FROM measurements m WHERE m.target_id = t.id AND m.success = 1)`,
+    targetIds
+  );
+  return new Set(rows.map(row => row.id));
+}
+
+/**
  * For each of some targets over a period, how many probes it had and when it
  * lost anything: what one target's loss is held against, to see whether the
  * others lost packets at the same moments. Only the moments of loss are read.

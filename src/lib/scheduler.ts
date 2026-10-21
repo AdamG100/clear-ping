@@ -6,7 +6,8 @@
  * are captured and stored for visualization on graphs.
  */
 
-import { getAllTargets, storeMeasurement, getDatabase, saveDatabaseToDisk, cleanOldMeasurements } from './db/database';
+import { getAllTargets, storeMeasurement, getDatabase, getNeverAnswered, saveDatabaseToDisk, cleanOldMeasurements } from './db/database';
+import { isClosedPortCheck } from './probes/config';
 import { checkProbeAgent, ProbeAgentUnavailableError, runProbes } from './probe-agents/client';
 import { cleanOldProbeAgentOutages, getProbeAgentConnection, pairedProbeAgentConnections } from './probe-agents/store';
 import { measurementFrom, worstOf } from './probes/result';
@@ -347,6 +348,11 @@ class ProbeScheduler {
     result: ProbeResult
   ): Promise<void> {
     try {
+      // A closed-port check whose server has never once answered it is a
+      // server the check cannot measure, not one that is down: nothing to
+      // alert on until it answers, after which silence is an outage again.
+      if (isClosedPortCheck(target) && !result.success && (await getNeverAnswered([target.id])).has(target.id)) return;
+
       const probedFrom = target.probeAgentId ? (await getProbeAgentConnection(target.probeAgentId))?.name : undefined;
       const events = await evaluateAlerts(
         { id: target.id, name: target.name, host: target.host, group: target.group, probedFrom },

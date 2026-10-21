@@ -16,8 +16,8 @@ slow looks different from one that is unstable.
   Rust, ARK, Valheim…), Minecraft Java's and Bedrock's pings and FiveM's
   `getinfo`, and shows the server's name, map and player count along with how
   fast it answers. For games that answer no query at all, such as Call of
-  Duty, it times the server's replies to closed ports instead, as
-  `mtr --udp` does (on Linux).
+  Duty, it times the server's "port unreachable" replies to closed ports
+  instead.
 - **Probe from anywhere.** A probe agent is a small program on another
   machine, such as a VPS in another country, that takes a target's readings
   from there. The dashboard connects to it over an encrypted, pinned link,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   firstDeadHop,
+  lastAnsweringHop,
   hopLoss,
   newestPerFamily,
   pathLoss,
@@ -105,6 +106,25 @@ describe('firstDeadHop', () => {
   it('has nothing to point at when the last hop answered but was not the target', () => {
     const hops = parseTraceroute(fixture.LINUX_ADMIN_PROHIBITED)
     expect(firstDeadHop(hops, false)).toBeNull()
+  })
+})
+
+describe('lastAnsweringHop', () => {
+  const hop = (n: number, address: string | null, answered: boolean) => ({ hop: n, address, rtts: answered ? [2.5] : [], sent: 3 })
+
+  it('finds the furthest hop that answered on the way to a server that does not', () => {
+    // As mtr --udp shows a server behind Google Cloud's firewall: Google's edge answers, the server never does.
+    const hops = [hop(1, '172.22.2.1', true), hop(2, null, false), hop(3, '154.0.0.89', true), hop(5, '72.14.220.200', true), hop(6, null, false)]
+    expect(lastAnsweringHop(hops, '34.1.208.133')?.address).toBe('72.14.220.200')
+  })
+
+  it('passes over the destination itself', () => {
+    const hops = [hop(1, '192.168.1.1', true), hop(2, '1.1.1.1', true)]
+    expect(lastAnsweringHop(hops, '1.1.1.1')?.address).toBe('192.168.1.1')
+  })
+
+  it('has nothing when no hop answered', () => {
+    expect(lastAnsweringHop([hop(1, null, false)], '34.1.208.133')).toBeNull()
   })
 })
 

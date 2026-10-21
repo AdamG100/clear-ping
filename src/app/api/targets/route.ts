@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTargets, createTarget, deleteTargets, getLatestMeasurementForAllTargets, pruneEmptyGroups, getGroupOrders, getGroups, getRecentSeriesForAllTargets } from '@/lib/db/database';
+import { getAllTargets, createTarget, deleteTargets, getLatestMeasurementForAllTargets, getNeverAnswered, pruneEmptyGroups, getGroupOrders, getGroups, getRecentSeriesForAllTargets } from '@/lib/db/database';
+import { isClosedPortCheck } from '@/lib/probes/config';
 import { randomUUID } from 'crypto';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
@@ -19,15 +20,18 @@ export async function GET(request: NextRequest) {
     const targets = await getAllTargets();
     
     if (includePacketLoss) {
-      const [latest, groups, groupOrders, series, probeAgents] = await Promise.all([
+      const [latest, groups, groupOrders, series, probeAgents, neverAnswered] = await Promise.all([
         getLatestMeasurementForAllTargets(),
         getGroups(),
         getGroupOrders(),
         getRecentSeriesForAllTargets(24),
         listProbeAgentSummaries(),
+        getNeverAnswered(targets.filter(isClosedPortCheck).map(target => target.id)),
       ]);
       return NextResponse.json({
-        targets,
+        // A closed-port check that has never had an answer can't measure its
+        // server, and is shown that way rather than as down.
+        targets: targets.map(target => (neverAnswered.has(target.id) ? { ...target, neverAnswered: true } : target)),
         latest,
         groups,
         groupOrders,

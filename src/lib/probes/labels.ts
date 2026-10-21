@@ -156,7 +156,7 @@ export function describeProbe(
       const query = config.gameQuery ?? 'source'
       const port = config.port ? `port ${config.port}` : 'the port below'
       if (query === 'unreachable') {
-        return `Sends UDP packets to ports on the server that nothing listens on and times its "port unreachable" answer, 10 a probe, a second apart, as mtr --udp does. Shows the server and the way to it are up, not the game on it.${family}`
+        return `Sends UDP packets to ports on the server that nothing listens on and times the "port unreachable" reply, 10 a probe, a second apart. Shows the server and the way to it are up, not the game on it. A server behind a firewall that drops these packets, such as Google Cloud's, sends no reply and cannot be measured this way.${family}`
       }
       const { sends, transport } = GAME_QUERY_INFO[query]
       const timed = query === 'minecraft'

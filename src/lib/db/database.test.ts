@@ -21,6 +21,7 @@ const {
   getBucketedMeasurements,
   cleanOldMeasurements,
   getMeasurements,
+  getNeverAnswered,
   closeDatabase,
 } = await import('./database')
 
@@ -247,5 +248,30 @@ describe('cleanOldMeasurements', () => {
 
     expect(await cleanOldMeasurements(90)).toBe(2)
     expect(await cleanOldMeasurements(90)).toBe(0)
+  })
+})
+
+describe('getNeverAnswered', () => {
+  it('names the targets that have readings and not one answer among them', async () => {
+    const reading = (targetId: string, minute: number, success: boolean) =>
+      storeMeasurement({
+        id: `n-${targetId}-${minute}`,
+        targetId,
+        timestamp: new Date(base + minute * 60_000),
+        latency: success ? 20 : null,
+        packetLoss: success ? 0 : 100,
+        jitter: null,
+        success,
+      })
+    for (const id of ['silent', 'answered-once', 'unprobed']) {
+      await createTarget({ id, name: id, host: '203.0.113.9', probeType: 'game', interval: 60, status: 'active', probeConfig: { port: 21299, gameQuery: 'unreachable' } })
+    }
+    for (let minute = 0; minute < 5; minute++) await reading('silent', minute, false)
+    // One answer, long ago, and silence since: an outage, not a server it can't measure.
+    await reading('answered-once', 0, true)
+    for (let minute = 1; minute < 5; minute++) await reading('answered-once', minute, false)
+
+    expect(await getNeverAnswered(['silent', 'answered-once', 'unprobed'])).toEqual(new Set(['silent']))
+    expect(await getNeverAnswered([])).toEqual(new Set())
   })
 })

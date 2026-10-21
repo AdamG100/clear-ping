@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { Activity, Clock3, Network, Route } from "lucide-react"
 import { Button } from "@/components/arc/button/button"
+import { Tooltip } from "@/components/arc/tooltip/tooltip"
 import { ExpandableCard } from "@/components/arc/expandable-card/expandable-card"
 import type { AddressFamily, TimeWindow } from "@/types/probe"
 import type { ProbeVocabulary } from "@/lib/probes/labels"
@@ -123,7 +124,33 @@ function PatternTile({ analysis, unit, longPeriod }: { analysis: LossAnalysis; u
  * The period folded into one day. Loss that comes every evening at the same
  * hour is congestion at the busy hour, and this is the only place it shows.
  */
-function HoursTile({ analysis }: { analysis: LossAnalysis }) {
+/** A share of probes, as a percentage worth reading: "16.7%", "0.8%", "100%". */
+function percent(share: number): string {
+  const value = share * 100
+  return `${value >= 10 || value === 0 ? value.toFixed(0) : value.toFixed(1)}%`
+}
+
+/** What one hour's bar says when pointed at. */
+function HourTip({ hour, peak, unit }: { hour: LossAnalysis["hours"][number]; peak: boolean; unit: string }) {
+  const span = `${hourLabel(hour.hour)}–${hourLabel((hour.hour + 1) % 24)}`
+  return (
+    <span className="block space-y-0.5 text-left">
+      <span className="block font-medium">{span}{peak && " · peak hour"}</span>
+      {hour.probes === 0 ? (
+        <span className="block">No probes in this hour</span>
+      ) : (
+        <>
+          <span className="block">
+            {count(hour.affected)} of {count(hour.probes)} probes lost {unit}
+          </span>
+          <span className="block">{percent(hour.affected / hour.probes)} of this hour&apos;s probes</span>
+        </>
+      )}
+    </span>
+  )
+}
+
+function HoursTile({ analysis, unit }: { analysis: LossAnalysis; unit: string }) {
   const share = (hour: LossAnalysis["hours"][number]) => (hour.probes > 0 ? hour.affected / hour.probes : 0)
   const highest = Math.max(...analysis.hours.map(share), 0)
   const covered = analysis.hours.filter(hour => hour.probes > 0).length
@@ -131,26 +158,46 @@ function HoursTile({ analysis }: { analysis: LossAnalysis }) {
   return (
     <Tile icon={<Clock3 size={15} strokeWidth={1.75} />} title="By hour of day">
       <div>
-        <div className="flex h-20 items-end gap-0.5" role="img" aria-label={`Share of probes with loss, hour by hour${analysis.busiestHour !== null ? `, peaking at ${hourLabel(analysis.busiestHour)}` : ""}`}>
-          {analysis.hours.map(hour => {
-            const height = highest > 0 ? (share(hour) / highest) * 100 : 0
-            return (
-              <div
-                key={hour.hour}
-                className={cn("flex-1 rounded-t-sm", hour.probes === 0 && "border-t border-dashed border-border")}
-                style={{
-                  height: hour.affected > 0 ? `${Math.max(8, height)}%` : "3px",
-                  backgroundColor: hour.affected === 0
-                    ? "var(--color-muted)"
-                    : hour.hour === analysis.busiestHour ? "var(--signal-moderate)" : "var(--signal-minor)",
-                }}
-                title={hour.probes > 0 ? `${hourLabel(hour.hour)}: ${hour.affected} of ${hour.probes} probes with loss` : `${hourLabel(hour.hour)}: no probes`}
-              />
-            )
-          })}
+        <div className="mb-1.5 flex items-baseline justify-between text-[11px] text-muted-foreground">
+          <span>Probes with loss, by hour</span>
+          {highest > 0 && <span className="font-mono">max {percent(highest)}</span>}
         </div>
-        <div className="mt-1.5 flex justify-between font-mono text-[10px] text-muted-foreground" aria-hidden="true">
-          <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
+        {/* The bars are scaled to the worst hour, whose share is the top line. */}
+        <div className="relative h-24 border-b border-border">
+          <div className="pointer-events-none absolute inset-x-0 top-0 border-t border-dashed border-border" aria-hidden="true" />
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed border-border/60" aria-hidden="true" />
+          <div className="absolute inset-0 grid grid-cols-24 gap-0.5">
+            {analysis.hours.map(hour => {
+              const height = highest > 0 ? (share(hour) / highest) * 100 : 0
+              const peak = hour.hour === analysis.busiestHour
+              return (
+                <Tooltip key={hour.hour} content={<HourTip hour={hour} peak={peak} unit={unit} />}>
+                  {/* The whole column answers the pointer, not only the bar, so a short bar is as easy to point at. */}
+                  <div
+                    tabIndex={0}
+                    aria-label={hour.probes === 0
+                      ? `${hourLabel(hour.hour)}: no probes`
+                      : `${hourLabel(hour.hour)}: ${hour.affected} of ${hour.probes} probes lost ${unit}`}
+                    className="group flex h-full items-end rounded-t-sm outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
+                  >
+                    <div
+                      className={cn("w-full rounded-t-sm transition-opacity group-hover:opacity-80", hour.probes === 0 && "border-t border-dashed border-muted-foreground/40")}
+                      style={{
+                        height: hour.affected > 0 ? `${Math.max(4, height)}%` : "2px",
+                        backgroundColor: hour.probes === 0
+                          ? "transparent"
+                          : hour.affected === 0 ? "var(--color-muted)" : peak ? "var(--signal-moderate)" : "var(--signal-minor)",
+                      }}
+                    />
+                  </div>
+                </Tooltip>
+              )
+            })}
+          </div>
+        </div>
+        {/* A label at the start of every third hour, under the bar it names. */}
+        <div className="mt-1.5 grid grid-cols-8 font-mono text-[10px] text-muted-foreground" aria-hidden="true">
+          {[0, 3, 6, 9, 12, 15, 18, 21].map(hour => <span key={hour}>{String(hour).padStart(2, "0")}</span>)}
         </div>
       </div>
       <p className="text-sm leading-relaxed text-muted-foreground">
@@ -293,7 +340,7 @@ export function LossBreakdown({
         <div className="@container/loss">
           <div className="grid gap-4 @3xl/loss:grid-cols-3">
             <PatternTile analysis={analysis} unit={vocabulary.unit} longPeriod={longPeriod} />
-            <HoursTile analysis={analysis} />
+            <HoursTile analysis={analysis} unit={vocabulary.unit} />
             <CorrelationTile analysis={analysis} unit={vocabulary.unit} />
           </div>
 

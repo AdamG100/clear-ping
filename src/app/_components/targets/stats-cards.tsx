@@ -8,6 +8,7 @@ import { getLatencyColor, getPacketLossLabel, getPacketLossVar, isMeaningfulLoss
 import { AnimatePresence, motion } from "motion/react"
 import { ArrowDown, ArrowUp, Clock, FileX, Gauge, TrendingUp, Zap } from "lucide-react"
 import { AnimatedCounter } from "@/components/arc/animated-counter/animated-counter"
+import { Tooltip } from "@/components/arc/tooltip/tooltip"
 
 /** How long ago something was, to the coarsest unit that says anything. */
 function describeAge(diffMs: number): string {
@@ -92,42 +93,93 @@ interface Spread {
  * not squash the usual readings into the first sliver of the bar, while the
  * figures underneath stay exact.
  */
-function SpreadBar({ spread, color, describe }: { spread: Spread; color: string; describe: (value: number) => string }) {
+/** One line of a tooltip: what it is, and the figure. */
+function TipRow({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="flex justify-between gap-4 whitespace-nowrap text-xs">
+      <span>{label}</span>
+      <span className="font-mono tabular-nums">{value}</span>
+    </span>
+  )
+}
+
+function SpreadBar({ spread, color, describe, what }: {
+  spread: Spread
+  color: string
+  describe: (value: number) => string
+  /** What the readings are, for the tooltip: "RTT", "jitter". */
+  what: string
+}) {
   const { min, max } = spread
   if (min === null || max === null) {
-    return <div className="h-5 rounded-full" aria-hidden="true"><div className="mt-2 h-1.5 rounded-full bg-muted" /></div>
+    return (
+      <div className="space-y-1.5" aria-hidden="true">
+        <div className="flex h-5 items-center"><div className="h-1.5 w-full rounded-full bg-muted" /></div>
+        <div className="h-3.5" />
+      </div>
+    )
   }
   const at = (value: number | null) =>
     value === null || max <= min ? 0 : Math.sqrt(Math.min(1, Math.max(0, (value - min) / (max - min)))) * 100
+  const range = spread.low !== null && spread.high !== null ? usual(spread.low, spread.high) : null
+  const mixed = `color-mix(in oklab, ${color} 55%, transparent)`
 
-  const parts = [
-    `From ${describe(min)} to ${describe(max)}`,
-    spread.low !== null && spread.high !== null && `usually ${describe(spread.low)} to ${describe(spread.high)}`,
-    spread.middle !== null && `median ${describe(spread.middle)}`,
-    spread.now !== null && `now ${describe(spread.now)}`,
-  ].filter(Boolean)
+  const tip = (
+    <span className="block space-y-1 text-left">
+      <span className="block font-medium">Spread of {what}</span>
+      <TipRow label="Lowest" value={describe(min)} />
+      {range && <TipRow label="Usually" value={range} />}
+      {spread.middle !== null && <TipRow label="Median" value={describe(spread.middle)} />}
+      <TipRow label="Highest" value={describe(max)} />
+      {spread.now !== null && <TipRow label="Latest" value={describe(spread.now)} />}
+      {range && <span className="block pt-1 text-xs opacity-70">Usually: where 8 in 10 readings fell</span>}
+    </span>
+  )
 
   return (
-    <div className="relative h-5" role="img" aria-label={parts.join(", ")}>
-      <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted" />
-      {spread.low !== null && spread.high !== null && (
+    <div className="space-y-1.5">
+      <Tooltip content={tip}>
         <div
-          className="absolute top-1/2 h-1.5 min-w-1.5 -translate-y-1/2 rounded-full"
-          style={{ left: `${at(spread.low)}%`, width: `${at(spread.high) - at(spread.low)}%`, backgroundColor: `color-mix(in oklab, ${color} 55%, transparent)` }}
-        />
-      )}
-      {spread.middle !== null && (
-        <div
-          className="absolute top-1/2 h-4 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full"
-          style={{ left: `${at(spread.middle)}%`, backgroundColor: color }}
-        />
-      )}
-      {spread.now !== null && (
-        <div
-          className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-card"
-          style={{ left: `${at(spread.now)}%` }}
-        />
-      )}
+          tabIndex={0}
+          aria-label={[
+            `${what} from ${describe(min)} to ${describe(max)}`,
+            range && `usually ${range}`,
+            spread.middle !== null && `median ${describe(spread.middle)}`,
+            spread.now !== null && `latest ${describe(spread.now)}`,
+          ].filter(Boolean).join(", ")}
+          className="relative h-5 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-(--focus-color)"
+        >
+          <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted" />
+          {spread.low !== null && spread.high !== null && (
+            <div
+              className="absolute top-1/2 h-1.5 min-w-1.5 -translate-y-1/2 rounded-full"
+              style={{ left: `${at(spread.low)}%`, width: `${at(spread.high) - at(spread.low)}%`, backgroundColor: mixed }}
+            />
+          )}
+          {spread.middle !== null && (
+            <div
+              className="absolute top-1/2 h-4 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{ left: `${at(spread.middle)}%`, backgroundColor: color }}
+            />
+          )}
+          {spread.now !== null && (
+            <div
+              className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-card"
+              style={{ left: `${at(spread.now)}%` }}
+            />
+          )}
+        </div>
+      </Tooltip>
+      {/* The ends of the bar, and what its marks are. */}
+      <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground" aria-hidden="true">
+        <span className="font-mono">{describe(min)}</span>
+        <span className="hidden items-center gap-2.5 @2xs/card:flex">
+          <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full" style={{ backgroundColor: mixed }} />usually</span>
+          <span className="flex items-center gap-1"><span className="h-2.5 w-0.5 rounded-full" style={{ backgroundColor: color }} />median</span>
+          <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-foreground" />latest</span>
+        </span>
+        <span className="font-mono">{describe(max)}</span>
+      </div>
     </div>
   )
 }
@@ -140,32 +192,50 @@ function SpreadBar({ spread, color, describe }: { spread: Spread; color: string;
 function LossBar({ bands, unit }: { bands: number[]; unit: string }) {
   const total = bands.reduce((sum, count) => sum + count, 0)
   const shown = PACKET_LOSS_BANDS.map((band, index) => ({ ...band, count: bands[index] ?? 0 })).filter(band => band.count > 0)
+  const share = (count: number) => {
+    const value = (count / total) * 100
+    return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)}%`
+  }
+  const probes = (count: number) => `${count.toLocaleString()} probe${count === 1 ? "" : "s"}`
 
   return (
-    <div className="space-y-2.5">
-      <div
-        className="flex h-2.5 gap-px overflow-hidden rounded-full bg-muted"
-        role="img"
-        aria-label={shown.map(band => `${band.count} ${band.label.toLowerCase()} (${band.range})`).join(", ")}
-      >
+    <div className="space-y-2">
+      <div className="flex h-2.5 gap-px overflow-hidden rounded-full bg-muted">
         {total > 0 && shown.map(band => (
-          <div
+          <Tooltip
             key={band.label}
-            className="h-full min-w-1"
-            style={{ flexGrow: band.count, flexBasis: 0, backgroundColor: band.cssVar }}
-            title={`${band.label} ${band.range}: ${band.count.toLocaleString()} probe${band.count === 1 ? "" : "s"}`}
-          />
+            content={
+              <span className="block space-y-1 text-left">
+                <span className="block font-medium">{band.label} loss: {band.range} of {unit}</span>
+                <TipRow label="Probes" value={probes(band.count)} />
+                <TipRow label="Of all probes" value={share(band.count)} />
+                <span className="block pt-1 text-xs opacity-70">{band.description}</span>
+              </span>
+            }
+          >
+            <div
+              tabIndex={0}
+              aria-label={`${band.label}, ${band.range} of ${unit} lost: ${probes(band.count)}, ${share(band.count)} of all`}
+              className="h-full min-w-1.5 cursor-default outline-none hover:brightness-125 focus-visible:brightness-125"
+              style={{ flexGrow: band.count, flexBasis: 0, backgroundColor: band.cssVar }}
+            />
+          </Tooltip>
         ))}
       </div>
+      {/* Probes counted by how much of what they sent was lost: a probe of 20
+          packets that lost one is in "Minor", at 5%. */}
+      <p className="text-[11px] text-muted-foreground">
+        {total > 0 ? `Probes by the share of their ${unit} lost` : `No ${unit} sent`}
+      </p>
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-hidden="true">
         {shown.map(band => (
           <li key={band.label} className="flex items-center gap-1.5">
             <span className="size-2 rounded-full" style={{ backgroundColor: band.cssVar }} />
             {band.label}
+            <span className="text-faint">{band.range}</span>
             <span className="font-mono tabular-nums text-foreground">{band.count.toLocaleString()}</span>
           </li>
         ))}
-        {total === 0 && <li>No {unit} sent</li>}
       </ul>
     </div>
   )
@@ -303,6 +373,8 @@ export default function StatsCards({
   lastUpdated,
   vocabulary,
   paused = false,
+  unmeasured = false,
+  period,
 }: Readonly<{
   statistics: TargetStatistics | null
   current: CurrentReadings
@@ -315,7 +387,18 @@ export default function StatsCards({
   paused?: boolean
   /** Names for the readings, which differ between ping and DNS targets. */
   vocabulary: ProbeVocabulary
+  /**
+   * A closed-port check that has never had an answer: its server cannot be
+   * measured this way. Grey, as paused is, and saying so, rather than
+   * calling a server down that no reading says is.
+   */
+  unmeasured?: boolean
+  /** The period the figures are over, as it ends a sentence: "over the last 2 days". */
+  period?: string
 }>) {
+  // Either way nothing on the cards is a verdict on the server.
+  const quiet = paused || unmeasured
+  const quietLabel = paused ? 'Paused' : "Can't measure"
   // "Has data" is a question about sample count, not about values. Checking
   // `avgLatency === 0 && packetLoss === 0` treated a fast, lossless target as
   // having no data and left it reading "Calculating…" forever.
@@ -365,11 +448,11 @@ export default function StatsCards({
 
   // All from the theme's signal colours, so the three cards agree with each
   // other and with the chart underneath in either theme.
-  const latencyAccentColor = !hasData || paused ? NO_DATA_COLOR
+  const latencyAccentColor = !hasData || quiet ? NO_DATA_COLOR
     : isCurrentlyOffline ? getPacketLossVar(100)
     : getLatencyColor(avgLatency ?? 0)
-  const packetLossAccentColor = !hasData || paused || packetLoss === null ? NO_DATA_COLOR : getPacketLossVar(packetLoss)
-  const jitterAccentColor = !hasData || paused || jitter === null ? NO_DATA_COLOR : getLatencyColor(jitter)
+  const packetLossAccentColor = !hasData || quiet || packetLoss === null ? NO_DATA_COLOR : getPacketLossVar(packetLoss)
+  const jitterAccentColor = !hasData || quiet || jitter === null ? NO_DATA_COLOR : getLatencyColor(jitter)
 
   // How many probes lost anything: the number the average is made of, said
   // outright so a small figure is not taken for a small problem, or the
@@ -379,30 +462,33 @@ export default function StatsCards({
   const lossLabel = !hasData
     ? vocabulary.lossLabel
     : affected === 0
-      ? `All ${probes.toLocaleString()} probes came back in full`
+      ? probes === 1 ? "The one probe came back in full" : `All ${probes.toLocaleString()} probes came back in full`
       : `${affected.toLocaleString()} of ${probes.toLocaleString()} probes lost ${vocabulary.unit}`
+  // Each headline says what period it is over, which the cards otherwise leave to the buttons above.
+  const over = (text: string) => (period && hasData ? `${text}, ${period}` : text)
 
   return (
     // One card to a row on a phone, three abreast where each still has room
     // for its figures. Between the two, the latency card takes a row to itself
     // and the other two share the next: three in two columns leaves a hole.
-    <div className={cn(STAT_GRID, paused && "grayscale")}>
+    <div className={cn(STAT_GRID, quiet && "grayscale")}>
       {/* The headline is a true median: one slow reply must not move it. */}
       <StatCard
         className={STAT_GRID_LEAD}
         title={vocabulary.latencyTitle}
         icon={<Gauge size={20} strokeWidth={1.75} />}
         main={{ value: hasData ? medianLatency : null, suffix: " ms", decimals: 1 }}
-        mainLabel={vocabulary.latencyLabel}
+        mainLabel={over(vocabulary.latencyLabel)}
         accentColor={latencyAccentColor}
-        trend={paused ? 'stable' : latencyTrend}
-        trendValue={paused ? 'Paused' : latencyTrendValue}
-        still={paused}
+        trend={quiet ? 'stable' : latencyTrend}
+        trendValue={quiet ? quietLabel : latencyTrendValue}
+        still={quiet}
         lastUpdated={lastUpdated}
         visual={
           <SpreadBar
             color={latencyAccentColor}
             describe={value => ms(value)}
+            what={vocabulary.latencyTitle.replace(/^Median /, "")}
             spread={{
               min: statistics?.minLatency ?? null,
               low: statistics?.latencyP10 ?? null,
@@ -414,10 +500,9 @@ export default function StatsCards({
           />
         }
         figures={[
-          { label: "Min", value: ms(statistics?.minLatency), variant: "success" },
+          { label: "Average", value: ms(avgLatency) },
           { label: "Usually", value: usual(statistics?.latencyP10, statistics?.latencyP90) },
-          { label: "Max", value: ms(statistics?.maxLatency), variant: avgLatency !== null && (statistics?.maxLatency ?? 0) > 200 ? "warning" : "default" },
-          { label: "Now", value: ms(current.latency) },
+          { label: "Latest", value: ms(current.latency) },
         ]}
       />
 
@@ -426,17 +511,17 @@ export default function StatsCards({
         title={vocabulary.lossTitle}
         icon={<FileX size={20} strokeWidth={1.75} />}
         main={{ value: hasData ? packetLoss : null, suffix: "%", decimals: 2 }}
-        mainLabel={lossLabel}
+        mainLabel={over(lossLabel)}
         accentColor={packetLossAccentColor}
-        trend={paused ? 'stable' : lossTrend}
-        trendValue={paused ? 'Paused' : lossTrendValue}
-        still={paused}
+        trend={quiet ? 'stable' : lossTrend}
+        trendValue={quiet ? quietLabel : lossTrendValue}
+        still={quiet}
         lastUpdated={lastUpdated}
         visual={<LossBar bands={statistics?.lossBands ?? []} unit={vocabulary.unit} />}
         figures={[
-          { label: "Worst", value: pct(maxPacketLoss), variant: !isMeaningfulLoss(maxPacketLoss) ? "success" : maxPacketLoss! > 5 ? "danger" : "warning" },
-          { label: "No reply", value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()}` : "—", variant: (statistics?.failedProbes ?? 0) > 0 ? "danger" : "success" },
-          { label: "Now", value: pct(current.packetLoss), variant: !isMeaningfulLoss(current.packetLoss) ? "success" : (current.packetLoss ?? 0) <= 5 ? "warning" : "danger" },
+          { label: "Worst probe", value: pct(maxPacketLoss), variant: !isMeaningfulLoss(maxPacketLoss) ? "success" : maxPacketLoss! > 5 ? "danger" : "warning" },
+          { label: "No reply at all", value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()} probes` : "—", variant: (statistics?.failedProbes ?? 0) > 0 ? "danger" : "success" },
+          { label: "Latest", value: pct(current.packetLoss), variant: !isMeaningfulLoss(current.packetLoss) ? "success" : (current.packetLoss ?? 0) <= 5 ? "warning" : "danger" },
         ]}
       />
 
@@ -444,16 +529,17 @@ export default function StatsCards({
         title="Jitter"
         icon={<Zap size={20} strokeWidth={1.75} />}
         main={{ value: hasData ? jitter : null, suffix: " ms", decimals: 1 }}
-        mainLabel={vocabulary.jitterLabel}
+        mainLabel={over(`Average ${vocabulary.jitterLabel.charAt(0).toLowerCase()}${vocabulary.jitterLabel.slice(1)}`)}
         accentColor={jitterAccentColor}
-        trend={paused ? 'stable' : jitterTrend}
-        trendValue={paused ? 'Paused' : jitterTrendValue}
-        still={paused}
+        trend={quiet ? 'stable' : jitterTrend}
+        trendValue={quiet ? quietLabel : jitterTrendValue}
+        still={quiet}
         lastUpdated={lastUpdated}
         visual={
           <SpreadBar
             color={jitterAccentColor}
             describe={value => ms(value)}
+            what="jitter"
             spread={{
               min: statistics?.minJitter ?? null,
               low: statistics?.jitterP10 ?? null,
@@ -465,10 +551,9 @@ export default function StatsCards({
           />
         }
         figures={[
-          { label: "Min", value: ms(statistics?.minJitter), variant: "success" },
+          { label: "Median", value: ms(statistics?.medianJitter) },
           { label: "Usually", value: usual(statistics?.jitterP10, statistics?.jitterP90) },
-          { label: "Max", value: ms(statistics?.maxJitter), variant: (statistics?.maxJitter ?? 0) > 100 ? "warning" : "default" },
-          { label: "Now", value: ms(current.jitter), variant: current.jitter === null || current.jitter <= 50 ? "default" : current.jitter <= 100 ? "warning" : "danger" },
+          { label: "Latest", value: ms(current.jitter), variant: current.jitter === null || current.jitter <= 50 ? "default" : current.jitter <= 100 ? "warning" : "danger" },
         ]}
       />
     </div>

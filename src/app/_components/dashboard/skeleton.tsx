@@ -37,12 +37,13 @@ export function ReadoutSkeleton() {
           </div>
           <Block className="mt-4 h-9 w-32 @2xl/main:mt-5" />
           <Block className="mt-2 h-3 w-40" />
-          {/* The bar of the spread, or of loss with its key under it. */}
+          {/* The bar of the spread with its ends and key under it, or of loss with its key. */}
           <Block className="mt-4 h-5 w-full rounded-full @2xl/main:mt-5" />
-          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 @2xs/card:grid-cols-4">
+          <Block className="mt-1.5 h-3.5 w-full" />
+          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 @2xs/card:grid-cols-3">
             {/* As tall as a label over a figure, so the cards do not grow when
                 the figures arrive and push the chart down the page. */}
-            {[0, 1, 2, 3].map(j => (
+            {[0, 1, 2].map(j => (
               <div key={j} className="flex h-[40.5px] flex-col justify-between py-1">
                 <Block className="h-2 w-8" />
                 <Block className="h-4 w-12" />

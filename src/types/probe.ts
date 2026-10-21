@@ -18,8 +18,8 @@ export type TargetType = 'ip' | 'domain' | 'dns' | 'tcp' | 'game' | 'http';
  *
  * `unreachable` is for the games that answer nothing at all to anyone outside
  * a match (Call of Duty and the like): it times the server's own "port
- * unreachable" for a port nothing listens on, as `mtr --udp` does, which many
- * a server that blocks ping still sends.
+ * unreachable" for a port nothing listens on, which many a server that blocks
+ * ping still sends (the reply `mtr --udp` gets from its last hop).
  */
 export type GameQuery = 'source' | 'minecraft' | 'bedrock' | 'quake' | 'unreachable';
 
@@ -206,6 +206,11 @@ export interface Target {
   probeAgent?: ProbeAgentSummary;
   /** Why no readings are being taken although it is not paused: its probe agent is down. */
   onHold?: string;
+  /**
+   * A closed-port check that has never had an answer since it was added: a
+   * server this check cannot measure, shown grey rather than as down.
+   */
+  neverAnswered?: boolean;
 }
 
 /**

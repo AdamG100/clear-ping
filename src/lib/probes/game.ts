@@ -27,8 +27,11 @@ import { resolveHost } from './resolve';
  * That same "port unreachable" is what times a server whose game answers
  * nothing to anyone outside a match (Call of Duty and the like) and which
  * blocks ping: sent to a port nothing listens on, a packet still gets an
- * answer from the server itself. That is how `mtr --udp` reaches such a server.
- * Linux hands the answer to a connected socket; Windows keeps it to itself.
+ * answer from the server itself. It is the reply `mtr --udp` gets from its
+ * last hop, though nothing here runs mtr: the packets are sent from here.
+ * A server behind a firewall that drops them, as Google Cloud's does, sends
+ * nothing back, and cannot be measured this way. Linux hands the answer to a
+ * connected socket; Windows keeps it to itself.
  */
 
 export interface GameProbeOptions {
@@ -79,7 +82,7 @@ const REASONS: Record<string, string> = {
 };
 
 const UNREACHABLE_SILENCE =
-  'No answer. The server, or a firewall in front of it, dropped the packet without saying the port is closed';
+  'No answer. The server, or a firewall in front of it (as on Google Cloud), drops packets to closed ports without replying';
 
 const NO_REPLY: Record<UdpGameQuery, string> = {
   source: 'No reply. A Steam server only answers on its query port, which is not always the port players join on',

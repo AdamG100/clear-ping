@@ -196,3 +196,16 @@ export function firstDeadHop(hops: TracerouteHop[], reached: boolean): number | 
   while (index > 0 && hops[index - 1].rtts.length === 0) index--
   return index < hops.length ? hops[index].hop : null
 }
+
+/**
+ * The furthest hop along a trace that answered and is not the destination:
+ * the closest point to a server that answers nothing, which can be pinged in
+ * its place. Null when no hop before the destination answered.
+ */
+export function lastAnsweringHop(hops: TracerouteHop[], destination: string): TracerouteHop | null {
+  for (let index = hops.length - 1; index >= 0; index--) {
+    const hop = hops[index]
+    if (hop.address && hop.rtts.length > 0 && hop.address !== destination) return hop
+  }
+  return null
+}

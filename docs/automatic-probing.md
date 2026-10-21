@@ -110,9 +110,9 @@ their own encrypted protocols. A server like that only talks to players who have
 joined its match, and drops anything else sent to its game port, so a query gets
 nothing back. Many of them block ping as well.
 
-**Any other game** reaches them the way `mtr --udp` does. It sends UDP packets to
-ports on the server that nothing listens on (33434 and up, as traceroute does),
-and times the server's own "port unreachable" answer, which many servers that
+**Any other game** sends UDP packets to ports on the server that nothing
+listens on (33434 and up, as traceroute does), and times the server's own
+"port unreachable" answer, which many servers that
 block ping still send. The reading is the server and the way to it: up or not,
 how fast, and how many packets went missing. It cannot say whether the game on
 the server is running, which only someone in the match can see.
@@ -124,8 +124,14 @@ the server is running, which only someone in the match can see.
   after a short burst, so the 10 queries of a probe are spaced a second apart,
   or the server's own limit would show as loss.
 - **Not every server answers.** One whose firewall drops everything, closed ports
-  included, shows 100% loss. Check first: `mtr --udp <address>` shows the
-  server's address as its last hop when this will work.
+  included, as Google Cloud's does, can't be measured this way. Until it has
+  answered once, its target is grey with "Can't measure" rather than offline,
+  its page says why, and it raises no alerts. Once it has answered, silence is
+  an outage again. Check first: `mtr --udp <address>`
+  gets the same reply, so it shows the server's address as its last hop when
+  this will work, and `???` there when it won't. To watch the way to a server
+  like that, add the last hop that does answer as a ping target: it is usually
+  where your traffic enters the host's network.
 
 To watch the network to one of them:
 

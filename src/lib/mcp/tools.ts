@@ -736,7 +736,7 @@ const TARGET_PROPERTIES = {
     type: 'object',
     description:
       'What only that probe has. ping: packets (echo requests per probe, 5 to 100, default 20; loss is read in steps of 100/packets percent). tcp: port (required unless it is in the address). ' +
-      'game: port (required unless it is in the address; for a Steam game, its query port), gameQuery ("source" for Steam games such as CS2, Rust, ARK and Valheim, the default; "minecraft" for Minecraft Java; "bedrock" for Minecraft Bedrock; "quake" for FiveM, RedM and Quake 3; "unreachable" for games that answer no query, such as Call of Duty, Valorant and League of Legends: it times the "port unreachable" the server sends for closed ports, as mtr --udp does, and needs ClearPing on Linux). http: scheme ("http" or "https"), port, path, expectedStatus, keyword (text the page must contain). ' +
+      'game: port (required unless it is in the address; for a Steam game, its query port), gameQuery ("source" for Steam games such as CS2, Rust, ARK and Valheim, the default; "minecraft" for Minecraft Java; "bedrock" for Minecraft Bedrock; "quake" for FiveM, RedM and Quake 3; "unreachable" for games that answer no query, such as Call of Duty, Valorant and League of Legends: it times the "port unreachable" the server sends for closed ports, needs ClearPing on Linux, and cannot measure a server whose firewall drops such packets, as on Google Cloud). http: scheme ("http" or "https"), port, path, expectedStatus, keyword (text the page must contain). ' +
       'dns on a server address: queryName, recordType, expectedAnswer. dns on a hostname: resolvers (a list of { protocol: "system" | "udp" | "dot" | "doh", server, name }), recordType, expectedAnswer.',
   },
 } as const
