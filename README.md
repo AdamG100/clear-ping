@@ -1,9 +1,10 @@
 # ClearPing
 
 A self-hosted network path monitor in the spirit of Smokeping. It probes your
-hosts on a schedule, keeps the history in a single SQLite file, and draws
-latency as a spread rather than a single line, so a path that is merely slow
-looks different from one that is unstable.
+hosts, websites, DNS and game servers on a schedule, from your own network or
+from probe agents elsewhere, keeps the history in a single SQLite file, and
+draws latency as a spread rather than a single line, so a path that is merely
+slow looks different from one that is unstable.
 
 ![A target's page: latency spread and packet loss over the last hour](docs/screenshots/target.jpg)
 
@@ -14,7 +15,13 @@ looks different from one that is unstable.
 - **Game servers.** A game server probe speaks the Steam server query (CS2,
   Rust, ARK, Valheim…), Minecraft Java's and Bedrock's pings and FiveM's
   `getinfo`, and shows the server's name, map and player count along with how
-  fast it answers.
+  fast it answers. For games that answer no query at all, such as Call of
+  Duty, it times the server's replies to closed ports instead, as
+  `mtr --udp` does (on Linux).
+- **Probe from anywhere.** A probe agent is a small program on another
+  machine, such as a VPS in another country, that takes a target's readings
+  from there. The dashboard connects to it over an encrypted, pinned link,
+  through a tailnet or the internet.
 - **One DNS lookup, several resolvers.** A DNS target can ask Cloudflare,
   Google, Quad9 or any resolver of your own on every probe, over plain DNS,
   DNS over TLS or DNS over HTTPS, and shows what each answered and how fast.
@@ -42,6 +49,10 @@ looks different from one that is unstable.
   to share.
 - **Certificate expiry.** HTTPS targets record when their certificate runs
   out, and an alert can watch for it.
+- **Accounts and roles.** Admins, editors and viewers; authenticator apps and
+  passkeys; single sign-on with Authentik; and keys for scripts. A new account
+  can be given a one-time link to choose its own password, so no admin ever
+  knows it.
 - **Ask an AI assistant.** ClearPing is an MCP server as well. Give Claude,
   or any assistant that speaks MCP, its address and say "gather the logs so I
   can report this to my ISP": it gets every outage with its times, what kept
@@ -55,25 +66,40 @@ looks different from one that is unstable.
 
 Everything in these is generated demo data.
 
-A group on one chart, with one loss strip per target:
+A group on one chart over a day, with the evening slowdown on every line, and
+Cloudflare as seen from a probe agent in Frankfurt:
 
-![Four targets in a group compared on one chart](docs/screenshots/group-comparison.jpg)
+![Four internet targets compared on one chart over 24 hours](docs/screenshots/group-comparison.jpg)
+
+A game server: how fast it answers its query, and what it says about itself:
+
+![A CS2 server's page, with its name, players, map and version](docs/screenshots/game-server.jpg)
+
+Adding a target: the address picks the check (here a DNS resolver), and the
+target can be probed from a probe agent:
+
+![The add target page, in four numbered sections](docs/screenshots/add-target.jpg)
+
+Probe agents, and how each is doing:
+
+![The probe agents page, with two online and one offline](docs/screenshots/probe-agents.jpg)
 
 Alerts, each watching the targets ticked for it:
 
 ![The alerts screen, with one alert firing](docs/screenshots/alerts.jpg)
 
-An alert being edited: the condition, where it is sent, and the targets:
+An alert being edited: the condition, tracing the route when it fires, where
+it is sent, and the targets:
 
 ![The alert editor](docs/screenshots/alert-editor.jpg)
 
 Sharing: tick the targets to send, and get a link that holds them:
 
-![The share dialog, with a link made for nine of twelve targets](docs/screenshots/share.jpg)
+![The share dialog, with a link made for eleven of fourteen targets](docs/screenshots/share.jpg)
 
-A new group being put inside another:
+Accounts: a new one gets a link to choose its own password:
 
-![The new group dialog, placing a group inside Home / Network](docs/screenshots/new-group.jpg)
+![The accounts page, with the new account form open](docs/screenshots/accounts.jpg)
 
 ## Quick start
 
@@ -120,14 +146,19 @@ rely on, build it and run the prober as its own process; see
 
 ### Targets
 
-**Add Target** at the bottom of the sidebar. The address box takes a hostname,
-an IP address, `host:port` or a URL, and chooses the probe to match; the rest of
-the form has defaults. A target is probed every five minutes unless you change
-its interval.
+**Add target** at the bottom of the sidebar opens a page of four numbered
+sections: **Target** (the address), **Name** (and its group), **Check** (how
+it is probed, and how often) and **Probe from** (this server or a probe agent,
+shown once you have one). The address box takes a hostname, an IP address,
+`host:port` or a URL, and chooses the check to match; everything else has a
+default, so an address and Enter is a whole target. Fields that must be filled
+in are marked *Required*. A target is probed every five minutes unless you
+change its interval.
 
 Each row in the sidebar shows the target's state, its address and a trace of
-its recent readings. Hovering a row reveals pause, edit, duplicate and delete;
-on a touchscreen they are behind the ⋮ button at the end of the row.
+its recent readings. Its badges say what it is (IP, DNS, TCP, HTTP, Game), and
+a purple *Remote* badge marks one probed from a probe agent. The ⋯ button at
+the end of the row copies the address, pauses, edits, duplicates or deletes it.
 
 **Duplicate** opens the add form already filled in from that target, for the
 second port on a host or the same check against the next server along. Change
@@ -176,7 +207,7 @@ A group stays until it is deleted, whether or not anything is in it.
 
 ### Sharing
 
-The share button beside **Add Target** makes a link out of your targets, for
+The share button beside **Add target** makes a link out of your targets, for
 someone else's ClearPing to import.
 
 - **Share**: tick the targets to send, single ones or whole groups (they all
@@ -265,15 +296,36 @@ network or outside it.
 A probe agent is a small program on another machine, such as a VPS in another
 country, that takes readings from there for your dashboard. It is not an AI
 agent. Add one under **Settings → Probe agents**, start it with the Docker
-command or the Linux install line shown there, and choose it as **Where should
-it be probed from?** on any target. That target's readings then show the
-network as seen from that machine, on the same dashboard as everything else.
+command or the Linux install line shown there, and choose it under **Probe
+from** on any target. That target's readings then show the network as seen
+from that machine, on the same dashboard as everything else, marked *Remote*
+in the sidebar.
+
+The page counts how many are online and how many need attention, and lists
+each with its status, version and when it was last seen. **Details** on one
+has its machine, certificate and targets, and tests its connection, makes it a
+new token or removes it.
 
 The dashboard connects to the agent, encrypted and pinned to the agent's own
 certificate, with a token for each agent. Over a tailnet such as Tailscale, no
 port has to be opened anywhere. While an agent can't be reached its targets
 take no readings, so a dead agent never shows up as targets being down. See
 [docs/probe-agents.md](docs/probe-agents.md).
+
+### Accounts
+
+**Settings → Accounts** lists who can sign in and what each may do. **Add
+account** opens the form for a new one, whose password is set one of two ways:
+
+- **They choose it, with a link.** You get a one-time link to send them, which
+  works for 48 hours. They choose their password on the sign-in page, so you
+  never know it.
+- **I set it now.** You type one and pass it on.
+
+**Password** beside an account does the same for someone who has forgotten
+theirs. The primary account, the first one made, resets its own with a code
+from the server log instead. Sign-in, roles, second factors and single sign-on
+are in [docs/security.md](docs/security.md).
 
 ## Upgrading
 
@@ -337,8 +389,9 @@ Everything the interface does goes through these.
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
 | `GET /api/health` | Whether the server is up; open even with sign-in on |
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
+| `POST /api/auth/password-reset` | A forgotten password: the primary account's code from the server log, or the code in a password link ([docs/security.md](docs/security.md#forgotten-password)) |
 | `POST /api/auth/two-factor`, `/passkey` | The code after a password, and signing in with a passkey ([docs/security.md](docs/security.md#second-factors)) |
-| `/api/security/…` | Sign-in switches, keys, accounts and their roles (`PATCH /api/security/users/:id`), single sign-on, the activity record, and your own second factors (`/api/security/me`); signed in only, and most of it for admins ([docs/security.md](docs/security.md#roles)) |
+| `/api/security/…` | Sign-in switches, keys, accounts and their roles (`PATCH /api/security/users/:id`), another account's password or a password link for it (`…/users/:id/password`, `…/users/:id/link`), single sign-on, the activity record, and your own second factors (`/api/security/me`); signed in only, and most of it for admins ([docs/security.md](docs/security.md#roles)) |
 | `GET /api/auth/sso/start`, `/callback` | Signing in with Authentik or another OpenID Connect provider |
 | `POST /api/auth/sso/logout` | Where the provider says someone signed out there (back-channel logout) |
 | `GET /api/version` | The version, commit and build time running, the same for the newest published image, and whether that is an update |
@@ -347,14 +400,20 @@ Everything the interface does goes through these.
 ## Development
 
 ```bash
-npm test            # unit and integration tests
+npm test                   # unit and integration tests
 npm run typecheck
 npm run lint
 npm run build
+npm run build:probe-agent  # the probe agent, as one bundled file
 ```
 
 The tests use temporary SQLite files and a local HTTP server; nothing touches
 the network or your real database.
+
+Under `npm run dev` every page opens signed in as a `dev` admin account, so
+sign-in never gets in the way while working on it. Set
+`CLEARPING_DEV_USER=off` to see the dashboard as someone signed out. A
+production build never does this.
 
 Where files go and how they are named is in [docs/structure.md](docs/structure.md).
 

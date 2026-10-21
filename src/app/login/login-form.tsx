@@ -24,7 +24,9 @@ import { BrandMark } from '../_components/shell/brand-mark'
  * Auth's, through /api/auth/two-factor and /api/auth/passkey.
  *
  * A forgotten password is reset with a one-time code ClearPing writes to its
- * server log (/api/auth/password-reset).
+ * server log (/api/auth/password-reset). A password link an admin made
+ * (Settings → Accounts) opens this page with the same kind of code after the
+ * `#`, and asks only for the new password.
  */
 
 interface Status {
@@ -56,9 +58,26 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
   const [backup, setBackup] = useState(false)
   const [trustDevice, setTrustDevice] = useState(false)
   // A forgotten password: ask for a code, then type it with the new password.
-  const [reset, setReset] = useState<'ask' | 'enter' | null>(null)
+  // Or a password link, which brings its code with it.
+  const [reset, setReset] = useState<'ask' | 'enter' | 'link' | null>(null)
   const [resetCode, setResetCode] = useState('')
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ title: string; detail: string } | null>(null)
+
+  // A password link: its code and username are after the `#`, which the
+  // browser never sends to the server. Taken out of the address at once, so it
+  // is not left in the history or on the screen.
+  useEffect(() => {
+    const told = new URLSearchParams(window.location.hash.slice(1))
+    const token = told.get('password-link')
+    if (!token) return
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    // Read once, from the address, after the first render.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setResetCode(token)
+    setUsername(told.get('user') ?? '')
+    setReset('link')
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [])
 
   useEffect(() => {
     fetch('/api/auth/status')
@@ -174,7 +193,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
   const sendReset = async (event: FormEvent) => {
     event.preventDefault()
     setError(null)
-    if (reset === 'enter' && password !== confirm) {
+    if (reset !== 'ask' && password !== confirm) {
       setError('The two passwords are not the same')
       return
     }
@@ -187,7 +206,9 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
-        setError(body.error ?? 'That did not work. Try again.')
+        // The code is the link's own: there is no code to retype, only a new link to ask for.
+        const linkSpent = reset === 'link' && /code/i.test(String(body.error ?? ''))
+        setError(linkSpent ? 'This link has been used, or it has run out. Ask an admin for a new one.' : body.error ?? 'That did not work. Try again.')
         return
       }
       if (reset === 'ask') {
@@ -200,7 +221,9 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
       setPassword('')
       setConfirm('')
       setResetCode('')
-      setNotice('Your password is changed. Sign in with the new one.')
+      setNotice(reset === 'link'
+        ? { title: 'Password set', detail: 'Your password is set. Sign in with it.' }
+        : { title: 'Password reset', detail: 'Your password is changed. Sign in with the new one.' })
     } catch {
       setError('ClearPing could not be reached. Try again in a moment.')
     } finally {
@@ -229,9 +252,11 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
           </div>
           <form onSubmit={sendReset} className="space-y-5 rounded-3xl border border-border bg-card p-6" noValidate>
             <div className="space-y-1">
-              <h1 className="text-lg font-medium text-card-foreground">Reset your password</h1>
+              <h1 className="text-lg font-medium text-card-foreground">{reset === 'link' ? 'Choose your password' : 'Reset your password'}</h1>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {reset === 'ask'
+                {reset === 'link'
+                  ? `For ${username || 'your account'}: the password you will sign in with. This link works once.`
+                  : reset === 'ask'
                   ? 'For the primary account, the first one made: ClearPing writes a one-time code to its server log, which only whoever runs the server can read. Any other account, ask an admin to set a new password for you.'
                   : `If ${username.trim()} is the primary account, its code is in the server log now. It works once, for 15 minutes.`}
               </p>
@@ -250,21 +275,30 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
               />
             ) : (
               <>
-                {/* Where to find it, ready to copy. */}
-                <CodeBlock code={'docker logs clear_ping 2>&1 | grep "reset code"'} filename="On the server" language="bash" />
-                <Input
-                  label="Code from the log"
-                  autoComplete="one-time-code"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  value={resetCode}
-                  onChange={event => setResetCode(event.target.value)}
-                  required
-                  autoFocus
-                  style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
-                />
+                {reset === 'enter' && (
+                  <>
+                    {/* Where to find it, ready to copy. */}
+                    <CodeBlock code={'docker logs clear_ping 2>&1 | grep "reset code"'} filename="On the server" language="bash" />
+                    <Input
+                      label="Code from the log"
+                      autoComplete="one-time-code"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      value={resetCode}
+                      onChange={event => setResetCode(event.target.value)}
+                      required
+                      autoFocus
+                      style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
+                    />
+                  </>
+                )}
+                {/* For the password manager: which account this password is for. */}
+                {reset === 'link' && username && (
+                  <input type="text" name="username" autoComplete="username" value={username} readOnly hidden />
+                )}
                 <PasswordField
                   label="New password"
+                  autoFocus={reset === 'link'}
                   description={`At least ${MIN_PASSWORD} characters.`}
                   autoComplete="new-password"
                   value={password}
@@ -282,7 +316,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
               </>
             )}
 
-            {error && <Alert tone="danger" title="The password was not reset">{error}</Alert>}
+            {error && <Alert tone="danger" title={reset === 'link' ? 'The password was not set' : 'The password was not reset'}>{error}</Alert>}
 
             <Button
               type="submit"
@@ -290,7 +324,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
               loading={busy}
               disabled={reset === 'ask' ? !username.trim() : !resetCode.trim() || !password || !confirm}
             >
-              {reset === 'ask' ? 'Write a code to the log' : 'Set the new password'}
+              {reset === 'ask' ? 'Write a code to the log' : reset === 'link' ? 'Set my password' : 'Set the new password'}
             </Button>
             <div className="space-y-1">
               {reset === 'enter' && (
@@ -335,6 +369,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
             {backup ? (
               <Input
                 label="Backup code"
+                required
                 autoComplete="one-time-code"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -481,7 +516,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
             </>
           )}
 
-          {notice && !error && <Alert tone="success" title="Password reset">{notice}</Alert>}
+          {notice && !error && <Alert tone="success" title={notice.title}>{notice.detail}</Alert>}
 
           {error && (
             <Alert tone="danger" title={registering ? 'The account was not made' : 'You are not signed in'}>

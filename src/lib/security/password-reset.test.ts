@@ -7,7 +7,8 @@ import { NextRequest } from 'next/server'
 /**
  * Forgotten passwords, through the routes the pages call. The primary account
  * resets its own with a code from the server's log; every other account's is
- * set by an admin, who can never set the primary account's. And a failed
+ * set by an admin, or chosen by its owner with a password link an admin makes,
+ * and an admin can never do either for the primary account. And a failed
  * sign-in saying why, in the log.
  */
 
@@ -20,6 +21,8 @@ const { closeAuth } = await import('./auth')
 const login = (await import('@/app/api/auth/login/route')).POST
 const reset = (await import('@/app/api/auth/password-reset/route')).POST
 const setPassword = (await import('@/app/api/security/users/[id]/password/route')).PUT
+const addAccount = (await import('@/app/api/security/users/route')).POST
+const makeLink = (await import('@/app/api/security/users/[id]/link/route')).POST
 
 const OLD = 'the old password'
 const NEW = 'a brand new password'
@@ -44,6 +47,11 @@ async function cookieOf(username: string, password: string): Promise<string> {
   expect(answer.status).toBe(200)
   return answer.headers.getSetCookie().map(line => line.split(';')[0]).join('; ')
 }
+
+const addWithLink = (username: string, cookie: string) =>
+  addAccount(request('/api/security/users', 'POST', { username, role: 'viewer', link: true }, cookie))
+const linkFor = (id: string, cookie: string) =>
+  makeLink(request(`/api/security/users/${id}/link`, 'POST', {}, cookie), { params: Promise.resolve({ id }) })
 
 const setPasswordOf = async (id: string, password: string, cookie: string) =>
   setPassword(request(`/api/security/users/${id}/password`, 'PUT', { password }, cookie), { params: Promise.resolve({ id }) })
@@ -154,6 +162,54 @@ describe('an admin setting a password', () => {
   it('is for admins only', async () => {
     const editorSession = await cookieOf('Eve', 'eve has a new one')
     expect((await setPasswordOf(second.id, 'an editor tried', editorSession)).status).toBe(403)
+  })
+})
+
+describe('a password link', () => {
+  it('makes an account whose owner chooses its password, which works once, for two days', async () => {
+    const admin = await cookieOf('Sam', OLD)
+    const added = await addWithLink('Lee', admin)
+    expect(added.status).toBe(201)
+    const { link } = await added.json()
+    expect(link.token).toMatch(/^[A-Za-z0-9]{32}$/)
+    expect(link.expiresAt - Date.now()).toBeGreaterThan(47 * 60 * 60 * 1000)
+
+    expect((await useCode(link.token, 'lee chose this one')).status).toBe(200)
+    expect((await signIn('Lee', 'lee chose this one')).status).toBe(200)
+    expect((await useCode(link.token, 'and once more')).status).toBe(400)
+  })
+
+  it('lets an account choose a new password, and the newest link is the only one that works', async () => {
+    const admin = await cookieOf('Sam', OLD)
+    const first = (await (await linkFor(editor.id, admin)).json()).link
+    const second = (await (await linkFor(editor.id, admin)).json()).link
+
+    expect((await useCode(first.token, 'from the first link')).status).toBe(400)
+    // Until the link is used, the password it replaces still works.
+    expect((await signIn('Eve', 'eve has a new one')).status).toBe(200)
+    expect((await useCode(second.token, 'from the second link')).status).toBe(200)
+    expect((await signIn('Eve', 'from the second link')).status).toBe(200)
+  })
+
+  it('stops working when an admin sets the password instead', async () => {
+    const admin = await cookieOf('Sam', OLD)
+    const lee = await store.findUserByUsername('lee')
+    const { link } = await (await linkFor(lee!.id, admin)).json()
+    expect((await setPasswordOf(lee!.id, 'set by the admin', admin)).status).toBe(200)
+    expect((await useCode(link.token, 'too late for this')).status).toBe(400)
+    expect((await signIn('Lee', 'set by the admin')).status).toBe(200)
+  })
+
+  it('is never made for the primary account or your own, and only by an admin', async () => {
+    const admin = await cookieOf('Sam', OLD)
+    const forPrimary = await linkFor(primary.id, admin)
+    expect(forPrimary.status).toBe(400)
+    expect((await forPrimary.json()).error).toMatch(/primary account/)
+    expect((await linkFor(second.id, admin)).status).toBe(400)
+
+    const editorSession = await cookieOf('Eve', 'from the second link')
+    expect((await linkFor(second.id, editorSession)).status).toBe(403)
+    expect((await addWithLink('Mal', editorSession)).status).toBe(403)
   })
 })
 

@@ -238,13 +238,33 @@ different hashes and a stolen copy of the database has to be guessed at one
 account at a time. Usernames are kept as they are. They name an account rather
 than prove anything, and an admin needs to read them to manage accounts.
 
+## New accounts and password links
+
+**Settings → Accounts → Add an account** opens the form for a new one. Its
+password is set one of two ways:
+
+- **They choose it, with a link.** ClearPing gives the admin a one-time link
+  to send on, by chat or email. It opens the sign-in page, where its owner
+  chooses a password, so the admin never knows it. Until then the account has a
+  long random password nobody is shown, so nobody can sign in to it.
+- **I set it now.** The admin types a password and passes it on.
+
+A link works once, for 48 hours, and is shown only when it is made. It is a
+Better Auth reset code like the primary account's (below), kept and checked by
+Better Auth; only its lifetime is longer. The code is after the `#` in the
+link, the part a browser never sends to a server, so it stays out of request
+logs, and the sign-in page takes it out of the address bar as soon as it opens.
+
 ## Forgotten password
 
-**Any account but the primary one:** an admin sets a new password in
-**Settings → Accounts → Set password** and passes it on. The account is signed
-out everywhere. An account made through single sign-on can be given its first
-password the same way. No admin can set the primary account's password, or
-their own (that is changed under *Your account*, with the current one).
+**Any account but the primary one:** an admin presses **Password** beside it in
+**Settings → Accounts**, and either makes a new link for them to choose a
+password with, or sets one and passes it on. A new link replaces any made for
+the account before. Setting a password signs the account out everywhere and
+ends any link it had; so does using a link. An account made through single
+sign-on can be given its first password the same way. No admin can do either
+for the primary account, or for their own (that is changed under *Your
+account*, with the current one).
 
 **The primary account** is the first one made, when ClearPing was set up. On
 an install from before there was one, it is the oldest admin. It is always an

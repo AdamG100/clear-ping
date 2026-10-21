@@ -6,17 +6,22 @@ import { probeAgentInstall } from '@/lib/probe-agents/install';
 import { createProbeAgent, listProbeAgents, probeAgentNameTaken } from '@/lib/probe-agents/store';
 import { requireAdmin } from '@/lib/security/http';
 import { recordActivity } from '@/lib/security/store';
+import { currentBuild } from '@/lib/version';
 
 /**
  * GET /api/security/probe-agents - Every probe agent, with how it is doing,
- * and where to install one from.
+ * where to install one from, and this dashboard's version beside theirs.
  */
 export async function GET(request: NextRequest) {
   const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
   await initializeServer();
 
-  return NextResponse.json({ probeAgents: await listProbeAgents(), install: probeAgentInstall() });
+  return NextResponse.json({
+    probeAgents: await listProbeAgents(),
+    install: probeAgentInstall(),
+    dashboardVersion: currentBuild().version,
+  });
 }
 
 /**

@@ -5,6 +5,7 @@ import type { InputHTMLAttributes } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { motionTokens } from "../lib/motion-tokens";
 import styles from "./input.module.css";
+import { RequiredMark } from "@/components/required-mark";
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
@@ -75,7 +76,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   const errorId = error ? `${controlId}-error` : undefined;
   const describedBy = [props["aria-describedby"], hintId, errorId].filter(Boolean).join(" ") || undefined;
   return <div className={styles.field}>
-    <label className={styles.label} htmlFor={controlId}>{label}</label>
+    <label className={styles.label} htmlFor={controlId}>{label}{props.required && <RequiredMark />}</label>
     <input {...props} id={controlId} ref={ref} className={[styles.input, className].filter(Boolean).join(" ")} aria-invalid={error ? true : props["aria-invalid"]} aria-describedby={describedBy}/>
     <FieldMessage id={hintId} text={description} className={styles.description} />
     <FieldMessage id={errorId} text={error} className={styles.error} alert />

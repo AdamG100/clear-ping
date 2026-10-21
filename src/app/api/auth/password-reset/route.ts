@@ -15,7 +15,9 @@ import { findUserByUsername, recordActivity } from '@/lib/security/store';
  * of an hour and sets the password (auth.ts, sendResetPassword). Reading the
  * log is what proves the right to it: that takes access to the machine
  * ClearPing runs on, which is the primary account's owner. Every other
- * account's password is set by an admin (/api/security/users/:id/password).
+ * account's password is set by an admin (/api/security/users/:id/password),
+ * or chosen by its owner with a password link an admin made
+ * (/api/security/users/:id/link), whose code comes to the 'reset' step here.
  *
  * Asking answers the same whether or not the account exists or is the
  * primary one, so the page says nothing about either; the log says which.

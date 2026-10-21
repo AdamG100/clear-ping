@@ -52,19 +52,27 @@ stored, charted and alerted on like any other reading
 
 ## Adding one
 
-1. In ClearPing, open **Settings → Probe agents** (admins only).
+1. In ClearPing, open **Settings → Probe agents** (admins only) and press
+   **Add probe agent**.
 2. Give it a name, such as *Germany VPS*, and the address the dashboard will
    reach it at. That is its tailnet address or name if you use Tailscale, and
    otherwise its public IP or hostname. The port is 7380 unless you change it.
-3. **Add probe agent.** ClearPing shows a token, once, and the commands to
+3. **Add probe agent** again. ClearPing shows a token, once, and the commands to
    start the agent with it: Docker, Docker Compose, or Linux without Docker.
    Run one of them on the agent's machine.
 4. Press **Connect**. ClearPing shows the certificate fingerprint it now
    trusts. The agent printed its own fingerprint when it started (it is in its
    log), and the two should be the same.
 
-A lost token can't be shown again. **New token** makes another, and the old
-one stops working straight away. Restart the agent with the new token.
+The page lists every probe agent with its status and when it was last seen,
+below a count of how many are online and how many need attention. **Details**
+on a row has everything else about it: its machine, version, certificate
+and targets, and the buttons to test the connection, make a new token or
+remove it.
+
+A lost token can't be shown again. **New token** in its details makes
+another, and the old one stops working straight away. Restart the agent with
+the new token.
 
 ## Over a tailnet
 
@@ -120,6 +128,9 @@ docker run -d --name clearping-probe-agent --restart unless-stopped \
 
 Keep the volume. The agent's certificate is kept in it, and a new certificate
 means confirming it again in the dashboard (see [Its certificate](#its-certificate)).
+To keep it in a folder instead (`-v ./data:/data`), create the folder and give
+it to uid 1000 first, which the container runs as, or it stops with
+"permission denied": `mkdir -p data && sudo chown 1000:1000 data`.
 
 For IPv6 targets, Docker's default network has no IPv6. Run the container with
 `--network host` instead of `-p …`, and set `CLEARPING_PROBE_AGENT_LISTEN` to
@@ -165,16 +176,17 @@ Check it with `systemctl status clearping-probe-agent`. Read its log with
 
 ## Probing a target from it
 
-When you add or edit a target, the form asks **Where should it be probed
-from?**: *This server*, or any of your probe agents. It only asks once a probe
-agent exists. You can also set this from an assistant: `add_targets` and
+When you add or edit a target, its **Probe from** section offers *This
+server* and each of your probe agents, as cards side by side. It only appears
+once a probe agent exists. With more than five, a search box narrows the cards
+down. You can also set this from an assistant: `add_targets` and
 `update_target` take `probe_agent`, and `list_probe_agents` lists them.
 
 Everywhere a target appears, it says where it is probed from:
 
-- **The sidebar.** A pin and the agent's name on the target's row. The
-  **Probed from** filter under the search box lists only one agent's targets,
-  or only this server's.
+- **The sidebar.** A purple *Remote* badge beside the target's type, which
+  names the agent when you point at it. The **Probed from** filter under the
+  search box lists only one agent's targets, or only this server's.
 - **The target's page.** A *Probed from …* line under the address. The
   *Route* panel says *traced from …*, because a traceroute also runs from the
   agent.
@@ -196,8 +208,8 @@ can't be reached:
 - **No readings are taken for its targets.** A dead agent never shows up as
   your targets being down, so it never sets off their alerts either.
 - Its targets show a grey status dot that says *No readings: probe agent … is
-  offline*. Their pin badge turns amber, and their page says no readings are
-  being taken.
+  offline*. Their *Remote* badge turns amber, and their page says no readings
+  are being taken.
 - On the chart, the time it was down is shaded *Probe agent offline: no
   readings*.
 - The activity record notes when it was lost and when it came back.

@@ -13,6 +13,7 @@ import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { Input } from '@/components/arc/input/input'
 import { RadioCards } from '@/components/arc/radio-cards/radio-cards'
 import { SegmentedField } from '@/components/segmented-field'
+import { SearchField } from '@/components/arc/search-field/search-field'
 import { Select } from '@/components/arc/select/select'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { addressFamilyFor, classifyHost, isDualStack, isWellKnownResolver, targetTypeFor } from '@/lib/probes/host'
@@ -34,7 +35,7 @@ import {
 } from '@/lib/probes/config'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { ResolverList } from './resolver-list'
-import { Gamepad2, Globe, Network, Plug, Wifi } from 'lucide-react'
+import { Gamepad2, Globe, MapPin, Network, Plug, Server, Wifi } from 'lucide-react'
 
 /**
  * The add and edit forms, which are the same form, and asking before a
@@ -164,6 +165,72 @@ function ProbeMethodPicker({
         meta: value === method.value && suggested === method.value ? <Badge size="sm" tone="info">Detected</Badge> : undefined,
       }))}
     />
+  )
+}
+
+/** Past this many probe agents, a search narrows the cards down and they scroll. */
+const PROBE_FROM_SEARCH_AFTER = 5
+
+/**
+ * Where the target is probed from: this server or a probe agent, as cards side
+ * by side that wrap onto more rows. With many probe agents a search narrows
+ * them, and the list scrolls inside a set height so the form below stays in
+ * reach. This server and the chosen one are always shown, whatever is typed.
+ */
+function ProbeFromPicker({
+  idPrefix,
+  probeAgents,
+  value,
+  onChange,
+}: {
+  idPrefix: string
+  probeAgents: ProbeAgentSummary[]
+  value: string | null
+  onChange: (probeAgentId: string | null) => void
+}) {
+  const [search, setSearch] = useState('')
+  const many = probeAgents.length > PROBE_FROM_SEARCH_AFTER
+  const query = search.trim().toLowerCase()
+  const shown = probeAgents.filter(agent =>
+    !query || agent.id === value || [agent.name, agent.address, agent.hostname ?? ''].some(text => text.toLowerCase().includes(query))
+  )
+  const labelId = `${idPrefix}-probe-from-label`
+
+  return (
+    <div className="space-y-3">
+      <p id={labelId} className="sr-only">Where should it be probed from?</p>
+      {many && (
+        <SearchField
+          label="Find a probe agent"
+          placeholder={`Search ${probeAgents.length} probe agents`}
+          value={search}
+          onValueChange={setSearch}
+        />
+      )}
+      <div className={cn(many && 'max-h-80 overflow-y-auto p-0.5')}>
+        <RadioCards
+          aria-labelledby={labelId}
+          name={`${idPrefix}-probe-from`}
+          value={value ?? THIS_SERVER}
+          onValueChange={next => onChange(next === THIS_SERVER ? null : next)}
+          minColumnWidth={200}
+          options={[
+            { value: THIS_SERVER, label: 'This server', description: 'Where this dashboard runs', icon: <Server {...ICON} /> },
+            ...shown.map(agent => ({
+              value: agent.id,
+              // Wrapped rather than cut short: the name is how the card is told apart.
+              label: <span className="block whitespace-normal wrap-break-word">{agent.name}</span>,
+              description: <span className="break-all">{agent.hostname ?? agent.address}</span>,
+              icon: <MapPin {...ICON} />,
+              meta: agent.state === 'online'
+                ? undefined
+                : <Badge size="sm" tone={PROBE_AGENT_STATE[agent.state].tone}>{PROBE_AGENT_STATE[agent.state].label}</Badge>,
+            })),
+          ]}
+        />
+      </div>
+      {query && shown.length === 0 && <FieldHint>No probe agent matches &ldquo;{search.trim()}&rdquo;.</FieldHint>}
+    </div>
   )
 }
 
@@ -584,9 +651,49 @@ export interface TargetFormProps {
 type RequiredField = 'address' | 'port'
 
 /**
+ * One question of the form, in a panel tinted with a colour of its own so each
+ * is told apart at a glance (never amber, which reads as a warning): its
+ * number, what it is and a line about it on the left, its fields on the
+ * right, stacked where the page is narrow.
+ * Probe from is purple, the colour of the Remote badge in the sidebar.
+ */
+function FormSection({ number, tone, title, hint, children }: {
+  number: number
+  tone: 'neutral' | 'series-1' | 'series-2' | 'series-4'
+  title: string
+  hint: string
+  children: ReactNode
+}) {
+  const colour = tone === 'neutral' ? 'var(--text-secondary)' : `var(--${tone})`
+  return (
+    <section
+      className="grid gap-4 rounded-2xl border p-4 @2xl/main:p-5 @4xl/main:grid-cols-[15rem_minmax(0,1fr)] @4xl/main:gap-10"
+      style={{
+        background: `color-mix(in oklab, ${colour} 5%, var(--surface))`,
+        borderColor: `color-mix(in oklab, ${colour} 22%, var(--border))`,
+      }}
+    >
+      <div className="space-y-1">
+        <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <span
+            className="grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-medium tabular-nums"
+            style={{ color: colour, background: `color-mix(in oklab, ${colour} 16%, var(--surface))` }}
+          >
+            {number}
+          </span>
+          {title}
+        </h2>
+        <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>
+      </div>
+      <div className="min-w-0 max-w-5xl space-y-4">{children}</div>
+    </section>
+  )
+}
+
+/**
  * The form reads top to bottom as the questions someone adding a target has,
- * in the order they have them: what, how, what to call it, and then the
- * settings that already hold a sensible answer. Only the first has to be
+ * in the order they have them: what, how, from where, and then the name and
+ * schedule, which already hold a sensible answer. Only the first has to be
  * answered, so an address and Enter is a whole target.
  */
 export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit, onCancel, probeAgents = [] }: TargetFormProps) {
@@ -734,141 +841,141 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
     return () => cancelAnimationFrame(frame)
   }, [group, idPrefix])
 
+  const addressField = (
+    <Input
+      id={`${idPrefix}-address`}
+      label="Address"
+      placeholder="example.com"
+      value={address}
+      onChange={e => handleAddressChange(e.target.value)}
+      onBlur={handleAddressBlur}
+      autoCapitalize="none"
+      autoCorrect="off"
+      spellCheck={false}
+      required
+      error={addressError ?? undefined}
+      style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
+      autoFocus={initial.host === ''}
+    />
+  )
+
+  const methodSection = (
+    <fieldset className="space-y-3">
+      <legend className="sr-only">How should it be checked?</legend>
+      <ProbeMethodPicker
+        value={probeType}
+        suggested={suggested}
+        onChange={value => { setProbeType(value); setProbeChosen(true); setSuggested(null) }}
+      />
+      {/* Every method has a setting of its own, ping its packet count. */}
+      <div className="space-y-4 rounded-2xl border border-border bg-background p-4">
+        <ProbeConfigFields
+          idPrefix={idPrefix}
+          probeType={probeType}
+          host={host}
+          ipVersion={isDomain ? ipVersion : 'auto'}
+          draft={draft}
+          portError={shown('port') ?? undefined}
+          onChange={changes => setDraft(current => ({ ...current, ...changes }))}
+          onPortBlur={() => touch('port')}
+        />
+        {settingsError && <Alert tone="danger" title="A setting is not right">{settingsError}</Alert>}
+        {summary && (
+          <div className="border-t border-border pt-3">
+            <ProbeSummary host={host} probeType={probeType} ipVersion={effectiveIpVersion} summary={summary} />
+          </div>
+        )}
+      </div>
+    </fieldset>
+  )
+
   return (
     <form noValidate onSubmit={event => { event.preventDefault(); handleSubmit() }}>
-      <div className="space-y-6">
-        {/* What. The one field that has to be filled in. */}
-        <Input
-          id={`${idPrefix}-address`}
-          label="What do you want to monitor?"
-          placeholder="example.com"
-          value={address}
-          onChange={e => handleAddressChange(e.target.value)}
-          onBlur={handleAddressBlur}
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          required
-          error={addressError ?? undefined}
-          description={
-            addressError
-              ? undefined
-              : 'A hostname, an IP address, host:port or a whole URL. Paste whatever you have: a port or path is moved into the settings below.'
-          }
-          style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
-          autoFocus={initial.host === ''}
-        />
+      {/* The questions in the order they come up, each a numbered panel of
+          its own colour: what, what to call it, how, and from where. Nothing
+          to step through, so an address and Enter is a target. */}
+      <div className="space-y-4">
+        <FormSection
+          number={1}
+          tone="neutral"
+          title="Target"
+          hint="A hostname, an IP address, host:port or a whole URL. A port or path moves into the check's settings."
+        >
+          {addressField}
+        </FormSection>
 
-        {/* How, with the chosen method's own settings attached beneath it. */}
-        <fieldset className="space-y-3">
-          <legend className="pb-2 text-sm font-medium text-card-foreground">How should it be checked?</legend>
-          <ProbeMethodPicker
-            value={probeType}
-            suggested={suggested}
-            onChange={value => { setProbeType(value); setProbeChosen(true); setSuggested(null) }}
-          />
-          {/* Every method has a setting of its own, ping its packet count. */}
-          <div className="space-y-4 rounded-2xl border border-border bg-background p-4">
-            <ProbeConfigFields
-              idPrefix={idPrefix}
-              probeType={probeType}
-              host={host}
-              ipVersion={isDomain ? ipVersion : 'auto'}
-              draft={draft}
-              portError={shown('port') ?? undefined}
-              onChange={changes => setDraft(current => ({ ...current, ...changes }))}
-              onPortBlur={() => touch('port')}
+        <FormSection number={2} tone="series-4" title="Name" hint="Optional. Left blank, the name is the address.">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
+            <Input
+              id={`${idPrefix}-name`}
+              label="Name"
+              placeholder={host && hostValid ? host : 'e.g. Office router'}
+              value={name}
+              onChange={e => setName(e.target.value)}
             />
-            {settingsError && <Alert tone="danger" title="A setting is not right">{settingsError}</Alert>}
-            {summary && (
-              <div className="border-t border-border pt-3">
-                <ProbeSummary host={host} probeType={probeType} ipVersion={effectiveIpVersion} summary={summary} />
+            <GroupSelect
+              id={`${idPrefix}-group`}
+              group={group}
+              availableGroups={availableGroups}
+              onChange={next => { setGroup(next); if (next !== NEW_GROUP) { setCustomGroup(''); setCustomParent('') } }}
+            />
+            {group === NEW_GROUP && (
+              <div className="grid items-start gap-4 rounded-2xl border border-border bg-background p-4 sm:col-span-2 sm:grid-cols-2">
+                <Input
+                  id={`${idPrefix}-new-group`}
+                  label="New group's name"
+                  required
+                  placeholder="e.g. Network"
+                  value={customGroup}
+                  onChange={e => setCustomGroup(e.target.value)}
+                />
+                <Select
+                  id={`${idPrefix}-new-group-parent`}
+                  label="Inside"
+                  value={customParent || NO_GROUP}
+                  onValueChange={value => setCustomParent(value === NO_GROUP ? '' : value)}
+                  options={[
+                    { value: NO_GROUP, label: 'Nothing (top level)' },
+                    ...availableGroups.map(each => ({ value: each, label: groupLabel(each) })),
+                  ]}
+                />
+                <div className="sm:col-span-2">
+                  <FieldHint>
+                    {newGroupPath
+                      ? <>The target goes in <span className="font-medium text-foreground">{groupLabel(newGroupPath)}</span>, which is made along with it.</>
+                      : 'Name the group and it is made along with the target.'}
+                  </FieldHint>
+                </div>
               </div>
             )}
           </div>
-        </fieldset>
+        </FormSection>
+
+        <FormSection number={3} tone="series-1" title="Check" hint="Picked from the address where it can tell, and how often it runs.">
+          {methodSection}
+          <div className="grid items-start gap-4 sm:grid-cols-2">
+            <IntervalSelect id={`${idPrefix}-interval`} value={interval} onChange={setInterval} />
+          </div>
+          {hostKind !== 'ipv4' && hostKind !== 'ipv6' && !asksNoAddress && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
+        </FormSection>
 
         {/* From where: asked only once there is somewhere besides here. */}
         {probeAgents.length > 0 && (
-          <div className="space-y-2">
-            <Select
-              id={`${idPrefix}-probe-from`}
-              label="Where should it be probed from?"
-              description="Readings are taken from the chosen machine, and show the network as seen from there."
-              value={probeAgentId ?? THIS_SERVER}
-              onValueChange={value => setProbeAgentId(value === THIS_SERVER ? null : value)}
-              options={[
-                { value: THIS_SERVER, label: 'This server (where this dashboard runs)' },
-                ...probeAgents.map(agent => ({
-                  value: agent.id,
-                  label: `${agent.name}${agent.state === 'online' ? '' : ` (${PROBE_AGENT_STATE[agent.state].label.toLowerCase()})`}`,
-                })),
-              ]}
-            />
+          <FormSection number={4} tone="series-2" title="Probe from" hint="Readings show the network as seen from the chosen machine.">
+            <ProbeFromPicker idPrefix={idPrefix} probeAgents={probeAgents} value={probeAgentId} onChange={setProbeAgentId} />
             {initial.host !== '' && probeAgentId !== initial.probeAgentId && (
               <FieldHint>
                 Readings before this change were taken from {placeName(initial.probeAgentId)}, and stay in its history.
                 From now on they come from {placeName(probeAgentId)}.
               </FieldHint>
             )}
-          </div>
+          </FormSection>
         )}
-
-        {/* What to call it. */}
-        <Input
-          id={`${idPrefix}-name`}
-          label="Name (optional)"
-          placeholder={host && hostValid ? host : 'e.g. Office router'}
-          value={name}
-          onChange={e => setName(e.target.value)}
-          description="Shown in the sidebar. Left blank, the address is used."
-        />
-
-        {/* Everything from here down already holds a sensible answer. */}
-        <div className="grid items-start gap-4 sm:grid-cols-2">
-          <IntervalSelect id={`${idPrefix}-interval`} value={interval} onChange={setInterval} />
-          <GroupSelect
-            id={`${idPrefix}-group`}
-            group={group}
-            availableGroups={availableGroups}
-            onChange={next => { setGroup(next); if (next !== NEW_GROUP) { setCustomGroup(''); setCustomParent('') } }}
-          />
-          {group === NEW_GROUP && (
-            <div className="grid items-start gap-4 rounded-2xl border border-border bg-background p-4 sm:col-span-2 sm:grid-cols-2">
-              <Input
-                id={`${idPrefix}-new-group`}
-                label="New group's name"
-                placeholder="e.g. Network"
-                value={customGroup}
-                onChange={e => setCustomGroup(e.target.value)}
-              />
-              <Select
-                id={`${idPrefix}-new-group-parent`}
-                label="Inside"
-                value={customParent || NO_GROUP}
-                onValueChange={value => setCustomParent(value === NO_GROUP ? '' : value)}
-                options={[
-                  { value: NO_GROUP, label: 'Nothing (top level)' },
-                  ...availableGroups.map(each => ({ value: each, label: groupLabel(each) })),
-                ]}
-              />
-              <div className="sm:col-span-2">
-                <FieldHint>
-                  {newGroupPath
-                    ? <>The target goes in <span className="font-medium text-foreground">{groupLabel(newGroupPath)}</span>, which is made along with it.</>
-                    : 'Name the group and it is made along with the target.'}
-                </FieldHint>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {hostKind !== 'ipv4' && hostKind !== 'ipv6' && !asksNoAddress && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
       </div>
 
       {/* Held at the foot of the page as it scrolls, so the button is on show
           however long the settings above it get. */}
-      <div className="sticky bottom-0 -mx-4 -mb-4 mt-6 flex flex-col gap-3 rounded-b-3xl border-t border-border bg-card px-4 py-4 @2xl/main:-mx-6 @2xl/main:-mb-6 @2xl/main:px-6">
+      <div className="sticky bottom-0 -mx-4 -mb-4 mt-6 flex flex-col gap-3 rounded-b-3xl border-t border-border bg-card px-4 py-4 @2xl/main:-mx-6 @2xl/main:-mb-6 @2xl/main:px-6 @5xl/main:flex-row @5xl/main:items-center @5xl/main:justify-between">
         {/* What pressing the button will do, or what is stopping it. */}
         <p
           className={cn('min-w-0 text-xs', attempted && !isValid ? 'text-destructive' : 'text-muted-foreground')}
@@ -886,13 +993,14 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
             )
           )}
         </p>
-        <div className="flex gap-2">
-          <Button type="button" variant="secondary" className="flex-1" onClick={onCancel}>
+        {/* Halves of the bar while it is narrow, their own width beside the recap once it is wide. */}
+        <div className="flex shrink-0 gap-2 *:flex-1 @5xl/main:*:flex-none">
+          <Button type="button" variant="secondary" onClick={onCancel}>
             Cancel
           </Button>
           {/* Left enabled while something is missing: pressing it says what,
               where a greyed-out button only says no. */}
-          <Button type="submit" className="flex-1" aria-disabled={!isValid}>
+          <Button type="submit" aria-disabled={!isValid}>
             {submitLabel}
           </Button>
         </div>

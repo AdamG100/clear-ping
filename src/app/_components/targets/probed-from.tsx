@@ -1,14 +1,29 @@
+import type { CSSProperties } from 'react'
 import { MapPin } from 'lucide-react'
 import { Badge } from '@/components/arc/badge/badge'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { inDisplayZone } from '@/lib/time-zone'
+import { cn } from '@/lib/utils'
 import type { ProbeAgentSummary } from '@/types/probe-agent'
 import { PROBE_AGENT_STATE } from '../settings/probe-agent-labels'
 
 /**
- * Where a target is probed from, wherever the target is shown: a pin and the
- * probe agent's name. A target probed from this server shows nothing, so the
- * dashboard looks as it always has for anyone without probe agents.
+ * A colour no other badge has: grey and blue say what a target is, green,
+ * amber and red how it is doing. Set through the badge's own variables, which
+ * a class could not reach past Arc's module.
+ */
+const REMOTE_COLOURS = {
+  '--badge-color': 'var(--series-2)',
+  '--badge-foreground': 'color-mix(in oklab, var(--series-2) 55%, var(--foreground))',
+  '--badge-background': 'color-mix(in oklab, var(--series-2) 12%, var(--surface))',
+  '--badge-border': 'color-mix(in oklab, var(--series-2) 30%, var(--border))',
+} as CSSProperties
+
+/**
+ * Where a target is probed from, wherever the target is shown: a "Remote"
+ * badge beside its type, with the probe agent named in its tooltip. A target
+ * probed from this server shows nothing, so the dashboard looks as it always
+ * has for anyone without probe agents.
  *
  * While the agent cannot be reached the badge says so in the warning colour:
  * the target's readings have stopped because of the agent, not the target.
@@ -26,10 +41,18 @@ export function ProbedFrom({ agent, className }: { agent?: ProbeAgentSummary; cl
           : `Probed from ${agent.name}${machine ? ` (${machine})` : ''}. Readings show the network as seen from there.`
       }
     >
-      <span className={className}>
-        <span className="sr-only">Probed from </span>
-        <Badge size="sm" tone={down ? 'warning' : 'neutral'} icon={<MapPin size={10} strokeWidth={2} aria-hidden />}>
-          {down ? `${agent.name} · offline` : agent.name}
+      <span className={cn('flex shrink-0', className)}>
+        {/* One short word, never the name: a name can be any length, and the
+            row has no room to give it. The tooltip and screen readers have it. */}
+        <span className="sr-only">Probed from {agent.name}{down ? ', offline' : ''}</span>
+        <Badge
+          size="sm"
+          tone={down ? 'warning' : 'neutral'}
+          icon={<MapPin size={10} strokeWidth={2} aria-hidden />}
+          style={down ? undefined : REMOTE_COLOURS}
+          aria-hidden
+        >
+          Remote
         </Badge>
       </span>
     </Tooltip>

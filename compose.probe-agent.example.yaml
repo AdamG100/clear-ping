@@ -33,6 +33,9 @@ services:
       # CLEARPING_PROBE_AGENT_LISTEN: 100.84.12.7:7380
     volumes:
       # Its certificate. Keep it: a new one has to be trusted again in ClearPing.
+      # For a folder instead of a volume (./data:/data), the container runs as
+      # uid 1000, so create the folder first and hand it over:
+      #   mkdir -p data && sudo chown 1000:1000 data
       - probe-agent-data:/data
 
 volumes:

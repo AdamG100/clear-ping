@@ -4,6 +4,7 @@ import type { TextareaHTMLAttributes } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { motionTokens } from "../lib/motion-tokens";
 import styles from "./textarea.module.css";
+import { RequiredMark } from "@/components/required-mark";
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> { label: string; description?: string; error?: string }
 /* Digits roll up when a number grows and down when it shrinks; `custom` hands the latest direction to digits already leaving. */
 const digit = {
@@ -60,5 +61,5 @@ function MessageRow({ id, text, className, alert }: { id?: string; text: string;
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea({ label, description, error, id, className, ...props }, ref) {
   const generatedId = useId(); const controlId = id ?? generatedId;
   const hintId = description ? `${controlId}-description` : undefined; const errorId = error ? `${controlId}-error` : undefined;
-  return <div className={styles.field}><label htmlFor={controlId}>{label}</label><textarea {...props} id={controlId} ref={ref} className={[styles.control, className].filter(Boolean).join(" ")} aria-invalid={error ? true : props["aria-invalid"]} aria-describedby={[props["aria-describedby"], hintId, errorId].filter(Boolean).join(" ") || undefined}/><FieldMessage id={hintId} text={description} className={styles.hint} /><FieldMessage id={errorId} text={error} className={styles.error} alert /></div>;
+  return <div className={styles.field}><label htmlFor={controlId}>{label}{props.required && <RequiredMark />}</label><textarea {...props} id={controlId} ref={ref} className={[styles.control, className].filter(Boolean).join(" ")} aria-invalid={error ? true : props["aria-invalid"]} aria-describedby={[props["aria-describedby"], hintId, errorId].filter(Boolean).join(" ") || undefined}/><FieldMessage id={hintId} text={description} className={styles.hint} /><FieldMessage id={errorId} text={error} className={styles.error} alert /></div>;
 });

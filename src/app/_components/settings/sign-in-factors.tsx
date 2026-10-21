@@ -192,10 +192,11 @@ function AuthenticatorApp({ mine, reload }: { mine: MyFactors; reload: () => Pro
       )}
 
       {step.kind === 'password' && (
-        <form onSubmit={withPassword} className="space-y-3">
+        <form noValidate onSubmit={withPassword} className="space-y-3">
           <div className="max-w-sm">
             <PasswordField
               label="Your password"
+              required
               description={
                 step.then === 'enable'
                   ? 'To be sure it is you setting this up.'

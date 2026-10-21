@@ -82,7 +82,7 @@ not here.
 its layout as shadcn makes it. Some of its files are edited (see CLAUDE.md),
 so never reinstall over them. Beside it go the few shared components built on
 Arc that every area uses (`notifications.tsx`, `segmented-field.tsx`,
-`error-boundary.tsx`).
+`required-mark.tsx`, `error-boundary.tsx`).
 
 ## Where a new file goes
 

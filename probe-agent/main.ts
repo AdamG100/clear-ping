@@ -34,6 +34,26 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/**
+ * The certificate kept in `directory`. A folder it may not write to is the
+ * usual first-run trouble: a bind mount Docker made for root, while the
+ * image runs as uid 1000. Said plainly, not as a stack trace.
+ */
+function certificateIn(directory: string): ReturnType<typeof loadOrCreateCertificate> {
+  try {
+    return loadOrCreateCertificate(directory, `clearping-probe-agent ${hostname()}`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'EACCES' && code !== 'EPERM') throw error;
+    const uid = process.getuid?.();
+    fail(
+      `cannot save its certificate in ${directory}: permission denied.` +
+      (uid === undefined ? '' : ` It runs as uid ${uid}, so give that folder to it, for a Docker bind mount on the host:` +
+        `\n\n  sudo chown -R ${uid}:${uid} ./data\n\nor use a named volume, as compose.probe-agent.example.yaml does.`)
+    );
+  }
+}
+
 /** Whether a program is on the PATH, without running it. */
 function installed(program: string): boolean {
   const names = process.platform === 'win32' ? [`${program}.exe`, `${program}.com`] : [program];
@@ -83,7 +103,7 @@ function main(): void {
 
   const { host, port } = listenAddress(process.env.CLEARPING_PROBE_AGENT_LISTEN);
   const dataDirectory = process.env.CLEARPING_PROBE_AGENT_DATA?.trim() || join(process.cwd(), 'probe-agent-data');
-  const certificate = loadOrCreateCertificate(dataDirectory, `clearping-probe-agent ${hostname()}`);
+  const certificate = certificateIn(dataDirectory);
 
   const tools = { ping: installed('ping'), traceroute: installed('traceroute') };
   if (!tools.ping) log('Warning: ping is not installed, so ping targets will fail. Install iputils-ping.');

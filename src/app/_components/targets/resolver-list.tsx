@@ -196,6 +196,7 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
                   )}
                   <Input
                     label={`Where it is (${DNS_PROTOCOL_NAME[row.protocol]})`}
+                    required
                     placeholder={PLACEHOLDER[row.protocol]}
                     value={row.server ?? ''}
                     onChange={event => setRow(index, { ...row, server: event.target.value })}

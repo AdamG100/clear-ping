@@ -1,15 +1,20 @@
 'use client'
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { KeyRound, Plug, RadioTower, ShieldCheck, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { AlertTriangle, ChevronRight, CircleCheck, KeyRound, Plug, Plus, RadioTower, RefreshCw, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
+import { AnimatedCounter } from '@/components/arc/animated-counter/animated-counter'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { CodeBlock } from '@/components/arc/code-block/code-block'
 import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
+import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
+import { Drawer, DrawerContent, useDrawerItem } from '@/components/arc/drawer/drawer'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { Input } from '@/components/arc/input/input'
 import { NumberField } from '@/components/arc/number-field/number-field'
+import { SearchField } from '@/components/arc/search-field/search-field'
+import { Select } from '@/components/arc/select/select'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/arc/tabs/tabs'
@@ -20,6 +25,7 @@ import { readProbeAgentAddress } from '@/lib/probe-agents/input'
 import type { ProbeAgentInstall } from '@/lib/probe-agents/install'
 import { PROBE_AGENT_DEFAULT_PORT } from '@/lib/probe-agents/protocol'
 import { inDisplayZone } from '@/lib/time-zone'
+import { cn } from '@/lib/utils'
 import type { ProbeAgent, ProbeAgentExposure, ProbeAgentState } from '@/types/probe-agent'
 import { CopyField } from './mcp-setup'
 import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
@@ -33,15 +39,20 @@ import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
  * a token and shows how to start the agent with it; connecting pins the
  * agent's certificate, so from then on this dashboard talks to that agent and
  * nothing else, encrypted, on any network.
+ *
+ * Laid out as a fleet: this server, a count of how they are doing, then every
+ * probe agent in a table, with what can be done to one in its details panel.
  */
 
 const HINT = 'text-xs leading-relaxed text-muted-foreground'
 const SECTION_TITLE = 'text-sm font-medium text-card-foreground'
+const PANEL = 'min-w-0 space-y-4 rounded-2xl border border-border p-4'
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 
 interface Loaded {
   probeAgents: ProbeAgent[]
   install: ProbeAgentInstall
+  dashboardVersion?: string
 }
 
 type Outcome =
@@ -65,6 +76,14 @@ const WAYS: { value: Way; label: string }[] = [
   { value: 'linux', label: 'Linux, no Docker' },
 ]
 
+type StatusFilter = 'all' | 'online' | 'attention'
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'online', label: 'Online' },
+  { value: 'attention', label: 'Needs attention' },
+]
+
 async function send(url: string, method: string, body?: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
   const response = await fetch(url, {
     method,
@@ -78,9 +97,34 @@ function when(ms: number | undefined): string {
   return ms ? new Date(ms).toLocaleString(undefined, inDisplayZone({ dateStyle: 'medium', timeStyle: 'short' })) : 'never'
 }
 
-/** The first few pairs of a fingerprint, enough to tell two apart at a glance. */
-function shortFingerprint(fingerprint: string): string {
-  return `${fingerprint.slice(0, 23)}…`
+/** How long ago, in the words a list of machines uses: "Just now", "5 min ago". */
+function ago(ms: number | undefined, now: number): string {
+  if (!ms) return 'Never'
+  const minutes = Math.floor((now - ms) / 60_000)
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  return when(ms)
+}
+
+/** The clock "ago" is measured against, moved on every half minute. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(interval)
+  }, [])
+  return now
+}
+
+function addressOf(agent: ProbeAgent): string {
+  return `${agent.address.includes(':') ? `[${agent.address}]` : agent.address}:${agent.port}`
+}
+
+/** Anything but answering: not connected yet counts, since it takes no readings either. */
+function needsAttention(agent: ProbeAgent): boolean {
+  return agent.state !== 'online'
 }
 
 /**
@@ -161,17 +205,55 @@ function OutcomeAlert({ outcome, name }: { outcome: Outcome; name: string }) {
       {outcome.offeredFingerprint && (
         <>
           {' '}It presents <span className="break-all font-mono">{outcome.offeredFingerprint}</span>. If that is the one in
-          its log (it was reinstalled, say), trust it from the list below.
+          its log (it was reinstalled, say), trust it from its details.
         </>
       )}
     </Alert>
   )
 }
 
+type TileTone = 'neutral' | 'success' | 'danger'
+
+const TILE: Record<TileTone, { tile: string; icon: string }> = {
+  neutral: { tile: 'border-border bg-muted/40', icon: 'bg-muted text-muted-foreground' },
+  success: { tile: 'border-success/25 bg-success/10', icon: 'bg-success/15 text-success' },
+  danger: { tile: 'border-destructive/25 bg-destructive/10', icon: 'bg-destructive/15 text-destructive' },
+}
+
+/** One count in the summary, in the colour of what it counts. */
+function Tile({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: number; tone: TileTone }) {
+  return (
+    <div className={cn('flex min-w-0 items-center gap-3 rounded-2xl border p-4', TILE[tone].tile)}>
+      <span className={cn('grid size-9 shrink-0 place-items-center rounded-full', TILE[tone].icon)}>
+        <Icon size={18} strokeWidth={1.75} aria-hidden />
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className="text-xl font-medium tabular-nums text-foreground">
+          <AnimatedCounter value={value} />
+        </span>
+      </span>
+    </div>
+  )
+}
+
+/** A label and what it says, in the details panel. */
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-0.5 sm:grid-cols-[8rem_1fr] sm:gap-3">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-sm text-foreground">{children}</dd>
+    </div>
+  )
+}
+
 export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentId: string) => void }) {
   const { notify, reportError } = useToast()
+  const now = useNow()
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
   const [port, setPort] = useState(PROBE_AGENT_DEFAULT_PORT)
@@ -179,8 +261,11 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
   const [made, setMade] = useState<Made | null>(null)
   const [way, setWay] = useState<Way>('docker')
   const [connecting, setConnecting] = useState<string | null>(null)
-  // How the last connection went, shown once, above the list.
+  // How the last connection went, shown once, above the list and in its details.
   const [lastOutcome, setLastOutcome] = useState<{ id: string; name: string; outcome: Outcome } | null>(null)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [detailsId, setDetailsId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const { ok, body } = await send('/api/security/probe-agents', 'GET')
@@ -194,8 +279,24 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
     void load()
   }, [load])
 
+  const refresh = async () => {
+    setRefreshing(true)
+    await load()
+    setRefreshing(false)
+  }
+
+  // The panel keeps showing the agent while it slides away.
+  const shownDetails = useDrawerItem(loaded?.probeAgents.find(agent => agent.id === detailsId) ?? null)
+
   const typed = readProbeAgentAddress(address)
   const exposure = typed.ok ? exposureOfAddress(typed.value) : null
+
+  const closeAdding = () => {
+    setAdding(false)
+    setName('')
+    setAddress('')
+    setPort(PROBE_AGENT_DEFAULT_PORT)
+  }
 
   const add = async (event: FormEvent) => {
     event.preventDefault()
@@ -204,9 +305,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
     setBusy(false)
     if (!ok) return reportError('Could not add the probe agent', body.error)
     setMade({ agent: body.probeAgent as ProbeAgent, token: String(body.token), install: body.install as ProbeAgentInstall, renewed: false })
-    setName('')
-    setAddress('')
-    setPort(PROBE_AGENT_DEFAULT_PORT)
+    closeAdding()
     void load()
   }
 
@@ -232,6 +331,8 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
       throw new Error(String(body.error ?? 'Could not make a new token'))
     }
     setMade({ agent: body.probeAgent as ProbeAgent, token: String(body.token), install: body.install as ProbeAgentInstall, renewed: true })
+    // The token is shown on the page, under the panel.
+    setDetailsId(null)
     void load()
   }
 
@@ -242,29 +343,73 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
       throw new Error(String(body.error ?? 'Could not remove it'))
     }
     if (made?.agent.id === agent.id) setMade(null)
+    setDetailsId(null)
     void load()
   }
 
   if (loadError) return <Alert tone="danger" title="Could not load the probe agents">{loadError}</Alert>
   if (!loaded) return <Skeleton label="Loading the probe agents" lines={4} />
 
-  const madeAgent = made ? loaded.probeAgents.find(agent => agent.id === made.agent.id) ?? made.agent : null
+  const agents = loaded.probeAgents
+  const madeAgent = made ? agents.find(agent => agent.id === made.agent.id) ?? made.agent : null
   const commands = made && madeAgent ? installCommands(madeAgent, made.token, made.install) : null
-  const rows = loaded.probeAgents.map(agent => ({ ...agent, agent }))
+  const online = agents.filter(agent => agent.state === 'online').length
+  const attention = agents.filter(needsAttention).length
+  const seen = agents.map(agent => agent.lastSeenAt).filter((at): at is number => !!at)
+  const oldestCheck = seen.length > 0 ? Math.min(...seen) : undefined
+
+  const query = search.trim().toLowerCase()
+  const shown = agents.filter(agent => {
+    if (statusFilter === 'online' && agent.state !== 'online') return false
+    if (statusFilter === 'attention' && !needsAttention(agent)) return false
+    if (!query) return true
+    return [agent.name, agent.address, agent.hostname ?? ''].some(text => text.toLowerCase().includes(query))
+  })
+  const rows = shown.map(agent => ({ ...agent, agent }))
 
   return (
-    <div className="space-y-6 text-foreground">
-      <div className="space-y-1">
-        <p className={SECTION_TITLE}>Take readings from other machines</p>
-        <p className={HINT}>
-          A probe agent is a small ClearPing program that runs on another machine, such as a VPS in another country, and
-          takes readings from there for this dashboard. A target probed from it shows the network as seen from that
-          machine. Probe agents have nothing to do with AI agents or the assistant.
-        </p>
+    <div className="space-y-5 text-foreground">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 max-w-2xl space-y-1">
+          <p className={SECTION_TITLE}>Probe agents</p>
+          <p className={HINT}>
+            Small ClearPing programs on other machines, such as a VPS in another country, that take readings from there
+            for this dashboard. Nothing to do with AI agents or the assistant.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="secondary" loading={refreshing} onClick={() => void refresh()}>
+            <RefreshCw {...ICON} />
+            Refresh
+          </Button>
+          <Button type="button" size="sm" onClick={() => setAdding(true)}>
+            <Plus {...ICON} />
+            Add probe agent
+          </Button>
+        </div>
+      </div>
+
+      {/* This server, which every target is probed from unless told otherwise. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-border px-4 py-3">
+        <span className="text-sm font-medium">This server</span>
+        <span className="text-sm text-muted-foreground">Where this dashboard runs</span>
+        <Badge size="sm" tone="success" icon={<CircleCheck size={11} strokeWidth={2} aria-hidden />}>
+          Always probes
+        </Badge>
+        {loaded.dashboardVersion && (
+          <span className="text-xs text-muted-foreground">
+            Version <span className="font-mono">{loaded.dashboardVersion}</span>
+          </span>
+        )}
+        {oldestCheck && (
+          <span className="ml-auto text-xs text-muted-foreground" title={when(oldestCheck)}>
+            Oldest probe agent check {ago(oldestCheck, now).toLowerCase()}
+          </span>
+        )}
       </div>
 
       {made && madeAgent && commands && (
-        <div className="space-y-3">
+        <div className={cn(PANEL, 'border-success/30')}>
           <Alert tone="success" title={made.renewed ? `A new token for ${madeAgent.name}` : `Now start ${madeAgent.name}`}>
             Copy the token now: it is not shown again. {made.renewed
               ? 'The old one no longer works, so restart the probe agent with this one.'
@@ -294,7 +439,11 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
             <TabsContent value="compose">
               <div className="space-y-2 text-foreground">
                 <CodeBlock code={commands.compose} filename="compose.yaml" language="yaml" />
-                <p className={HINT}>Then <span className="font-mono">docker compose up -d</span> beside it.</p>
+                <p className={HINT}>
+                  Then <span className="font-mono">docker compose up -d</span> beside it. To keep its certificate in a
+                  folder such as <span className="font-mono">./data</span> instead of a volume, give the folder to uid
+                  1000 first: <span className="font-mono">sudo chown 1000:1000 data</span>.
+                </p>
               </div>
             </TabsContent>
             <TabsContent value="linux">
@@ -311,7 +460,6 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
 
           {lastOutcome?.id === madeAgent.id && <OutcomeAlert outcome={lastOutcome.outcome} name={madeAgent.name} />}
 
-          {/* Each on a line of its own: buttons are inline. */}
           <div className="flex flex-wrap gap-2">
             <Button type="button" loading={connecting === madeAgent.id} onClick={() => connect(madeAgent).catch(() => {})}>
               <Plug {...ICON} />
@@ -324,182 +472,265 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
         </div>
       )}
 
-      <form onSubmit={add} className="space-y-3">
-        <div className="space-y-1">
-          <p className={SECTION_TITLE}>Add a probe agent</p>
-          <p className={HINT}>
-            Where this dashboard will find it. Over a tailnet, use the machine&apos;s tailnet address or name, and no port
-            has to be opened anywhere.
-          </p>
-        </div>
-        <Input label="Name" placeholder="Germany VPS" value={name} maxLength={60} onChange={event => setName(event.target.value)} />
-        <div className="grid items-start gap-4 sm:grid-cols-[1fr_10rem]">
-          <Input
-            label="Address"
-            placeholder="100.84.12.7 or vps.tail1234.ts.net"
-            value={address}
-            onChange={event => setAddress(event.target.value)}
-            error={address.trim() && !typed.ok ? typed.error : undefined}
-          />
-          <NumberField
-            id="probe-agent-port"
-            label="Port"
-            min={1}
-            max={65535}
-            value={port}
-            onValueChange={setPort}
-            formatOptions={{ useGrouping: false }}
-          />
-        </div>
-        {exposure && <ExposureNote exposure={exposure} />}
-        <div>
-          <Button type="submit" loading={busy} disabled={!name.trim() || !typed.ok}>
-            <RadioTower {...ICON} />
-            Add probe agent
-          </Button>
-        </div>
-      </form>
-
-      {lastOutcome && lastOutcome.id !== made?.agent.id && <OutcomeAlert outcome={lastOutcome.outcome} name={lastOutcome.name} />}
-
-      {loaded.probeAgents.length === 0 ? (
-        <EmptyState
-          icon={<RadioTower size={24} strokeWidth={1.75} />}
-          title="No probe agents yet"
-          description="Every target is probed from the machine this dashboard runs on."
-        />
-      ) : (
-        <SortableDataTable
-          caption="Probe agents"
-          emptyMessage="No probe agents yet"
-          itemName={{ one: 'probe agent', other: 'probe agents' }}
-          rows={rows}
-          rowKey="id"
-          defaultSort={{ key: 'name', direction: 'asc' }}
-          columns={[
-            {
-              key: 'name',
-              label: 'Probe agent',
-              render: (_, { agent }) => (
-                <span className="flex min-w-0 flex-col gap-1">
-                  <span className="font-medium">{agent.name}</span>
-                  <span className="break-all font-mono text-xs text-muted-foreground">
-                    {agent.address.includes(':') ? `[${agent.address}]` : agent.address}:{agent.port}
-                  </span>
-                  {agent.fingerprint && (
-                    <span className="font-mono text-[11px] text-muted-foreground" title={agent.fingerprint}>
-                      <ShieldCheck size={11} strokeWidth={1.75} aria-hidden className="mr-1 inline" />
-                      {shortFingerprint(agent.fingerprint)}
-                    </span>
-                  )}
-                </span>
-              ),
-            },
-            {
-              key: 'state',
-              label: 'State',
-              render: (_, { agent }) => (
-                <span className="flex flex-col items-start gap-1">
-                  <Badge size="sm" tone={PROBE_AGENT_STATE[agent.state].tone}>{PROBE_AGENT_STATE[agent.state].label}</Badge>
-                  {agent.state !== 'online' && agent.lastError && (
-                    <span className="max-w-64 text-xs text-muted-foreground">{agent.lastError}</span>
-                  )}
-                  {agent.state === 'cert-changed' && agent.offeredFingerprint && (
-                    <span className="max-w-64 break-all font-mono text-[11px] text-muted-foreground">
-                      Now presents {agent.offeredFingerprint}
-                    </span>
-                  )}
-                  <span className="text-xs text-muted-foreground">Last seen {when(agent.lastSeenAt)}</span>
-                </span>
-              ),
-            },
-            {
-              key: 'exposure',
-              label: 'Reached over',
-              render: (_, { agent }) => (
-                <span className="flex flex-col items-start gap-1">
-                  <Badge size="sm" tone={PROBE_AGENT_EXPOSURE[agent.exposure].tone}>{PROBE_AGENT_EXPOSURE[agent.exposure].label}</Badge>
-                  {agent.exposure === 'public' && (
-                    <span className="max-w-56 text-xs text-muted-foreground">Firewall its port to this dashboard&apos;s address</span>
-                  )}
-                </span>
-              ),
-            },
-            {
-              key: 'version',
-              label: 'Machine',
-              render: (_, { agent }) => (
-                <span className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-                  <span className="text-foreground">{agent.hostname ?? 'Not known yet'}</span>
-                  {agent.version && <span>Version {agent.version}</span>}
-                  {agent.tools && (!agent.tools.ping || !agent.tools.traceroute) && (
-                    <span className="text-warning">
-                      No {[!agent.tools.ping && 'ping', !agent.tools.traceroute && 'traceroute'].filter(Boolean).join(' or ')} installed
-                    </span>
-                  )}
-                </span>
-              ),
-            },
-            {
-              key: 'targetCount',
-              label: 'Targets',
-              numeric: true,
-              render: (_, { agent }) =>
-                agent.targetCount > 0 && onShowTargets ? (
-                  <Button type="button" size="sm" variant="ghost" onClick={() => onShowTargets(agent.id)}>
-                    {agent.targetCount} {agent.targetCount === 1 ? 'target' : 'targets'}
-                  </Button>
-                ) : (
-                  <span className="text-muted-foreground">{agent.targetCount}</span>
-                ),
-            },
-            {
-              key: 'actions',
-              label: 'Actions',
-              sortable: false,
-              // Room for a question once open: the table's layout is fixed, so a cell never widens to fit one.
-              width: 288,
-              render: (_, { agent }) => (
-                <span className="flex flex-col items-start gap-1">
-                  {agent.state === 'cert-changed' && agent.offeredFingerprint ? (
-                    <ConfirmMorph
-                      label="Trust new certificate"
-                      icon={<ShieldCheck {...ICON} />}
-                      tone="neutral"
-                      prompt="Trust it?"
-                      confirmLabel="Trust"
-                      doneLabel="Trusted"
-                      onConfirm={() => connect(agent, true)}
-                    />
-                  ) : (
-                    <Button type="button" size="sm" variant="secondary" loading={connecting === agent.id} onClick={() => connect(agent).catch(() => {})}>
-                      <Plug {...ICON} />
-                      {agent.fingerprint ? 'Test' : 'Connect'}
-                    </Button>
-                  )}
-                  <ConfirmMorph
-                    label="New token"
-                    icon={<KeyRound {...ICON} />}
-                    tone="neutral"
-                    prompt="Replace it?"
-                    confirmLabel="Replace"
-                    doneLabel="Made"
-                    onConfirm={() => renewToken(agent)}
-                  />
-                  <ConfirmMorph
-                    label="Remove"
-                    icon={<Trash2 {...ICON} />}
-                    prompt="Remove it?"
-                    confirmLabel="Remove"
-                    doneLabel="Removed"
-                    onConfirm={() => remove(agent)}
-                  />
-                </span>
-              ),
-            },
-          ]}
-        />
+      {lastOutcome && lastOutcome.id !== made?.agent.id && lastOutcome.id !== detailsId && (
+        <OutcomeAlert outcome={lastOutcome.outcome} name={lastOutcome.name} />
       )}
+
+      <section className={PANEL} aria-labelledby="probe-agents-summary">
+        <p id="probe-agents-summary" className={SECTION_TITLE}>Summary</p>
+        <div className="grid gap-3 @2xl/main:grid-cols-3">
+          <Tile icon={Server} label="Probe agents" value={agents.length} tone="neutral" />
+          <Tile icon={CircleCheck} label="Online" value={online} tone={online > 0 ? 'success' : 'neutral'} />
+          <Tile icon={AlertTriangle} label="Needs attention" value={attention} tone={attention > 0 ? 'danger' : 'neutral'} />
+        </div>
+      </section>
+
+      <section className={PANEL} aria-labelledby="probe-agents-list">
+        <div className="space-y-1">
+          <p id="probe-agents-list" className={SECTION_TITLE}>All probe agents</p>
+          <p className={HINT}>Choose one in a target&apos;s settings to take that target&apos;s readings from there.</p>
+        </div>
+
+        {agents.length === 0 ? (
+          <EmptyState
+            icon={<RadioTower size={24} strokeWidth={1.75} />}
+            title="No probe agents yet"
+            description="Every target is probed from this server. Add a probe agent to take readings from somewhere else too."
+          />
+        ) : (
+          <>
+            <div className="grid items-end gap-3 @2xl/main:grid-cols-[minmax(0,20rem)_12rem]">
+              <SearchField label="Search" placeholder="Name, address or machine" value={search} onValueChange={setSearch} />
+              <Select
+                id="probe-agents-status"
+                label="Status"
+                value={statusFilter}
+                onValueChange={value => setStatusFilter(value as StatusFilter)}
+                options={STATUS_FILTERS}
+              />
+            </div>
+
+            <SortableDataTable
+              caption="Probe agents"
+              emptyMessage="No probe agent matches"
+              itemName={{ one: 'probe agent', other: 'probe agents' }}
+              rows={rows}
+              rowKey="id"
+              defaultSort={{ key: 'name', direction: 'asc' }}
+              columns={[
+                {
+                  key: 'name',
+                  label: 'Probe agent',
+                  render: (_, { agent }) => (
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="font-medium wrap-break-word">{agent.name}</span>
+                      <span className="break-all font-mono text-xs text-muted-foreground">{addressOf(agent)}</span>
+                    </span>
+                  ),
+                },
+                {
+                  key: 'exposure',
+                  label: 'Reached over',
+                  render: (_, { agent }) => (
+                    <Badge size="sm" tone={PROBE_AGENT_EXPOSURE[agent.exposure].tone}>{PROBE_AGENT_EXPOSURE[agent.exposure].label}</Badge>
+                  ),
+                },
+                {
+                  key: 'version',
+                  label: 'Version',
+                  render: (_, { agent }) => (
+                    <span className={cn('font-mono text-xs', agent.version ? 'text-foreground' : 'text-muted-foreground')}>
+                      {agent.version ?? '—'}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'state',
+                  label: 'Status',
+                  render: (_, { agent }) => (
+                    <Badge size="sm" tone={PROBE_AGENT_STATE[agent.state].tone}>{PROBE_AGENT_STATE[agent.state].label}</Badge>
+                  ),
+                },
+                {
+                  key: 'lastSeenAt',
+                  label: 'Last seen',
+                  render: (_, { agent }) => (
+                    <span className="text-xs text-muted-foreground" title={agent.lastSeenAt ? when(agent.lastSeenAt) : undefined}>
+                      {ago(agent.lastSeenAt, now)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'targetCount',
+                  label: 'Targets',
+                  numeric: true,
+                  render: (_, { agent }) =>
+                    agent.targetCount > 0 && onShowTargets ? (
+                      <Button type="button" size="sm" variant="ghost" onClick={() => onShowTargets(agent.id)}>
+                        {agent.targetCount}
+                      </Button>
+                    ) : (
+                      <span className="text-muted-foreground">{agent.targetCount}</span>
+                    ),
+                },
+                {
+                  key: 'actions',
+                  label: 'Actions',
+                  sortable: false,
+                  render: (_, { agent }) => (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setDetailsId(agent.id)} aria-label={`Details of ${agent.name}`}>
+                      Details
+                      <ChevronRight {...ICON} />
+                    </Button>
+                  ),
+                },
+              ]}
+            />
+          </>
+        )}
+      </section>
+
+      <Dialog open={adding} onOpenChange={open => { if (!open) closeAdding() }}>
+        <DialogContent
+          title="Add a probe agent"
+          description="Where this dashboard will find it. Over a tailnet, use the machine's tailnet address or name, and no port has to be opened anywhere."
+        >
+          <form noValidate onSubmit={add} className="space-y-3 text-foreground">
+            <Input label="Name" placeholder="Germany VPS" required value={name} maxLength={60} onChange={event => setName(event.target.value)} />
+            <div className="grid items-start gap-4 sm:grid-cols-[1fr_8rem]">
+              <Input
+                label="Address"
+                required
+                placeholder="100.84.12.7 or vps.tail1234.ts.net"
+                value={address}
+                onChange={event => setAddress(event.target.value)}
+                error={address.trim() && !typed.ok ? typed.error : undefined}
+              />
+              <NumberField
+                id="probe-agent-port"
+                label="Port"
+                min={1}
+                max={65535}
+                value={port}
+                onValueChange={setPort}
+                formatOptions={{ useGrouping: false }}
+              />
+            </div>
+            {exposure && <ExposureNote exposure={exposure} />}
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={closeAdding}>Cancel</Button>
+              <Button type="submit" loading={busy} disabled={!name.trim() || !typed.ok}>
+                <RadioTower {...ICON} />
+                Add probe agent
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Drawer open={detailsId !== null && shownDetails !== null} onOpenChange={open => { if (!open) setDetailsId(null) }}>
+        {shownDetails && (
+          <DrawerContent title={shownDetails.name} description={addressOf(shownDetails)}>
+            <div className="space-y-5 text-foreground">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={PROBE_AGENT_STATE[shownDetails.state].tone}>{PROBE_AGENT_STATE[shownDetails.state].label}</Badge>
+                <Badge tone={PROBE_AGENT_EXPOSURE[shownDetails.exposure].tone}>{PROBE_AGENT_EXPOSURE[shownDetails.exposure].label}</Badge>
+              </div>
+
+              {shownDetails.state !== 'online' && shownDetails.lastError && (
+                <p className="text-sm text-muted-foreground">{shownDetails.lastError}</p>
+              )}
+              {lastOutcome?.id === shownDetails.id && <OutcomeAlert outcome={lastOutcome.outcome} name={shownDetails.name} />}
+
+              <dl className="space-y-3">
+                <Fact label="Address">
+                  <span className="break-all font-mono text-xs">{addressOf(shownDetails)}</span>
+                </Fact>
+                <Fact label="Reached over">{PROBE_AGENT_EXPOSURE[shownDetails.exposure].detail}</Fact>
+                <Fact label="Machine">{shownDetails.hostname ?? 'Not known yet'}</Fact>
+                <Fact label="Version">
+                  {shownDetails.version ?? 'Not known yet'}
+                  {shownDetails.platform && <span className="text-muted-foreground"> · {shownDetails.platform}</span>}
+                </Fact>
+                {shownDetails.tools && (
+                  <Fact label="Tools">
+                    {shownDetails.tools.ping && shownDetails.tools.traceroute ? (
+                      'ping and traceroute'
+                    ) : (
+                      <span className="text-warning">
+                        No {[!shownDetails.tools.ping && 'ping', !shownDetails.tools.traceroute && 'traceroute'].filter(Boolean).join(' or ')} installed
+                      </span>
+                    )}
+                  </Fact>
+                )}
+                <Fact label="Certificate">
+                  {shownDetails.fingerprint ? (
+                    <span className="flex items-start gap-1.5 break-all font-mono text-xs">
+                      <ShieldCheck size={13} strokeWidth={1.75} aria-hidden className="mt-0.5 shrink-0" />
+                      {shownDetails.fingerprint}
+                    </span>
+                  ) : (
+                    'Not connected yet'
+                  )}
+                </Fact>
+                {shownDetails.state === 'cert-changed' && shownDetails.offeredFingerprint && (
+                  <Fact label="Now presents">
+                    <span className="break-all font-mono text-xs text-warning">{shownDetails.offeredFingerprint}</span>
+                  </Fact>
+                )}
+                <Fact label="Last seen">{shownDetails.lastSeenAt ? when(shownDetails.lastSeenAt) : 'Never'}</Fact>
+                <Fact label="Added">{when(shownDetails.createdAt)}</Fact>
+                <Fact label="Targets">
+                  {shownDetails.targetCount > 0 && onShowTargets ? (
+                    <Button type="button" size="sm" variant="secondary" onClick={() => onShowTargets(shownDetails.id)}>
+                      Show its {shownDetails.targetCount} {shownDetails.targetCount === 1 ? 'target' : 'targets'}
+                    </Button>
+                  ) : (
+                    'None yet'
+                  )}
+                </Fact>
+              </dl>
+
+              {/* Each on a line of its own: buttons are inline. */}
+              <div className="flex flex-col items-start gap-2 border-t border-border pt-4">
+                {shownDetails.state === 'cert-changed' && shownDetails.offeredFingerprint ? (
+                  <ConfirmMorph
+                    label="Trust new certificate"
+                    icon={<ShieldCheck {...ICON} />}
+                    tone="neutral"
+                    prompt="Trust it?"
+                    confirmLabel="Trust"
+                    doneLabel="Trusted"
+                    onConfirm={() => connect(shownDetails, true)}
+                  />
+                ) : (
+                  <Button type="button" variant="secondary" loading={connecting === shownDetails.id} onClick={() => connect(shownDetails).catch(() => {})}>
+                    <Plug {...ICON} />
+                    {shownDetails.fingerprint ? 'Test the connection' : 'Connect'}
+                  </Button>
+                )}
+                <ConfirmMorph
+                  label="New token"
+                  icon={<KeyRound {...ICON} />}
+                  tone="neutral"
+                  prompt="Replace it?"
+                  confirmLabel="Replace"
+                  doneLabel="Made"
+                  onConfirm={() => renewToken(shownDetails)}
+                />
+                <ConfirmMorph
+                  label="Remove"
+                  icon={<Trash2 {...ICON} />}
+                  prompt="Remove it?"
+                  confirmLabel="Remove"
+                  doneLabel="Removed"
+                  onConfirm={() => remove(shownDetails)}
+                />
+              </div>
+            </div>
+          </DrawerContent>
+        )}
+      </Drawer>
     </div>
   )
 }

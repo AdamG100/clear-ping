@@ -8,6 +8,7 @@ import type { Variants } from "motion/react";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { motionTokens } from "../lib/motion-tokens";
 import styles from "./select.module.css";
+import { RequiredMark } from "@/components/required-mark";
 
 export interface SelectProps extends Omit<ComponentPropsWithoutRef<typeof SelectPrimitive.Root>, "children"> {
   label: string;
@@ -45,7 +46,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
 
   return (
     <div className={styles.field}>
-      <label htmlFor={controlId}>{label}</label>
+      <label htmlFor={controlId}>{label}{rootProps.required && <RequiredMark />}</label>
       <SelectPrimitive.Root {...rootProps} disabled={disabled} onValueChange={(next) => { setUncontrolledValue(next); onValueChange?.(next); }}>
         <SelectPrimitive.Trigger
           ref={ref}

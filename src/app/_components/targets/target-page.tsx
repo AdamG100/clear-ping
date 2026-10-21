@@ -21,10 +21,14 @@ import { BLANK_TARGET, formValuesOf, TargetForm } from './target-dialogs'
 
 type NewTarget = Omit<Target, 'id' | 'isOnline' | 'lastCheck' | 'avgLatency' | 'packetLoss'>
 
-/** A form's page: a way back, what it is for, and the form in a card. Shared with the alert editor. */
-export function PageFrame({ title, description, onBack, children }: { title: string; description?: string; onBack: () => void; children: React.ReactNode }) {
+/**
+ * A form's page: a way back, what it is for, and the form in a card. Shared
+ * with the alert editor. `wide` takes the full width of the pane, for a form
+ * that lays itself out in columns when there is room.
+ */
+export function PageFrame({ title, description, onBack, wide = false, children }: { title: string; description?: string; onBack: () => void; wide?: boolean; children: React.ReactNode }) {
   return (
-    <div className={cn(PANE, 'max-w-3xl')}>
+    <div className={cn(PANE, !wide && 'max-w-3xl')}>
       <header className={PANE_HEADER}>
         <div className="min-w-0">
           <Button type="button" variant="ghost" size="sm" onClick={onBack}>
@@ -65,6 +69,7 @@ export function AddTargetPage({ availableGroups, group = '', template = null, on
           : 'Only the address is needed. Everything else starts with a sensible default.'
       }
       onBack={onClose}
+      wide
     >
       <TargetForm
         idPrefix="add"
@@ -111,7 +116,7 @@ export function EditTargetPage({ target, availableGroups, onSave, onClose, probe
   }
 
   return (
-    <PageFrame title={`Edit ${target.name}`} onBack={onClose}>
+    <PageFrame title={`Edit ${target.name}`} onBack={onClose} wide>
       <TargetForm
         key={target.id}
         idPrefix="edit"

@@ -149,6 +149,7 @@ function GroupForm({ task, groups, onCancel, onCreate, onMove, onDelete }: Group
       <Input
         id="group-name"
         label="Name"
+        required
         value={name}
         onChange={e => setName(e.target.value)}
         placeholder={editing ? undefined : 'e.g. Network'}

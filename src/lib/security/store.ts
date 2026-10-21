@@ -1,3 +1,4 @@
+import { generateRandomString } from 'better-auth/crypto'
 import { authDatabase, getAuth, placeholderEmail, SSO_PROVIDER_ID } from './auth'
 import type { FactorsOwed } from './factors'
 import { effectiveKeyAccess, isRole, type KeyAccess, type Role } from './roles'
@@ -223,7 +224,51 @@ export async function setPasswordFor(userId: string, password: string, adminHead
   const auth = await getAuth()
   await auth.api.setUserPassword({ body: { userId, newPassword: password }, headers: adminHeaders })
   await auth.api.revokeUserSessions({ body: { userId }, headers: adminHeaders })
+  // A password link given out before would set another over this one.
+  const db = await authDatabase()
+  db.prepare(`DELETE FROM verification WHERE value = ? AND identifier LIKE 'reset-password:%'`).run(userId)
   return (await getUser(userId))!
+}
+
+/** How long a password link works for: long enough to reach someone, and be opened the next day. */
+export const PASSWORD_LINK_HOURS = 48
+
+/**
+ * A link for someone to choose their own password, so the admin who made it
+ * never knows it: for a new account, or one whose password is forgotten.
+ *
+ * It is a Better Auth reset token, kept in Better Auth's verification table
+ * and redeemed by its own reset (POST /api/auth/password-reset), which lets
+ * it be used once and sets the password. Only its lifetime is ClearPing's:
+ * Better Auth gives every reset code the quarter of an hour the primary
+ * account's code from the log has, too short for a link passed on to someone.
+ * A new link replaces any the account had before. Never the primary
+ * account's, which only its owner resets.
+ */
+export async function makePasswordLink(userId: string): Promise<{ token: string; expiresAt: number }> {
+  const user = await getUser(userId)
+  if (!user) throw new Error('No such account')
+  if (user.primary) throw new Error('Only the primary account sets its own password. If it is lost, it can be reset with a code from the server log')
+
+  const db = await authDatabase()
+  db.prepare(`DELETE FROM verification WHERE value = ? AND identifier LIKE 'reset-password:%'`).run(userId)
+
+  const token = generateRandomString(32, 'a-z', 'A-Z', '0-9')
+  const expiresAt = new Date(Date.now() + PASSWORD_LINK_HOURS * 60 * 60 * 1000)
+  const context = await (await getAuth()).$context
+  await context.internalAdapter.createVerificationValue({ value: userId, identifier: `reset-password:${token}`, expiresAt })
+  return { token, expiresAt: expiresAt.getTime() }
+}
+
+/**
+ * A new account that chooses its own password through a link. Better Auth
+ * needs a password to make the account, so it is given a long random one that
+ * is never shown or kept anywhere else: until the link is used, there is no
+ * password anyone could sign in with.
+ */
+export async function createUserWithLink(username: string, role: Role): Promise<{ user: User; token: string; expiresAt: number }> {
+  const user = await createUser(username, generateRandomString(64), role)
+  return { user, ...(await makePasswordLink(user.id)) }
 }
 
 /** Whether this is the account's password. */

@@ -78,3 +78,7 @@ Things that bite:
   (copies through `src/lib/clipboard.ts`, which works over plain HTTP), and the fields (input,
   textarea, password, search, number, tag input, select), whose focus border is
   `--focus-color`, the colour of every other focus ring, instead of white.
+  Input, textarea, password and select also show a "Required" tag
+  (`src/components/required-mark.tsx`) beside the label when given `required`:
+  give it to every field that has to be filled in, and `noValidate` to its form
+  so ClearPing's own messages are the ones shown.

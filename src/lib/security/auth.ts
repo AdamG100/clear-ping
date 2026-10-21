@@ -305,7 +305,9 @@ function buildOptions(db: Database.Database, secret: string, sso: SsoConfig, sit
         const row = db.prepare('SELECT id, username, role FROM user WHERE id = ?').get(user.id) as
           | { id: string; username: string; role: Role }
           | undefined
-        if (row) recordOnAuthDb(db, { kind: 'user', id: row.id, name: row.username, role: row.role }, 'dashboard', 'account.password.reset', 'With a code from the server log')
+        // Both are Better Auth reset codes: the primary account's from the log,
+        // and any other's from a password link an admin made (store.ts).
+        if (row) recordOnAuthDb(db, { kind: 'user', id: row.id, name: row.username, role: row.role }, 'dashboard', 'account.password.reset', 'With a one-time code: from the server log, or a password link')
       },
     },
     session: {

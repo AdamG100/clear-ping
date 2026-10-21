@@ -341,6 +341,8 @@ function TargetRow({
                 <TypeBadge type={target.type} />
               </span>
             )}
+            {/* Where it is measured from, when that is another machine. */}
+            <ProbedFrom agent={target.probeAgent} />
             {paused && (
               <span className="shrink-0">
                 <Badge size="sm">Paused</Badge>
@@ -359,8 +361,6 @@ function TargetRow({
             {(dualStack || usesIpv6) && (
               <span className="flex shrink-0">{dualStack ? <DualStackBadge /> : <Ipv6Badge />}</span>
             )}
-            {/* Where it is measured from, when that is another machine. */}
-            <ProbedFrom agent={target.probeAgent} className="flex min-w-0 shrink" />
             {/* Stays put on hover: the trace is the reason to look at the row,
                 so swapping it out for the controls hid the thing being read. */}
             <span className="ml-auto shrink-0">
@@ -1321,12 +1321,12 @@ export function Sidebar({
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-sm text-sidebar-foreground truncate">{target.name}</span>
                                   {target.type && <TypeBadge type={target.type} />}
+                                  <ProbedFrom agent={target.probeAgent} />
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
                                     {targetAddressLabel(target)}
                                   </span>
-                                  <ProbedFrom agent={target.probeAgent} className="flex min-w-0 shrink" />
                                   <span className="ml-auto shrink-0">
                                     <Sparkline
                                       points={series?.[target.id] ?? []}

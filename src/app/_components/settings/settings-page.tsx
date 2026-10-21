@@ -1,17 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, Fingerprint, History, KeyRound, LogIn, LogOut, RadioTower, ShieldAlert, ShieldCheck, Trash2, User, UserPlus, Users, Wrench, type LucideIcon } from 'lucide-react'
+import { Bot, Fingerprint, History, KeyRound, LogIn, LogOut, RadioTower, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
-import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { CodeBlock } from '@/components/arc/code-block/code-block'
 import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { Input } from '@/components/arc/input/input'
 import { PasswordField } from '@/components/arc/password-field/password-field'
-import { RadioGroup } from '@/components/arc/radio-group/radio-group'
 import { SegmentedField } from '@/components/segmented-field'
 import { Select } from '@/components/arc/select/select'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
@@ -21,12 +19,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/arc/tabs/
 import { Timeline } from '@/components/arc/timeline/timeline'
 import { useToast } from '@/components/notifications'
 import type { SettingsSection } from '@/lib/dashboard-pages'
-import { canAdminister, DEFAULT_NEW_ROLE, maxKeyAccess, ROLE_DETAIL, ROLE_LABEL, ROLES, type Role } from '@/lib/security/roles'
+import { canAdminister, maxKeyAccess, ROLE_DETAIL, ROLE_LABEL, ROLES, type Role } from '@/lib/security/roles'
 import type { FactorPolicy } from '@/lib/security/factors'
 import { cn } from '@/lib/utils'
 import { FactorPolicyForm, SignInFactors, useMyFactors } from './sign-in-factors'
 import { MaintenanceTab } from './maintenance-tab'
 import { ProbeAgentsTab } from './probe-agents-tab'
+import { AddAccount } from './add-account'
+import { PasswordDialog } from './password-dialog'
 import { AssistantSettings, CopyField, PAGE_CARD } from './mcp-setup'
 import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
 import { displayTimeZone, inDisplayZone } from '@/lib/time-zone'
@@ -317,7 +317,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
         </div>
       )}
 
-      <form onSubmit={make} className="space-y-3">
+      <form noValidate onSubmit={make} className="space-y-3">
         <div className="space-y-1">
           <p className={SECTION_TITLE}>Create a key</p>
           <p className={HINT}>
@@ -327,6 +327,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
         </div>
         <Input
           label="Name"
+          required
           placeholder="Claude, ChatGPT, Home Assistant…"
           value={name}
           maxLength={60}
@@ -434,27 +435,11 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
 }
 
 function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
-  const { notify, reportError } = useToast()
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [role, setRole] = useState<Role>(DEFAULT_NEW_ROLE)
-  const [busy, setBusy] = useState<'add' | 'password' | 'role' | null>(null)
-  // The account whose password an admin is setting, while the dialog is open.
-  const [settingFor, setSettingFor] = useState<Account | null>(null)
+  const { reportError } = useToast()
+  const [busy, setBusy] = useState<'password' | 'role' | null>(null)
+  // The account whose password an admin is seeing to, while the dialog is open.
+  const [passwordFor, setPasswordFor] = useState<Account | null>(null)
   const admin = canAdminister(data.me.role)
-
-  const add = async (event: FormEvent) => {
-    event.preventDefault()
-    setBusy('add')
-    const { ok, body } = await send('/api/security/users', 'POST', { username: username.trim(), password, role })
-    setBusy(null)
-    if (!ok) return reportError('Could not add the account', body.error)
-    notify({ tone: 'success', title: `Added ${username.trim()}`, detail: `As ${ROLE_LABEL[role]}` })
-    setUsername('')
-    setPassword('')
-    setRole(DEFAULT_NEW_ROLE)
-    reload()
-  }
 
   const changeRole = async (account: Account, next: Role) => {
     setBusy('role')
@@ -501,6 +486,8 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
 
   return (
     <div className="space-y-8">
+      <AddAccount onAdded={reload} />
+
       <SortableDataTable
         caption="Accounts"
         itemName={{ one: 'account', other: 'accounts' }}
@@ -566,9 +553,9 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
             render: (_, { account }) =>
               account.id === data.me.id || account.primary ? null : (
                 <span className="flex flex-wrap items-center gap-2">
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setSettingFor(account)}>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setPasswordFor(account)}>
                     <KeyRound {...ICON} />
-                    {account.hasPassword ? 'Set password' : 'Give a password'}
+                    Password
                   </Button>
                   <ConfirmMorph
                     label="Remove"
@@ -586,106 +573,14 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
       <p className={HINT}>
         The primary account is the first one made. It is always an admin, cannot be removed, and only it sets its own
         password: if that is lost, the sign-in page resets it with a code from the server log. Every other account&apos;s
-        forgotten password is set here by an admin. There is always at least one admin. Roles matter once sign-in is on
+        forgotten password is set here by an admin, or chosen by its owner with a password link an admin makes. There is
+        always at least one admin. Roles matter once sign-in is on
         (Access): with it off, anyone who can reach ClearPing can change anything without signing in.
       </p>
-      <SetPasswordDialog account={settingFor} onClose={() => setSettingFor(null)} onDone={reload} />
-
-      <form onSubmit={add} className="space-y-4">
-        <p className={SECTION_TITLE}>Add an account</p>
-        <div className="grid items-start gap-3 sm:grid-cols-2">
-          <Input label="Username" autoComplete="off" value={username} onChange={event => setUsername(event.target.value)} />
-          <PasswordField
-            label="Password"
-            description="10 characters or more"
-            autoComplete="new-password"
-            value={password}
-            onChange={event => setPassword(event.target.value)}
-          />
-        </div>
-        {/* In a box of its own: the group sets its own margin to none, which
-            would take away the space the form puts under it. */}
-        <div>
-          <RadioGroup
-            label="What the account may do"
-            name="new-account-role"
-            value={role}
-            onValueChange={value => setRole(value as Role)}
-            options={ROLES.map(option => ({ value: option, label: ROLE_LABEL[option], description: ROLE_DETAIL[option] }))}
-          />
-        </div>
-        <Button type="submit" loading={busy === 'add'} disabled={busy !== null || !username.trim() || !password}>
-          <UserPlus {...ICON} />
-          Add account
-        </Button>
-      </form>
+      <PasswordDialog account={passwordFor} onClose={() => setPasswordFor(null)} onDone={reload} />
 
       {data.me.hasPassword && <PasswordForm busy={busy} setBusy={setBusy} />}
     </div>
-  )
-}
-
-/**
- * An admin setting another account's password, for someone who has forgotten
- * theirs. They are signed out everywhere and sign in with the new one, which
- * the admin passes on to them.
- */
-function SetPasswordDialog({ account, onClose, onDone }: { account: Account | null; onClose: () => void; onDone: () => void }) {
-  const { notify, reportError } = useToast()
-  const [password, setPassword] = useState('')
-  const [confirm, setConfirm] = useState('')
-  const [busy, setBusy] = useState(false)
-  const mismatch = confirm !== '' && password !== confirm
-
-  const close = () => {
-    setPassword('')
-    setConfirm('')
-    onClose()
-  }
-
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!account || password !== confirm) return
-    setBusy(true)
-    const { ok, body } = await send(`/api/security/users/${account.id}/password`, 'PUT', { password })
-    setBusy(false)
-    if (!ok) return reportError(`Could not set the password of ${account.username}`, body.error)
-    notify({ tone: 'success', title: `Password set for ${account.username}`, detail: 'They have been signed out everywhere. Give them the new password.' })
-    close()
-    onDone()
-  }
-
-  return (
-    <Dialog open={account !== null} onOpenChange={open => { if (!open) close() }}>
-      <DialogContent
-        title={account ? `Set the password of ${account.username}` : 'Set a password'}
-        description="For someone who has forgotten theirs. They are signed out everywhere, and sign in with this one."
-      >
-        <form onSubmit={save} className="space-y-4 text-foreground" noValidate>
-          <PasswordField
-            label="New password"
-            description="10 characters or more"
-            autoComplete="new-password"
-            value={password}
-            onChange={event => setPassword(event.target.value)}
-          />
-          <PasswordField
-            label="New password again"
-            autoComplete="new-password"
-            value={confirm}
-            onChange={event => setConfirm(event.target.value)}
-          />
-          {mismatch && <p className="text-xs text-destructive">The two passwords are not the same.</p>}
-          {account?.twoFactor && (
-            <p className={HINT}>{account.username} still needs their authenticator app after the password.</p>
-          )}
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={close}>Cancel</Button>
-            <Button type="submit" loading={busy} disabled={busy || !password || password !== confirm}>Set password</Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }
 
@@ -707,11 +602,11 @@ function PasswordForm<Busy extends string>({ busy, setBusy }: { busy: Busy | nul
   }
 
   return (
-    <form onSubmit={changePassword} className="space-y-4">
+    <form noValidate onSubmit={changePassword} className="space-y-4">
       <p className={SECTION_TITLE}>Change your password</p>
       <div className="grid items-start gap-3 sm:grid-cols-2">
-        <PasswordField label="Current password" autoComplete="current-password" value={current} onChange={event => setCurrent(event.target.value)} />
-        <PasswordField label="New password" autoComplete="new-password" value={next} onChange={event => setNext(event.target.value)} />
+        <PasswordField label="Current password" required autoComplete="current-password" value={current} onChange={event => setCurrent(event.target.value)} />
+        <PasswordField label="New password" required autoComplete="new-password" value={next} onChange={event => setNext(event.target.value)} />
       </div>
       <Button type="submit" variant="secondary" loading={busy === 'password'} disabled={(busy !== null && busy !== 'password') || !current || !next}>
         Change password
@@ -853,7 +748,7 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
         <CopyField id="sso-after-logout" label="Post logout redirect URI" value={afterLogoutUri} />
       </div>
 
-      <form
+      <form noValidate
         onSubmit={event => {
           event.preventDefault()
           void save(form, 'save')
@@ -863,14 +758,16 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
         <div className="grid items-start gap-4 sm:grid-cols-2">
           <Input
             label="Issuer"
+            required
             placeholder="https://auth.example.com/application/o/clearping/"
             value={form.issuer}
             onChange={event => set('issuer')(event.target.value)}
           />
           <Input label="Name on the button" placeholder="Authentik" value={form.label} maxLength={40} onChange={event => set('label')(event.target.value)} />
-          <Input label="Client ID" autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
+          <Input label="Client ID" required autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
           <PasswordField
             label="Client secret"
+            required={!saved.clientSecretSet}
             autoComplete="new-password"
             description={saved.clientSecretSet ? 'Saved. Leave it empty to keep it.' : undefined}
             value={form.clientSecret}
@@ -989,6 +886,7 @@ const ACTIONS: Record<string, string> = {
   'account.password.reset': 'reset their password',
   'account.password.reset.asked': 'asked for a password reset code',
   'account.password.set': 'set the password of',
+  'account.password.link': 'made a password link for',
   'account.2fa.enable': 'turned on their authenticator app',
   'account.2fa.disable': 'turned off their authenticator app',
   'account.2fa.codes': 'made new backup codes',

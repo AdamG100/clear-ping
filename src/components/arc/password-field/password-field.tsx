@@ -4,6 +4,7 @@ import type { InputHTMLAttributes } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { motionTokens } from "../lib/motion-tokens";
 import styles from "./password-field.module.css";
+import { RequiredMark } from "@/components/required-mark";
 /** The toggle's names. Both have English defaults; pass the ones you translate. */
 export interface PasswordFieldMessages { showPassword: string; hidePassword: string }
 export const defaultPasswordFieldMessages: PasswordFieldMessages = { showPassword: "Show password", hidePassword: "Hide password" };
@@ -61,5 +62,5 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(fu
   const generated = useId(); const controlId = id ?? generated; const [visible, setVisible] = useState(false); const [toggled, setToggled] = useState(false);
   const hintId = description ? `${controlId}-description` : undefined;
   // data-reveal only appears after the first toggle, so the value resolves on each change but never on mount.
-  return <div className={styles.field}><label htmlFor={controlId}>{label}</label><div className={styles.shell}><input {...props} ref={ref} id={controlId} type={visible ? "text" : "password"} data-reveal={toggled ? (visible ? "shown" : "hidden") : undefined} aria-describedby={[props["aria-describedby"], hintId].filter(Boolean).join(" ") || undefined} className={[styles.input, className].filter(Boolean).join(" ")} /><button type="button" onClick={() => { setVisible(current => !current); setToggled(true); }} aria-label={visible ? messages.hidePassword : messages.showPassword} aria-pressed={visible}><EyeMorph slashed={visible} /></button></div><FieldMessage id={hintId} text={description} className={styles.hint} /></div>;
+  return <div className={styles.field}><label htmlFor={controlId}>{label}{props.required && <RequiredMark />}</label><div className={styles.shell}><input {...props} ref={ref} id={controlId} type={visible ? "text" : "password"} data-reveal={toggled ? (visible ? "shown" : "hidden") : undefined} aria-describedby={[props["aria-describedby"], hintId].filter(Boolean).join(" ") || undefined} className={[styles.input, className].filter(Boolean).join(" ")} /><button type="button" onClick={() => { setVisible(current => !current); setToggled(true); }} aria-label={visible ? messages.hidePassword : messages.showPassword} aria-pressed={visible}><EyeMorph slashed={visible} /></button></div><FieldMessage id={hintId} text={description} className={styles.hint} /></div>;
 });
