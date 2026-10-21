@@ -7,8 +7,8 @@
  */
 
 import { startScheduler } from './scheduler';
-import { initDatabase } from './database';
-import { startMaintenanceSchedule } from './maintenance';
+import { initDatabase } from './db/database';
+import { startMaintenanceSchedule } from './db/maintenance';
 import { recoveryMode } from './security/settings-store';
 import { announceSetupCode } from './security/setup-code';
 import { countUsers } from './security/store';

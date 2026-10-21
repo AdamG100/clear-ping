@@ -6,7 +6,7 @@ import path from 'node:path'
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clearping-security-'))
 process.env.CLEARPING_DB_PATH = path.join(dir, 'test.db')
 
-const { initDatabase, closeDatabase } = await import('../database')
+const { initDatabase, closeDatabase } = await import('../db/database')
 const store = await import('./store')
 const { authDatabase, closeAuth, getAuth } = await import('./auth')
 const { identify, securityPolicy } = await import('./access')
@@ -162,16 +162,16 @@ describe('keys', () => {
 })
 
 describe('roles', () => {
-  it('never leaves no admin, by a change of role or by removing the account', async () => {
+  it('never leaves no admin: the primary account stays one, and stays', async () => {
     const adam = (await store.listUsers()).find(user => user.username === 'Adam')!
-    expect(adam.role).toBe('admin')
-    await expect(store.setRole(adam.id, 'viewer')).rejects.toThrow('only admin')
-    await expect(store.deleteUser(adam.id)).rejects.toThrow('only admin')
+    expect(adam).toMatchObject({ role: 'admin', primary: true })
+    await expect(store.setRole(adam.id, 'viewer')).rejects.toThrow('primary account')
+    await expect(store.deleteUser(adam.id)).rejects.toThrow('primary account')
 
+    // Any other admin can be made something else, or removed: the primary one remains.
     const second = await store.createUser('second-admin', PASSWORD, 'admin')
-    expect((await store.setRole(adam.id, 'editor')).role).toBe('editor')
-    await expect(store.setRole(second.id, 'viewer')).rejects.toThrow('only admin')
-    await store.setRole(adam.id, 'admin')
+    await expect(store.setRole(adam.id, 'editor')).rejects.toThrow('primary account')
+    expect((await store.setRole(second.id, 'viewer')).role).toBe('viewer')
     await store.deleteUser(second.id)
   })
 

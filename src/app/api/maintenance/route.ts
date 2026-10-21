@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAlerts } from '@/lib/alerts';
+import { getAlerts } from '@/lib/alerts/store';
 import { initializeServer } from '@/lib/init';
 import {
   getMaintenanceHistory,
@@ -9,7 +9,7 @@ import {
   parseMaintenanceSettings,
   runMaintenance,
   saveMaintenanceSettings,
-} from '@/lib/maintenance';
+} from '@/lib/db/maintenance';
 import { actorFor } from '@/lib/security/access';
 import { requireAdmin } from '@/lib/security/http';
 import { recordActivity } from '@/lib/security/store';

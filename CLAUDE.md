@@ -17,6 +17,14 @@ One trailer is enough for everything going out together: the biggest one asked
 for since the last release wins. Do not edit `package.json`'s version or make
 `v*` tags.
 
+## Structure
+
+Where files go, how they are named, and what may import what are in
+`docs/structure.md`: read it before adding or moving a file, and go through its
+checklist before finishing. In short: a folder names a subject and a file one
+thing in it (`src/lib/probes/config.ts`, not `probe-config.ts`), tests sit
+beside what they test, `@/` across folders and `./` within one, no barrels.
+
 ## Security: Better Auth
 
 Everything to do with signing in is Better Auth's (`src/lib/security/auth.ts`)
@@ -26,6 +34,23 @@ by adding the Better Auth plugin that does it, called from ClearPing's own
 routes on the server; never write sign-in, session or credential handling by
 hand. Better Auth's HTTP endpoints stay closed to the browser (the `before`
 hook), so ClearPing's rules always apply.
+
+## Probe agents
+
+A probe agent (`probe-agent/`) is a small program on another machine that the
+dashboard connects to for readings from there (`docs/probe-agents.md`). Never
+call it a bare "agent" in the UI or docs: it is a "probe agent", and has
+nothing to do with AI agents or the assistant.
+
+- It bundles the dashboard's probe modules (`src/lib/probes/`,
+  `src/lib/traceroute/run.ts`, …) with esbuild. Anything those import must
+  stay free of the database (`src/lib/db/`), Next.js and Better Auth;
+  `scripts/build-probe-agent.mjs` fails the build if any of them gets in. Put
+  dashboard-only work in `src/lib/probe-agents/client.ts`, not in the probe modules.
+- `src/lib/probe-agents/protocol.ts` is the contract both ends share. Raise
+  `PROBE_AGENT_PROTOCOL` when what `/v1/*` takes or gives changes.
+- Its token is a pairing secret for a program that has no Better Auth, not a
+  sign-in: the routes that manage probe agents are Better Auth admin routes.
 
 ## UI: Arc
 

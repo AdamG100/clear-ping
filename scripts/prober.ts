@@ -12,7 +12,7 @@
  * schedule probes.
  */
 
-import { closeDatabase, initDatabase } from '../src/lib/database';
+import { closeDatabase, initDatabase } from '../src/lib/db/database';
 import { getScheduler, startScheduler, stopScheduler } from '../src/lib/scheduler';
 
 async function main() {

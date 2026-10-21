@@ -6,10 +6,11 @@ import { browserSupportsWebAuthn, startAuthentication } from '@simplewebauthn/br
 import { Alert } from '@/components/arc/alert/alert'
 import { Button } from '@/components/arc/button/button'
 import { Checkbox } from '@/components/arc/checkbox/checkbox'
+import { CodeBlock } from '@/components/arc/code-block/code-block'
 import { Input } from '@/components/arc/input/input'
 import { OtpInput } from '@/components/arc/otp-input/otp-input'
 import { PasswordField } from '@/components/arc/password-field/password-field'
-import { BrandMark } from '../_components/monitoring/brand-mark'
+import { BrandMark } from '../_components/shell/brand-mark'
 
 /**
  * Sign in, or make the first account.
@@ -21,6 +22,9 @@ import { BrandMark } from '../_components/monitoring/brand-mark'
  * An account with an authenticator app is asked for its code after the
  * password; one with a passkey can sign in with that alone. Both are Better
  * Auth's, through /api/auth/two-factor and /api/auth/passkey.
+ *
+ * A forgotten password is reset with a one-time code ClearPing writes to its
+ * server log (/api/auth/password-reset).
  */
 
 interface Status {
@@ -51,6 +55,10 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
   const [code, setCode] = useState('')
   const [backup, setBackup] = useState(false)
   const [trustDevice, setTrustDevice] = useState(false)
+  // A forgotten password: ask for a code, then type it with the new password.
+  const [reset, setReset] = useState<'ask' | 'enter' | null>(null)
+  const [resetCode, setResetCode] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/auth/status')
@@ -162,6 +170,143 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
   }
 
   const passkeyOffered = !registering && step === 'password' && !!status?.passkeys && typeof window !== 'undefined' && browserSupportsWebAuthn()
+
+  const sendReset = async (event: FormEvent) => {
+    event.preventDefault()
+    setError(null)
+    if (reset === 'enter' && password !== confirm) {
+      setError('The two passwords are not the same')
+      return
+    }
+    setBusy(true)
+    try {
+      const response = await fetch('/api/auth/password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reset === 'ask' ? { step: 'ask', username } : { step: 'reset', code: resetCode, password }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setError(body.error ?? 'That did not work. Try again.')
+        return
+      }
+      if (reset === 'ask') {
+        setReset('enter')
+        setPassword('')
+        setConfirm('')
+        return
+      }
+      setReset(null)
+      setPassword('')
+      setConfirm('')
+      setResetCode('')
+      setNotice('Your password is changed. Sign in with the new one.')
+    } catch {
+      setError('ClearPing could not be reached. Try again in a moment.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const leaveReset = () => {
+    setReset(null)
+    setResetCode('')
+    setPassword('')
+    setConfirm('')
+    setError(null)
+  }
+
+  if (reset) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="flex items-center gap-2.5">
+            <BrandMark />
+            <div>
+              <p className="text-sm font-medium text-foreground">ClearPing</p>
+              <p className="text-xs text-muted-foreground">Path monitor</p>
+            </div>
+          </div>
+          <form onSubmit={sendReset} className="space-y-5 rounded-3xl border border-border bg-card p-6" noValidate>
+            <div className="space-y-1">
+              <h1 className="text-lg font-medium text-card-foreground">Reset your password</h1>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {reset === 'ask'
+                  ? 'For the primary account, the first one made: ClearPing writes a one-time code to its server log, which only whoever runs the server can read. Any other account, ask an admin to set a new password for you.'
+                  : `If ${username.trim()} is the primary account, its code is in the server log now. It works once, for 15 minutes.`}
+              </p>
+            </div>
+
+            {reset === 'ask' ? (
+              <Input
+                label="Username"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={username}
+                onChange={event => setUsername(event.target.value)}
+                required
+                autoFocus
+              />
+            ) : (
+              <>
+                {/* Where to find it, ready to copy. */}
+                <CodeBlock code={'docker logs clear_ping 2>&1 | grep "reset code"'} filename="On the server" language="bash" />
+                <Input
+                  label="Code from the log"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={resetCode}
+                  onChange={event => setResetCode(event.target.value)}
+                  required
+                  autoFocus
+                  style={{ fontFamily: 'var(--font-plex-mono), ui-monospace, monospace' }}
+                />
+                <PasswordField
+                  label="New password"
+                  description={`At least ${MIN_PASSWORD} characters.`}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={event => setPassword(event.target.value)}
+                  required
+                  minLength={MIN_PASSWORD}
+                />
+                <PasswordField
+                  label="New password again"
+                  autoComplete="new-password"
+                  value={confirm}
+                  onChange={event => setConfirm(event.target.value)}
+                  required
+                />
+              </>
+            )}
+
+            {error && <Alert tone="danger" title="The password was not reset">{error}</Alert>}
+
+            <Button
+              type="submit"
+              className="w-full"
+              loading={busy}
+              disabled={reset === 'ask' ? !username.trim() : !resetCode.trim() || !password || !confirm}
+            >
+              {reset === 'ask' ? 'Write a code to the log' : 'Set the new password'}
+            </Button>
+            <div className="space-y-1">
+              {reset === 'enter' && (
+                <Button type="button" variant="ghost" className="w-full" onClick={() => { setReset('ask'); setError(null) }}>
+                  Ask for another code
+                </Button>
+              )}
+              <Button type="button" variant="ghost" className="w-full" onClick={leaveReset}>
+                Back to sign in
+              </Button>
+            </div>
+          </form>
+        </div>
+      </main>
+    )
+  }
 
   if (step === 'code') {
     return (
@@ -336,6 +481,8 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
             </>
           )}
 
+          {notice && !error && <Alert tone="success" title="Password reset">{notice}</Alert>}
+
           {error && (
             <Alert tone="danger" title={registering ? 'The account was not made' : 'You are not signed in'}>
               {error}
@@ -352,6 +499,17 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
             <Button type="button" variant="secondary" className="w-full" onClick={withPasskey} disabled={busy}>
               <Fingerprint size={16} strokeWidth={1.75} aria-hidden="true" />
               Sign in with a passkey
+            </Button>
+          )}
+
+          {passwordForm && !registering && status?.accountExists && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={() => { setReset('ask'); setPassword(''); setError(null); setNotice(null) }}
+            >
+              Forgot your password?
             </Button>
           )}
 

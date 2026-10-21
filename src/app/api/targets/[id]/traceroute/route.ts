@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTargetById } from '@/lib/database';
-import { isTraceFamilies } from '@/lib/host';
+import { getTargetById } from '@/lib/db/database';
+import { isTraceFamilies } from '@/lib/probes/host';
 import { initializeServer } from '@/lib/init';
+import { ProbeAgentUnavailableError } from '@/lib/probe-agents/client';
 import {
   countTraceroutes,
   deleteOlderTraceroutes,
@@ -10,7 +11,7 @@ import {
   getTraceroutes,
   traceAndStore,
   traceFamiliesProblem,
-} from '@/lib/traceroute';
+} from '@/lib/traceroute/store';
 
 /**
  * GET /api/targets/[id]/traceroute - Recent traces for a target, newest first
@@ -65,6 +66,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     return NextResponse.json({ traceroutes: await traceAndStore(target, 'manual', family) });
   } catch (error) {
+    if (error instanceof ProbeAgentUnavailableError) {
+      return NextResponse.json({ error: `Probe agent ${error.agentName}: ${error.message}` }, { status: 503 });
+    }
     console.error('Error running traceroute:', error);
     return NextResponse.json({ error: 'Failed to run traceroute' }, { status: 500 });
   }

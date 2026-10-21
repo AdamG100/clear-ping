@@ -1,0 +1,39 @@
+# A ClearPing probe agent, for the machine it takes readings from (a VPS, say),
+# not the one the dashboard runs on. Add the probe agent in ClearPing first
+# (Settings -> Probe agents): that gives the token. Then, on this machine:
+#
+#   cp compose.probe-agent.example.yaml compose.yaml
+#   (put the token in below)
+#   docker compose up -d
+#
+# and press Connect for it in ClearPing. The certificate fingerprint ClearPing
+# shows should match the one in `docker logs clearping-probe-agent`.
+#
+# The dashboard connects to this; this never connects to the dashboard. Over a
+# tailnet nothing is open to the internet. Reached at a public address, the
+# link is still encrypted and token-checked, but let only the dashboard's
+# address through to the port. See docs/probe-agents.md.
+
+services:
+  clearping-probe-agent:
+    image: ghcr.io/adamg100/clear-ping-probe-agent:latest
+    container_name: clearping-probe-agent
+    restart: unless-stopped
+    ports:
+      # On a tailnet, publish it on the tailnet address only, which keeps it
+      # off every other interface:
+      #   - "100.84.12.7:7380:7380"
+      - "7380:7380"
+    # For IPv6 targets, which Docker's default network cannot reach, use the
+    # host's network instead of `ports`, with the address to listen on:
+    # network_mode: host
+    environment:
+      CLEARPING_PROBE_AGENT_TOKEN: "cpa_paste_the_token_from_clearping_here"
+      # With network_mode: host, the address and port to listen on:
+      # CLEARPING_PROBE_AGENT_LISTEN: 100.84.12.7:7380
+    volumes:
+      # Its certificate. Keep it: a new one has to be trusted again in ClearPing.
+      - probe-agent-data:/data
+
+volumes:
+  probe-agent-data:

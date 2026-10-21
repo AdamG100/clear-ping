@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from '@/lib/security/auth';
-import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies } from '@/lib/security/http';
+import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies, refusal } from '@/lib/security/http';
 import { securityPolicy } from '@/lib/security/access';
-import { actorOf, getUser, recordActivity } from '@/lib/security/store';
+import { actorOf, getUser, recordActivity, signInTrouble } from '@/lib/security/store';
 
 /**
  * POST /api/auth/login - Sign in
@@ -37,11 +37,15 @@ export async function POST(request: NextRequest) {
 
   const auth = await getAuth();
   // A refusal from one of ClearPing's hooks arrives as a throw, not an answer.
+  let thrown: string | null = null;
   const answer =
     username && password
       ? await auth.api
           .signInUsername({ body: { username, password, rememberMe: true }, headers: request.headers, asResponse: true })
-          .catch(() => null)
+          .catch((error: unknown) => {
+            thrown = error instanceof Error ? error.message : String(error);
+            return null;
+          })
       : null;
   const signedIn = answer?.ok
     ? ((await answer.clone().json().catch(() => null)) as { user?: { id: string }; twoFactorRedirect?: boolean } | null)
@@ -56,6 +60,9 @@ export async function POST(request: NextRequest) {
 
   if (!answer?.ok || !user) {
     noteLoginFailure(keys);
+    // The page says only "wrong username or password"; the log says which.
+    const said = thrown ?? (answer ? await refusal(answer.clone(), `answered ${answer.status}`) : 'nothing was checked');
+    console.warn(`[Sign-in] "${username}" from ${address} was refused: ${await signInTrouble(username, said)}`);
     await recordActivity({ kind: 'anonymous', name: username || 'Unknown' }, 'dashboard', 'signin.failed', `From ${address}`);
     return NextResponse.json({ error: 'Wrong username or password' }, { status: 401 });
   }

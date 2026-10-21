@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAlert, sendTestAlert } from '@/lib/alerts';
-import { getTargetById } from '@/lib/database';
+import { getAlert, sendTestAlert } from '@/lib/alerts/store';
+import { getTargetById } from '@/lib/db/database';
 import { initializeServer } from '@/lib/init';
 
 /**

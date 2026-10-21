@@ -4,7 +4,7 @@ import { getAuth } from '@/lib/security/auth';
 import { passCookies } from '@/lib/security/http';
 import { passwordProblem } from '@/lib/security/secrets';
 import { setupCodeMatches } from '@/lib/security/setup-code';
-import { actorOf, countUsers, createUser, recordActivity } from '@/lib/security/store';
+import { actorOf, countUsers, createUser, makePrimary, recordActivity } from '@/lib/security/store';
 
 /**
  * POST /api/auth/register - Make the first account, and sign in with it
@@ -22,7 +22,8 @@ export async function POST(request: NextRequest) {
   const username = typeof body?.username === 'string' ? body.username.trim() : '';
   const password = body?.password;
 
-  if ((await countUsers()) > 0 && !recoveryMode()) {
+  const first = (await countUsers()) === 0;
+  if (!first && !recoveryMode()) {
     return NextResponse.json({ error: 'There is already an account. Sign in, and add others from the security settings.' }, { status: 403 });
   }
   // The first account is an admin, so it is not for whoever gets here first:
@@ -36,6 +37,9 @@ export async function POST(request: NextRequest) {
   let user;
   try {
     user = await createUser(username, password, 'admin');
+    // The first account belongs to whoever runs the server: the primary one.
+    // One made later with CLEARPING_AUTH=off is an admin like any other.
+    if (first) await makePrimary(user.id);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not make the account' }, { status: 400 });
   }

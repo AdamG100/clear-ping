@@ -9,7 +9,7 @@ import { passkey } from '@better-auth/passkey'
 import { createAccessControl } from 'better-auth/plugins/access'
 import { adminAc, defaultStatements, userAc } from 'better-auth/plugins/admin/access'
 import { apiKey } from '@better-auth/api-key'
-import { databasePath, getDatabase } from '../database'
+import { databasePath, getDatabase } from '../db/database'
 import { discover, getSsoConfig, groupsOf, inAllowedGroup, ssoRole, ssoUsable, usernameFrom, type Claims, type SsoConfig } from './oidc'
 import { ROLE_LABEL, type Role } from './roles'
 import { hashPassword, KEY_PREFIX, newToken, verifyPassword } from './secrets'
@@ -71,6 +71,9 @@ const ROLES = {
 }
 
 const SESSION_DAYS = 30
+
+/** How long a password reset code from the server log works for. */
+export const RESET_CODE_MINUTES = 15
 
 // â”€â”€â”€ The database â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -284,6 +287,25 @@ function buildOptions(db: Database.Database, secret: string, sso: SsoConfig, sit
       password: {
         hash: hashPassword,
         verify: ({ hash, password }: { hash: string; password: string }) => verifyPassword(password, hash),
+      },
+      // A forgotten password. Better Auth makes the code, keeps it, lets it be
+      // used once and sets the new password; the code is written to the
+      // server's log instead of being emailed, since accounts here have no
+      // address to send it to. Whoever can read the log runs the server.
+      sendResetPassword: async ({ user, token }: { user: { name: string; username?: string | null }; token: string }) => {
+        console.log(
+          `[Sign-in] Password reset code for "${user.username ?? user.name}": ${token}  ` +
+            `(works once, for ${RESET_CODE_MINUTES} minutes; type it on the sign-in page under "Forgot your password?")`
+        )
+      },
+      resetPasswordTokenExpiresIn: RESET_CODE_MINUTES * 60,
+      // Whoever had the old password is signed out with it.
+      revokeSessionsOnPasswordReset: true,
+      onPasswordReset: async ({ user }: { user: { id: string } }) => {
+        const row = db.prepare('SELECT id, username, role FROM user WHERE id = ?').get(user.id) as
+          | { id: string; username: string; role: Role }
+          | undefined
+        if (row) recordOnAuthDb(db, { kind: 'user', id: row.id, name: row.username, role: row.role }, 'dashboard', 'account.password.reset', 'With a code from the server log')
       },
     },
     session: {

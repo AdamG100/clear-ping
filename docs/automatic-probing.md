@@ -49,7 +49,7 @@ Common intervals:
 ### Ping Configuration
 
 By default, each probe sends **20 pings**, spaced **10 ms** apart, with a **1 second
-timeout** per packet. The defaults live in [src/lib/ping.ts](../src/lib/ping.ts):
+timeout** per packet. The defaults live in [src/lib/probes/ping.ts](../src/lib/probes/ping.ts):
 
 ```typescript
 const DEFAULTS = { count: 20, timeout: 1000, interval: 10 };
@@ -57,7 +57,7 @@ const DEFAULTS = { count: 20, timeout: 1000, interval: 10 };
 
 ## What Each Kind of Target Measures
 
-The sidebar labels every target `IP`, `DOMAIN`, `TCP`, `HTTP` or `DNS`. The label is
+The sidebar labels every target `IP`, `DOMAIN`, `TCP`, `GAME`, `HTTP` or `DNS`. The label is
 derived from the address and the probe method, and each kind is measured differently:
 
 | Target | Example | What a probe does |
@@ -65,11 +65,12 @@ derived from the address and the probe method, and each kind is measured differe
 | **IP** | `1.1.1.1`, `2606:4700:4700::1111` | Pings the address directly with ICMP echo requests. |
 | **Domain** | `example.com` | Resolves the name once, then sends every packet of that probe to the one address it returned. |
 | **TCP** | `db.internal:5432` | Opens a connection to the port, times the handshake and closes it. 10 attempts per probe. |
+| **Game** | `udp://203.0.113.5:27015` | Asks the server how it is, in its game's own query, and times the answer. 10 queries per probe. |
 | **HTTP** | `https://example.com/health` | Makes the request and checks the answer. 3 requests per probe, each on a fresh connection. |
 | **DNS** (server) | `8.8.8.8` with the DNS method | Sends DNS queries straight to that server and times the answers. No ping. |
 | **DNS** (name) | `example.com` with the DNS method | Looks the name up and times the answer: through the system resolver, or through each of the resolvers you list for it. No ping. |
 
-The address box accepts a URL or `host:port` and picks the method to match. Whatever
+The address box accepts a URL, `host:port` or `udp://host:port` and picks the method to match. Whatever
 the method, the host is resolved once per probe and the resolved address is shown
 next to the target, so the IPv4/IPv6 setting below applies to all of them.
 
@@ -79,6 +80,78 @@ For hosts that drop ICMP, and for knowing a service is listening rather than mer
 that the machine is up. "Loss" is the share of connection attempts that failed. The
 error distinguishes a refused connection (nothing listening) from a timeout
 (something dropping the packets).
+
+### Game servers
+
+A game server says nothing to a packet it does not understand, so a game server
+probe asks in the game's own query and times the answer. "Loss" is the share of
+queries that got no answer. Pick the game the server runs:
+
+| Game | Over | Answered by | Usual port |
+|------|------|-------------|------------|
+| **Steam (A2S)** | UDP | Counter-Strike 2, Rust, ARK, Garry's Mod, Valheim, DayZ, TF2 and most Steam game servers | 27015 |
+| **Minecraft Java** | TCP | Java servers and proxies such as BungeeCord and Velocity | 25565 |
+| **Minecraft Bedrock** | UDP | Bedrock and Education servers, Geyser | 19132 |
+| **Quake 3 / FiveM** | UDP | FiveM, RedM, Quake 3, Enemy Territory, older Call of Duty | 30120, 27960 |
+| **Any other game** | UDP | Call of Duty, Valorant, League of Legends, Fortnite: games that answer no query (below) | the game port |
+
+Minecraft Java's is the game's own server list ping: each query connects, reads
+the server's status and times a ping, which is the figure the game's multiplayer
+screen shows. The name that is sent with it is the target's, so a proxy that
+picks a server by name picks the right one.
+
+For a Steam game, use the server's **query port**. For many games it is the game port, but not for
+all: Rust's is set by `server.queryport`, Valheim's is the game port plus one, and
+ARK's is 27015 by default.
+
+**Games that answer no query.** Current Call of Duty, Valorant, League of
+Legends, Fortnite and most other big online games run their own servers with
+their own encrypted protocols. A server like that only talks to players who have
+joined its match, and drops anything else sent to its game port, so a query gets
+nothing back. Many of them block ping as well.
+
+**Any other game** reaches them the way `mtr --udp` does. It sends UDP packets to
+ports on the server that nothing listens on (33434 and up, as traceroute does),
+and times the server's own "port unreachable" answer, which many servers that
+block ping still send. The reading is the server and the way to it: up or not,
+how fast, and how many packets went missing. It cannot say whether the game on
+the server is running, which only someone in the match can see.
+
+- **Needs Linux.** Linux passes the "port unreachable" on to ClearPing; Windows
+  does not, and the check says so there instead of showing loss. The Docker
+  image is Linux, and so is a probe agent on a Raspberry Pi.
+- **A second apart.** Servers answer only about one "port unreachable" a second
+  after a short burst, so the 10 queries of a probe are spaced a second apart,
+  or the server's own limit would show as loss.
+- **Not every server answers.** One whose firewall drops everything, closed ports
+  included, shows 100% loss. Check first: `mtr --udp <address>` shows the
+  server's address as its last hop when this will work.
+
+To watch the network to one of them:
+
+- **Trace the route when it loses packets.** An alert on packet loss, set to
+  trace, records the route at the moment it happens. The hop where loss starts
+  and carries on to the end is where the trouble is; loss at one hop that the
+  hops after it do not have is only that router not bothering to answer.
+- **Probe from the player's own network.** A reading from wherever ClearPing runs
+  shows that machine's path, not a player's. Run a [probe agent](./probe-agents.md)
+  on the player's network to measure what they get.
+- **Expect the address to change.** Matchmade games put each match on whichever
+  server is free, so the address seen in one match is often not the next one's.
+  Ping a few of them, or the region's, rather than one.
+
+The game queries also read what the server says about itself (its name, map,
+player count and version), and the latest one is shown above the chart. A Steam
+server that asks for its challenge back is sent it once a probe for this, outside
+the timed queries.
+
+On Linux, where the Docker image runs, a port nothing is listening on is reported
+as `Port unreachable`, because the host answers with ICMP. Silence (`No reply`)
+means the query was dropped or not understood: a firewall, the wrong port, or the
+wrong query for the game. Game servers and the DDoS filters in front of them often
+limit how many queries one address may send; the probe spaces its queries 200 ms
+apart, but a filter that only lets known players through has to be told about the
+dashboard's (or probe agent's) address.
 
 ### HTTP(S)
 
@@ -187,7 +260,7 @@ An IP target uses the family of its address. Bracketed (`[2001:db8::1]`) and
 scoped link-local (`fe80::1%eth0`) forms are accepted.
 
 A target named by a hostname has an **IP version** setting, whatever it is probed
-with (ping, TCP, HTTP or DNS):
+with (ping, TCP, UDP, HTTP or DNS):
 
 | Setting | What is probed |
 |---------|----------------|
@@ -497,7 +570,7 @@ If you're seeing unexpected packet loss:
 |---------|-----------|-----------|
 | Default Interval | 300s | 300s |
 | Pings per Probe | 20 | 20 |
-| Probe Types | ICMP, TCP, HTTP(S), DNS | ICMP, DNS, HTTP, etc. |
+| Probe Types | ICMP, TCP, UDP (game servers), HTTP(S), DNS | ICMP, DNS, HTTP, etc. |
 | IPv4 / IPv6 | Per target: either, or both side by side | Separate probes (FPing, FPing6) |
 | Multi-host graphs | Any sidebar group | Configured per graph |
 | Storage | SQLite | RRD files |
@@ -506,45 +579,28 @@ If you're seeing unexpected packet loss:
 
 ## Code Structure
 
+The probing code, in `src/lib/`. [structure.md](structure.md) has the whole layout
+and the rules that keep it tidy.
+
 ```
-src/
-├── instrumentation.ts      # Server startup hook (starts the scheduler)
-├── lib/
-│   ├── scheduler.ts        # Probe scheduling and retention
-│   ├── init.ts             # Server initialization
-│   ├── ping.ts             # ICMP probe (process handling)
-│   ├── ping-parse.ts       # ICMP output parsing (platform-specific, tested)
-│   ├── tcp.ts              # TCP connect probe
-│   ├── http-probe.ts       # HTTP(S) probe, including certificate expiry
-│   ├── dns.ts              # DNS probe
-│   ├── probe.ts            # Runs a target's probe, once per address family
-│   ├── probe-result.ts     # Loss, latency and jitter from a probe's samples
-│   ├── probe-config.ts     # Per-probe settings: parsing and validation
-│   ├── host.ts             # Address classification (IPv4, IPv6, hostname)
-│   ├── resolve.ts          # Name resolution for domain targets
-│   ├── traceroute.ts       # Running and storing traceroutes
-│   ├── traceroute-parse.ts # Traceroute output parsing (platform-specific, tested)
-│   ├── alerts.ts           # Alerts: storage, judging a probe, delivery
-│   ├── alert-delivery.ts   # What an alert says, and the notification URLs it is sent to
-│   ├── apprise.ts          # Sending a notification, by running Apprise
-│   ├── group-path.ts       # Nested groups as paths
-│   ├── migrations.ts       # Schema changes applied when the database is opened
-│   ├── metrics.ts          # Shared statistics (median, jitter)
-│   ├── series.ts           # Chart series and gap detection
-│   └── database.ts         # Database operations
-scripts/
-└── prober.ts               # Standalone probe runner (npm run probe)
-└── app/
-    ├── api/
-    │   ├── scheduler/
-    │   │   ├── status/route.ts    # Status endpoint
-    │   │   └── start/route.ts     # Start endpoint
-    │   └── targets/
-    │       └── [id]/
-    │           └── probe/route.ts  # Manual probe endpoint
-    └── _components/
-        └── monitoring/
-            └── scheduler-status.tsx  # Status UI component
+src/lib/
+├── init.ts            Server start-up: the database, then the scheduler
+├── scheduler.ts       Probing each target at its interval, and retention
+├── probes/
+│   ├── probe.ts       Runs a target's probe, once per address family
+│   ├── result.ts      Loss, latency and jitter from a probe's samples
+│   ├── config.ts      Per-probe settings: parsing and checking
+│   ├── labels.ts      The words for each probe's readings
+│   ├── host.ts        What an address is (IPv4, IPv6, hostname)
+│   ├── resolve.ts     Resolving a name once per probe
+│   ├── ping.ts        ICMP ping (ping-parse.ts reads its output)
+│   ├── tcp.ts         TCP connect
+│   ├── http.ts        HTTP(S), certificate expiry included
+│   ├── dns.ts         DNS, with dns/ for the wire format, transports and resolvers
+│   └── game.ts        Game servers, with game/ for each game's query
+├── traceroute/        Running, reading, keeping and exporting traceroutes
+└── db/                The database, its migrations and maintenance
+scripts/prober.ts      The scheduler as a process of its own (npm run probe)
 ```
 
 ## Future Enhancements
@@ -552,6 +608,6 @@ scripts/
 Potential improvements:
 - [ ] Web UI for configuring probe intervals
 - [ ] Multiple probe schedules per target
-- [ ] Distributed probing from multiple locations
+- [x] Distributed probing from multiple locations ([probe agents](probe-agents.md))
 - [ ] Export data to Prometheus/Grafana
 - [ ] RRD-style data aggregation for long-term storage

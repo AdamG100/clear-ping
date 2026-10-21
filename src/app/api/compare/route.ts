@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTargets, getBucketedMeasurements, getResolverRounds, getTargetStatistics } from '@/lib/database';
-import { resolverSeries } from '@/lib/dns-resolver-series';
-import { isDualStack } from '@/lib/host';
+import { getAllTargets, getBucketedMeasurements, getResolverRounds, getTargetStatistics } from '@/lib/db/database';
+import { resolverSeries } from '@/lib/charts/dns-resolver-series';
+import { isDualStack } from '@/lib/probes/host';
 import { initializeServer } from '@/lib/init';
-import { windowFromQuery } from '@/lib/series';
+import { windowFromQuery } from '@/lib/charts/series';
 import type { AddressFamily, ComparisonSeries } from '@/types/probe';
 
 /** More lines than this on one chart cannot be told apart. */

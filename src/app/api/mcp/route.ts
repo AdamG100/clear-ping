@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { initializeServer } from '@/lib/init';
-import { handleMessage, JSON_RPC, MCP_PROTOCOL_VERSIONS, originAllowed, tokenTravelsSafely } from '@/lib/mcp-protocol';
-import { clearPingMcp } from '@/lib/mcp-tools';
+import { handleMessage, JSON_RPC, MCP_PROTOCOL_VERSIONS, originAllowed, tokenTravelsSafely } from '@/lib/mcp/protocol';
+import { clearPingMcp } from '@/lib/mcp/tools';
 import { identify, presentedKey, securityPolicy } from '@/lib/security/access';
 import { canChange } from '@/lib/security/roles';
 import { ANONYMOUS, recordActivity } from '@/lib/security/store';

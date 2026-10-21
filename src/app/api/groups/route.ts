@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createGroup, deleteGroup, moveGroup } from '@/lib/database';
-import { MAX_GROUP_PATH_LENGTH, isWithinGroup, normalizeGroupPath } from '@/lib/group-path';
+import { createGroup, deleteGroup, moveGroup } from '@/lib/db/database';
+import { MAX_GROUP_PATH_LENGTH, isWithinGroup, normalizeGroupPath } from '@/lib/targets/group-path';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
 import { actorFor } from '@/lib/security/access';

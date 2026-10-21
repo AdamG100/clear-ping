@@ -68,8 +68,9 @@ Accounts** (or by Authentik groups; see below):
   `CLEARPING_AUTH=off` to get back in. Accounts that were here before roles
   are admins: nothing changes for them.
 - An account an admin adds is a **viewer** unless they choose otherwise.
-- There is always an admin: the last one cannot be made anything else, or
-  removed.
+- The first account made is the **primary** one. It is always an admin, and
+  cannot be removed or made anything else, by anyone (see Forgotten password).
+  So there is always an admin.
 - A change of role takes effect at once, on the next request, without
   signing in again.
 - A viewer's dashboard leaves out what it may not do (Add target, editing,
@@ -219,7 +220,8 @@ revocable without a restart, named in the record. Move to them and unset it.
 - every change an assistant made over MCP, with what it was asked to do;
 - keys made and revoked, accounts added and removed, roles changed (and by
   whom: an admin, or the person's groups at Authentik), passwords changed,
-  sign-in turned on and off;
+  passwords an admin set for someone else, reset codes asked for and passwords
+  reset with them, sign-in turned on and off;
 - authenticator apps turned on and off, backup codes remade, passkeys added
   and removed, and changes to what is required;
 - sign-ins, with how (a password, an authenticator code, a backup code, a
@@ -228,9 +230,61 @@ revocable without a restart, named in the record. Move to them and unset it.
 Each entry says who (the account, the key, or *Anonymous* while sign-in is off)
 and how it arrived: the dashboard, the API or MCP. Entries are kept for a year.
 
+## Passwords
+
+Passwords are never stored, only a hash of each: scrypt, with a random salt of
+its own for every password, so two accounts with the same password have
+different hashes and a stolen copy of the database has to be guessed at one
+account at a time. Usernames are kept as they are. They name an account rather
+than prove anything, and an admin needs to read them to manage accounts.
+
+## Forgotten password
+
+**Any account but the primary one:** an admin sets a new password in
+**Settings → Accounts → Set password** and passes it on. The account is signed
+out everywhere. An account made through single sign-on can be given its first
+password the same way. No admin can set the primary account's password, or
+their own (that is changed under *Your account*, with the current one).
+
+**The primary account** is the first one made, when ClearPing was set up. On
+an install from before there was one, it is the oldest admin. It is always an
+admin, cannot be removed, and is marked *Primary* in the list of accounts.
+Its password is reset with a code from the server's log, which only whoever runs
+the server can read. On the sign-in page, **Forgot your password?** asks for the
+username and writes the code to the log:
+
+```bash
+docker logs clear_ping 2>&1 | grep "reset code"
+```
+
+```
+[Sign-in] Password reset code for "adam": Xk3…  (works once, for 15 minutes; …)
+```
+
+Type the code and a new password on the page. The code works once, within 15
+minutes, and the account is signed out everywhere else. Reading the log takes
+access to the machine ClearPing runs on, which is what the code proves. Asked for
+any other account, no code is written. The page answers the same either way,
+and the same for an account that does not exist; the log says which. It works
+while password sign-in is on. An account with an authenticator app still asks
+for its code afterwards.
+
+**Why a sign-in failed.** The page only ever says *Wrong username or password*,
+so as not to tell anyone which accounts exist. The log says why:
+
+```
+[Sign-in] "adam" from 203.0.113.7 was refused: the password is wrong
+[Sign-in] "adma" from 203.0.113.7 was refused: there is no account by that name
+[Sign-in] "adam" from 203.0.113.7 was refused: the account has no password: it signs in through single sign-on
+```
+
+An account made by signing in through single sign-on has no password until one
+is set; a reset code sets its first.
+
 ## Locked out
 
-Start ClearPing with `CLEARPING_AUTH=off`:
+If password sign-in is turned off, or the log cannot be read, start ClearPing
+with `CLEARPING_AUTH=off`:
 
 ```bash
 docker run … -e CLEARPING_AUTH=off ghcr.io/adamg100/clear-ping:latest

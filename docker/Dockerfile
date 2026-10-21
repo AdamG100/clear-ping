@@ -80,7 +80,7 @@ RUN npm run build
 
 # The same check on what the runtime stage is about to copy. The build once
 # traced ./data into the standalone output by itself (see the turbopackIgnore
-# note in src/lib/database.ts), so the context being clean is not enough.
+# note in src/lib/db/database.ts), so the context being clean is not enough.
 RUN found="$(find .next/standalone .next/static public -path '*/node_modules' -prune -o -type f \
       \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.db.*' \) -print)" \
  && if [ -n "$found" ]; then \

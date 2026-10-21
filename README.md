@@ -9,8 +9,12 @@ looks different from one that is unstable.
 
 ## What it does
 
-- **Four kinds of probe.** ICMP ping, TCP connect, HTTP(S) request and DNS
-  query. Paste a host, `host:port` or a URL and the right one is picked.
+- **Five kinds of probe.** ICMP ping, TCP connect, game server query, HTTP(S)
+  request and DNS query. Paste a host, `host:port` or a URL and the right one is picked.
+- **Game servers.** A game server probe speaks the Steam server query (CS2,
+  Rust, ARK, Valheim…), Minecraft Java's and Bedrock's pings and FiveM's
+  `getinfo`, and shows the server's name, map and player count along with how
+  fast it answers.
 - **One DNS lookup, several resolvers.** A DNS target can ask Cloudflare,
   Google, Quad9 or any resolver of your own on every probe, over plain DNS,
   DNS over TLS or DNS over HTTPS, and shows what each answered and how fast.
@@ -256,6 +260,21 @@ A report is as good as what is monitored. Add your router as a target as well
 as addresses beyond it, and the data can show whether a fault was inside your
 network or outside it.
 
+### Probe agents
+
+A probe agent is a small program on another machine, such as a VPS in another
+country, that takes readings from there for your dashboard. It is not an AI
+agent. Add one under **Settings → Probe agents**, start it with the Docker
+command or the Linux install line shown there, and choose it as **Where should
+it be probed from?** on any target. That target's readings then show the
+network as seen from that machine, on the same dashboard as everything else.
+
+The dashboard connects to the agent, encrypted and pinned to the agent's own
+certificate, with a token for each agent. Over a tailnet such as Tailscale, no
+port has to be opened anywhere. While an agent can't be reached its targets
+take no readings, so a dead agent never shows up as targets being down. See
+[docs/probe-agents.md](docs/probe-agents.md).
+
 ## Upgrading
 
 Pull the new image and recreate the container:
@@ -313,6 +332,8 @@ Everything the interface does goes through these.
 | `GET`, `POST /api/alerts` | Every alert; make one |
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
+| `GET /api/probe-agents` | The probe agents targets can be probed from, and whether each can be reached. A target's `probeAgentId` says which it uses (`null` for this server), and is set the same way in `POST` and `PATCH /api/targets` |
+| `/api/security/probe-agents/…` | Add, change and remove probe agents, connect to one (`…/:id/connect`) and make it a new token (`…/:id/token`); admins only ([docs/probe-agents.md](docs/probe-agents.md)) |
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
 | `GET /api/health` | Whether the server is up; open even with sign-in on |
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
@@ -335,6 +356,8 @@ npm run build
 The tests use temporary SQLite files and a local HTTP server; nothing touches
 the network or your real database.
 
+Where files go and how they are named is in [docs/structure.md](docs/structure.md).
+
 Built with Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4 and
 SQLite.
 
@@ -343,5 +366,7 @@ SQLite.
 - [docs/running.md](docs/running.md): running it, Docker, installing it as an app, upgrading, configuration
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
 - [docs/alerting.md](docs/alerting.md): alerts, and sending them with Apprise
+- [docs/probe-agents.md](docs/probe-agents.md): probing targets from other machines, over a tailnet or the internet
 - [docs/mcp.md](docs/mcp.md): connecting an AI assistant, and the report for an ISP
 - [docs/security.md](docs/security.md): sign-in, roles, single sign-on with Authentik, keys for scripts and assistants, and the activity record
+- [docs/structure.md](docs/structure.md): for changing ClearPing: where files go, how they are named, and what may import what

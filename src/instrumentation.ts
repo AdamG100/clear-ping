@@ -23,7 +23,7 @@ export async function register() {
 
   if (process.env.CLEARPING_EXTERNAL_PROBER === '1') {
     console.log('[Init] External prober configured; in-process scheduler disabled');
-    const { initDatabase } = await import('./lib/database');
+    const { initDatabase } = await import('./lib/db/database');
     await initDatabase();
     return;
   }

@@ -7,7 +7,7 @@ import path from 'node:path'
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clearping-auth-move-'))
 process.env.CLEARPING_DB_PATH = path.join(dir, 'test.db')
 
-const { closeDatabase, getDatabase } = await import('../database')
+const { closeDatabase, getDatabase } = await import('../db/database')
 const { hashPassword } = await import('./secrets')
 
 const OLD_KEY = 'cp_' + 'k'.repeat(43)

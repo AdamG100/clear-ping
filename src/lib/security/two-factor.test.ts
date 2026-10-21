@@ -15,7 +15,7 @@ import { createOTP } from '@better-auth/utils/otp'
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clearping-two-factor-'))
 process.env.CLEARPING_DB_PATH = path.join(dir, 'test.db')
 
-const { initDatabase, closeDatabase } = await import('../database')
+const { initDatabase, closeDatabase } = await import('../db/database')
 const store = await import('./store')
 const { closeAuth } = await import('./auth')
 const { identify } = await import('./access')

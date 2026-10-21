@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { decide, FACTOR_SETUP_PAGE, hostAllowed, identify, routeKind, securityPolicy } from '@/lib/security/access'
+import { devUserEnabled } from '@/lib/security/dev-user'
 
 /**
  * The one place every page and API request passes through first, and so the
@@ -26,6 +27,14 @@ export async function proxy(request: NextRequest) {
   const [policy, identity] = open
     ? [{ loginRequired: false }, { actor: null, invalidKey: false }]
     : await Promise.all([securityPolicy(), identify(request)])
+
+  // Under `next dev`, a page is always opened signed in (see dev-user.ts).
+  if (devUserEnabled() && routeKind(pathname) === 'page' && request.method === 'GET' && !identity.actor) {
+    const signIn = new URL('/api/auth/dev-user', request.url)
+    signIn.searchParams.set('next', pathname + search)
+    return NextResponse.redirect(signIn)
+  }
+
   const decision = decide({
     pathname,
     method: request.method,

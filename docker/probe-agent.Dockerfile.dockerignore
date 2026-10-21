@@ -1,0 +1,30 @@
+# What is kept out of the build context for docker/probe-agent.Dockerfile.
+# BuildKit picks this file up by its name. The agent is built from a handful
+# of paths (see the COPY lines); the rest only slows the build down, and a
+# database or local settings must never get near an image.
+
+node_modules
+.next
+out
+build
+dist
+coverage
+*.tsbuildinfo
+
+data
+probe-agent-data
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.db.*
+**/*.bak
+**/*.pem
+.env*
+
+.git
+.github
+.claude
+.vscode
+docs
+public
+*.md

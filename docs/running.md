@@ -9,6 +9,14 @@ npm run dev      # or: npm run build && npm start
 The probe scheduler starts with the server via `src/instrumentation.ts`, so
 probing begins at boot rather than waiting for someone to open the page.
 
+Under `npm run dev` you are always signed in: a page opened without a session
+signs in as `dev`, an admin account made the first time with a random password
+kept in the database. Signing out takes you to the sign-in page, where you can
+sign in as someone else; opening any other page signs you back in as `dev`. Set
+`CLEARPING_DEV_USER=off` to see the dashboard signed out. A production build
+(`npm start`, the Docker image) never does this. Anyone who can reach the dev
+server is signed in as `dev`, so keep it on your own machine.
+
 Alerts are sent by [Apprise](https://github.com/caronc/apprise), a Python
 program that has to be installed for any to go out:
 
@@ -42,6 +50,10 @@ Why bother:
 
 Both processes open the same SQLite file. WAL mode is enabled, so the prober
 writes while the UI reads without either blocking the other.
+
+The separate prober runs on the same machine as the dashboard. To take
+readings from another machine, such as a VPS in another country, run a
+[probe agent](probe-agents.md) there.
 
 ## Docker
 
@@ -116,7 +128,7 @@ What makes it installable, for anyone changing it:
 - `public/icons/` holds the icons. The two `.svg` files are the drawings the
   `.png` files were made from; `icon-maskable` has the margin Android needs to
   crop it to the launcher's shape.
-- `src/app/_components/install-prompt.tsx` is the card, and
+- `src/app/_components/shell/install-prompt.tsx` is the card, and
   `use-install-prompt.ts` beside it decides whether there is anything to
   offer on the device in hand.
 - `public/sw.js` is the service worker and `public/offline.html` the page it
@@ -197,9 +209,9 @@ How that works, for when it matters:
   of the upgrade, and knows nothing of notification URLs added since.
 
 For anyone changing the schema: add a function to the list at the bottom of
-`src/lib/migrations.ts`. Entries already in the list are never edited, since
+`src/lib/db/migrations.ts`. Entries already in the list are never edited, since
 databases that have run them will not run them again.
-`src/lib/database-migration.test.ts` opens a database in the oldest shape there
+`src/lib/db/migration.test.ts` opens a database in the oldest shape there
 is and checks that everything survives the trip to the newest.
 
 ## Configuration

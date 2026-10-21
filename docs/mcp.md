@@ -252,6 +252,6 @@ One address, `POST /api/mcp`, taking one JSON-RPC message and answering with
 JSON. Nothing is kept between requests and nothing is streamed, so there is no
 session, and a `GET` is answered `405`. It speaks protocol revisions
 `2025-06-18`, `2025-03-26` and `2024-11-05`. It is written out in
-[src/lib/mcp-protocol.ts](../src/lib/mcp-protocol.ts) with no SDK behind it;
-the tools are in [src/lib/mcp-tools.ts](../src/lib/mcp-tools.ts), and what
-turns readings into incidents in [src/lib/outages.ts](../src/lib/outages.ts).
+[src/lib/mcp/protocol.ts](../src/lib/mcp/protocol.ts) with no SDK behind it;
+the tools are in [src/lib/mcp/tools.ts](../src/lib/mcp/tools.ts), and what
+turns readings into incidents in [src/lib/reports/outages.ts](../src/lib/reports/outages.ts).

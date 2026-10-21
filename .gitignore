@@ -19,6 +19,10 @@
 
 # production
 /build
+# the probe agent's bundle and binary (npm run build:probe-agent), and the
+# certificate it makes when run from here
+/dist
+/probe-agent-data
 
 # misc
 .DS_Store

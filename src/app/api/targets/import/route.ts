@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { initializeServer } from '@/lib/init';
-import { addTargets } from '@/lib/target-actions';
-import { validateTargetDefinition } from '@/lib/target-definition';
-import { MAX_SHARED_TARGETS } from '@/lib/target-share';
+import { addTargets } from '@/lib/targets/actions';
+import { validateTargetDefinition } from '@/lib/targets/definition';
+import { MAX_SHARED_TARGETS } from '@/lib/targets/share';
 import type { TargetDefinition } from '@/types/probe';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';

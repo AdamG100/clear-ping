@@ -1,4 +1,4 @@
-import { originAllowed } from '../mcp-protocol'
+import { originAllowed } from '../mcp/protocol'
 import { KEY_PREFIX, sameSecret } from './secrets'
 import { canChange, ROLE_LABEL } from './roles'
 import { describeOwed, factorsOwed } from './factors'

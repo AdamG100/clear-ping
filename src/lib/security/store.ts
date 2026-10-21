@@ -2,7 +2,7 @@ import { authDatabase, getAuth, placeholderEmail, SSO_PROVIDER_ID } from './auth
 import type { FactorsOwed } from './factors'
 import { effectiveKeyAccess, isRole, type KeyAccess, type Role } from './roles'
 import { verifyPassword } from './secrets'
-import { recordSecurityActivity } from './settings-store'
+import { getJsonSetting, recordSecurityActivity, setJsonSetting } from './settings-store'
 
 /**
  * Accounts, sessions and keys: ClearPing's view of what Better Auth keeps
@@ -67,6 +67,8 @@ export interface User {
   twoFactor: boolean
   /** How many passkeys it can sign in with. */
   passkeys: number
+  /** The primary account (see primaryUserId). */
+  primary: boolean
 }
 
 interface UserRow {
@@ -91,7 +93,7 @@ const USER_SELECT = `
     (SELECT COUNT(*) FROM passkey p WHERE p.userId = u.id) AS passkeys
   FROM "user" u`
 
-const userFrom = (row: UserRow): User => ({
+const userFrom = (row: UserRow, primaryId: string | null): User => ({
   id: row.id,
   // As it was typed; the username itself is kept in lower case, for matching.
   username: row.displayUsername || row.username || row.name,
@@ -103,6 +105,7 @@ const userFrom = (row: UserRow): User => ({
   role: isRole(row.role) ? row.role : 'viewer',
   twoFactor: row.twoFactorEnabled === 1,
   passkeys: row.passkeys ?? 0,
+  primary: row.id === primaryId,
 })
 
 /** The user as the one making a change: what the activity record and the checks take. */
@@ -111,6 +114,33 @@ export function actorOf(user: Pick<User, 'id' | 'username' | 'role'>): Extract<A
 }
 
 export const USERNAME = /^[A-Za-z0-9._@-]{1,64}$/
+
+const PRIMARY = 'auth.primaryUser'
+
+/**
+ * The primary account: the first one made, by whoever runs the server. It is
+ * always an admin and cannot be removed, nobody else can set its password,
+ * and it alone can reset a forgotten password with a code from the server's
+ * log, since reading the log is what proves it is theirs. Every other
+ * account's password is set by an admin.
+ *
+ * An install from before there was a primary account takes its oldest admin,
+ * once, and keeps it.
+ */
+export async function primaryUserId(): Promise<string | null> {
+  const db = await authDatabase()
+  const kept = await getJsonSetting<string>(PRIMARY)
+  if (kept && db.prepare('SELECT 1 FROM "user" WHERE id = ?').get(kept)) return kept
+  const oldest = db.prepare(`SELECT id FROM "user" WHERE role = 'admin' ORDER BY createdAt LIMIT 1`).get() as { id: string } | undefined
+  if (!oldest) return null
+  await setJsonSetting(PRIMARY, oldest.id)
+  return oldest.id
+}
+
+/** Make the first account the primary one. */
+export async function makePrimary(userId: string): Promise<void> {
+  await setJsonSetting(PRIMARY, userId)
+}
 
 export async function countUsers(): Promise<number> {
   const db = await authDatabase()
@@ -125,16 +155,41 @@ export async function countPasskeys(): Promise<number> {
 
 export async function listUsers(): Promise<User[]> {
   const db = await authDatabase()
-  return (db.prepare(`${USER_SELECT} ORDER BY u.createdAt`).all() as UserRow[]).map(userFrom)
+  const primary = await primaryUserId()
+  return (db.prepare(`${USER_SELECT} ORDER BY u.createdAt`).all() as UserRow[]).map(row => userFrom(row, primary))
 }
 
 export async function getUser(userId: string): Promise<User | null> {
   const db = await authDatabase()
   const row = db.prepare(`${USER_SELECT} WHERE u.id = ?`).get(userId) as UserRow | undefined
-  return row ? userFrom(row) : null
+  return row ? userFrom(row, await primaryUserId()) : null
 }
 
 /** Throws with a reason fit to show when the name is taken or not allowed. */
+/** The account a username names, ignoring case, with the address Better Auth knows it by. */
+export async function findUserByUsername(username: string): Promise<(User & { email: string }) | null> {
+  const db = await authDatabase()
+  const row = db.prepare(`${USER_SELECT.replace('SELECT u.id,', 'SELECT u.email, u.id,')} WHERE u.username = ?`).get(username.trim().toLowerCase()) as
+    | (UserRow & { email: string })
+    | undefined
+  return row ? { ...userFrom(row, await primaryUserId()), email: row.email } : null
+}
+
+/**
+ * Why a sign-in with this username failed, for the server's log only: the
+ * page says the same thing whatever it was, so as not to tell anyone which
+ * accounts exist, and the person who runs the server is left to find out.
+ */
+export async function signInTrouble(username: string, refusal: string): Promise<string> {
+  if (!username) return 'no username was given'
+  const user = await findUserByUsername(username)
+  if (!user) return 'there is no account by that name'
+  if (!user.hasPassword) {
+    return user.sso ? 'the account has no password: it signs in through single sign-on' : 'the account has no password'
+  }
+  return /invalid (username|email) or password/i.test(refusal) ? 'the password is wrong' : refusal
+}
+
 export async function createUser(username: string, password: string, role: Role): Promise<User> {
   if (!USERNAME.test(username)) {
     throw new Error('A username is 1 to 64 letters, digits, dots, dashes, underscores or @')
@@ -151,6 +206,24 @@ export async function createUser(username: string, password: string, role: Role)
     body: { email, password, name: username, role, data: { username: username.toLowerCase(), displayUsername: username } },
   })
   return (await getUser(user.id))!
+}
+
+/**
+ * An admin sets another account's password: for someone who has forgotten
+ * theirs, or an account made through single sign-on that has none. Better
+ * Auth's admin plugin sets it, with the admin's own session as the authority,
+ * and every session of the account is ended. Never the primary account's,
+ * which is its own business, and never your own, which is changed with the
+ * current password.
+ */
+export async function setPasswordFor(userId: string, password: string, adminHeaders: Headers): Promise<User> {
+  const user = await getUser(userId)
+  if (!user) throw new Error('No such account')
+  if (user.primary) throw new Error('Only the primary account sets its own password. If it is lost, it can be reset with a code from the server log')
+  const auth = await getAuth()
+  await auth.api.setUserPassword({ body: { userId, newPassword: password }, headers: adminHeaders })
+  await auth.api.revokeUserSessions({ body: { userId }, headers: adminHeaders })
+  return (await getUser(userId))!
 }
 
 /** Whether this is the account's password. */
@@ -177,6 +250,7 @@ export async function isLastAdmin(userId: string): Promise<boolean> {
 export async function setRole(userId: string, role: Role): Promise<User> {
   const user = await getUser(userId)
   if (!user) throw new Error('No such account')
+  if (user.primary && role !== 'admin') throw new Error('This is the primary account, which is always an admin')
   if (user.role === 'admin' && role !== 'admin' && (await isLastAdmin(userId))) {
     throw new Error('This is the only admin. Make another account an admin first')
   }
@@ -191,6 +265,7 @@ export async function setRole(userId: string, role: Role): Promise<User> {
  * account is gone. Throws if it is the last admin.
  */
 export async function deleteUser(userId: string): Promise<boolean> {
+  if ((await primaryUserId()) === userId) throw new Error('This is the primary account, which cannot be removed')
   if (await isLastAdmin(userId)) throw new Error('This is the only admin. Make another account an admin first')
   const db = await authDatabase()
   const remove = db.transaction(() => {

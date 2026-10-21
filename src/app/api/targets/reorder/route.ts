@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGroupOrders, saveGroupOrders, updateTargetSortOrders } from '@/lib/database';
+import { getGroupOrders, saveGroupOrders, updateTargetSortOrders } from '@/lib/db/database';
 
 /**
  * GET /api/targets/reorder - Get current group ordering

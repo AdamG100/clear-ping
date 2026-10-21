@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllTargets, createTarget, deleteTargets, getLatestMeasurementForAllTargets, pruneEmptyGroups, getGroupOrders, getGroups, getRecentSeriesForAllTargets } from '@/lib/database';
+import { getAllTargets, createTarget, deleteTargets, getLatestMeasurementForAllTargets, pruneEmptyGroups, getGroupOrders, getGroups, getRecentSeriesForAllTargets } from '@/lib/db/database';
 import { randomUUID } from 'crypto';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
-import { validateTargetDefinition } from '@/lib/target-definition';
+import { validateTargetDefinition } from '@/lib/targets/definition';
+import { listProbeAgentSummaries, readProbeAgentChoice } from '@/lib/probe-agents/store';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
 
@@ -18,11 +19,12 @@ export async function GET(request: NextRequest) {
     const targets = await getAllTargets();
     
     if (includePacketLoss) {
-      const [latest, groups, groupOrders, series] = await Promise.all([
+      const [latest, groups, groupOrders, series, probeAgents] = await Promise.all([
         getLatestMeasurementForAllTargets(),
         getGroups(),
         getGroupOrders(),
         getRecentSeriesForAllTargets(24),
+        listProbeAgentSummaries(),
       ]);
       return NextResponse.json({
         targets,
@@ -30,6 +32,8 @@ export async function GET(request: NextRequest) {
         groups,
         groupOrders,
         series,
+        // So each row can say where it is probed from, and whether that is up.
+        probeAgents,
       });
     }
     
@@ -48,12 +52,22 @@ export async function POST(request: NextRequest) {
     // Ensure server is initialized
     await initializeServer();
     
-    const definition = validateTargetDefinition(await request.json());
+    const body = await request.json();
+    const definition = validateTargetDefinition(body);
     if (!definition.ok) {
       return NextResponse.json({ error: definition.error }, { status: 400 });
     }
+    // Where it is probed from belongs to this installation, not to what the
+    // target is, so it is read beside the definition rather than in it.
+    const from = await readProbeAgentChoice(body?.probeAgentId);
+    if (!from.ok) return NextResponse.json({ error: from.error }, { status: 400 });
 
-    const target = await createTarget({ id: randomUUID(), ...definition.target, status: 'active' });
+    const target = await createTarget({
+      id: randomUUID(),
+      ...definition.target,
+      status: 'active',
+      probeAgentId: from.probeAgentId ?? null,
+    });
     const { actor, via } = await actorFor(request);
     await recordActivity(actor, via, 'target.add', `${target.name} (${target.host})`);
 

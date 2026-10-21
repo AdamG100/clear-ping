@@ -1,5 +1,5 @@
 import type sqlite3 from 'sqlite3'
-import { getDatabase } from '../database'
+import { getDatabase } from '../db/database'
 import { isFactorPolicy, NO_FACTOR_POLICY, type FactorPolicy } from './factors'
 import type { Actor, Via } from './store'
 

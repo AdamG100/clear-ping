@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getBucketedMeasurements, getTargetStatistics } from '@/lib/database';
-import { windowFromQuery } from '@/lib/series';
+import { getBucketedMeasurements, getTargetById, getTargetStatistics } from '@/lib/db/database';
+import { probeAgentOutages as outagesOf } from '@/lib/probe-agents/store';
+import { windowFromQuery } from '@/lib/charts/series';
 import { initializeServer } from '@/lib/init';
 
 export async function GET(
@@ -26,15 +27,20 @@ export async function GET(
     const requestedFamily = Number(searchParams.get('family'));
     const family = requestedFamily === 4 || requestedFamily === 6 ? requestedFamily : undefined;
 
-    const [buckets, statistics] = await Promise.all([
+    const target = await getTargetById(id);
+    const [buckets, statistics, probeAgentOutages] = await Promise.all([
       getBucketedMeasurements(id, startTime, endTime, bucketMs, family),
       getTargetStatistics(id, startTime, endTime, family),
+      // When its probe agent could not be reached: the gaps in the readings
+      // that are the agent's and not the target's.
+      target?.probeAgentId ? outagesOf(target.probeAgentId, window.start, window.end) : [],
     ]);
 
     return NextResponse.json({
       buckets,
       bucketMs,
       statistics,
+      probeAgentOutages,
     });
   } catch (error) {
     console.error('Error fetching measurements:', error);

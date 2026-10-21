@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAlert, getAlerts, parseAlertInput, type AlertInput } from '@/lib/alerts';
-import { checkNotifyUrls } from '@/lib/apprise';
+import { createAlert, getAlerts, parseAlertInput, type AlertInput } from '@/lib/alerts/store';
+import { checkNotifyUrls } from '@/lib/alerts/apprise';
 import { initializeServer } from '@/lib/init';
-import { redactNotifyUrl } from '@/lib/alert-delivery';
+import { redactNotifyUrl } from '@/lib/alerts/delivery';
 import { actorFor, identify } from '@/lib/security/access';
 import { canChange } from '@/lib/security/roles';
 import { recordActivity } from '@/lib/security/store';

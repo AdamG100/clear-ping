@@ -4,8 +4,8 @@ import { ArrowRight, LogOut } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Button } from '@/components/arc/button/button'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
-import { SignInFactors, useMyFactors } from '../_components/security/sign-in-factors'
-import { BrandMark } from '../_components/monitoring/brand-mark'
+import { SignInFactors, useMyFactors } from '../_components/settings/sign-in-factors'
+import { BrandMark } from '../_components/shell/brand-mark'
 
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 

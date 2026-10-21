@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "probe": "tsx scripts/prober.ts"
+    "probe": "tsx scripts/prober.ts",
+    "probe-agent": "tsx probe-agent/main.ts",
+    "build:probe-agent": "node scripts/build-probe-agent.mjs"
   },
   "dependencies": {
     "@better-auth/api-key": "^1.7.10",
@@ -48,6 +50,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.2",
     "tailwindcss": "^4",

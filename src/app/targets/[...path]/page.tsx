@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation'
-import { Dashboard } from '../../_components/monitoring/dashboard'
+import { Dashboard } from '@/app/_components/dashboard/dashboard'
 import { pageFromPath } from '@/lib/dashboard-pages'
 
 /**

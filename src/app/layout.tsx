@@ -5,9 +5,9 @@ import { NotificationsProvider } from "@/components/notifications";
 import { connection } from "next/server";
 import { THEME_COLOR } from "@/lib/app-theme";
 import { configuredTimeZone } from "@/lib/time-zone";
-import { InstallPrompt } from "./_components/install-prompt";
-import { ServiceWorker } from "./_components/service-worker";
-import { SessionWatcher } from "./_components/session-watcher";
+import { InstallPrompt } from "./_components/shell/install-prompt";
+import { ServiceWorker } from "./_components/shell/service-worker";
+import { SessionWatcher } from "./_components/shell/session-watcher";
 
 // Arc UI's two faces: Inter for text, Geist for large headings. They are
 // handed to the stylesheet under the names Arc's tokens read, and globals.css

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTargetById, updateTarget, deleteTarget } from '@/lib/database';
-import { IP_VERSIONS, isIpVersion, isValidHost, normalizeHost } from '@/lib/host';
-import { isProbeType, PROBE_TYPES, validateProbeConfig } from '@/lib/probe-config';
+import { getTargetById, updateTarget, deleteTarget } from '@/lib/db/database';
+import { IP_VERSIONS, isIpVersion, isValidHost, normalizeHost } from '@/lib/probes/host';
+import { isProbeType, PROBE_TYPES, validateProbeConfig } from '@/lib/probes/config';
 import { getScheduler } from '@/lib/scheduler';
 import { initializeServer } from '@/lib/init';
+import { listProbeAgentSummaries, readProbeAgentChoice } from '@/lib/probe-agents/store';
 import type { Target } from '@/types/probe';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
@@ -116,6 +117,12 @@ export async function PATCH(
       updates.group = body.group ? String(body.group).trim() : '';
     }
 
+    // Null moves it back to being probed from this server.
+    const from = await readProbeAgentChoice(body.probeAgentId);
+    if (!from.ok) return NextResponse.json({ error: from.error }, { status: 400 });
+    if (from.probeAgentId !== undefined) updates.probeAgentId = from.probeAgentId;
+    const before = updates.probeAgentId !== undefined ? await getTargetById(id) : null;
+
     // A probe's settings are only valid for that probe and that host, so
     // changing any of the three means re-checking the settings against what
     // the target is about to become, not against what was sent on its own.
@@ -155,9 +162,16 @@ export async function PATCH(
 
     const target = await getTargetById(id);
     const { actor, via } = await actorFor(request);
-    const fields = Object.keys(updates);
+    const fields = Object.keys(updates).filter(field => field !== 'probeAgentId');
+    // Readings before and after a move are from two places, so the record
+    // says which two.
+    if (before && (before.probeAgentId ?? null) !== updates.probeAgentId) {
+      const names = new Map((await listProbeAgentSummaries()).map(agent => [agent.id, agent.name]));
+      const place = (agentId: string | null | undefined) => (agentId ? names.get(agentId) ?? 'a removed probe agent' : 'this server');
+      fields.push(`probed from ${place(before.probeAgentId)} → ${place(updates.probeAgentId)}`);
+    }
     const action = fields.length === 1 && updates.status ? (updates.status === 'paused' ? 'target.pause' : 'target.resume') : 'target.change';
-    await recordActivity(actor, via, action, `${target?.name ?? id}${action === 'target.change' ? `: ${fields.join(', ')}` : ''}`);
+    await recordActivity(actor, via, action, `${target?.name ?? id}${action === 'target.change' && fields.length > 0 ? `: ${fields.join(', ')}` : ''}`);
     return NextResponse.json(target);
   } catch (error) {
     console.error('Error updating target:', error);

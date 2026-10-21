@@ -6,13 +6,14 @@
  * are captured and stored for visualization on graphs.
  */
 
-import { getAllTargets, storeMeasurement, getDatabase, saveDatabaseToDisk, cleanOldMeasurements } from './database';
-import { executeProbes } from './probe';
-import { measurementFrom, worstOf } from './probe-result';
+import { getAllTargets, storeMeasurement, getDatabase, saveDatabaseToDisk, cleanOldMeasurements } from './db/database';
+import { checkProbeAgent, ProbeAgentUnavailableError, runProbes } from './probe-agents/client';
+import { cleanOldProbeAgentOutages, getProbeAgentConnection, pairedProbeAgentConnections } from './probe-agents/store';
+import { measurementFrom, worstOf } from './probes/result';
 import type { IpVersion, ProbeConfig, ProbeResult, ProbeType } from '@/types/probe';
 import { randomUUID } from 'crypto';
-import { asksForTrace, dispatchAlert, evaluateAlerts, shouldTraceOnAlert } from './alerts';
-import { cleanOldTraceroutes, ensureTracerouteSchema, lastAlertTraceAt, traceAndStore } from './traceroute';
+import { asksForTrace, dispatchAlert, evaluateAlerts, shouldTraceOnAlert } from './alerts/store';
+import { cleanOldTraceroutes, ensureTracerouteSchema, lastAlertTraceAt, traceAndStore } from './traceroute/store';
 
 /**
  * Targets probed at once, per kind. Bounded so a long target list cannot
@@ -20,6 +21,16 @@ import { cleanOldTraceroutes, ensureTracerouteSchema, lastAlertTraceAt, traceAnd
  * latencies being measured.
  */
 const PROBE_CONCURRENCY = 8;
+
+/**
+ * Targets probed at once through each probe agent. The waiting here is on the
+ * network, not on this machine, but an agent on a small VPS should not be
+ * handed every target at once either.
+ */
+const AGENT_CONCURRENCY = 4;
+
+/** How often each probe agent is asked how it is, whether or not it has targets due. */
+const AGENT_CHECK_INTERVAL_MS = 60_000;
 
 interface ScheduledTarget {
   id: string;
@@ -30,6 +41,8 @@ interface ScheduledTarget {
   probeType: ProbeType;
   ipVersion: IpVersion;
   probeConfig?: ProbeConfig;
+  /** Probed from this probe agent, or from here when null. */
+  probeAgentId: string | null;
   interval: number; // seconds
   lastProbeTime: number; // timestamp
   isProbing: boolean;
@@ -40,6 +53,8 @@ class ProbeScheduler {
   private intervalId: NodeJS.Timeout | null = null;
   private reloadIntervalId: NodeJS.Timeout | null = null;
   private retentionIntervalId: NodeJS.Timeout | null = null;
+  private agentCheckIntervalId: NodeJS.Timeout | null = null;
+  private agentCheckInFlight: boolean = false;
   private retentionDays: number = Number(process.env.CLEARPING_RETENTION_DAYS ?? 90);
   private checkIntervalMs: number = 10000; // Check every 10 seconds
   private isRunning: boolean = false;
@@ -84,6 +99,13 @@ class ProbeScheduler {
       void this.runRetention();
     }, 6 * 60 * 60 * 1000);
 
+    // Probe agents. A round is only sent to an agent that answered last time,
+    // so this is what notices one has gone, and what notices it is back.
+    void this.checkProbeAgents();
+    this.agentCheckIntervalId = setInterval(() => {
+      void this.checkProbeAgents();
+    }, AGENT_CHECK_INTERVAL_MS);
+
     console.log('[Scheduler] Probe scheduler started successfully');
   }
 
@@ -102,6 +124,10 @@ class ProbeScheduler {
     if (this.retentionIntervalId) {
       clearInterval(this.retentionIntervalId);
       this.retentionIntervalId = null;
+    }
+    if (this.agentCheckIntervalId) {
+      clearInterval(this.agentCheckIntervalId);
+      this.agentCheckIntervalId = null;
     }
     this.isRunning = false;
     console.log('[Scheduler] Probe scheduler stopped');
@@ -140,6 +166,7 @@ class ProbeScheduler {
           probeType: target.probeType,
           ipVersion: target.ipVersion ?? 'auto',
           probeConfig: target.probeConfig,
+          probeAgentId: target.probeAgentId ?? null,
           interval: target.interval,
         };
 
@@ -201,18 +228,30 @@ class ProbeScheduler {
 
     if (targetsToProbe.length === 0) return;
 
-    const pingTargets = targetsToProbe.filter(t => t.probeType === 'ping');
-    const otherTargets = targetsToProbe.filter(t => t.probeType !== 'ping');
+    const local = targetsToProbe.filter(t => !t.probeAgentId);
+    const pingTargets = local.filter(t => t.probeType === 'ping');
+    const otherTargets = local.filter(t => t.probeType !== 'ping');
+
+    // Each probe agent's targets queue on their own: a slow or distant agent
+    // holds up nothing but itself.
+    const byAgent = new Map<string, ScheduledTarget[]>();
+    for (const target of targetsToProbe) {
+      if (target.probeAgentId) byAgent.set(target.probeAgentId, [...(byAgent.get(target.probeAgentId) ?? []), target]);
+    }
 
     // Pings and the rest are worked through side by side, a few at a time
     // each. An unresponsive HTTP or TCP target spends its whole timeout on
     // every attempt, and in one shared queue a handful of those in a row held
     // up every ping waiting behind them.
-    await Promise.all([this.probeEach(pingTargets), this.probeEach(otherTargets)]);
+    await Promise.all([
+      this.probeEach(pingTargets),
+      this.probeEach(otherTargets),
+      ...[...byAgent.values()].map(targets => this.probeEach(targets, AGENT_CONCURRENCY)),
+    ]);
   }
 
   /** Probe targets individually, with bounded concurrency. */
-  private async probeEach(targets: ScheduledTarget[]): Promise<void> {
+  private async probeEach(targets: ScheduledTarget[], concurrency = PROBE_CONCURRENCY): Promise<void> {
     let next = 0;
 
     const worker = async () => {
@@ -222,8 +261,29 @@ class ProbeScheduler {
     };
 
     await Promise.all(
-      Array.from({ length: Math.min(PROBE_CONCURRENCY, targets.length) }, worker)
+      Array.from({ length: Math.min(concurrency, targets.length) }, worker)
     );
+  }
+
+  /** Ask every paired probe agent how it is. One pass at a time. */
+  private async checkProbeAgents(): Promise<void> {
+    if (this.agentCheckInFlight) return;
+    this.agentCheckInFlight = true;
+    try {
+      const agents = await pairedProbeAgentConnections();
+      await Promise.all(
+        agents.map(async agent => {
+          const state = await checkProbeAgent(agent);
+          if (state !== agent.state) {
+            console.log(`[Scheduler] Probe agent ${agent.name} is now ${state}`);
+          }
+        })
+      );
+    } catch (error) {
+      console.error('[Scheduler] Probe agent check failed:', error);
+    } finally {
+      this.agentCheckInFlight = false;
+    }
   }
 
   /**
@@ -287,8 +347,9 @@ class ProbeScheduler {
     result: ProbeResult
   ): Promise<void> {
     try {
+      const probedFrom = target.probeAgentId ? (await getProbeAgentConnection(target.probeAgentId))?.name : undefined;
       const events = await evaluateAlerts(
-        { id: target.id, name: target.name, host: target.host, group: target.group },
+        { id: target.id, name: target.name, host: target.host, group: target.group, probedFrom },
         result
       );
 
@@ -333,7 +394,7 @@ class ProbeScheduler {
     try {
       console.log(`[Scheduler] Probing ${target.name} (${target.host}) via ${target.probeType.toUpperCase()}`);
 
-      const results = await executeProbes(target);
+      const results = await runProbes(target);
 
       // Deleted while it was being probed: nothing to record against.
       if (this.scheduledTargets.get(targetId) !== target) return;
@@ -341,6 +402,13 @@ class ProbeScheduler {
       await this.recordResults(target, results);
       saveDatabaseToDisk();
     } catch (error) {
+      // The probe agent, not the target: no reading at all, rather than one
+      // saying the target is down. The round is tried again at the target's
+      // interval, and is skipped at once while the agent is known to be down.
+      if (error instanceof ProbeAgentUnavailableError) {
+        console.log(`[Scheduler] Skipped ${target.name}: probe agent ${error.agentName}: ${error.message}`);
+        return;
+      }
       // A result stored just as its target was deleted fails the foreign key;
       // that is the delete winning the race, not an error.
       const removed = this.scheduledTargets.get(targetId) !== target;
@@ -395,6 +463,7 @@ class ProbeScheduler {
         console.log(`[Scheduler] Retention: removed ${removed} measurements older than ${this.retentionDays}d`);
       }
       await cleanOldTraceroutes(this.retentionDays);
+      await cleanOldProbeAgentOutages(this.retentionDays);
     } catch (error) {
       console.error('[Scheduler] Retention failed:', error);
     }
