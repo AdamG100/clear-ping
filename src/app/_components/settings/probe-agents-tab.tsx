@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils'
 import type { ProbeAgent } from '@/types/probe-agent'
 import { CopyField } from './mcp-setup'
 import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
-import { addressOf, ago, ExposureNote, HINT, ICON, OutcomeAlert, ProbeAgentDetails, send, uninstallCommands, when, type Outcome } from './probe-agent-details'
+import { addressOf, ago, ExposureNote, HINT, ICON, isOutdated, OutcomeAlert, OutdatedBadge, ProbeAgentDetails, send, uninstallCommands, when, type Outcome } from './probe-agent-details'
 
 /**
  * Settings → Probe agents: the other machines targets can be probed from.
@@ -451,8 +451,11 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
                   key: 'version',
                   label: 'Version',
                   render: (_, { agent }) => (
-                    <span className={cn('font-mono text-xs', agent.version ? 'text-foreground' : 'text-muted-foreground')}>
-                      {agent.version ?? '—'}
+                    <span className="inline-flex items-center gap-2">
+                      <span className={cn('font-mono text-xs', agent.version ? 'text-foreground' : 'text-muted-foreground')}>
+                        {agent.version ?? '—'}
+                      </span>
+                      {isOutdated(agent, loaded.dashboardVersion) && <OutdatedBadge />}
                     </span>
                   ),
                 },
@@ -546,6 +549,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
             <ProbeAgentDetails
               agent={shownDetails}
               install={loaded.install}
+              dashboardVersion={loaded.dashboardVersion}
               now={now}
               outcome={lastOutcome?.id === shownDetails.id ? lastOutcome.outcome : null}
               connecting={connecting === shownDetails.id}

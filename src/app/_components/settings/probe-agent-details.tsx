@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Check, KeyRound, Pencil, Plug, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Check, CircleArrowUp, KeyRound, Pencil, Plug, ShieldCheck, Trash2, X } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge, type BadgeTone } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -14,6 +14,7 @@ import { exposureOfAddress } from '@/lib/probe-agents/exposure'
 import { PROBE_AGENT_NAME_MAX, readProbeAgentAddress } from '@/lib/probe-agents/input'
 import type { ProbeAgentInstall } from '@/lib/probe-agents/install'
 import { inDisplayZone } from '@/lib/time-zone'
+import { compareVersions } from '@/lib/version'
 import { cn } from '@/lib/utils'
 import type { ProbeAgent, ProbeAgentExposure, ProbeAgentState } from '@/types/probe-agent'
 import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
@@ -147,6 +148,20 @@ function Fact({ label, children, below }: { label: string; children: ReactNode; 
   )
 }
 
+/** Whether a probe agent is on an older version than this dashboard: never when either is not a numbered release. */
+export function isOutdated(agent: ProbeAgent, dashboardVersion: string | undefined): boolean {
+  if (!agent.version || !dashboardVersion) return false
+  return (compareVersions(agent.version, dashboardVersion) ?? 0) < 0
+}
+
+export function OutdatedBadge() {
+  return (
+    <Badge size="sm" tone="warning" icon={<CircleArrowUp size={11} strokeWidth={2} aria-hidden />}>
+      Out of date
+    </Badge>
+  )
+}
+
 /** A certificate fingerprint, in full, in a box of its own: it is read pair by pair against the agent's log. */
 function Fingerprint({ value, tone = 'neutral' }: { value: string; tone?: 'neutral' | 'warning' }) {
   return (
@@ -231,6 +246,7 @@ function EditForm({ agent, onDone, onCancel }: { agent: ProbeAgent; onDone: () =
 export function ProbeAgentDetails({
   agent,
   install,
+  dashboardVersion,
   now,
   outcome,
   connecting,
@@ -243,6 +259,8 @@ export function ProbeAgentDetails({
   agent: ProbeAgent
   /** Where the probe agent is installed from, for the command that takes it off again. */
   install: ProbeAgentInstall
+  /** This dashboard's version, which the probe agent's is compared with. */
+  dashboardVersion?: string
   now: number
   /** How the last connection to it went, if it was this session. */
   outcome: Outcome | null
@@ -257,6 +275,7 @@ export function ProbeAgentDetails({
   const state = PROBE_AGENT_STATE[agent.state]
   const status = STATUS[state.tone]
   const exposure = PROBE_AGENT_EXPOSURE[agent.exposure]
+  const outdated = isOutdated(agent, dashboardVersion)
   const missingTools = agent.tools ? [!agent.tools.ping && 'ping', !agent.tools.traceroute && 'traceroute'].filter(Boolean) : []
 
   return (
@@ -309,8 +328,23 @@ export function ProbeAgentDetails({
 
           <Facts title="Machine">
             <Fact label="Name">{agent.hostname ?? <span className="text-muted-foreground">Not known yet</span>}</Fact>
-            <Fact label="Version">
-              {agent.version ? <span className="font-mono text-xs">{agent.version}</span> : <span className="text-muted-foreground">Not known yet</span>}
+            <Fact
+              label="Version"
+              below={outdated ? (
+                <p className={HINT}>
+                  This dashboard is on <span className="font-mono">{dashboardVersion}</span>. Update it with{' '}
+                  <span className="font-mono">docker compose pull</span>, or by running the install line again.
+                </p>
+              ) : undefined}
+            >
+              {agent.version ? (
+                <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                  {outdated && <OutdatedBadge />}
+                  <span className="font-mono text-xs">{agent.version}</span>
+                </span>
+              ) : (
+                <span className="text-muted-foreground">Not known yet</span>
+              )}
             </Fact>
             {agent.platform && <Fact label="Platform"><span className="font-mono text-xs">{agent.platform}</span></Fact>}
             {agent.tools && (
