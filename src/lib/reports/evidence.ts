@@ -145,6 +145,8 @@ export interface HourOfDay {
   hour: string
   probes: number
   failedProbes: number
+  /** Probes that lost anything, those that got nothing back among them. */
+  affectedProbes: number
   lossPercent: number
   medianLatencyMs: number | null
 }
@@ -157,7 +159,7 @@ export interface HourOfDay {
  * answer for.
  */
 export function hoursOfDay(readings: readonly ProbeReading[], timeZone: string): HourOfDay[] {
-  const hours = Array.from({ length: 24 }, () => ({ probes: 0, failed: 0, loss: 0, latencies: [] as number[] }))
+  const hours = Array.from({ length: 24 }, () => ({ probes: 0, failed: 0, affected: 0, loss: 0, latencies: [] as number[] }))
 
   // The clock is asked once for each quarter of an hour, not once a reading:
   // no time zone is offset from another by less.
@@ -178,6 +180,7 @@ export function hoursOfDay(readings: readonly ProbeReading[], timeZone: string):
     const hour = hours[hourOf(reading.timestamp)]
     hour.probes++
     if (!reading.success) hour.failed++
+    if (lossOf(reading) > 0) hour.affected++
     hour.loss += lossOf(reading)
     if (reading.latency !== null) hour.latencies.push(reading.latency)
   }
@@ -189,6 +192,7 @@ export function hoursOfDay(readings: readonly ProbeReading[], timeZone: string):
           hour: `${String(index).padStart(2, '0')}:00`,
           probes: hour.probes,
           failedProbes: hour.failed,
+          affectedProbes: hour.affected,
           lossPercent: round(hour.loss / hour.probes, 2),
           medianLatencyMs: latencySummary(hour.latencies)?.median ?? null,
         }]

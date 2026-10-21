@@ -64,6 +64,12 @@ interface SmokeTraceProps {
    * drawn even if probes are missing at either end.
    */
   window?: TimeWindow | null
+  /**
+   * The whole period the data was read for. Unzoomed, the axis spans it, so
+   * 90 days is drawn as 90 days even when the readings cover only the last
+   * few, and they sit at the end of it where they belong.
+   */
+  span?: TimeWindow | null
   /** Called with the period selected by dragging, in epoch milliseconds. */
   onZoom?: (start: number, end: number) => void
   onResetZoom?: () => void
@@ -122,6 +128,7 @@ export const SmokeTrace = memo(function SmokeTrace({
   timeRange,
   height: fullHeight = 340,
   window: zoomWindow = null,
+  span = null,
   onZoom,
   onResetZoom,
   noLossLabel = 'No packet loss in this window',
@@ -153,12 +160,13 @@ export const SmokeTrace = memo(function SmokeTrace({
     const { min: lo, max: hi } = latencyDomain(values)
 
     const times = data.map(d => d.timestamp.getTime())
-    const tMin = zoomWindow?.start ?? (times.length ? Math.min(...times) : 0)
+    const shown = zoomWindow ?? span
+    const tMin = shown?.start ?? (times.length ? Math.min(...times) : 0)
     // A probe agent still down took no readings since it went, so the
     // readings alone would end the axis where the outage starts and hide it.
     // The axis runs on to where the outage is now.
     const lastOutageEnd = Math.max(0, ...agentOutages.map(outage => outage.end ?? Date.now()))
-    const tMax = zoomWindow?.end ?? Math.max(times.length ? Math.max(...times) : 1, times.length ? lastOutageEnd : 0)
+    const tMax = shown?.end ?? Math.max(times.length ? Math.max(...times) : 1, times.length ? lastOutageEnd : 0)
 
     const xFor = (t: number) =>
       PAD.left + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
@@ -213,7 +221,7 @@ export const SmokeTrace = memo(function SmokeTrace({
       xMax: tMax,
       worstLoss: rows.reduce((max, r) => Math.max(max, r.loss), 0),
     }
-  }, [data, plotW, traceH, zoomWindow, agentOutages])
+  }, [data, plotW, traceH, zoomWindow, span, agentOutages])
 
   // The stretches a probe agent was down, where they fall on this axis.
   const outageBands = useMemo(() => {

@@ -3,7 +3,8 @@ import fs from 'fs';
 import sqlite3 from 'sqlite3';
 import { Target, ProbeMeasurement, TargetStatistics, GroupOrder, LatestMeasurement, FamilyReading, BucketedMeasurement, SparklinePoint, IpVersion, ProbeType, AddressFamily, DnsResolverReading, ProbeDetails } from '@/types/probe';
 import { addressFamilyFor, FAMILY_LABEL, isDualStack } from '../probes/host';
-import { median } from '../probes/metrics';
+import { median, percentile } from '../probes/metrics';
+import { lossBandIndex, PACKET_LOSS_BANDS } from '../charts/packet-loss-colors';
 import { groupWithAncestors, isWithinGroup, normalizeGroupPath, parentGroup, rebaseGroupPath } from '../targets/group-path';
 import { runMigrations } from './migrations';
 
@@ -925,6 +926,45 @@ export async function getProbeReadings(targetId: string, startTime: Date, endTim
 }
 
 /**
+ * For each of some targets over a period, how many probes it had and when it
+ * lost anything: what one target's loss is held against, to see whether the
+ * others lost packets at the same moments. Only the moments of loss are read.
+ */
+export async function getLossMoments(
+  targetIds: string[],
+  startTime: Date,
+  endTime: Date
+): Promise<Map<string, { probes: number; affected: number[] }>> {
+  const moments = new Map(targetIds.map(id => [id, { probes: 0, affected: [] as number[] }]));
+  if (targetIds.length === 0) return moments;
+
+  const database = await getDatabase();
+  const ids = targetIds.map(() => '?').join(', ');
+  const window = [...targetIds, startTime.getTime(), endTime.getTime()];
+
+  const [counts, lost] = await Promise.all([
+    allSql<{ target_id: string; probes: number }>(
+      database,
+      `SELECT target_id, COUNT(*) AS probes FROM measurements
+       WHERE target_id IN (${ids}) AND timestamp >= ? AND timestamp <= ?
+       GROUP BY target_id`,
+      window
+    ),
+    allSql<{ target_id: string; timestamp: number }>(
+      database,
+      `SELECT target_id, timestamp FROM measurements
+       WHERE target_id IN (${ids}) AND timestamp >= ? AND timestamp <= ? AND (success = 0 OR packet_loss > 0)
+       ORDER BY timestamp ASC`,
+      window
+    ),
+  ]);
+
+  for (const row of counts) moments.get(row.target_id)!.probes = row.probes;
+  for (const row of lost) moments.get(row.target_id)!.affected.push(row.timestamp);
+  return moments;
+}
+
+/**
  * Get target statistics for a time range.
  *
  * Packet loss is the mean of the per-probe `packet_loss` column, not the share
@@ -971,16 +1011,24 @@ export async function getTargetStatistics(
 
   if (!aggregates || aggregates.total === 0) return null;
 
-  // SQLite has no median aggregate, so pull the latency column for the window.
-  const latencies = await new Promise<number[]>((resolve, reject) => {
-    database.all(`
-      SELECT latency FROM measurements
-      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? AND latency IS NOT NULL ${only.clause}
-    `, window, (err, rows) => {
-      if (err) reject(err);
-      else resolve((rows as { latency: number }[]).map(r => r.latency));
-    });
-  });
+  // SQLite has no median aggregate, so the window's probes are read for the
+  // spreads, and for how many fell into each band of loss.
+  const probes = await allSql<Pick<MeasurementRow, 'latency' | 'jitter' | 'packet_loss' | 'success'>>(
+    database,
+    `SELECT latency, jitter, packet_loss, success FROM measurements
+     WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? ${only.clause}`,
+    window
+  );
+  const latencies = probes.flatMap(probe => (probe.latency === null ? [] : [probe.latency]));
+  const jitters = probes.flatMap(probe => (probe.jitter === null ? [] : [probe.jitter]));
+  const lossBands = PACKET_LOSS_BANDS.map(() => 0);
+  let lossyProbes = 0;
+  for (const probe of probes) {
+    // A probe that got nothing back lost everything it sent.
+    const loss = probe.success === 1 ? probe.packet_loss ?? 0 : 100;
+    lossBands[lossBandIndex(loss)]++;
+    if (probe.success === 1 && loss > 0) lossyProbes++;
+  }
 
   const total = aggregates.total;
 
@@ -991,14 +1039,22 @@ export async function getTargetStatistics(
     minLatency: aggregates.min_latency,
     maxLatency: aggregates.max_latency,
     medianLatency: median(latencies),
+    latencyP10: percentile(latencies, 10),
+    latencyP90: percentile(latencies, 90),
     packetLoss: aggregates.avg_loss ?? 0,
     minPacketLoss: aggregates.min_loss ?? 0,
     maxPacketLoss: aggregates.max_loss ?? 0,
     uptime: ((total - aggregates.failures) / total) * 100,
+    lossyProbes,
+    failedProbes: aggregates.failures,
+    lossBands,
     lastProbe: aggregates.last_probe !== null ? new Date(aggregates.last_probe) : null,
     jitter: aggregates.avg_jitter,
     minJitter: aggregates.min_jitter,
     maxJitter: aggregates.max_jitter,
+    medianJitter: median(jitters),
+    jitterP10: percentile(jitters, 10),
+    jitterP90: percentile(jitters, 90),
   };
 }
 

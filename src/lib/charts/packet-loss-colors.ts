@@ -132,6 +132,13 @@ export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: num
   },
 ] as const
 
+/** Which of PACKET_LOSS_BANDS a loss figure falls into, as its place in the list. */
+export function lossBandIndex(lossPercent: number): number {
+  const loss = Number.isFinite(lossPercent) ? Math.min(100, Math.max(0, lossPercent)) : 0
+  const index = PACKET_LOSS_BANDS.findIndex(band => loss <= band.maxLoss)
+  return index === -1 ? PACKET_LOSS_BANDS.length - 1 : index
+}
+
 /** The severity band a loss figure falls into, e.g. "Clear" or "Severe". */
 export function getPacketLossLabel(lossPercent: number | string): string {
   return getPacketLossColorInfo(lossPercent).label

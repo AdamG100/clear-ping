@@ -322,16 +322,29 @@ export interface TargetStatistics {
   minLatency: number | null;
   maxLatency: number | null;
   medianLatency: number | null;
+  /** The middle eight in ten of the latencies: where they usually are, without the outliers. */
+  latencyP10: number | null;
+  latencyP90: number | null;
   /** Mean per-probe packet loss across the window, 0-100. */
   packetLoss: number;
   minPacketLoss: number;
   maxPacketLoss: number;
   /** Share of probes that got at least one reply, 0-100. Distinct from loss. */
   uptime: number;
+  /** Probes that got something back, and not everything. */
+  lossyProbes: number;
+  /** Probes that got nothing back at all. */
+  failedProbes: number;
+  /** Probes in each band of PACKET_LOSS_BANDS, best first; one that got nothing back is in the last. */
+  lossBands: number[];
   lastProbe: Date | null;
+  /** Mean jitter across the window. */
   jitter: number | null;
   minJitter: number | null;
   maxJitter: number | null;
+  medianJitter: number | null;
+  jitterP10: number | null;
+  jitterP90: number | null;
 }
 
 /** One aggregated time bucket, produced by SQL rather than in the browser. */

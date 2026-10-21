@@ -39,9 +39,12 @@ export function inDisplayZone<T extends Intl.DateTimeFormatOptions>(options: T):
   return { ...options, timeZone: displayTimeZone() }
 }
 
+/** The zone this machine is in, asked once: a chart asks it hundreds of times a render. */
+let machineZone: string | undefined
+
 /** The zone named, or the one this machine is in. */
 function resolveZone(zone: string | undefined): string {
-  return zone ?? new Intl.DateTimeFormat().resolvedOptions().timeZone
+  return zone ?? (machineZone ??= new Intl.DateTimeFormat().resolvedOptions().timeZone)
 }
 
 // ─── The calendar in a zone ─────────────────────────────────────────────────

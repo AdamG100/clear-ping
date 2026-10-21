@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from 'react'
 import { timeTicks } from '@/lib/charts/time-ticks'
 import { inDisplayZone } from '@/lib/time-zone'
@@ -175,10 +175,13 @@ function ticksAcross({ start, end, left, width }: TimeSpan) {
  * guessing at a fraction of the width. Drawn before the readings, so that it
  * sits behind them.
  */
-export function TimeGrid({ top, bottom, ...span }: TimeSpan & { top: number; bottom: number }) {
+export function TimeGrid({ top, bottom, start, end, left, width }: TimeSpan & { top: number; bottom: number }) {
+  // Worked out once for a period and a width, not on every render: the chart
+  // renders again on every move of the pointer.
+  const ticks = useMemo(() => ticksAcross({ start, end, left, width }), [start, end, left, width])
   return (
     <g className="text-border" pointerEvents="none">
-      {ticksAcross(span).map(tick => (
+      {ticks.map(tick => (
         <line
           key={tick.time}
           x1={tick.x}
@@ -199,9 +202,11 @@ export function TimeGrid({ top, bottom, ...span }: TimeSpan & { top: number; bot
  * as there is room for. See `timeTicks` for how they are chosen.
  */
 export function TimeAxis({ y, ...span }: TimeSpan & { y: number }) {
+  const { start, end, left, width } = span
+  const ticks = useMemo(() => ticksAcross({ start, end, left, width }), [start, end, left, width])
   return (
     <>
-      {ticksAcross(span).map(tick => {
+      {ticks.map(tick => {
         // A mark at either end of the plot would centre its label half off the
         // chart. It is held just inside instead, which the margins have room for.
         const half = (tick.label.length * AXIS_CHARACTER_PX) / 2

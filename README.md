@@ -27,7 +27,13 @@ slow looks different from one that is unstable.
   DNS over TLS or DNS over HTTPS, and shows what each answered and how fast.
 - **Latency as a distribution.** Each probe sends several packets; the chart
   shows where they clustered and how far the outliers reached, with packet loss
-  on its own strip underneath.
+  on its own strip underneath. Above it, the round-trip time and jitter are
+  drawn as their spread, and the loss as every probe by how much it lost.
+- **Packet loss analysis.** When a target loses packets, a folded panel under
+  the figures says what kind of loss it is (sporadic, bursts or sustained),
+  the hour of day it peaks at, and which other targets lost packets at the
+  same time, with the likely source: your local network, your connection or
+  ISP, or the target's own path.
 - **IPv4 and IPv6.** A hostname can be probed over either family, or over both
   at once and charted as two lines.
 - **Nested groups.** Arrange targets into groups inside groups, drag targets
@@ -374,6 +380,7 @@ Everything the interface does goes through these.
 | `GET`, `PATCH`, `DELETE /api/targets/:id` | Read, change (including pause and group) or delete one |
 | `POST /api/targets/:id/probe` | Probe it now |
 | `GET /api/targets/:id/measurements` | Its readings, bucketed for a chart (`?hours=` or `?start=&end=`) |
+| `GET /api/targets/:id/loss` | Its packet loss analysis over the same period: pattern, hour of day, other targets that lost packets at the same time, likely source (`&tz=` for the hours) |
 | `GET`, `POST /api/targets/:id/traceroute` | Its saved routes; trace it now, over `{"family": "ipv4" \| "ipv6" \| "both"}` if given |
 | `DELETE /api/targets/:id/traceroute` | Delete one saved route (`?trace=id`) or all but the newest (`?older=1`) |
 | `PUT /api/targets/reorder` | Save the order of targets or of groups |

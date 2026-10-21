@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react"
 import type { TargetStatistics } from "@/types/probe"
 import type { ProbeVocabulary } from "@/lib/probes/labels"
 import { cn } from "@/lib/utils"
-import { getLatencyColor, getPacketLossLabel, getPacketLossVar, isMeaningfulLoss, NO_DATA_COLOR } from "@/lib/charts/packet-loss-colors"
+import { getLatencyColor, getPacketLossLabel, getPacketLossVar, isMeaningfulLoss, NO_DATA_COLOR, PACKET_LOSS_BANDS } from "@/lib/charts/packet-loss-colors"
 import { AnimatePresence, motion } from "motion/react"
 import { ArrowDown, ArrowUp, Clock, FileX, Gauge, TrendingUp, Zap } from "lucide-react"
 import { AnimatedCounter } from "@/components/arc/animated-counter/animated-counter"
@@ -45,18 +45,128 @@ function RelativeTime({ timestamp }: { timestamp: Date }) {
 type Variant = "default" | "success" | "warning" | "danger"
 
 const VARIANT_TEXT: Record<Variant, string> = {
-  default: "text-muted-foreground",
+  default: "text-foreground",
   success: "text-success",
   warning: "text-warning",
   danger: "text-destructive",
 }
 
-function StatItem({ label, value, variant = "default" }: { label: string; value: string; variant?: Variant }) {
+interface Figure {
+  label: string
+  value: string
+  variant?: Variant
+}
+
+/** The figures along the bottom of a card, each under its label. */
+function Figures({ figures }: { figures: Figure[] }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      {/* A missing reading is muted, never styled as though it were good. */}
-      <span className={cn("font-mono text-sm tabular-nums", value === "—" ? "text-faint" : VARIANT_TEXT[variant])}>{value}</span>
+    // Four across needs room for four figures the width of "123.4 ms"; in a
+    // card without it they go two by two.
+    <dl className={cn("grid grid-cols-2 gap-3", figures.length === 4 ? "@2xs/card:grid-cols-4" : "@2xs/card:grid-cols-3")}>
+      {figures.map(figure => (
+        <div key={figure.label} className="flex min-w-0 flex-col gap-1">
+          <dt className="text-xs text-muted-foreground">{figure.label}</dt>
+          {/* A missing reading is muted, never styled as though it were good. */}
+          <dd className={cn("truncate font-mono text-sm tabular-nums", figure.value === "—" ? "text-faint" : VARIANT_TEXT[figure.variant ?? "default"])}>
+            {figure.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+interface Spread {
+  min: number | null
+  low: number | null
+  middle: number | null
+  high: number | null
+  max: number | null
+  now: number | null
+}
+
+/**
+ * Where a period's readings lay, from the lowest to the highest: the band is
+ * where eight in ten of them were, the tick their median and the dot the
+ * newest. On a square-root scale, so the spikes a path has now and then do
+ * not squash the usual readings into the first sliver of the bar, while the
+ * figures underneath stay exact.
+ */
+function SpreadBar({ spread, color, describe }: { spread: Spread; color: string; describe: (value: number) => string }) {
+  const { min, max } = spread
+  if (min === null || max === null) {
+    return <div className="h-5 rounded-full" aria-hidden="true"><div className="mt-2 h-1.5 rounded-full bg-muted" /></div>
+  }
+  const at = (value: number | null) =>
+    value === null || max <= min ? 0 : Math.sqrt(Math.min(1, Math.max(0, (value - min) / (max - min)))) * 100
+
+  const parts = [
+    `From ${describe(min)} to ${describe(max)}`,
+    spread.low !== null && spread.high !== null && `usually ${describe(spread.low)} to ${describe(spread.high)}`,
+    spread.middle !== null && `median ${describe(spread.middle)}`,
+    spread.now !== null && `now ${describe(spread.now)}`,
+  ].filter(Boolean)
+
+  return (
+    <div className="relative h-5" role="img" aria-label={parts.join(", ")}>
+      <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted" />
+      {spread.low !== null && spread.high !== null && (
+        <div
+          className="absolute top-1/2 h-1.5 min-w-1.5 -translate-y-1/2 rounded-full"
+          style={{ left: `${at(spread.low)}%`, width: `${at(spread.high) - at(spread.low)}%`, backgroundColor: `color-mix(in oklab, ${color} 55%, transparent)` }}
+        />
+      )}
+      {spread.middle !== null && (
+        <div
+          className="absolute top-1/2 h-4 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{ left: `${at(spread.middle)}%`, backgroundColor: color }}
+        />
+      )}
+      {spread.now !== null && (
+        <div
+          className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-card"
+          style={{ left: `${at(spread.now)}%` }}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Every probe in the period by how much it lost, in the colours of the
+ * chart's loss lane. A band any probe fell into keeps a sliver however few
+ * did, so the one bad minute in a thousand good ones can still be seen.
+ */
+function LossBar({ bands, unit }: { bands: number[]; unit: string }) {
+  const total = bands.reduce((sum, count) => sum + count, 0)
+  const shown = PACKET_LOSS_BANDS.map((band, index) => ({ ...band, count: bands[index] ?? 0 })).filter(band => band.count > 0)
+
+  return (
+    <div className="space-y-2.5">
+      <div
+        className="flex h-2.5 gap-px overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={shown.map(band => `${band.count} ${band.label.toLowerCase()} (${band.range})`).join(", ")}
+      >
+        {total > 0 && shown.map(band => (
+          <div
+            key={band.label}
+            className="h-full min-w-1"
+            style={{ flexGrow: band.count, flexBasis: 0, backgroundColor: band.cssVar }}
+            title={`${band.label} ${band.range}: ${band.count.toLocaleString()} probe${band.count === 1 ? "" : "s"}`}
+          />
+        ))}
+      </div>
+      <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-hidden="true">
+        {shown.map(band => (
+          <li key={band.label} className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full" style={{ backgroundColor: band.cssVar }} />
+            {band.label}
+            <span className="font-mono tabular-nums text-foreground">{band.count.toLocaleString()}</span>
+          </li>
+        ))}
+        {total === 0 && <li>No {unit} sent</li>}
+      </ul>
     </div>
   )
 }
@@ -67,7 +177,9 @@ interface StatCardProps {
   /** The reading the card is for: null when the period has none. */
   main: { value: number | null; suffix: string; decimals: number }
   mainLabel: string
-  stats: Array<{ label: string; value: string; variant?: Variant }>
+  /** How the period's readings were spread: a bar drawn under the headline. */
+  visual: React.ReactNode
+  figures: Figure[]
   trend?: "up" | "down" | "stable"
   trendValue?: string
   /** How the reading stands, in the colour it is drawn in on the chart: the card's glow, icon and verdict. */
@@ -78,13 +190,13 @@ interface StatCardProps {
   className?: string
 }
 
-function StatCard({ title, icon, main, mainLabel, stats, trend, trendValue, accentColor = "var(--accent)", lastUpdated, still = false, className }: StatCardProps) {
+function StatCard({ title, icon, main, mainLabel, visual, figures, trend, trendValue, accentColor = "var(--accent)", lastUpdated, still = false, className }: StatCardProps) {
   return (
-    // A container, so the four figures along the bottom can be laid out from
-    // the card's own width: it is narrowest on a mid-sized screen, three
-    // abreast, and wide again on a phone, where it has a row to itself.
+    // A container, so the figures along the bottom can be laid out from the
+    // card's own width: it is narrowest on a mid-sized screen, three abreast,
+    // and wide again on a phone, where it has a row to itself.
     <section
-      className={cn("group @container/card relative overflow-hidden rounded-3xl border border-border bg-card p-4 transition-colors duration-300 hover:border-border-strong @2xl/main:p-6", className)}
+      className={cn("group @container/card relative flex flex-col overflow-hidden rounded-3xl border border-border bg-card p-4 transition-colors duration-300 hover:border-border-strong @2xl/main:p-6", className)}
       aria-label={title}
     >
       {/* The card's glow, in the colour of how the reading stands, so the
@@ -133,14 +245,14 @@ function StatCard({ title, icon, main, mainLabel, stats, trend, trendValue, acce
         </AnimatePresence>
       </div>
 
-      <div className="relative mt-4 @2xl/main:mt-6">
+      <div className="relative mt-4 @2xl/main:mt-5">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           {/* A period with no readings says so with a dash, never a zero. */}
           <div className="font-mono text-3xl font-medium tabular-nums text-foreground">
             {main.value === null ? (
               <span className="text-faint">—</span>
             ) : (
-              <AnimatedCounter value={main.value} suffix={main.suffix} decimals={main.decimals} label={title} />
+              <AnimatedCounter value={main.value} suffix={main.suffix} decimals={main.decimals} />
             )}
           </div>
           {lastUpdated && <RelativeTime timestamp={lastUpdated} />}
@@ -148,12 +260,13 @@ function StatCard({ title, icon, main, mainLabel, stats, trend, trendValue, acce
         <p className="mt-1 text-xs text-muted-foreground">{mainLabel}</p>
       </div>
 
-      {/* Four across needs room for four figures the width of "123.4 ms"; in
-          a card without it they overlapped, so there they go two by two. */}
-      <div className="relative mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 @2xs/card:grid-cols-4 @2xl/main:mt-6">
-        {stats.map((stat, index) => (
-          <StatItem key={index} label={stat.label} value={stat.value} variant={stat.variant} />
-        ))}
+      {/* Pushed to the bottom, so the bars of the three cards line up
+          whichever of them has the longer line above. */}
+      <div className="relative mt-auto space-y-4 pt-4 @2xl/main:pt-5">
+        {visual}
+        <div className="border-t border-border pt-4">
+          <Figures figures={figures} />
+        </div>
       </div>
     </section>
   )
@@ -180,6 +293,9 @@ const ms = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `${v.toFixed(1)} ms`
 const pct = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `${v.toFixed(2)}%`
+/** Where most readings were: "3.0–4.1 ms". */
+const usual = (low: number | null | undefined, high: number | null | undefined) =>
+  low === null || low === undefined || high === null || high === undefined ? "—" : `${low.toFixed(1)}–${high.toFixed(1)} ms`
 
 export default function StatsCards({
   statistics,
@@ -207,14 +323,9 @@ export default function StatsCards({
 
   const avgLatency = statistics?.avgLatency ?? null
   const medianLatency = statistics?.medianLatency ?? null
-  const minLatency = statistics?.minLatency ?? null
-  const maxLatency = statistics?.maxLatency ?? null
   const packetLoss = statistics?.packetLoss ?? null
-  const minPacketLoss = statistics?.minPacketLoss ?? null
   const maxPacketLoss = statistics?.maxPacketLoss ?? null
   const jitter = statistics?.jitter ?? null
-  const minJitter = statistics?.minJitter ?? null
-  const maxJitter = statistics?.maxJitter ?? null
 
   const isCurrentlyOffline = hasData && !current.isOnline
 
@@ -260,13 +371,23 @@ export default function StatsCards({
   const packetLossAccentColor = !hasData || paused || packetLoss === null ? NO_DATA_COLOR : getPacketLossVar(packetLoss)
   const jitterAccentColor = !hasData || paused || jitter === null ? NO_DATA_COLOR : getLatencyColor(jitter)
 
+  // How many probes lost anything: the number the average is made of, said
+  // outright so a small figure is not taken for a small problem, or the
+  // other way about.
+  const probes = statistics?.sampleCount ?? 0
+  const affected = (statistics?.lossyProbes ?? 0) + (statistics?.failedProbes ?? 0)
+  const lossLabel = !hasData
+    ? vocabulary.lossLabel
+    : affected === 0
+      ? `All ${probes.toLocaleString()} probes came back in full`
+      : `${affected.toLocaleString()} of ${probes.toLocaleString()} probes lost ${vocabulary.unit}`
+
   return (
     // One card to a row on a phone, three abreast where each still has room
     // for its figures. Between the two, the latency card takes a row to itself
     // and the other two share the next: three in two columns leaves a hole.
     <div className={cn(STAT_GRID, paused && "grayscale")}>
-      {/* RTT Card — the headline is a true median. It used to be the midrange,
-          (min + max) / 2, which a single spike drags far from any reading. */}
+      {/* The headline is a true median: one slow reply must not move it. */}
       <StatCard
         className={STAT_GRID_LEAD}
         title={vocabulary.latencyTitle}
@@ -278,37 +399,47 @@ export default function StatsCards({
         trendValue={paused ? 'Paused' : latencyTrendValue}
         still={paused}
         lastUpdated={lastUpdated}
-        stats={[
-          { label: "Avg", value: ms(avgLatency), variant: "default" },
-          { label: "Max", value: ms(maxLatency), variant: avgLatency !== null && avgLatency > 100 ? "warning" : "default" },
-          { label: "Min", value: ms(minLatency), variant: "success" },
-          { label: "Now", value: ms(current.latency), variant: "default" },
+        visual={
+          <SpreadBar
+            color={latencyAccentColor}
+            describe={value => ms(value)}
+            spread={{
+              min: statistics?.minLatency ?? null,
+              low: statistics?.latencyP10 ?? null,
+              middle: medianLatency,
+              high: statistics?.latencyP90 ?? null,
+              max: statistics?.maxLatency ?? null,
+              now: hasData ? current.latency : null,
+            }}
+          />
+        }
+        figures={[
+          { label: "Min", value: ms(statistics?.minLatency), variant: "success" },
+          { label: "Usually", value: usual(statistics?.latencyP10, statistics?.latencyP90) },
+          { label: "Max", value: ms(statistics?.maxLatency), variant: avgLatency !== null && (statistics?.maxLatency ?? 0) > 200 ? "warning" : "default" },
+          { label: "Now", value: ms(current.latency) },
         ]}
       />
 
-      {/* Packet Loss Card — Min and Max are the real extremes over the window.
-          They were previously hardcoded to 0% and to the average. */}
+      {/* Min and max are the real extremes over the window. */}
       <StatCard
         title={vocabulary.lossTitle}
         icon={<FileX size={20} strokeWidth={1.75} />}
         main={{ value: hasData ? packetLoss : null, suffix: "%", decimals: 2 }}
-        mainLabel={hasData && statistics
-          ? `${statistics.uptime.toFixed(1)}% of ${statistics.sampleCount} probes answered`
-          : vocabulary.lossLabel}
+        mainLabel={lossLabel}
         accentColor={packetLossAccentColor}
         trend={paused ? 'stable' : lossTrend}
         trendValue={paused ? 'Paused' : lossTrendValue}
         still={paused}
         lastUpdated={lastUpdated}
-        stats={[
-          { label: "Avg", value: pct(packetLoss), variant: "default" },
-          { label: "Max", value: pct(maxPacketLoss), variant: !isMeaningfulLoss(maxPacketLoss) ? "success" : maxPacketLoss! > 5 ? "danger" : "warning" },
-          { label: "Min", value: pct(minPacketLoss), variant: "success" },
+        visual={<LossBar bands={statistics?.lossBands ?? []} unit={vocabulary.unit} />}
+        figures={[
+          { label: "Worst", value: pct(maxPacketLoss), variant: !isMeaningfulLoss(maxPacketLoss) ? "success" : maxPacketLoss! > 5 ? "danger" : "warning" },
+          { label: "No reply", value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()}` : "—", variant: (statistics?.failedProbes ?? 0) > 0 ? "danger" : "success" },
           { label: "Now", value: pct(current.packetLoss), variant: !isMeaningfulLoss(current.packetLoss) ? "success" : (current.packetLoss ?? 0) <= 5 ? "warning" : "danger" },
         ]}
       />
 
-      {/* Jitter Card */}
       <StatCard
         title="Jitter"
         icon={<Zap size={20} strokeWidth={1.75} />}
@@ -319,11 +450,25 @@ export default function StatsCards({
         trendValue={paused ? 'Paused' : jitterTrendValue}
         still={paused}
         lastUpdated={lastUpdated}
-        stats={[
-          { label: "Avg", value: ms(jitter), variant: "default" },
-          { label: "Max", value: ms(maxJitter), variant: jitter !== null && jitter > 100 ? "warning" : "default" },
-          { label: "Min", value: ms(minJitter), variant: "success" },
-          { label: "Now", value: ms(current.jitter), variant: current.jitter === null || current.jitter <= 50 ? "success" : current.jitter <= 100 ? "warning" : "danger" },
+        visual={
+          <SpreadBar
+            color={jitterAccentColor}
+            describe={value => ms(value)}
+            spread={{
+              min: statistics?.minJitter ?? null,
+              low: statistics?.jitterP10 ?? null,
+              middle: statistics?.medianJitter ?? null,
+              high: statistics?.jitterP90 ?? null,
+              max: statistics?.maxJitter ?? null,
+              now: hasData ? current.jitter : null,
+            }}
+          />
+        }
+        figures={[
+          { label: "Min", value: ms(statistics?.minJitter), variant: "success" },
+          { label: "Usually", value: usual(statistics?.jitterP10, statistics?.jitterP90) },
+          { label: "Max", value: ms(statistics?.maxJitter), variant: (statistics?.maxJitter ?? 0) > 100 ? "warning" : "default" },
+          { label: "Now", value: ms(current.jitter), variant: current.jitter === null || current.jitter <= 50 ? "default" : current.jitter <= 100 ? "warning" : "danger" },
         ]}
       />
     </div>

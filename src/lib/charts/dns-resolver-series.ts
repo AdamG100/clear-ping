@@ -1,6 +1,7 @@
 import type { BucketedMeasurement, DnsResolver, DnsResolverReading, TargetStatistics } from '@/types/probe'
 import { resolverLabel, resolverOfReading } from '../probes/dns/resolvers'
-import { mean, median } from '../probes/metrics'
+import { mean, median, percentile } from '../probes/metrics'
+import { lossBandIndex, PACKET_LOSS_BANDS } from './packet-loss-colors'
 
 /**
  * A DNS target that asks several resolvers, taken apart into a line for each.
@@ -95,6 +96,8 @@ export function resolverSeries(
 
     const latencies = seen.map(each => each.reading.latency).filter((latency): latency is number => latency !== null)
     const losses = seen.map(each => each.reading.loss)
+    const lossBands = PACKET_LOSS_BANDS.map(() => 0)
+    for (const { reading } of seen) lossBands[lossBandIndex(reading.latency === null ? 100 : reading.loss)]++
 
     return {
       label,
@@ -106,14 +109,22 @@ export function resolverSeries(
         minLatency: latencies.length > 0 ? Math.min(...latencies) : null,
         maxLatency: latencies.length > 0 ? Math.max(...latencies) : null,
         medianLatency: median(latencies),
+        latencyP10: percentile(latencies, 10),
+        latencyP90: percentile(latencies, 90),
         packetLoss: mean(losses) ?? 0,
         minPacketLoss: Math.min(...losses),
         maxPacketLoss: Math.max(...losses),
         uptime: (latencies.length / seen.length) * 100,
+        lossyProbes: seen.filter(({ reading }) => reading.latency !== null && reading.loss > 0).length,
+        failedProbes: seen.length - latencies.length,
+        lossBands,
         lastProbe: new Date(seen[seen.length - 1].timestamp),
         jitter: null,
         minJitter: null,
         maxJitter: null,
+        medianJitter: null,
+        jitterP10: null,
+        jitterP90: null,
       },
     }
   })

@@ -23,6 +23,7 @@ import { MobileTopBar } from './mobile-top-bar'
 import { useSidebarDrawer } from '../sidebar/use-sidebar-drawer'
 import { PANE, PANE_ACTION, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
 import StatsCards from '../targets/stats-cards'
+import { LossBreakdown } from '../targets/loss-breakdown'
 import { TimeRangeSelector } from '../charts/time-range-selector'
 import { SmokeTrace } from '../charts/smoke-trace'
 import { PaneSkeleton, ReadoutSkeleton, TraceSkeleton } from './skeleton'
@@ -358,6 +359,8 @@ interface RangeSnapshot {
    * drawn on it, including while the next window is still loading.
    */
   window: TimeWindow | null
+  /** The whole period the points were read for: the chart spans it, readings or not. */
+  span: TimeWindow | null
   /** When the target's probe agent could not be reached: gaps that are the agent's, not the target's. */
   outages: ProbeAgentOutage[]
 }
@@ -448,6 +451,7 @@ function useTargetMeasurements(
             }
           : null,
         window: zoom,
+        span: typeof result.start === 'number' && typeof result.end === 'number' ? { start: result.start, end: result.end } : null,
         outages: Array.isArray(result.probeAgentOutages) ? result.probeAgentOutages : [],
       }
 
@@ -479,6 +483,7 @@ function useTargetMeasurements(
     statistics: shown ? shown.statistics : null,
     /** The zoom window the points on screen belong to; null when unzoomed. */
     window: shown ? shown.window : null,
+    span: shown ? shown.span : null,
     outages: shown ? shown.outages : [],
     /** A fetch is in flight with nothing cached to show for this range. */
     pending,
@@ -792,7 +797,7 @@ export function Dashboard() {
   // A comparison loads its own data, so the single-series fetch stands down.
   const singleSeriesTargetId = groupTargets || comparingFamilies ? null : selectedTargetId
 
-  const { points, statistics, window: shownWindow, outages: agentOutages, pending, reload, initialLoad } =
+  const { points, statistics, window: shownWindow, span: shownSpan, outages: agentOutages, pending, reload, initialLoad } =
     useTargetMeasurements(singleSeriesTargetId, timeRange, selectedTarget?.interval ?? 300, reportError, zoom, shownFamily)
 
   const handleTimeRangeChange = useCallback((range: TimeRange) => {
@@ -1405,6 +1410,18 @@ export function Dashboard() {
                 />
               )}
 
+              {/* Only when there is loss to find the cause of. */}
+              {!showSpinner && statistics && statistics.lossyProbes + statistics.failedProbes > 0 && (
+                <LossBreakdown
+                  targetId={selectedTarget.id}
+                  zoom={zoom}
+                  hours={TIME_RANGE_CONFIG[timeRange].hours}
+                  family={shownFamily}
+                  refreshKey={statistics.lastProbe?.getTime()}
+                  vocabulary={vocabulary}
+                />
+              )}
+
               <ProbeDetailsPanel
                 probeType={selectedTarget.probeType}
                 latest={latestReading}
@@ -1465,6 +1482,7 @@ export function Dashboard() {
                         data={points}
                         timeRange={timeRange}
                         window={shownWindow}
+                        span={shownSpan}
                         onZoom={handleZoom}
                         onResetZoom={handleResetZoom}
                         noLossLabel={vocabulary.noLoss}
@@ -1508,18 +1526,21 @@ export function Dashboard() {
               </motion.div>
               </AnimatePresence>
 
-                <ErrorBoundary label="Route">
-                  <TraceroutePanel
-                    key={selectedTarget.id}
-                    targetId={selectedTarget.id}
-                    name={selectedTarget.name}
-                    host={selectedTarget.host}
-                    ipVersion={selectedTarget.ipVersion}
-                    tracedFrom={selectedAgent?.name}
-                    refreshKey={lastUpdated?.getTime()}
-                    readOnly={readOnly}
-                  />
-                </ErrorBoundary>
+                {/* Where the loss breakdown's "Trace the route" goes. */}
+                <div id="route" className="scroll-mt-4">
+                  <ErrorBoundary label="Route">
+                    <TraceroutePanel
+                      key={selectedTarget.id}
+                      targetId={selectedTarget.id}
+                      name={selectedTarget.name}
+                      host={selectedTarget.host}
+                      ipVersion={selectedTarget.ipVersion}
+                      tracedFrom={selectedAgent?.name}
+                      refreshKey={lastUpdated?.getTime()}
+                      readOnly={readOnly}
+                    />
+                  </ErrorBoundary>
+                </div>
 
                 <TargetAlerts
                   alerts={alerts}

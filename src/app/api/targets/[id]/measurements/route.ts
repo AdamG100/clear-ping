@@ -39,6 +39,10 @@ export async function GET(
     return NextResponse.json({
       buckets,
       bucketMs,
+      // The period read, which the chart spans whether or not it has readings
+      // all the way across.
+      start: window.start,
+      end: window.end,
       statistics,
       probeAgentOutages,
     });

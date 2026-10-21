@@ -41,20 +41,36 @@ function labelLength(step: number): number {
   return step < MINUTE ? '02:30:15 PM'.length : '02:30 PM'.length
 }
 
+/**
+ * The formatters labels are written with, made once each: making one is the
+ * slow part of formatting a date, and an axis writes dozens of labels.
+ */
+const labelFormatters = new Map<string, Intl.DateTimeFormat>()
+
+function labelFormatter(kind: 'date' | 'minutes' | 'seconds', zone: string | undefined): Intl.DateTimeFormat {
+  const key = `${kind} ${zone ?? ''}`
+  let formatter = labelFormatters.get(key)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(
+      'en-US',
+      kind === 'date'
+        ? { month: 'short', day: 'numeric', timeZone: zone }
+        : { hour: '2-digit', minute: '2-digit', second: kind === 'seconds' ? '2-digit' : undefined, timeZone: zone }
+    )
+    labelFormatters.set(key, formatter)
+  }
+  return formatter
+}
+
 function labelFor(time: number, step: number, zone: string | undefined): string {
   const date = new Date(time)
 
   // Midnight is where the date changes, which is worth more than "12:00 AM".
   const clock = wallClock(time, zone)
   const midnight = clock.hour === 0 && clock.minute === 0 && clock.second === 0
-  if (step >= DAY || midnight) return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: zone })
+  if (step >= DAY || midnight) return labelFormatter('date', zone).format(date)
 
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: step < MINUTE ? '2-digit' : undefined,
-    timeZone: zone,
-  })
+  return labelFormatter(step < MINUTE ? 'seconds' : 'minutes', zone).format(date)
 }
 
 /** Every time from `start` to `end` that is a whole number of `step`s past midnight in `zone`. */

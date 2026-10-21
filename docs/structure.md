@@ -51,7 +51,7 @@ src/
 | `db/` | The database: opening and querying it, migrations, maintenance. |
 | `targets/` | Targets and groups as data: checking a new one, sharing, actions taken on several, group paths and health, the sidebar's layout. |
 | `charts/` | Readings turned into what is drawn: series, ticks, colours. |
-| `reports/` | Readings turned into words: outages, evidence for an ISP. |
+| `reports/` | Readings turned into words: outages, evidence for an ISP, where a target's loss is. |
 | `mcp/` | The MCP server: the protocol and the tools. |
 | `security/` | Sign-in and everything around it, all through Better Auth. |
 | `__fixtures__/` | Captured output that tests read: ping, traceroute and DNS messages. |

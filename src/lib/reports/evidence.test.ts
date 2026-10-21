@@ -80,8 +80,8 @@ describe('hoursOfDay', () => {
     const two = [reading(0, '.', 10), reading(60, 'x'), reading(24 * 60, '.', 30), reading(25 * 60, 'x')]
 
     expect(hoursOfDay(two, 'UTC')).toEqual([
-      { hour: '12:00', probes: 2, failedProbes: 0, lossPercent: 0, medianLatencyMs: 20 },
-      { hour: '13:00', probes: 2, failedProbes: 2, lossPercent: 100, medianLatencyMs: null },
+      { hour: '12:00', probes: 2, failedProbes: 0, affectedProbes: 0, lossPercent: 0, medianLatencyMs: 20 },
+      { hour: '13:00', probes: 2, failedProbes: 2, affectedProbes: 2, lossPercent: 100, medianLatencyMs: null },
     ])
     expect(hoursOfDay(two, 'Africa/Johannesburg').map(row => row.hour)).toEqual(['14:00', '15:00'])
     // A zone half an hour out: noon UTC is half past five there.
