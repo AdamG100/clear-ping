@@ -303,8 +303,8 @@ in the sidebar.
 
 The page counts how many are online and how many need attention, and lists
 each with its status, version and when it was last seen. **Details** on one
-has its machine, certificate and targets, and tests its connection, makes it a
-new token or removes it.
+has its machine, certificate and targets, and tests its connection, renames it
+or changes its address, makes it a new token or removes it.
 
 The dashboard connects to the agent, encrypted and pinned to the agent's own
 certificate, with a token for each agent. Over a tailnet such as Tailscale, no

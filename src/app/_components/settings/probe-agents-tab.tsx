@@ -1,13 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { AlertTriangle, ChevronRight, CircleCheck, KeyRound, Plug, Plus, RadioTower, RefreshCw, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { AlertTriangle, ChevronRight, CircleCheck, Plug, Plus, RadioTower, RefreshCw, Server, type LucideIcon } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { AnimatedCounter } from '@/components/arc/animated-counter/animated-counter'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { CodeBlock } from '@/components/arc/code-block/code-block'
-import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
 import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { Drawer, DrawerContent, useDrawerItem } from '@/components/arc/drawer/drawer'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
@@ -24,11 +23,11 @@ import { exposureOfAddress } from '@/lib/probe-agents/exposure'
 import { readProbeAgentAddress } from '@/lib/probe-agents/input'
 import type { ProbeAgentInstall } from '@/lib/probe-agents/install'
 import { PROBE_AGENT_DEFAULT_PORT } from '@/lib/probe-agents/protocol'
-import { inDisplayZone } from '@/lib/time-zone'
 import { cn } from '@/lib/utils'
-import type { ProbeAgent, ProbeAgentExposure, ProbeAgentState } from '@/types/probe-agent'
+import type { ProbeAgent } from '@/types/probe-agent'
 import { CopyField } from './mcp-setup'
 import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
+import { addressOf, ago, ExposureNote, HINT, ICON, OutcomeAlert, ProbeAgentDetails, send, uninstallCommands, when, type Outcome } from './probe-agent-details'
 
 /**
  * Settings → Probe agents: the other machines targets can be probed from.
@@ -44,20 +43,14 @@ import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
  * probe agent in a table, with what can be done to one in its details panel.
  */
 
-const HINT = 'text-xs leading-relaxed text-muted-foreground'
 const SECTION_TITLE = 'text-sm font-medium text-card-foreground'
 const PANEL = 'min-w-0 space-y-4 rounded-2xl border border-border p-4'
-const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 
 interface Loaded {
   probeAgents: ProbeAgent[]
   install: ProbeAgentInstall
   dashboardVersion?: string
 }
-
-type Outcome =
-  | { ok: true; fingerprint: string; pinned: boolean; info: { version: string; hostname: string } }
-  | { ok: false; state: ProbeAgentState; error: string; offeredFingerprint?: string }
 
 /** A token just made, shown with how to start the agent with it. Never kept: a reload loses it. */
 interface Made {
@@ -84,30 +77,6 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'attention', label: 'Needs attention' },
 ]
 
-async function send(url: string, method: string, body?: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
-  const response = await fetch(url, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  return { ok: response.ok, body: await response.json().catch(() => ({})) }
-}
-
-function when(ms: number | undefined): string {
-  return ms ? new Date(ms).toLocaleString(undefined, inDisplayZone({ dateStyle: 'medium', timeStyle: 'short' })) : 'never'
-}
-
-/** How long ago, in the words a list of machines uses: "Just now", "5 min ago". */
-function ago(ms: number | undefined, now: number): string {
-  if (!ms) return 'Never'
-  const minutes = Math.floor((now - ms) / 60_000)
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes} min ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} h ago`
-  return when(ms)
-}
-
 /** The clock "ago" is measured against, moved on every half minute. */
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now())
@@ -116,10 +85,6 @@ function useNow(): number {
     return () => clearInterval(interval)
   }, [])
   return now
-}
-
-function addressOf(agent: ProbeAgent): string {
-  return `${agent.address.includes(':') ? `[${agent.address}]` : agent.address}:${agent.port}`
 }
 
 /** Anything but answering: not connected yet counts, since it takes no readings either. */
@@ -167,51 +132,6 @@ function installCommands(agent: ProbeAgent, token: string, install: ProbeAgentIn
   }
 }
 
-/** What the address typed so far says about how the agent will be reached. */
-function ExposureNote({ exposure }: { exposure: ProbeAgentExposure }) {
-  if (exposure === 'public') {
-    return (
-      <Alert tone="warning" title="This probe agent is reached over the internet">
-        ClearPing encrypts the connection and the agent only answers this dashboard&apos;s token, but its port is open
-        to anyone who finds it. On the agent&apos;s machine, allow only this dashboard&apos;s address through the
-        firewall, or connect the two over a tailnet such as Tailscale.
-      </Alert>
-    )
-  }
-  if (exposure === 'tailnet') {
-    return (
-      <Alert tone="success" title="Over a tailnet">
-        Nothing outside the tailnet can reach the agent&apos;s port, so there is no port to open on the internet.
-      </Alert>
-    )
-  }
-  return <p className={HINT}>{PROBE_AGENT_EXPOSURE.private.detail}</p>
-}
-
-function OutcomeAlert({ outcome, name }: { outcome: Outcome; name: string }) {
-  if (outcome.ok) {
-    return (
-      <Alert tone="success" title={`Connected to ${name}`}>
-        {outcome.info.hostname}, version {outcome.info.version}.{' '}
-        {outcome.pinned ? 'Its certificate is trusted from now on' : 'Its certificate is the trusted one'}: SHA-256{' '}
-        <span className="break-all font-mono">{outcome.fingerprint}</span>. It should match the fingerprint the probe
-        agent printed when it started.
-      </Alert>
-    )
-  }
-  return (
-    <Alert tone={outcome.state === 'cert-changed' ? 'warning' : 'danger'} title={`Could not connect to ${name}`}>
-      {outcome.error}.
-      {outcome.offeredFingerprint && (
-        <>
-          {' '}It presents <span className="break-all font-mono">{outcome.offeredFingerprint}</span>. If that is the one in
-          its log (it was reinstalled, say), trust it from its details.
-        </>
-      )}
-    </Alert>
-  )
-}
-
 type TileTone = 'neutral' | 'success' | 'danger'
 
 const TILE: Record<TileTone, { tile: string; icon: string }> = {
@@ -233,16 +153,6 @@ function Tile({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: str
           <AnimatedCounter value={value} />
         </span>
       </span>
-    </div>
-  )
-}
-
-/** A label and what it says, in the details panel. */
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid gap-0.5 sm:grid-cols-[8rem_1fr] sm:gap-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 text-sm text-foreground">{children}</dd>
     </div>
   )
 }
@@ -454,6 +364,8 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
                   again to update. It needs <span className="font-mono">ping</span> and{' '}
                   <span className="font-mono">traceroute</span> on the machine, and says if they are missing.
                 </p>
+                <p className={HINT}>To take it all off the machine again, the same script uninstalls it:</p>
+                <CodeBlock code={uninstallCommands(made.install).linux} filename="To uninstall it" language="bash" />
               </div>
             </TabsContent>
           </Tabs>
@@ -631,103 +543,18 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
       <Drawer open={detailsId !== null && shownDetails !== null} onOpenChange={open => { if (!open) setDetailsId(null) }}>
         {shownDetails && (
           <DrawerContent title={shownDetails.name} description={addressOf(shownDetails)}>
-            <div className="space-y-5 text-foreground">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={PROBE_AGENT_STATE[shownDetails.state].tone}>{PROBE_AGENT_STATE[shownDetails.state].label}</Badge>
-                <Badge tone={PROBE_AGENT_EXPOSURE[shownDetails.exposure].tone}>{PROBE_AGENT_EXPOSURE[shownDetails.exposure].label}</Badge>
-              </div>
-
-              {shownDetails.state !== 'online' && shownDetails.lastError && (
-                <p className="text-sm text-muted-foreground">{shownDetails.lastError}</p>
-              )}
-              {lastOutcome?.id === shownDetails.id && <OutcomeAlert outcome={lastOutcome.outcome} name={shownDetails.name} />}
-
-              <dl className="space-y-3">
-                <Fact label="Address">
-                  <span className="break-all font-mono text-xs">{addressOf(shownDetails)}</span>
-                </Fact>
-                <Fact label="Reached over">{PROBE_AGENT_EXPOSURE[shownDetails.exposure].detail}</Fact>
-                <Fact label="Machine">{shownDetails.hostname ?? 'Not known yet'}</Fact>
-                <Fact label="Version">
-                  {shownDetails.version ?? 'Not known yet'}
-                  {shownDetails.platform && <span className="text-muted-foreground"> · {shownDetails.platform}</span>}
-                </Fact>
-                {shownDetails.tools && (
-                  <Fact label="Tools">
-                    {shownDetails.tools.ping && shownDetails.tools.traceroute ? (
-                      'ping and traceroute'
-                    ) : (
-                      <span className="text-warning">
-                        No {[!shownDetails.tools.ping && 'ping', !shownDetails.tools.traceroute && 'traceroute'].filter(Boolean).join(' or ')} installed
-                      </span>
-                    )}
-                  </Fact>
-                )}
-                <Fact label="Certificate">
-                  {shownDetails.fingerprint ? (
-                    <span className="flex items-start gap-1.5 break-all font-mono text-xs">
-                      <ShieldCheck size={13} strokeWidth={1.75} aria-hidden className="mt-0.5 shrink-0" />
-                      {shownDetails.fingerprint}
-                    </span>
-                  ) : (
-                    'Not connected yet'
-                  )}
-                </Fact>
-                {shownDetails.state === 'cert-changed' && shownDetails.offeredFingerprint && (
-                  <Fact label="Now presents">
-                    <span className="break-all font-mono text-xs text-warning">{shownDetails.offeredFingerprint}</span>
-                  </Fact>
-                )}
-                <Fact label="Last seen">{shownDetails.lastSeenAt ? when(shownDetails.lastSeenAt) : 'Never'}</Fact>
-                <Fact label="Added">{when(shownDetails.createdAt)}</Fact>
-                <Fact label="Targets">
-                  {shownDetails.targetCount > 0 && onShowTargets ? (
-                    <Button type="button" size="sm" variant="secondary" onClick={() => onShowTargets(shownDetails.id)}>
-                      Show its {shownDetails.targetCount} {shownDetails.targetCount === 1 ? 'target' : 'targets'}
-                    </Button>
-                  ) : (
-                    'None yet'
-                  )}
-                </Fact>
-              </dl>
-
-              {/* Each on a line of its own: buttons are inline. */}
-              <div className="flex flex-col items-start gap-2 border-t border-border pt-4">
-                {shownDetails.state === 'cert-changed' && shownDetails.offeredFingerprint ? (
-                  <ConfirmMorph
-                    label="Trust new certificate"
-                    icon={<ShieldCheck {...ICON} />}
-                    tone="neutral"
-                    prompt="Trust it?"
-                    confirmLabel="Trust"
-                    doneLabel="Trusted"
-                    onConfirm={() => connect(shownDetails, true)}
-                  />
-                ) : (
-                  <Button type="button" variant="secondary" loading={connecting === shownDetails.id} onClick={() => connect(shownDetails).catch(() => {})}>
-                    <Plug {...ICON} />
-                    {shownDetails.fingerprint ? 'Test the connection' : 'Connect'}
-                  </Button>
-                )}
-                <ConfirmMorph
-                  label="New token"
-                  icon={<KeyRound {...ICON} />}
-                  tone="neutral"
-                  prompt="Replace it?"
-                  confirmLabel="Replace"
-                  doneLabel="Made"
-                  onConfirm={() => renewToken(shownDetails)}
-                />
-                <ConfirmMorph
-                  label="Remove"
-                  icon={<Trash2 {...ICON} />}
-                  prompt="Remove it?"
-                  confirmLabel="Remove"
-                  doneLabel="Removed"
-                  onConfirm={() => remove(shownDetails)}
-                />
-              </div>
-            </div>
+            <ProbeAgentDetails
+              agent={shownDetails}
+              install={loaded.install}
+              now={now}
+              outcome={lastOutcome?.id === shownDetails.id ? lastOutcome.outcome : null}
+              connecting={connecting === shownDetails.id}
+              onConnect={trust => connect(shownDetails, trust)}
+              onRenewToken={() => renewToken(shownDetails)}
+              onRemove={() => remove(shownDetails)}
+              onChanged={() => void load()}
+              onShowTargets={onShowTargets && (() => onShowTargets(shownDetails.id))}
+            />
           </DrawerContent>
         )}
       </Drawer>

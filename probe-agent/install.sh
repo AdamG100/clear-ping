@@ -8,6 +8,10 @@
 #     | sudo CLEARPING_PROBE_AGENT_TOKEN=cpa_… CLEARPING_PROBE_AGENT_LISTEN=100.84.12.7:7380 sh
 #
 # Run it again to update: without a token it keeps the one already set up.
+# Run it with `uninstall` to take it all off again: the service, the program,
+# its user, its settings and its certificate.
+#
+#   curl -fsSL …/install-probe-agent.sh | sudo sh -s -- uninstall
 #
 #   CLEARPING_PROBE_AGENT_TOKEN    the token from the dashboard
 #   CLEARPING_PROBE_AGENT_LISTEN   address:port to listen on (0.0.0.0:7380). On
@@ -36,6 +40,23 @@ fail() { printf 'clearping-probe-agent install: %s\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || fail "run it as root, with sudo"
 [ "$(uname -s)" = Linux ] || fail "this installs on Linux; elsewhere, run the Docker image"
 command -v systemctl >/dev/null 2>&1 || fail "this needs systemd; without it, run the Docker image"
+
+# Everything this script put on the machine, taken off again. The certificate
+# goes too, so installed again it is a new probe agent to the dashboard, whose
+# certificate has to be trusted afresh.
+if [ "${1:-}" = uninstall ]; then
+  systemctl disable --now "$NAME" >/dev/null 2>&1 || true
+  rm -f "$UNIT"
+  systemctl daemon-reload
+  rm -f "$BIN"
+  rm -rf "$ETC" "$DATA"
+  if id -u "$NAME" >/dev/null 2>&1; then
+    if command -v userdel >/dev/null 2>&1; then userdel "$NAME"; else deluser "$NAME"; fi
+  fi
+  say "The probe agent is uninstalled. Remove it in ClearPing too (Settings, Probe agents) if it is still listed."
+  exit 0
+fi
+[ -z "${1:-}" ] || fail "unknown option $1: run it with nothing to install or update, or with uninstall"
 
 case "$(uname -m)" in
   x86_64 | amd64) ARCH=amd64 ;;

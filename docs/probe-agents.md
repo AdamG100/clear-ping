@@ -67,8 +67,9 @@ stored, charted and alerted on like any other reading
 The page lists every probe agent with its status and when it was last seen,
 below a count of how many are online and how many need attention. **Details**
 on a row has everything else about it: its machine, version, certificate
-and targets, and the buttons to test the connection, make a new token or
-remove it.
+and targets, and the buttons to test the connection, rename it or change
+where it is reached, make a new token or remove it. A renamed or moved probe
+agent keeps its pinned certificate, and its targets keep their history.
 
 A lost token can't be shown again. **New token** in its details makes
 another, and the old one stops working straight away. Restart the agent with
@@ -163,6 +164,19 @@ missing. On Debian or Ubuntu: `apt install iputils-ping traceroute`.
 
 Check it with `systemctl status clearping-probe-agent`. Read its log with
 `journalctl -u clearping-probe-agent`.
+
+To uninstall it, run the same script with `uninstall`:
+
+```bash
+curl -fsSL https://github.com/adamg100/clear-ping/releases/latest/download/install-probe-agent.sh \
+  | sudo sh -s -- uninstall
+```
+
+That stops and removes the service, the program, its user, its settings and
+its certificate. Installed again, it has a new certificate to trust, so
+remove it in the dashboard as well. A probe agent run with Docker comes off with
+`docker rm -f clearping-probe-agent` and `docker volume rm clearping-probe-agent`.
+Each probe agent's **Details** shows both commands.
 
 ### Settings
 
