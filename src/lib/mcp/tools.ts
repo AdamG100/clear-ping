@@ -1080,8 +1080,8 @@ export const clearPingMcp: McpServer = {
   title: 'ClearPing',
   version: currentBuild().version,
   instructions:
-    'ClearPing is a self-hosted network monitor: it probes hosts on a schedule (ping, TCP, HTTP, DNS) and keeps every result. ' +
-    'These tools read that history; none of them changes anything. ' +
+    'ClearPing is a self-hosted network monitor: it probes hosts on a schedule (ping, TCP, game servers, HTTP, DNS) and keeps every result. ' +
+    'These tools read that history. ' +
     'For a request to gather logs or evidence of connection problems, or to report them to an ISP, call build_isp_report and write from what it returns. ' +
     'Use list_targets to learn what is monitored, get_target_history for one target in depth, get_incidents for outages across targets, ' +
     'get_traceroutes for the route to a target, and get_dns_resolvers to compare the resolvers of a DNS target. ' +
