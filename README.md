@@ -134,7 +134,7 @@ to yours.
 
 ### From source
 
-Needs Node.js 26 or newer, and `ping` and `traceroute` (`tracert` on Windows)
+Needs Node.js 26.12.1 or newer, and `ping` and `traceroute` (`tracert` on Windows)
 on the machine.
 
 ```bash
