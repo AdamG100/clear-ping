@@ -5,6 +5,7 @@ describe('dashboard pages', () => {
   it('reads each page from its address', () => {
     expect(pageFromPath('/')).toBeNull()
     expect(pageFromPath('/alerts')).toEqual({ kind: 'alerts' })
+    expect(pageFromPath('/patch-notes')).toEqual({ kind: 'patch-notes' })
     expect(pageFromPath('/settings')).toEqual({ kind: 'settings', section: 'access' })
     expect(pageFromPath('/settings/keys/')).toEqual({ kind: 'settings', section: 'keys' })
     expect(pageFromPath('/settings/assistant')).toEqual({ kind: 'settings', section: 'assistant' })
@@ -17,7 +18,7 @@ describe('dashboard pages', () => {
   })
 
   it('gives each page an address that reads back as the same page', () => {
-    const pages: DashboardPage[] = [{ kind: 'alerts' }, ...SETTINGS_SECTIONS.map(section => ({ kind: 'settings' as const, section }))]
+    const pages: DashboardPage[] = [{ kind: 'alerts' }, { kind: 'patch-notes' }, ...SETTINGS_SECTIONS.map(section => ({ kind: 'settings' as const, section }))]
     for (const page of pages) expect(pageFromPath(pathOf(page))).toEqual(page)
     expect(pathOf(null)).toBe('/')
     expect(pathOf({ kind: 'settings', section: 'access' })).toBe('/settings')

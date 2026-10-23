@@ -38,7 +38,8 @@ function TwoLines({ name, detail }: { name: string; detail?: string }) {
   )
 }
 
-export function VersionBadge() {
+/** `onOpen` opens the patch notes, which the badge leads to. */
+export function VersionBadge({ onOpen }: { onOpen?: () => void }) {
   const [status, setStatus] = useState<VersionStatus | null>(null)
   // The version the server was on when this page loaded: the one its scripts are from.
   const [loadedWith, setLoadedWith] = useState<string | null>(null)
@@ -77,18 +78,19 @@ export function VersionBadge() {
     )
   }
 
+  // The badge opens the patch notes, an update or not. The GitHub release is
+  // no help to anyone the repository is private to, and the notes are in the
+  // image anyway.
   if (updateAvailable && latest) {
     const newer = latest.version ? `v${latest.version}` : `commit ${latest.commit?.slice(0, 7)}`
-    const release = latest.version && latest.source ? `${latest.source}/releases/tag/v${latest.version}` : undefined
-    const Tag = release ? 'a' : 'span'
     return (
-      <Tooltip content={<TwoLines name={`${newer} is available`} detail={`Running ${label}. Pull the latest image and recreate the container to update.`} />}>
-        <Tag {...(release ? { href: release, target: '_blank', rel: 'noreferrer' } : { tabIndex: 0 })}>
+      <Tooltip content={<TwoLines name={`${newer} is available`} detail={`Running ${label}. Pull the latest image and recreate the container to update. Click for the patch notes.`} />}>
+        <button type="button" onClick={onOpen} className="cursor-pointer">
           <Badge tone="warning" size="sm">
             {label}
-            <span className="sr-only">, update available: {newer}</span>
+            <span className="sr-only">, update available: {newer}. Patch notes</span>
           </Badge>
-        </Tag>
+        </button>
       </Tooltip>
     )
   }
@@ -105,10 +107,13 @@ export function VersionBadge() {
       : [provenance(current), status.latestUnknownBecause].filter(Boolean).join('. ')
 
   return (
-    <Tooltip content={<TwoLines name={tip} detail={detail} />}>
-      <span tabIndex={0}>
-        <Badge tone={updateAvailable === false ? 'success' : 'neutral'} size="sm">{label}</Badge>
-      </span>
+    <Tooltip content={<TwoLines name={tip} detail={[detail, 'Click for the patch notes'].filter(Boolean).join('. ')} />}>
+      <button type="button" onClick={onOpen} className="cursor-pointer">
+        <Badge tone={updateAvailable === false ? 'success' : 'neutral'} size="sm">
+          {label}
+          <span className="sr-only">. Patch notes</span>
+        </Badge>
+      </button>
     </Tooltip>
   )
 }

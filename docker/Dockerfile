@@ -72,6 +72,11 @@ RUN found="$(find . -path ./node_modules -prune -o -type f \
       exit 1; \
     fi
 
+# The patch notes the dashboard shows (src/lib/release-notes.ts). CI writes
+# them from the commit messages before building; a build without them has
+# none to show, and an empty list says so.
+RUN test -f release-notes.json || echo '[]' > release-notes.json
+
 # Standalone output: a self-contained server with only the modules it uses,
 # instead of the whole of node_modules. See next.config.ts.
 ENV NEXT_TELEMETRY_DISABLED=1 \
@@ -127,6 +132,7 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/public ./public
+COPY --from=build --chown=node:node /app/release-notes.json ./release-notes.json
 
 # The database lives outside the image, so replacing the container keeps the
 # measurement history. The directory is created empty here, so a fresh volume

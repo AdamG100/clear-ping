@@ -18,6 +18,10 @@ name: Docker image
 # `Release: major` (scripts/next-version.mjs). The number is baked into the
 # image, where the dashboard shows it and compares it with whatever :latest is
 # to say whether there is an update.
+#
+# The patch notes are written from the commit messages going out
+# (scripts/release-notes.mjs): onto the GitHub release, and into the image,
+# where the version badge opens them.
 
 on:
   push:
@@ -87,6 +91,26 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "### Version $version" >> "$GITHUB_STEP_SUMMARY"
 
+      # What changed, from the commit messages (scripts/release-notes.mjs):
+      # every release so far, for the image to carry and the dashboard to show
+      # as its patch notes, and this one's alone, for its GitHub release.
+      - name: Write the patch notes
+        env:
+          VERSION: ${{ steps.number.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/notes"
+          node scripts/release-notes.mjs --json --version "$VERSION" --out "$RUNNER_TEMP/notes/release-notes.json"
+          node scripts/release-notes.mjs --markdown --version "$VERSION" --out "$RUNNER_TEMP/notes/release-notes.md"
+          cat "$RUNNER_TEMP/notes/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Hand the patch notes on
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes/*
+          if-no-files-found: error
+          retention-days: 1
+
   # One job per architecture, each on a runner of that architecture. Nothing
   # is emulated, so the build is as fast as it was and the smoke test below
   # runs the real thing on both.
@@ -109,6 +133,12 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Into the build context, where the Dockerfile copies them into the image.
+      - name: Collect the patch notes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -166,6 +196,12 @@ jobs:
           # The number the dashboard shows is the one this build was given.
           if ! curl -fsS http://localhost:3000/api/version | jq -e --arg v "$VERSION" '.current.version == $v and .current.development == false'; then
             echo "::error::The image does not report version $VERSION"
+            exit 1
+          fi
+
+          # It carries its patch notes, its own version's first.
+          if ! curl -fsS http://localhost:3000/api/release-notes | jq -e --arg v "$VERSION" '.releases[0].version == $v'; then
+            echo "::error::The image does not carry the patch notes for $VERSION"
             exit 1
           fi
 
@@ -540,6 +576,12 @@ jobs:
           pattern: probe-agent-binary-*
           merge-multiple: true
 
+      - name: Collect the patch notes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes
+
       - name: Tag and release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -550,11 +592,26 @@ jobs:
           assets="$RUNNER_TEMP/assets"
           cp probe-agent/install.sh "$assets/install-probe-agent.sh"
           chmod +x "$assets"/clearping-probe-agent-linux-*
+
+          # The images, the patch notes written from the commit messages, and
+          # a link to every commit since the release before. (GitHub's own
+          # generated notes list merged pull requests, and main is pushed to.)
+          previous=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+          notes="$RUNNER_TEMP/notes/body.md"
+          {
+            echo "Image: \`$IMAGE:$VERSION\` · Probe agent: \`$IMAGE-probe-agent:$VERSION\`"
+            echo
+            cat "$RUNNER_TEMP/notes/release-notes.md"
+            if [ -n "$previous" ]; then
+              echo
+              echo "**Every commit**: https://github.com/$GH_REPO/compare/$previous...v$VERSION"
+            fi
+          } > "$notes"
+
           gh release create "v$VERSION" \
             --target "$GITHUB_SHA" \
             --title "v$VERSION" \
-            --notes "Image: \`$IMAGE:$VERSION\` · Probe agent: \`$IMAGE-probe-agent:$VERSION\`" \
-            --generate-notes \
+            --notes-file "$notes" \
             "$assets"/clearping-probe-agent-linux-amd64 \
             "$assets"/clearping-probe-agent-linux-arm64 \
             "$assets"/install-probe-agent.sh

@@ -17,6 +17,13 @@ One trailer is enough for everything going out together: the biggest one asked
 for since the last release wins. Do not edit `package.json`'s version or make
 `v*` tags.
 
+The commit messages are the patch notes (`scripts/release-notes.mjs`): each
+commit's subject and body go onto the GitHub release and into the image, where
+the version badge opens them, filed under the part its trailer says (`major`
+is "Before you update", `minor` "New", none "Fixes and improvements"). Write
+the subject and body for someone running ClearPing, saying what changed for
+them; keep file names and internals to a minimum.
+
 ## Structure
 
 Where files go, how they are named, and what may import what are in

@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "probe": "tsx scripts/prober.ts",
     "probe-agent": "tsx probe-agent/main.ts",
-    "build:probe-agent": "node scripts/build-probe-agent.mjs"
+    "build:probe-agent": "node scripts/build-probe-agent.mjs",
+    "release-notes": "node scripts/release-notes.mjs --json --out release-notes.json"
   },
   "dependencies": {
     "@better-auth/api-key": "^1.7.10",

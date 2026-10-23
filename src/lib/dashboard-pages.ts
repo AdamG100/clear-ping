@@ -24,6 +24,8 @@ export type DashboardPage =
   /** A blank form for a new target, started in `group` or as a copy of the target `from`. */
   | { kind: 'target-new'; group?: string; from?: string }
   | { kind: 'target-edit'; id: string }
+  /** What changed in each version, opened from the version badge. */
+  | { kind: 'patch-notes' }
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
   return typeof value === 'string' && (SETTINGS_SECTIONS as readonly string[]).includes(value)
@@ -70,6 +72,7 @@ export function pageFromPath(pathname: string): DashboardPage | null {
 
   if (rest.length > 0) return null
   if (first === 'alerts' && !second) return { kind: 'alerts' }
+  if (first === 'patch-notes' && !second) return { kind: 'patch-notes' }
   if (first === 'settings') {
     if (!second) return { kind: 'settings', section: DEFAULT_SETTINGS_SECTION }
     if (isSettingsSection(second)) return { kind: 'settings', section: second }

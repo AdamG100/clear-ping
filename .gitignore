@@ -24,6 +24,10 @@
 /dist
 /probe-agent-data
 
+# the patch notes, written from the commit messages by CI into each image
+# (npm run release-notes makes them here)
+/release-notes.json
+
 # misc
 .DS_Store
 Thumbs.db

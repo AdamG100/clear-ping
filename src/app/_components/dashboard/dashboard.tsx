@@ -48,6 +48,7 @@ import { agentDown, holdReason, probedFromLine, type ProbeFromFilter } from '../
 import { TraceroutePanel } from '../targets/traceroute-panel'
 import { CopyAddress } from './copy-address'
 import { ComparePanel } from '../charts/compare-panel'
+import { PatchNotesPage } from './patch-notes'
 import { FamilySection } from './family-section'
 import { formatWindowEdge } from '../charts/chart-brush'
 import { ChartLine, MapPin } from 'lucide-react'
@@ -659,6 +660,7 @@ export function Dashboard() {
     hideSidebar()
   }, [goTo, hideSidebar])
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
+  const openPatchNotes = useCallback(() => openPage({ kind: 'patch-notes' }), [openPage])
   const openAlertEditor = useCallback(
     (which: 'new' | string) => goTo(which === 'new' ? { kind: 'alert-new' } : { kind: 'alert-edit', id: which }),
     [goTo]
@@ -1022,6 +1024,7 @@ export function Dashboard() {
         onOpenAlerts={openAlerts}
         settingsOpen={page?.kind === 'settings'}
         onOpenSettings={openSettings}
+        onOpenPatchNotes={openPatchNotes}
         readOnly={readOnly}
         firingAlerts={firingAlerts}
         onOpenAddTarget={openAddTarget}
@@ -1101,6 +1104,18 @@ export function Dashboard() {
                 onOpenEditor={openAlertEditor}
                 onCloseEditor={closeAlertEditor}
               />
+            </ErrorBoundary>
+          </motion.div>
+          ) : page?.kind === 'patch-notes' ? (
+          <motion.div
+            key="patch-notes"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+          >
+            <ErrorBoundary label="Patch notes">
+              <PatchNotesPage />
             </ErrorBoundary>
           </motion.div>
           ) : page?.kind === 'settings' ? (
@@ -1207,6 +1222,7 @@ export function Dashboard() {
                 (groupVocabulary ? `had ${groupVocabulary.lossTitle.toLowerCase()}.` : 'lost packets or failed.')
               }
               onSelectTarget={setSelectedTargetId}
+              probeAgents={probeAgents}
               reportError={reportError}
             />
           </motion.div>

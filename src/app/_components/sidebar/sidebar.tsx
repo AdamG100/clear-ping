@@ -197,6 +197,8 @@ interface SidebarProps {
   /** Whether Settings is what the main pane is showing. */
   settingsOpen?: boolean
   onOpenSettings?: () => void
+  /** Opens the patch notes, from the version badge. */
+  onOpenPatchNotes?: () => void
   /** The account signed in may look but not change anything: no way to change things is offered. */
   readOnly?: boolean
   onReorderTargets?: (updates: { id: string; sortOrder: number; group?: string }[]) => void
@@ -903,6 +905,7 @@ export function Sidebar({
   firingAlerts = 0,
   settingsOpen = false,
   onOpenSettings,
+  onOpenPatchNotes,
   readOnly = false,
   onReorderTargets,
   loading = false,
@@ -1158,7 +1161,7 @@ export function Sidebar({
             </h1>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               Path monitor
-              <VersionBadge />
+              <VersionBadge onOpen={onOpenPatchNotes} />
             </p>
           </div>
           <span className="ml-auto">
