@@ -5,6 +5,8 @@ import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { cn } from '@/lib/utils'
 import { DNS_PROTOCOL_LABEL, DNS_PROTOCOL_NAME, readingName } from '@/lib/probes/dns/resolvers'
 import { resolversThatDiffer } from '@/lib/charts/dns-resolver-series'
+import { getPacketLossVar, NO_REPLY_COLOR } from '@/lib/charts/packet-loss-colors'
+import { LossFigure } from '../charts/loss-figure'
 import type { DnsResolver, DnsResolverReading, GameServerInfo, LatestMeasurement, ProbeDetails, ProbeType } from '@/types/probe'
 import { inDisplayZone } from '@/lib/time-zone'
 
@@ -183,15 +185,17 @@ function ResolverTable({
               label: 'Resolver',
               render: (_, { reading, name }) => (
                 <span className="flex items-center gap-2">
+                  {/* The dot says how it went, in the loss colours; the badge only which protocol. */}
                   <span
-                    className={cn('size-2 shrink-0 rounded-full', reading.latency === null ? 'bg-destructive' : reading.loss > 0 ? 'bg-signal-moderate' : 'bg-signal-perfect')}
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: reading.latency === null ? NO_REPLY_COLOR : getPacketLossVar(reading.loss) }}
                     aria-hidden="true"
                   />
                   {/* By the name it has now, and without the protocol: the badge says that. */}
                   <span className="whitespace-nowrap font-medium text-foreground">{name}</span>
                   <Tooltip content={DNS_PROTOCOL_NAME[reading.protocol]}>
                     <span tabIndex={0}>
-                      <Badge size="sm" tone={reading.latency === null ? 'danger' : reading.loss > 0 ? 'warning' : 'neutral'}>
+                      <Badge size="sm" tone="neutral">
                         {DNS_PROTOCOL_LABEL[reading.protocol]}
                       </Badge>
                     </span>
@@ -205,7 +209,7 @@ function ResolverTable({
               numeric: true,
               render: (_, { reading }) =>
                 reading.latency === null ? (
-                  <span className="text-destructive">no answer</span>
+                  <LossFigure loss={100} className="font-sans">no answer</LossFigure>
                 ) : (
                   <span className="flex items-center justify-end gap-2">
                     <span className="hidden h-1.5 w-20 rounded-full bg-muted @2xl/main:block" aria-hidden="true">
@@ -221,11 +225,11 @@ function ResolverTable({
               numeric: true,
               render: (_, { reading }) => (
                 // Out of how many, where that was kept; as a share where it was not.
-                <span className={cn('font-mono', reading.loss > 0 ? 'text-destructive' : 'text-muted-foreground')}>
+                <LossFigure loss={reading.loss}>
                   {reading.sent
                     ? `${Math.round(reading.sent * (1 - reading.loss / 100))} of ${reading.sent}`
                     : `${(100 - reading.loss).toFixed(0)}%`}
-                </span>
+                </LossFigure>
               ),
             },
             ...(encrypted

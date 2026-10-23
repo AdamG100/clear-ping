@@ -4,7 +4,6 @@ import { useCallback, useMemo, useState, useRef, memo } from 'react'
 import {
   getPacketLossVar,
   isMeaningfulLoss,
-  PACKET_LOSS_BANDS,
   NO_DATA_COLOR,
 } from '@/lib/charts/packet-loss-colors'
 import type { DataPoint, TimeRange, TimeWindow } from '@/types/probe'
@@ -23,6 +22,7 @@ import {
   useChartWidth,
   useOutsidePress,
 } from './chart-brush'
+import { LossKey } from './loss-key'
 
 /**
  * The smoke trace.
@@ -669,14 +669,7 @@ export const SmokeTrace = memo(function SmokeTrace({
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
-        {PACKET_LOSS_BANDS.map(band => (
-          <span key={band.label} className="flex items-center gap-1.5">
-            <span className="h-2 w-4 rounded-sm" style={{ backgroundColor: band.cssVar }} />
-            <span className="text-muted-foreground">
-              {band.label} <span className="font-mono">{band.range}</span>
-            </span>
-          </span>
-        ))}
+        <LossKey />
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-4 rounded-sm bg-[var(--trace)] opacity-25" />
           <span className="text-muted-foreground">Latency distribution</span>

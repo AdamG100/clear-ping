@@ -4,11 +4,12 @@ import React, { useState, useEffect } from "react"
 import type { TargetStatistics } from "@/types/probe"
 import type { ProbeVocabulary } from "@/lib/probes/labels"
 import { cn } from "@/lib/utils"
-import { getLatencyColor, getPacketLossLabel, getPacketLossVar, isMeaningfulLoss, NO_DATA_COLOR, PACKET_LOSS_BANDS } from "@/lib/charts/packet-loss-colors"
+import { getLatencyColor, getPacketLossLabel, getPacketLossVar, isMeaningfulLoss, NO_DATA_COLOR, NO_REPLY_COLOR, PACKET_LOSS_BANDS } from "@/lib/charts/packet-loss-colors"
 import { AnimatePresence, motion } from "motion/react"
 import { ArrowDown, ArrowUp, Clock, FileX, Gauge, TrendingUp, Zap } from "lucide-react"
 import { AnimatedCounter } from "@/components/arc/animated-counter/animated-counter"
 import { Tooltip } from "@/components/arc/tooltip/tooltip"
+import { LossFigure } from "../charts/loss-figure"
 
 /** How long ago something was, to the coarsest unit that says anything. */
 function describeAge(diffMs: number): string {
@@ -56,6 +57,8 @@ interface Figure {
   label: string
   value: string
   variant?: Variant
+  /** For a figure of loss: the share lost, which colours it as loss is coloured everywhere. */
+  loss?: number | null
 }
 
 /** The figures along the bottom of a card, each under its label. */
@@ -69,7 +72,7 @@ function Figures({ figures }: { figures: Figure[] }) {
           <dt className="text-xs text-muted-foreground">{figure.label}</dt>
           {/* A missing reading is muted, never styled as though it were good. */}
           <dd className={cn("truncate font-mono text-sm tabular-nums", figure.value === "—" ? "text-faint" : VARIANT_TEXT[figure.variant ?? "default"])}>
-            {figure.value}
+            {figure.value !== "—" && typeof figure.loss === "number" ? <LossFigure loss={figure.loss}>{figure.value}</LossFigure> : figure.value}
           </dd>
         </div>
       ))}
@@ -449,7 +452,7 @@ export default function StatsCards({
   // All from the theme's signal colours, so the three cards agree with each
   // other and with the chart underneath in either theme.
   const latencyAccentColor = !hasData || quiet ? NO_DATA_COLOR
-    : isCurrentlyOffline ? getPacketLossVar(100)
+    : isCurrentlyOffline ? NO_REPLY_COLOR
     : getLatencyColor(avgLatency ?? 0)
   const packetLossAccentColor = !hasData || quiet || packetLoss === null ? NO_DATA_COLOR : getPacketLossVar(packetLoss)
   const jitterAccentColor = !hasData || quiet || jitter === null ? NO_DATA_COLOR : getLatencyColor(jitter)
@@ -519,9 +522,9 @@ export default function StatsCards({
         lastUpdated={lastUpdated}
         visual={<LossBar bands={statistics?.lossBands ?? []} unit={vocabulary.unit} />}
         figures={[
-          { label: "Worst probe", value: pct(maxPacketLoss), variant: !isMeaningfulLoss(maxPacketLoss) ? "success" : maxPacketLoss! > 5 ? "danger" : "warning" },
-          { label: "No reply at all", value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()} probes` : "—", variant: (statistics?.failedProbes ?? 0) > 0 ? "danger" : "success" },
-          { label: "Latest", value: pct(current.packetLoss), variant: !isMeaningfulLoss(current.packetLoss) ? "success" : (current.packetLoss ?? 0) <= 5 ? "warning" : "danger" },
+          { label: "Worst probe", value: pct(maxPacketLoss), loss: maxPacketLoss },
+          { label: "No reply at all", value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()} probes` : "—", loss: (statistics?.failedProbes ?? 0) > 0 ? 100 : 0 },
+          { label: "Latest", value: pct(current.packetLoss), loss: current.packetLoss },
         ]}
       />
 

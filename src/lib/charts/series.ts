@@ -3,6 +3,21 @@ import type { BucketedMeasurement, DataPoint, TimeWindow } from '@/types/probe'
 /** Points beyond this are indistinguishable at typical chart widths. */
 export const MAX_CHART_POINTS = 400
 
+/** The most targets one comparison takes: a big group's worth. */
+export const MAX_COMPARED_TARGETS = 100
+
+/**
+ * About how many points a comparison asks for in all. Shared out among its
+ * targets, so a group of a hundred comes back as fast as one of twenty: each
+ * line coarser, which on a chart that width loses nothing that can be seen.
+ */
+const COMPARISON_POINTS = 8000
+
+/** How many points to ask for per target when comparing `targets` of them. */
+export function comparisonPointsPer(targets: number): number {
+  return Math.max(60, Math.min(MAX_CHART_POINTS, Math.round(COMPARISON_POINTS / Math.max(1, targets))))
+}
+
 /** Narrowest window worth asking for: below this there is at most one probe. */
 export const MIN_WINDOW_MS = 60_000
 

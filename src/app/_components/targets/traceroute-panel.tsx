@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { CheckCircle2, ChevronDown, ChevronRight, Download, Route, Trash2, XCircle } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
@@ -16,6 +17,7 @@ import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useToast } from '@/components/notifications'
 import { cn } from '@/lib/utils'
 import { mean } from '@/lib/probes/metrics'
+import { getPacketLossVar } from '@/lib/charts/packet-loss-colors'
 import {
   addressFamilyFor,
   canChooseTraceFamily,
@@ -39,6 +41,7 @@ import {
 } from '@/lib/traceroute/export'
 import type { IpVersion, Traceroute, TracerouteHop } from '@/types/probe'
 import { inDisplayZone } from '@/lib/time-zone'
+import { LossFigure } from '../charts/loss-figure'
 
 /**
  * The route to a target, hop by hop.
@@ -139,11 +142,21 @@ function ShareTrace({ trace, subject }: { trace: Traceroute; subject: TraceSubje
 
 const NODE_STYLE: Record<HopState, string> = {
   answered: 'border-signal-perfect/50 bg-signal-perfect/10 text-foreground',
-  lossy: 'border-signal-moderate/70 bg-signal-moderate/15 text-foreground',
+  // In the colour of how much it loses: see lossyNode.
+  lossy: 'text-foreground',
   silent: 'border-dashed border-muted-foreground/40 text-muted-foreground',
-  dead: 'border-destructive/60 bg-destructive/15 text-destructive',
+  dead: 'border-signal-critical/60 bg-signal-critical/15 text-signal-critical',
   destination: 'border-signal-perfect bg-signal-perfect font-medium text-background',
 }
+
+/**
+ * A hop losing traffic, in its loss band's colour, as loss is everywhere else:
+ * 3% at a hop is the yellow of 3% on a chart, not the same amber as 60%.
+ */
+const lossyNode = (loss: number): CSSProperties => ({
+  borderColor: `color-mix(in oklab, ${getPacketLossVar(loss)} 70%, transparent)`,
+  backgroundColor: `color-mix(in oklab, ${getPacketLossVar(loss)} 15%, transparent)`,
+})
 
 /** Half of the line joining a hop to the one before or after it. */
 function PathLine({ half, broken }: { half: 'above' | 'below'; broken: boolean }) {
@@ -154,7 +167,7 @@ function PathLine({ half, broken }: { half: 'above' | 'below'; broken: boolean }
         'absolute left-1/2 -translate-x-1/2',
         half === 'above' ? 'bottom-1/2 top-0' : 'bottom-0 top-1/2',
         // Past where replies stop the path is not known to go anywhere.
-        broken ? 'border-l border-dashed border-destructive/50' : 'w-px bg-border'
+        broken ? 'border-l border-dashed border-signal-critical/50' : 'w-px bg-border'
       )}
     />
   )
@@ -165,7 +178,7 @@ function PathLine({ half, broken }: { half: 'above' | 'below'; broken: boolean }
  * slowest, with a mark at the average. Reading down the column shows where
  * latency is added along the path, and a wide band shows where it is unstable.
  */
-function LatencyBar({ hop, scale, state }: { hop: TracerouteHop; scale: number; state: HopState }) {
+function LatencyBar({ hop, scale, state, loss }: { hop: TracerouteHop; scale: number; state: HopState; loss: number }) {
   if (hop.rtts.length === 0) {
     return <span className="block h-1.5 rounded-full bg-muted/20" aria-hidden="true" />
   }
@@ -174,17 +187,17 @@ function LatencyBar({ hop, scale, state }: { hop: TracerouteHop; scale: number; 
   const fastest = Math.min(...hop.rtts)
   const slowest = Math.max(...hop.rtts)
   const average = mean(hop.rtts) ?? fastest
-  const colour = state === 'lossy' ? 'bg-signal-moderate' : state === 'destination' ? 'bg-signal-perfect' : 'bg-trace'
+  const colour = state === 'lossy' ? getPacketLossVar(loss) : state === 'destination' ? 'var(--signal-perfect)' : 'var(--trace)'
 
   return (
     <span className="relative block h-1.5 rounded-full bg-muted/40" aria-hidden="true">
       <span
-        className={cn('absolute inset-y-0 min-w-1 rounded-full opacity-40', colour)}
-        style={{ left: at(fastest), width: `calc(${at(slowest)} - ${at(fastest)})` }}
+        className="absolute inset-y-0 min-w-1 rounded-full opacity-40"
+        style={{ left: at(fastest), width: `calc(${at(slowest)} - ${at(fastest)})`, backgroundColor: colour }}
       />
       <span
-        className={cn('absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-card', colour)}
-        style={{ left: at(average) }}
+        className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-card"
+        style={{ left: at(average), backgroundColor: colour }}
       />
     </span>
   )
@@ -246,7 +259,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
     const silent = hop.rtts.length === 0
 
     return (
-      <tr key={hop.hop} className={cn('transition-colors hover:bg-muted/30', state === 'dead' && 'bg-destructive/5')}>
+      <tr key={hop.hop} className={cn('transition-colors hover:bg-muted/30', state === 'dead' && 'bg-signal-critical/5')}>
         {/* The path itself: each hop a numbered stop on a line running down
             the table, so the route reads as a route before any figure is read. */}
         <td className="relative w-10 p-0">
@@ -259,6 +272,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
                 'flex size-6 items-center justify-center rounded-full border font-mono text-[10px] tabular-nums',
                 NODE_STYLE[state]
               )}
+              style={state === 'lossy' ? lossyNode(loss) : undefined}
             >
               {hop.hop}
             </span>
@@ -271,7 +285,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
         <td className="w-full max-w-0 py-2 pl-1 pr-4 @md/main:w-2/5">
           {hop.address === null ? (
             <>
-              <span className={cn('block', state === 'dead' ? 'text-destructive' : 'text-muted-foreground')}>No reply</span>
+              <span className={cn('block', state === 'dead' ? 'text-signal-critical' : 'text-muted-foreground')}>No reply</span>
               {state === 'silent' && (
                 <span className="block text-[11px] text-muted-foreground/70">
                   Does not answer probes. Still passing traffic on.
@@ -317,7 +331,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
             // Every probe unanswered, and not a loss of traffic: left quiet.
             <span className="text-muted-foreground">{loss.toFixed(0)}%</span>
           ) : (
-            <Badge tone={state === 'dead' ? 'danger' : 'warning'} size="sm">{loss.toFixed(0)}%</Badge>
+            <LossFigure loss={state === 'dead' ? 100 : loss}>{loss.toFixed(0)}%</LossFigure>
           )}
         </td>
         <td className="whitespace-nowrap py-2 text-right font-mono text-foreground @md/main:pr-4">
@@ -330,7 +344,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
           {silent ? '—' : ms(Math.max(...hop.rtts))}
         </td>
         <td className="hidden w-2/5 min-w-24 py-2 pr-1 align-middle @md/main:table-cell">
-          <LatencyBar hop={hop} scale={scale} state={state} />
+          <LatencyBar hop={hop} scale={scale} state={state} loss={loss} />
         </td>
       </tr>
     )
@@ -604,13 +618,13 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
                           ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                           : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                         <StatusIcon
-                          className={cn('h-4 w-4 shrink-0', summary.tone === 'ok' ? 'text-signal-perfect' : 'text-destructive')}
+                          className={cn('h-4 w-4 shrink-0', summary.tone === 'ok' ? 'text-signal-perfect' : 'text-signal-critical')}
                           aria-hidden="true"
                         />
                         {/* Which family, first: the two take different routes,
                             and a list of both read as one otherwise. */}
                         {family && <Badge size="sm" tone="info">{FAMILY_LABEL[family]}</Badge>}
-                        <span className={cn('font-medium', summary.tone === 'bad' ? 'text-destructive' : 'text-foreground')}>
+                        <span className={cn('font-medium', summary.tone === 'bad' ? 'text-signal-critical' : 'text-foreground')}>
                           {summary.text}
                         </span>
                         {took !== null && <span className="font-mono text-muted-foreground">{ms(took)} ms</span>}

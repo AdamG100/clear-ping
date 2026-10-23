@@ -1,5 +1,5 @@
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
-import { getPacketLossColor, isMeaningfulLoss, NO_DATA_COLOR } from '@/lib/charts/packet-loss-colors'
+import { getPacketLossVar, isMeaningfulLoss, NO_DATA_COLOR, NO_REPLY_COLOR } from '@/lib/charts/packet-loss-colors'
 
 /**
  * Status dot: online (coloured by packet loss), offline, awaiting its first
@@ -48,12 +48,12 @@ export function StatusIndicator({
     statusColor = NO_DATA_COLOR
     label = 'Waiting for first measurement'
   } else if (isOnline) {
-    statusColor = getPacketLossColor(packetLoss ?? 0)
+    statusColor = getPacketLossVar(packetLoss ?? 0)
     label = isMeaningfulLoss(packetLoss)
       ? `Online (${packetLoss!.toFixed(1)}% packet loss)`
       : 'Online'
   } else {
-    statusColor = getPacketLossColor(100)
+    statusColor = NO_REPLY_COLOR
     label = 'Offline'
   }
 

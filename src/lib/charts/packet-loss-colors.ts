@@ -6,9 +6,18 @@
  * what "moderate loss" looks like or where it starts.
  */
 
+/**
+ * The colours are written twice: here, and as the `--signal-*` tokens in
+ * `globals.css`, which is what the app draws with. A test holds the two
+ * together, so change both.
+ */
 export interface PacketLossColorScheme {
+  /** The dark theme's colour, as hex, for the rare context that cannot take a var(). */
   hex: string
+  /** The dark theme's colour. */
   oklch: string
+  /** The light theme's colour. */
+  light: string
   /** Theme-aware CSS variable; preferred over hex wherever CSS is in play. */
   cssVar: string
   label: string
@@ -19,6 +28,12 @@ export interface PacketLossColorScheme {
 
 /** Colour for a bucket with no measurements — distinct from every severity band. */
 export const NO_DATA_COLOR = 'var(--signal-none)'
+
+/**
+ * Colour for a probe, query or hop that got no reply at all: the worst band,
+ * the same red as a target that has stopped answering.
+ */
+export const NO_REPLY_COLOR = 'var(--signal-critical)'
 
 /**
  * CSS custom properties, so a chart stroke and a status dot resolve to the same
@@ -80,6 +95,7 @@ export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: num
     maxLoss: LOSS_NOISE_FLOOR,
     oklch: 'oklch(0.75 0.15 150)',
     hex: '#5dc879',
+    light: 'oklch(0.58 0.15 150)',
     cssVar: 'var(--signal-perfect)',
     label: 'Clear',
     range: '≤1%',
@@ -88,7 +104,8 @@ export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: num
   {
     maxLoss: 5,
     oklch: 'oklch(0.84 0.15 95)',
-    hex: '#e3c04a',
+    hex: '#e9c944',
+    light: 'oklch(0.68 0.15 85)',
     cssVar: 'var(--signal-minor)',
     label: 'Minor',
     range: '1-5%',
@@ -97,7 +114,8 @@ export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: num
   {
     maxLoss: 10,
     oklch: 'oklch(0.73 0.19 50)',
-    hex: '#ef8b3c',
+    hex: '#ff7c0d',
+    light: 'oklch(0.60 0.18 50)',
     cssVar: 'var(--signal-moderate)',
     label: 'Moderate',
     range: '5-10%',
@@ -107,6 +125,7 @@ export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: num
     maxLoss: 15,
     oklch: 'oklch(0.62 0.24 305)',
     hex: '#a94ff6',
+    light: 'oklch(0.46 0.24 305)',
     cssVar: 'var(--signal-high)',
     label: 'High',
     range: '10-15%',
@@ -116,6 +135,7 @@ export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: num
     maxLoss: 20,
     oklch: 'oklch(0.66 0.25 350)',
     hex: '#f72fa7',
+    light: 'oklch(0.54 0.24 352)',
     cssVar: 'var(--signal-severe)',
     label: 'Severe',
     range: '15-20%',
@@ -124,7 +144,8 @@ export const PACKET_LOSS_BANDS: readonly (PacketLossColorScheme & { maxLoss: num
   {
     maxLoss: 100,
     oklch: 'oklch(0.63 0.23 25)',
-    hex: '#e2453c',
+    hex: '#f52f39',
+    light: 'oklch(0.53 0.22 25)',
     cssVar: 'var(--signal-critical)',
     label: 'Critical',
     range: '>20%',
@@ -150,8 +171,8 @@ export function getPacketLossLabel(lossPercent: number | string): string {
 const LATENCY_PALETTE = {
   excellent: { oklch: 'var(--signal-perfect)', hex: '#5dc879' }, // <=50ms
   good: { oklch: 'var(--signal-perfect)', hex: '#5dc879' }, // 51-100ms
-  fair: { oklch: 'var(--signal-minor)', hex: '#e3c04a' }, // 101-200ms
-  poor: { oklch: 'var(--signal-critical)', hex: '#e2453c' }, // >200ms
+  fair: { oklch: 'var(--signal-minor)', hex: '#e9c944' }, // 101-200ms
+  poor: { oklch: 'var(--signal-critical)', hex: '#f52f39' }, // >200ms
 } as const
 
 /**

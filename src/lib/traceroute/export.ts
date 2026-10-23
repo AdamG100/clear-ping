@@ -3,6 +3,7 @@ import { classifyHost, FAMILY_LABEL, type AddressFamily } from '../probes/host'
 import { mean } from '../probes/metrics'
 import { displayTimeZone, formatMoment, wallClock } from '../time-zone'
 import { firstDeadHop, hopLoss, pathLoss } from './parse'
+import { lossBandIndex, PACKET_LOSS_BANDS } from '../charts/packet-loss-colors'
 
 /**
  * A traceroute read the way the dashboard reads it, and written out for
@@ -204,21 +205,33 @@ export function traceFileName(trace: Traceroute, subject: TraceSubject): string 
   return `route-${slug}${family ? `-ipv${family}` : ''}-${stamp}.html`
 }
 
+/**
+ * The loss bands' colours as the page's own variables, `--loss-0` (clear) to
+ * `--loss-5` (critical), taken from the bands so they cannot drift from the
+ * dashboard's. A hop's loss is in the same colour on the page as on screen.
+ */
+const lossColours = (theme: 'light' | 'oklch') =>
+  PACKET_LOSS_BANDS.map((band, index) => `--loss-${index}: ${band[theme]};`).join(' ')
+
+/** A hop's loss band, as the variable holding its colour. */
+const lossColour = (loss: number) => `var(--loss-${lossBandIndex(loss)})`
+
 /** Styles for the page, which has to stand alone: nothing is loaded from anywhere. */
 const PAGE_STYLE = `
 :root {
   color-scheme: light dark;
   --page: #f4f5f6; --card: #ffffff; --text: #1b1f23; --muted: #646b73; --border: #e2e5e8;
-  --track: #eceef0; --ok: oklch(0.58 0.15 150); --warn: oklch(0.60 0.18 50); --bad: oklch(0.53 0.22 25);
-  --info: oklch(0.52 0.1 222); --bar: oklch(0.42 0.03 250);
+  --track: #eceef0; --info: oklch(0.52 0.1 222); --bar: oklch(0.42 0.03 250);
+  ${lossColours('light')}
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --page: #121212; --card: #1b2024; --text: oklch(0.96 0.004 240); --muted: oklch(0.70 0.014 240);
-    --border: #2b3237; --track: #272e34; --ok: oklch(0.75 0.15 150); --warn: oklch(0.73 0.19 50);
-    --bad: oklch(0.66 0.21 25); --info: oklch(0.80 0.09 215); --bar: oklch(0.85 0.02 250);
+    --border: #2b3237; --track: #272e34; --info: oklch(0.80 0.09 215); --bar: oklch(0.85 0.02 250);
+    ${lossColours('oklch')}
   }
 }
+:root { --ok: var(--loss-0); --bad: var(--loss-${PACKET_LOSS_BANDS.length - 1}); }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 32px 16px; background: var(--page); color: var(--text);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -246,7 +259,7 @@ tr.dead td.path::before, tr.dead td.path::after, tr.before-dead td.path::after {
 .node { position: relative; z-index: 1; margin: 0 auto; width: 26px; height: 26px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center; font-size: 11px; border: 1px solid var(--border); background: var(--card); }
 .node.answered { border-color: color-mix(in oklab, var(--ok) 55%, transparent); background: color-mix(in oklab, var(--ok) 12%, var(--card)); }
-.node.lossy { border-color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, var(--card)); }
+.node.lossy { border-color: var(--band); background: color-mix(in oklab, var(--band) 16%, var(--card)); }
 .node.silent { border-style: dashed; color: var(--muted); }
 .node.dead { border-color: var(--bad); color: var(--bad); background: color-mix(in oklab, var(--bad) 14%, var(--card)); }
 .node.destination { border-color: var(--ok); background: var(--ok); color: var(--card); font-weight: 600; }
@@ -255,7 +268,8 @@ tr.dead td.path::before, tr.dead td.path::after, tr.before-dead td.path::after {
 .router .quiet { color: var(--muted); }
 .router .note { display: block; color: var(--muted); font-size: 11px; }
 .dead .router .quiet { color: var(--bad); }
-.loss-warn { color: var(--warn); font-weight: 600; } .loss-bad { color: var(--bad); font-weight: 600; }
+.loss { display: inline-flex; align-items: center; gap: 6px; }
+.loss i { width: 8px; height: 8px; border-radius: 50%; background: var(--band); }
 .faint { color: var(--muted); }
 td.bar { width: 32%; min-width: 120px; padding-right: 0; }
 .track { position: relative; height: 6px; border-radius: 999px; background: var(--track); }
@@ -304,9 +318,9 @@ export function traceAsHtml(trace: Traceroute, subject: TraceSubject, generatedA
         ? '<span class="faint">0%*</span>'
         : loss === 0 || state === 'silent'
           ? `<span class="faint">${loss.toFixed(0)}%</span>`
-          : `<span class="${state === 'dead' ? 'loss-bad' : 'loss-warn'}">${loss.toFixed(0)}%</span>`
+          : `<span class="loss" style="--band:${state === 'dead' ? 'var(--bad)' : lossColour(loss)}"><i></i>${loss.toFixed(0)}%</span>`
 
-      const colour = state === 'lossy' ? 'var(--warn)' : state === 'destination' ? 'var(--ok)' : 'var(--bar)'
+      const colour = state === 'lossy' ? lossColour(loss) : state === 'destination' ? 'var(--ok)' : 'var(--bar)'
       const bar = replied
         ? `<div class="track"><span class="range" style="left:${at(Math.min(...hop.rtts))};width:calc(${at(Math.max(...hop.rtts))} - ${at(Math.min(...hop.rtts))});background:${colour}"></span>` +
           `<span class="avg" style="left:${at(average ?? 0)};background:${colour}"></span></div>`
@@ -315,7 +329,7 @@ export function traceAsHtml(trace: Traceroute, subject: TraceSubject, generatedA
       const classes = [state === 'dead' && 'dead', nextDead && state !== 'dead' && 'before-dead'].filter(Boolean).join(' ')
       return (
         `<tr${classes ? ` class="${classes}"` : ''}>` +
-        `<td class="path"><div class="node ${state} mono">${hop.hop}</div></td>` +
+        `<td class="path"><div class="node ${state} mono"${state === 'lossy' ? ` style="--band:${lossColour(loss)}"` : ''}>${hop.hop}</div></td>` +
         `<td class="router">${router}</td>` +
         `<td class="num">${lossCell}</td>` +
         `<td class="num">${average === null ? '<span class="faint">-</span>' : formatMs(average)}</td>` +

@@ -3,9 +3,9 @@
 import { useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import { ExpandableCard } from '@/components/arc/expandable-card/expandable-card'
-import { cn } from '@/lib/utils'
 import { FAMILY_LABEL } from '@/lib/probes/host'
 import { resolversThatDiffer } from '@/lib/charts/dns-resolver-series'
+import { getPacketLossVar, NO_DATA_COLOR, NO_REPLY_COLOR } from '@/lib/charts/packet-loss-colors'
 import type { AddressFamily, FamilyReading } from '@/types/probe'
 
 /**
@@ -56,7 +56,7 @@ function summaryOf(latest: FamilyReading | undefined) {
     silent: readings.filter(reading => reading.latency === null).length,
     differing: resolversThatDiffer(readings).size > 0,
     // The family's state at a glance, in the colours the target list uses.
-    tone: !latest.success ? 'bg-destructive' : latest.packetLoss > 0 ? 'bg-signal-moderate' : 'bg-signal-perfect',
+    tone: !latest.success ? NO_REPLY_COLOR : getPacketLossVar(latest.packetLoss),
   }
 }
 
@@ -97,7 +97,7 @@ export function FamilySection({ family, detail, latest, children }: FamilySectio
     <ExpandableCard
       title={detail ? `${FAMILY_LABEL[family]}: ${detail}` : FAMILY_LABEL[family]}
       description={describe(summary)}
-      leading={<span className={cn('size-2.5 shrink-0 rounded-full', summary?.tone ?? 'bg-muted-foreground/40')} aria-hidden="true" />}
+      leading={<span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: summary?.tone ?? NO_DATA_COLOR }} aria-hidden="true" />}
       defaultExpanded={startOpen}
       onClickCapture={remember}
     >

@@ -126,6 +126,31 @@
   --signal-none: oklch(0.65 0.02 250);
   --trace: oklch(0.30 0.02 250);
 
+  /* The lines of a comparison chart, in the order they are handed out. The
+     order is part of the palette: each colour is far enough from the next,
+     for colour-blind eyes too, that two lines in a row of the legend never
+     look alike. The first eight are the most distinct there are; the next
+     eight were picked, each as far as could be from every one before it,
+     and ordered so that neighbours still differ. Past sixteen a line gets a
+     hue of its own, worked out from --line-l (compare-panel.tsx). */
+  --line-1: #2a78d6;
+  --line-2: #eb6834;
+  --line-3: #1baf7a;
+  --line-4: #eda100;
+  --line-5: #e87ba4;
+  --line-6: #008300;
+  --line-7: #6250d6;
+  --line-8: #e34948;
+  --line-9: #067396;
+  --line-10: #c331aa;
+  --line-11: #5f884a;
+  --line-12: #5c346b;
+  --line-13: #1f9996;
+  --line-14: #4c5a09;
+  --line-15: #a381c2;
+  --line-16: #8b7b02;
+  --line-l: 0.55;
+
   /* The sidebar's groups, each a panel a step off the sidebar's own colour,
      and a group inside another a step further, so it is plain where one group
      ends and which one a group sits in. Mixed from the theme's surface and
@@ -194,6 +219,24 @@
   --signal-critical: oklch(0.63 0.23 25);
   --signal-none: oklch(0.55 0.02 250);
   --trace: oklch(0.90 0.02 250);
+
+  --line-1: #3987e5;
+  --line-2: #d95926;
+  --line-3: #199e70;
+  --line-4: #c98500;
+  --line-5: #d55181;
+  --line-6: #008300;
+  --line-7: #9085e9;
+  --line-8: #e66767;
+  --line-9: #4ba4c9;
+  --line-10: #fb69de;
+  --line-11: #8eba7a;
+  --line-12: #8b619c;
+  --line-13: #5fccc8;
+  --line-14: #798940;
+  --line-15: #d6b3f6;
+  --line-16: #bdac4a;
+  --line-l: 0.72;
 }
 
 @layer base {

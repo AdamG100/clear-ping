@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { motion } from 'motion/react'
 import type {
   AddressFamily,
@@ -13,17 +14,21 @@ import type {
 } from '@/types/probe'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
 import { Button } from '@/components/arc/button/button'
+import { Checkbox } from '@/components/arc/checkbox/checkbox'
 import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { cn } from '@/lib/utils'
 import { FAMILY_LABEL } from '@/lib/probes/host'
-import { getPacketLossVar, isMeaningfulLoss } from '@/lib/charts/packet-loss-colors'
 import { targetAddressLabel } from '@/lib/probes/config'
-import { buildSeries } from '@/lib/charts/series'
+import { buildSeries, comparisonPointsPer, MAX_COMPARED_TARGETS } from '@/lib/charts/series'
+import type { ProbeAgentSummary } from '@/types/probe-agent'
 import { formatWindowEdge } from './chart-brush'
 import { CompareTrace, type CompareLine } from './compare-trace'
+import { LossFigure } from './loss-figure'
+import { LossKey } from './loss-key'
 import { TraceSkeleton } from '../dashboard/skeleton'
+import { ProbedFrom } from '../targets/probed-from'
 
 /**
  * A comparison chart with its legend: the lines, and under them a table that
@@ -34,23 +39,23 @@ import { TraceSkeleton } from '../dashboard/skeleton'
  * asks several.
  */
 
+/** How many lines have a colour of the palette's: the `--line-*` tokens in `globals.css`. */
+const PALETTE_SIZE = 16
+
 /**
- * Line colours. Evenly lit and spread around the hue wheel so neighbours in
- * the legend are easy to tell apart, and none of them the red or amber that
- * means packet loss everywhere else in the app.
+ * A line's colour: no two lines share one. The first sixteen come from the
+ * palette; after it, each line gets a hue of its own, stepped round the
+ * wheel by the golden angle so that consecutive lines land far apart, at
+ * three lightnesses in turn. Past a dozen lines, though, it is picking a line
+ * out (pointing at it, or unticking the others) that says which is which.
  */
-const SERIES_COLORS = [
-  'oklch(0.74 0.13 215)',
-  'oklch(0.76 0.15 300)',
-  'oklch(0.80 0.15 130)',
-  'oklch(0.74 0.16 345)',
-  'oklch(0.78 0.12 180)',
-  'oklch(0.70 0.16 265)',
-  'oklch(0.83 0.13 100)',
-  'oklch(0.72 0.14 320)',
-  'oklch(0.76 0.10 240)',
-  'oklch(0.80 0.13 160)',
-]
+function seriesColor(index: number): string {
+  if (index < PALETTE_SIZE) return `var(--line-${index + 1})`
+  const step = index - PALETTE_SIZE
+  const hue = (step * 137.508 + 20) % 360
+  const lift = [0, -0.08, 0.08][step % 3]
+  return `oklch(calc(var(--line-l) + ${lift}) 0.15 ${hue.toFixed(1)})`
+}
 
 interface LoadedSeries {
   key: string
@@ -136,7 +141,8 @@ function useComparison(
         ? `start=${zoom.start}&end=${zoom.end}`
         : `hours=${TIME_RANGE_CONFIG[timeRange].hours}`
       const by = split ? `&split=${split}${splitFamily ? `&family=${splitFamily}` : ''}` : ''
-      const response = await fetch(`/api/compare?targets=${[...intervals.keys()].join(',')}&${period}${by}`)
+      const ids = [...intervals.keys()].slice(0, MAX_COMPARED_TARGETS)
+      const response = await fetch(`/api/compare?targets=${ids.join(',')}&${period}${by}&maxPoints=${comparisonPointsPer(ids.length)}`)
       if (!response.ok) {
         reportError('Could not load the comparison', `Server responded ${response.status}`)
         return
@@ -229,7 +235,33 @@ interface ComparePanelProps {
   showAddress?: boolean
   /** When given, a row's name opens that target's own page. */
   onSelectTarget?: (id: string) => void
+  /** The probe agents, so a target probed from one is marked Remote in the table. */
+  probeAgents?: ProbeAgentSummary[]
   reportError: (title: string, error?: unknown) => void
+}
+
+/** Every line drawn: one set for all, so a render that hides nothing changes nothing. */
+const NONE_HIDDEN: ReadonlySet<string> = new Set()
+
+/** More lines than this are too many to start with all of them drawn. */
+const CROWDED = 12
+
+/** How many of a crowded comparison's lines are drawn to begin with. */
+const DRAWN_AT_FIRST = 8
+
+/**
+ * The lines a comparison starts with off the chart: none, unless there are
+ * too many to read, when all but the ones that lost the most, then the
+ * slowest, are left for the viewer to tick. Those are the ones worth a look.
+ */
+function hiddenAtFirst(rows: Array<{ line: CompareLine; statistics: TargetStatistics | null }>): ReadonlySet<string> {
+  if (rows.length <= CROWDED) return new Set()
+  const worstFirst = [...rows].sort(
+    (a, b) =>
+      (b.statistics?.packetLoss ?? 0) - (a.statistics?.packetLoss ?? 0) ||
+      (b.statistics?.medianLatency ?? 0) - (a.statistics?.medianLatency ?? 0)
+  )
+  return new Set(worstFirst.slice(DRAWN_AT_FIRST).map(row => row.line.key))
 }
 
 const defaultName = (target: Target, family: AddressFamily | null, resolver?: string) =>
@@ -251,6 +283,7 @@ export function ComparePanel({
   note,
   showAddress = true,
   onSelectTarget,
+  probeAgents,
   reportError,
 }: ComparePanelProps) {
   const { snapshot, pending, initialLoad } = useComparison(targets, timeRange, zoom, refreshKey, reportError, split, splitFamily)
@@ -264,18 +297,45 @@ export function ComparePanel({
       const target = byId.get(series.targetId)
       if (!target) return []
 
+      // Coloured by place among all the lines, not the ones shown, so hiding
+      // one does not repaint the rest.
       const line: CompareLine = {
         key: series.key,
         label: nameSeries(target, series.family, series.resolver),
-        color: SERIES_COLORS[index % SERIES_COLORS.length],
-        dashed: index >= SERIES_COLORS.length,
+        color: seriesColor(index),
         points: series.points,
       }
       return [{ line, target, statistics: series.statistics, now: latestReading(series.points) }]
     })
   }, [snapshot, targets, nameSeries])
 
-  const lines = useMemo(() => rows.map(row => row.line), [rows])
+  // Lines taken off the chart from the legend. The rest are rescaled to fill
+  // it, so hiding the slow one shows the fast ones in detail. Held for one set
+  // of targets: another group starts afresh, and a crowded one starts with
+  // only its worst few drawn. Settled once, when that set's first lines
+  // arrive, so a refresh never swaps lines in or out on its own.
+  const owner = snapshot?.owner ?? null
+  // Until the viewer ticks something, a change in how many lines there are
+  // (a resolver added to the list) settles it again.
+  const [choice, setChoice] = useState<{ owner: string; count: number; hidden: ReadonlySet<string>; untouched: boolean } | null>(null)
+  if (owner !== null && rows.length > 0 && (choice?.owner !== owner || (choice.untouched && choice.count !== rows.length))) {
+    setChoice({ owner, count: rows.length, hidden: hiddenAtFirst(rows), untouched: true })
+  }
+  const hidden = choice?.owner === owner ? choice.hidden : NONE_HIDDEN
+  const setHidden = (next: ReadonlySet<string>) => {
+    if (owner !== null) setChoice({ owner, count: rows.length, hidden: next, untouched: false })
+  }
+
+  const toggleLine = (key: string) => {
+    const next = new Set(hidden)
+    if (!next.delete(key)) next.add(key)
+    setHidden(next)
+  }
+
+  const agentsById = useMemo(() => new Map((probeAgents ?? []).map(agent => [agent.id, agent])), [probeAgents])
+
+  const lines = useMemo(() => rows.map(row => row.line).filter(line => !hidden.has(line.key)), [rows, hidden])
+  const hiddenCount = rows.length - lines.length
   const hasMeasurements = rows.some(row => (row.statistics?.sampleCount ?? 0) > 0)
 
   return (
@@ -284,6 +344,11 @@ export function ComparePanel({
         <div className="min-w-0">
           <h2 className="text-sm font-medium text-foreground">{title}</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+          {targets.length > MAX_COMPARED_TARGETS && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              The first {MAX_COMPARED_TARGETS} of its {targets.length} targets are compared: more than that is a group to split.
+            </p>
+          )}
         </div>
         {zoom && (
           <p className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted-foreground">
@@ -323,16 +388,54 @@ export function ComparePanel({
               animate={{ opacity: 1 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
             >
-              <CompareTrace
-                lines={lines}
-                start={snapshot.start}
-                end={snapshot.end}
-                zoomed={snapshot.window !== null}
-                highlighted={highlighted}
-                onZoom={onZoom}
-                onResetZoom={onResetZoom}
-              />
+              {lines.length > 0 ? (
+                <CompareTrace
+                  lines={lines}
+                  start={snapshot.start}
+                  end={snapshot.end}
+                  zoomed={snapshot.window !== null}
+                  highlighted={highlighted}
+                  onZoom={onZoom}
+                  onResetZoom={onResetZoom}
+                />
+              ) : (
+                <div className="flex h-[20rem] flex-col items-center justify-center gap-2 text-center">
+                  <p className="text-sm text-foreground">Every line is hidden</p>
+                  <p className="max-w-sm text-xs text-muted-foreground">
+                    Tick a line in the table below to put it back on the chart.
+                  </p>
+                </div>
+              )}
             </motion.div>
+
+            {/* What the colours in the loss strips mean. */}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
+              <span className="text-muted-foreground">{lossLabel} in the strips:</span>
+              <LossKey withClear={false} />
+            </div>
+
+            {/* Which lines are drawn, said where the boxes that choose them
+                are, so it is plain that ticking them is how. One box ticks or
+                unticks them all, lined up over the rows' own: comparing two
+                lines among twenty starts from none, then the two ticked. */}
+            {rows.length > 1 && (
+              <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-1">
+                <Checkbox
+                  label="All lines"
+                  checked={hiddenCount === 0 ? true : hiddenCount === rows.length ? false : 'indeterminate'}
+                  onCheckedChange={() => setHidden(hiddenCount === 0 ? new Set(rows.map(row => row.line.key)) : new Set())}
+                />
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {hiddenCount === 0 ? `All ${rows.length} shown` : `${lines.length} of ${rows.length} shown`}
+                  </span>
+                  {' · '}
+                  {rows.length > CROWDED && choice?.untouched
+                    ? `With this many, the chart starts with the ${DRAWN_AT_FIRST} that lost the most, or else the slowest. Tick others to add them.`
+                    : 'Tick or untick a line to show or hide it.'}
+                </p>
+              </div>
+            )}
 
             {/* The legend. Smokeping prints each line's figures beside its
                 colour; here that is a table, so the lines can be compared by
@@ -341,7 +444,7 @@ export function ComparePanel({
                 telling first, so that the ones that remain fit without the
                 table having to be scrolled sideways: the extremes go first,
                 then the two that say again what the median and the loss do. */}
-            <div className="mt-4">
+            <div className={rows.length > 1 ? 'mt-2' : 'mt-4'}>
               <SortableDataTable
                 caption="The lines on the chart"
                 itemName={{ one: 'line', other: 'lines' }}
@@ -363,46 +466,60 @@ export function ComparePanel({
                   {
                     key: 'label',
                     label: 'Line',
-                    render: (_, { line, target }) => (
-                      <span
-                        className="flex items-center gap-2"
-                        onMouseEnter={() => setHighlighted(line.key)}
-                        onMouseLeave={() => setHighlighted(null)}
-                      >
-                        <svg viewBox="0 0 16 6" className="h-1.5 w-4 shrink-0" aria-hidden="true">
-                          <line
-                            x1={1}
-                            x2={15}
-                            y1={3}
-                            y2={3}
-                            stroke={line.color}
-                            strokeWidth={2.5}
-                            strokeLinecap="round"
-                            strokeDasharray={line.dashed ? '5 3' : undefined}
-                          />
-                        </svg>
-                        {onSelectTarget ? (
-                          <Tooltip content={`Open ${target.name}`}>
-                            <button
-                              type="button"
-                              onClick={() => onSelectTarget(target.id)}
-                              onFocus={() => setHighlighted(line.key)}
-                              onBlur={() => setHighlighted(null)}
-                              className="min-w-0 cursor-pointer truncate text-left font-medium text-foreground underline-offset-2 hover:underline"
-                            >
-                              {line.label}
-                            </button>
-                          </Tooltip>
-                        ) : (
-                          <span className="min-w-0 truncate font-medium text-foreground">{line.label}</span>
-                        )}
-                        {showAddress && (
-                          <span className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground @4xl/main:inline">
-                            {targetAddressLabel(target)}
+                    render: (_, { line, target }) => {
+                      const off = hidden.has(line.key)
+                      return (
+                        <span
+                          className="flex items-center gap-2"
+                          onMouseEnter={() => { if (!off) setHighlighted(line.key) }}
+                          onMouseLeave={() => setHighlighted(null)}
+                        >
+                          {/* Whether the line is drawn: a box filled with the
+                              line's own colour, so it is the line's key too.
+                              Held to the row's height; its hit area is the
+                              full 44px all the same. */}
+                          <span className="-my-3 -ml-3 -mr-1 flex shrink-0">
+                            <Checkbox
+                              checked={!off}
+                              onCheckedChange={() => {
+                                toggleLine(line.key)
+                                setHighlighted(null)
+                              }}
+                              aria-label={`Show ${line.label} on the chart`}
+                              style={{ '--control-on': line.color, '--control-glyph': 'var(--surface)' } as CSSProperties}
+                            />
                           </span>
-                        )}
-                      </span>
-                    ),
+                          {onSelectTarget ? (
+                            <Tooltip content={`Open ${target.name}`}>
+                              <button
+                                type="button"
+                                onClick={() => onSelectTarget(target.id)}
+                                onFocus={() => setHighlighted(line.key)}
+                                onBlur={() => setHighlighted(null)}
+                                className={cn(
+                                  'min-w-0 cursor-pointer truncate text-left font-medium underline-offset-2 hover:underline',
+                                  off ? 'text-muted-foreground' : 'text-foreground'
+                                )}
+                              >
+                                {line.label}
+                              </button>
+                            </Tooltip>
+                          ) : (
+                            <span className={cn('min-w-0 truncate font-medium', off ? 'text-muted-foreground' : 'text-foreground')}>
+                              {line.label}
+                            </span>
+                          )}
+                          {/* Measured from somewhere else, where the same host
+                              can look quite different: the sidebar's badge. */}
+                          <ProbedFrom agent={target.probeAgentId ? agentsById.get(target.probeAgentId) : undefined} />
+                          {showAddress && (
+                            <span className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground @4xl/main:inline">
+                              {targetAddressLabel(target)}
+                            </span>
+                          )}
+                        </span>
+                      )
+                    },
                   },
                   {
                     key: 'now',
@@ -412,7 +529,7 @@ export function ComparePanel({
                       value === null ? (
                         <span className="text-faint">—</span>
                       ) : value === -1 ? (
-                        <span style={{ color: getPacketLossVar(100) }}>no reply</span>
+                        <LossFigure loss={100}>no reply</LossFigure>
                       ) : (
                         <span className="font-mono">{ms(value as number)} ms</span>
                       ),
@@ -425,15 +542,7 @@ export function ComparePanel({
                     key: 'loss',
                     label: lossLabel,
                     numeric: true,
-                    render: value => {
-                      if (value === null) return <span className="text-faint">—</span>
-                      const loss = value as number
-                      return (
-                        <span className="font-mono" style={isMeaningfulLoss(loss) ? { color: getPacketLossVar(loss) } : undefined}>
-                          {loss.toFixed(loss > 0 && loss < 10 ? 1 : 0)}%
-                        </span>
-                      )
-                    },
+                    render: value => (value === null ? <span className="text-faint">—</span> : <LossFigure loss={value as number} />),
                   },
                   {
                     key: 'uptime',
@@ -452,6 +561,7 @@ export function ComparePanel({
                 {note && <>{note} </>}
                 Latency columns are in milliseconds, over the period shown.{' '}
                 <span className="touch:hidden">
+                  {rows.length > 2 && 'Point at a line or its loss strip to pick it out. '}
                   {zoom ? 'Drag to zoom further · double-click the chart to reset.' : 'Drag across the chart to zoom in.'}
                 </span>
                 <span className="hidden touch:inline">

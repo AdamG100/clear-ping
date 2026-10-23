@@ -3,14 +3,11 @@ import { getAllTargets, getBucketedMeasurements, getResolverRounds, getTargetSta
 import { resolverSeries } from '@/lib/charts/dns-resolver-series';
 import { isDualStack } from '@/lib/probes/host';
 import { initializeServer } from '@/lib/init';
-import { windowFromQuery } from '@/lib/charts/series';
+import { MAX_COMPARED_TARGETS, windowFromQuery } from '@/lib/charts/series';
 import type { AddressFamily, ComparisonSeries } from '@/types/probe';
 
-/** More lines than this on one chart cannot be told apart. */
-const MAX_TARGETS = 24;
-
 /**
- * GET /api/compare?targets=id,id,…&hours=… (or &start=…&end=…)
+ * GET /api/compare?targets=id,id,…&hours=… (or &start=…&end=…)[&maxPoints=…]
  *
  * The same window of several targets, bucketed on one shared grid so their
  * lines can be drawn on one chart — Smokeping's multi-host graph. A target
@@ -30,7 +27,7 @@ export async function GET(request: NextRequest) {
       .split(',')
       .map(id => id.trim())
       .filter(Boolean)
-      .slice(0, MAX_TARGETS);
+      .slice(0, MAX_COMPARED_TARGETS);
 
     if (requested.length === 0) {
       return NextResponse.json({ error: 'No targets given' }, { status: 400 });
