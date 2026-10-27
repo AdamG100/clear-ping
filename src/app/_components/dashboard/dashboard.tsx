@@ -49,9 +49,10 @@ import { TraceroutePanel } from '../targets/traceroute-panel'
 import { CopyAddress } from './copy-address'
 import { ComparePanel } from '../charts/compare-panel'
 import { PatchNotesPage } from './patch-notes'
+import { OverviewPage } from './overview'
 import { FamilySection } from './family-section'
 import { formatWindowEdge } from '../charts/chart-brush'
-import { ChartLine, MapPin } from 'lucide-react'
+import { MapPin } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -617,11 +618,14 @@ export function Dashboard() {
   const [familyView, setFamilyView] = useState<FamilyView>('both')
 
   // The remembered selection is read once, lazily, so there is no post-mount
-  // effect writing state back into the component. localStorage is unavailable
+  // effect writing state back into the component. Storage is unavailable
   // during SSR, hence the guard rather than a plain initialiser.
+  //
+  // Remembered for the tab, not for good: a reload stays on what was being
+  // looked at, and opening ClearPing afresh starts at the overview.
   const [selectedTargetId, setSelectedTargetIdState] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null
-    return localStorage.getItem('selectedTargetId')
+    return sessionStorage.getItem('selectedTargetId')
   })
 
   // A group can be on screen instead of a target: every target in it on one
@@ -629,7 +633,7 @@ export function Dashboard() {
   // (or the group disappearing) lands back on something.
   const [selectedGroup, setSelectedGroupState] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null
-    return localStorage.getItem('selectedGroup')
+    return sessionStorage.getItem('selectedGroup')
   })
 
   // Persisting belongs with the act of choosing, not in an effect watching the
@@ -642,9 +646,9 @@ export function Dashboard() {
     setFamilyView('both')
     hideSidebar()
     if (typeof window === 'undefined') return
-    localStorage.removeItem('selectedGroup')
-    if (id) localStorage.setItem('selectedTargetId', id)
-    else localStorage.removeItem('selectedTargetId')
+    sessionStorage.removeItem('selectedGroup')
+    if (id) sessionStorage.setItem('selectedTargetId', id)
+    else sessionStorage.removeItem('selectedTargetId')
   }, [hideSidebar, goTo])
 
   const selectGroup = useCallback((groupName: string) => {
@@ -652,13 +656,14 @@ export function Dashboard() {
     goTo(null)
     setZoom(null)
     hideSidebar()
-    if (typeof window !== 'undefined') localStorage.setItem('selectedGroup', groupName)
+    if (typeof window !== 'undefined') sessionStorage.setItem('selectedGroup', groupName)
   }, [hideSidebar, goTo])
 
   const openPage = useCallback((next: DashboardPage) => {
     goTo(next)
     hideSidebar()
   }, [goTo, hideSidebar])
+  const openOverview = useCallback(() => openPage({ kind: 'overview' }), [openPage])
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
   const openPatchNotes = useCallback(() => openPage({ kind: 'patch-notes' }), [openPage])
   const openAlertEditor = useCallback(
@@ -721,20 +726,14 @@ export function Dashboard() {
     if (selectedGroup && isWithinGroup(selectedGroup, from)) {
       const moved = rebaseGroupPath(selectedGroup, from, to)
       setSelectedGroupState(moved)
-      if (typeof window !== 'undefined') localStorage.setItem('selectedGroup', moved)
+      if (typeof window !== 'undefined') sessionStorage.setItem('selectedGroup', moved)
     }
   }, [moveGroup, selectedGroup])
 
-  // Fall back to the first target once loading finishes, and recover if the
-  // remembered target has since been deleted. Resolved during render so the
-  // pane never paints a frame with nothing selected.
-  const resolvedTargetId =
-    isLoaded && targets.length > 0 && (!selectedTargetId || !targets.some(t => t.id === selectedTargetId))
-      ? targets[0].id
-      : selectedTargetId
-
-  if (resolvedTargetId !== selectedTargetId) {
-    setSelectedTargetIdState(resolvedTargetId)
+  // Let go of a remembered target that has since been deleted, once the list
+  // has arrived to say so. Nothing selected is the overview.
+  if (isLoaded && selectedTargetId && !targets.some(t => t.id === selectedTargetId)) {
+    setSelectedTargetIdState(null)
   }
 
   const selectedTarget = useMemo(() => {
@@ -997,6 +996,35 @@ export function Dashboard() {
   // inspect" on every refresh, ahead of the target that was selected all along.
   const showLoadingState = !isLoaded && !page
   const showEmptyState = !selectedTarget && !groupTargets && !page
+
+  // With nothing chosen to look at, on a fresh visit or once what was chosen
+  // has gone, the dashboard is the overview. Before the list arrives only the
+  // remembered choice can be gone by.
+  const nothingChosen = !page && (isLoaded ? !selectedTarget && !groupTargets : !selectedTargetId && !selectedGroup)
+  const showingOverview = page?.kind === 'overview' || nothingChosen
+  // And its address says so, once the list is in. Not sooner: on the first
+  // render Next.js has yet to take charge of the history, and an address
+  // changed then is one it never hears of.
+  const settledOnOverview = isLoaded && nothingChosen
+  useEffect(() => {
+    if (settledOnOverview) goTo({ kind: 'overview' }, 'replace')
+  }, [settledOnOverview, goTo])
+
+  // Moves on whenever anything is probed again, for the overview to catch up.
+  const latestRefreshKey = useMemo(
+    () => Math.max(0, ...Object.values(latest).map(reading => reading.timestamp.getTime())),
+    [latest]
+  )
+  const showTargetsFrom = useCallback(
+    (from: string) => {
+      // The list of those targets is the sidebar's, which may be folded away
+      // or, on a phone, a drawer to be opened.
+      setProbeFrom(from)
+      expandSidebar()
+      showSidebar()
+    },
+    [expandSidebar, showSidebar]
+  )
   // Only the very first load for a target blanks the pane. Switching ranges
   // keeps the previous range on screen and dims it, so the layout never
   // collapses and reflows underneath the pointer.
@@ -1020,6 +1048,8 @@ export function Dashboard() {
         selectedGroup={groupTargets && !page ? selectedGroup : null}
         onSelectGroup={selectGroup}
         onMoveGroup={handleMoveGroup}
+        overviewOpen={showingOverview}
+        onOpenOverview={openOverview}
         alertsOpen={showingAlerts}
         onOpenAlerts={openAlerts}
         settingsOpen={page?.kind === 'settings'}
@@ -1051,6 +1081,8 @@ export function Dashboard() {
       <MobileTopBar
         sidebarOpen={sidebarOpen}
         onOpenSidebar={showSidebar}
+        overviewOpen={showingOverview}
+        onOpenOverview={openOverview}
         alertsOpen={showingAlerts}
         onOpenAlerts={openAlerts}
         firingAlerts={firingAlerts}
@@ -1062,16 +1094,8 @@ export function Dashboard() {
           The pane is a container: what is inside is laid out from the pane's
           own width, not the screen's (see pane-layout.ts). */}
       <main className="@container/main flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable pb-(--safe-bottom) pr-(--safe-right) max-lg:pl-(--safe-left) lg:pt-(--safe-top)">
-        {showLoadingState ? (
+        {(showLoadingState || showEmptyState) && !showingOverview ? (
           <PaneSkeleton />
-        ) : showEmptyState ? (
-          <div className="flex h-full items-center justify-center p-6">
-            <EmptyState
-              icon={<ChartLine size={24} strokeWidth={1.75} />}
-              title="Pick a path to inspect"
-              description="Choose a target from the sidebar to see its latency spread and packet loss, or add one to start measuring."
-            />
-          </div>
         ) : (
           // Switching target fades the old pane out before the new one comes
           // in. The outgoing pane is kept exactly as it last rendered, so its
@@ -1081,7 +1105,34 @@ export function Dashboard() {
           // in between.
           <MotionConfig reducedMotion="user">
           <AnimatePresence mode="wait" initial={false}>
-          {showingAlerts ? (
+          {showingOverview ? (
+          <motion.div
+            key="overview"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+          >
+            <ErrorBoundary label="Overview">
+              <OverviewPage
+                targets={transformedTargets}
+                latest={latest}
+                probeAgents={probeAgents}
+                alerts={alerts}
+                groups={groups}
+                groupOrders={groupOrders}
+                loaded={isLoaded}
+                refreshKey={latestRefreshKey}
+                readOnly={readOnly}
+                onSelectTarget={setSelectedTargetId}
+                onSelectGroup={selectGroup}
+                onShowTargetsFrom={showTargetsFrom}
+                onAddTarget={() => openAddTarget()}
+                reportError={reportError}
+              />
+            </ErrorBoundary>
+          </motion.div>
+          ) : showingAlerts ? (
           <motion.div
             // The list and each form are pages of their own, and change over
             // as the other pages do.

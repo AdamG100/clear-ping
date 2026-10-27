@@ -68,6 +68,7 @@ import {
   ChartLine,
   Bell,
   ClipboardCopy,
+  LayoutDashboard,
   ListX,
   MoreHorizontal,
   PanelLeftClose,
@@ -189,6 +190,9 @@ interface SidebarProps {
   onDeleteGroup?: (group: string) => void
   /** Rename a group or move it inside another: its path changes from one to the other. */
   onMoveGroup?: (from: string, to: string) => void
+  /** Whether the overview is what the main pane is showing. */
+  overviewOpen?: boolean
+  onOpenOverview?: () => void
   /** Whether the alerts screen is what the main pane is showing. */
   alertsOpen?: boolean
   onOpenAlerts?: () => void
@@ -900,6 +904,8 @@ export function Sidebar({
   onCreateGroup,
   onDeleteGroup,
   onMoveGroup,
+  overviewOpen = false,
+  onOpenOverview,
   alertsOpen = false,
   onOpenAlerts,
   firingAlerts = 0,
@@ -1154,7 +1160,14 @@ export function Sidebar({
       {/* Header */}
       <div className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-2 mb-3">
-          <BrandMark />
+          {/* The mark goes home, as a site's does. */}
+          {onOpenOverview ? (
+            <button type="button" onClick={onOpenOverview} className="flex shrink-0 cursor-pointer rounded-lg" aria-label="Overview">
+              <BrandMark />
+            </button>
+          ) : (
+            <BrandMark />
+          )}
           <div>
             <h1 className="text-sm font-medium text-sidebar-foreground">
               ClearPing
@@ -1239,6 +1252,23 @@ export function Sidebar({
           </div>
         </div>
 
+        {/* Home: first in the sidebar, above the list it sums up, and marked
+            the way the target on show is when it is the page on show. */}
+        {onOpenOverview && (
+          <button
+            type="button"
+            onClick={onOpenOverview}
+            aria-current={overviewOpen ? 'page' : undefined}
+            className={cn(
+              'mt-3 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-sidebar-foreground transition-colors',
+              overviewOpen ? SELECTED_ROW : 'hover:bg-sidebar-row-hover'
+            )}
+            suppressHydrationWarning
+          >
+            <LayoutDashboard {...ICON} />
+            Overview
+          </button>
+        )}
         {/* Always there once there is something to find: behind a button it
             went unnoticed. Its placeholder says what it is, so its label is
             said, not shown. */}
@@ -1492,6 +1522,8 @@ export function Sidebar({
               onSelectTarget={onSelectTarget}
               onSelectGroup={onSelectGroup}
               onExpand={onExpand}
+              overviewOpen={overviewOpen}
+              onOpenOverview={onOpenOverview}
               alertsOpen={alertsOpen}
               onOpenAlerts={onOpenAlerts}
               firingAlerts={firingAlerts}

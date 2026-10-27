@@ -103,7 +103,7 @@ export default async function RootLayout({
           // whether the sidebar was collapsed, so it is not drawn and then
           // taken away (see `sidebar-collapsed` in globals.css).
           dangerouslySetInnerHTML={{
-            __html: `(function(){var d=document.documentElement;try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}d.dataset.theme=t==='light'?'light':'dark';if(localStorage.getItem('selectedGroup'))d.dataset.view='group';if(localStorage.getItem('sidebarCollapsed'))d.dataset.sidebar='collapsed';}catch(e){d.dataset.theme='dark';}})();`,
+            __html: `(function(){var d=document.documentElement;try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}d.dataset.theme=t==='light'?'light':'dark';if(sessionStorage.getItem('selectedGroup'))d.dataset.view='group';if(localStorage.getItem('sidebarCollapsed'))d.dataset.sidebar='collapsed';}catch(e){d.dataset.theme='dark';}})();`,
           }}
         />
         <script

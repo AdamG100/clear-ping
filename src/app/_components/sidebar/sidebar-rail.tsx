@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Bell, PanelLeftOpen, Plus, Settings, Share2 } from 'lucide-react'
+import { Bell, LayoutDashboard, PanelLeftOpen, Plus, Settings, Share2 } from 'lucide-react'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
@@ -31,6 +31,9 @@ interface SidebarRailProps {
   onSelectTarget: (id: string) => void
   onSelectGroup?: (group: string) => void
   onExpand?: () => void
+  /** Whether the overview is open. */
+  overviewOpen?: boolean
+  onOpenOverview?: () => void
   alertsOpen: boolean
   onOpenAlerts?: () => void
   /** How many alerts are firing on at least one target. */
@@ -61,6 +64,8 @@ export function SidebarRail({
   onSelectTarget,
   onSelectGroup,
   onExpand,
+  overviewOpen = false,
+  onOpenOverview,
   alertsOpen,
   onOpenAlerts,
   firingAlerts,
@@ -99,6 +104,14 @@ export function SidebarRail({
         className="flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto py-2 [scrollbar-width:none]"
         aria-label="Groups"
       >
+        {/* Home first, above the groups it sums up, as in the full sidebar. */}
+        {onOpenOverview && (
+          <Beside name="Overview">
+            <Button type="button" variant={overviewOpen ? 'primary' : 'ghost'} size="sm" onClick={onOpenOverview} aria-pressed={overviewOpen} aria-label="Overview">
+              <LayoutDashboard {...ICON} />
+            </Button>
+          </Beside>
+        )}
         {groups.map(({ group, memberIds, health }) => {
           const name = groupName(group)
           const state = describeGroupHealth(health)

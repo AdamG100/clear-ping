@@ -16,6 +16,8 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'access'
 
 export type DashboardPage =
+  /** Everything at a glance: where the dashboard opens. */
+  | { kind: 'overview' }
   | { kind: 'alerts' }
   /** The form for a new alert, in the main pane rather than a panel over it. */
   | { kind: 'alert-new' }
@@ -71,6 +73,7 @@ export function pageFromPath(pathname: string): DashboardPage | null {
   }
 
   if (rest.length > 0) return null
+  if (first === 'overview' && !second) return { kind: 'overview' }
   if (first === 'alerts' && !second) return { kind: 'alerts' }
   if (first === 'patch-notes' && !second) return { kind: 'patch-notes' }
   if (first === 'settings') {
