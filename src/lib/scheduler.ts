@@ -33,6 +33,81 @@ const AGENT_CONCURRENCY = 4;
 /** How often each probe agent is asked how it is, whether or not it has targets due. */
 const AGENT_CHECK_INTERVAL_MS = 60_000;
 
+/**
+ * How often the scheduler looks for targets that are due. Only a look: what
+ * is due is handed to its lane and the look is over, so this can be short
+ * enough for each target to be probed close to its own moment.
+ */
+const CHECK_INTERVAL_MS = 1000;
+
+/**
+ * Where in its interval a target is probed, in milliseconds from the start
+ * of each interval: the same for a target every time, and different from one
+ * target to the next.
+ *
+ * Probing every target the moment its interval was up lined them up. Targets
+ * added together, or caught by the same ten-second look, went off in the same
+ * instant for ever after: sixteen probes leaving the machine at once each
+ * minute, and nothing in between. A burst like that is the kind of traffic a
+ * router queues and drops, so the monitor was making some of the loss it
+ * measured. Spread by a hash of the id, they go off one after another.
+ */
+export function phaseOf(id: string, intervalMs: number): number {
+  // FNV-1a over the id, then murmur3's finish: without it, ids that differ
+  // only at the end barely move the top bits, and landed side by side.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    hash ^= id.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  hash ^= hash >>> 16;
+  return ((hash >>> 0) / 0x1_0000_0000) * intervalMs;
+}
+
+/**
+ * Whether a target last probed at `last` is due at `now`: its moment in an
+ * interval later than the one it was last probed in has come. Never probed
+ * (`last` 0) is due at once.
+ */
+export function isDue(now: number, last: number, intervalMs: number, phase: number): boolean {
+  if (intervalMs <= 0) return true;
+  return Math.floor((now - phase) / intervalMs) > Math.floor((last - phase) / intervalMs);
+}
+
+/**
+ * Jobs run a few at a time, in the order they were given. Each kind of probe
+ * has its own, and each probe agent, so a slow one holds up only its own
+ * kind; and nothing waits for a lane to empty before the next look.
+ */
+export class Lane {
+  private running = 0;
+  private waiting: (() => Promise<void>)[] = [];
+
+  constructor(private readonly size: number) {}
+
+  add(job: () => Promise<void>): void {
+    this.waiting.push(job);
+    this.next();
+  }
+
+  private next(): void {
+    while (this.running < this.size && this.waiting.length > 0) {
+      const job = this.waiting.shift()!;
+      this.running++;
+      job()
+        .catch(error => console.error('[Scheduler] Probe failed:', error))
+        .finally(() => {
+          this.running--;
+          this.next();
+        });
+    }
+  }
+}
+
 interface ScheduledTarget {
   id: string;
   name: string;
@@ -46,6 +121,7 @@ interface ScheduledTarget {
   probeAgentId: string | null;
   interval: number; // seconds
   lastProbeTime: number; // timestamp
+  /** Waiting in its lane or being probed: either way, not to be handed over again. */
   isProbing: boolean;
 }
 
@@ -57,9 +133,16 @@ class ProbeScheduler {
   private agentCheckIntervalId: NodeJS.Timeout | null = null;
   private agentCheckInFlight: boolean = false;
   private retentionDays: number = Number(process.env.CLEARPING_RETENTION_DAYS ?? 90);
-  private checkIntervalMs: number = 10000; // Check every 10 seconds
   private isRunning: boolean = false;
-  private tickInFlight: boolean = false;
+  // Pings and the rest are worked through side by side, a few at a time
+  // each. An unresponsive HTTP or TCP target spends its whole timeout on
+  // every attempt, and in one shared lane a handful of those in a row held
+  // up every ping waiting behind them.
+  private pingLane = new Lane(PROBE_CONCURRENCY);
+  private otherLane = new Lane(PROBE_CONCURRENCY);
+  // Each probe agent's targets queue on their own: a slow or distant agent
+  // holds up nothing but itself.
+  private agentLanes = new Map<string, Lane>();
 
   /**
    * Start the scheduler
@@ -78,15 +161,10 @@ class ProbeScheduler {
     // Load all active targets
     await this.loadTargets();
 
-    // Start the periodic check. Ticks are serialised: a probe run can outlast
-    // the 10s check interval, and overlapping runs would double-probe.
-    this.intervalId = setInterval(() => {
-      if (this.tickInFlight) return;
-      this.tickInFlight = true;
-      this.checkAndProbeTargets()
-        .catch(error => console.error('[Scheduler] Probe tick failed:', error))
-        .finally(() => { this.tickInFlight = false; });
-    }, this.checkIntervalMs);
+    // Look for what is due every second. A look only hands targets to their
+    // lanes and never waits on a probe: when it waited for the whole round,
+    // one target timing out held every other target back until it had.
+    this.intervalId = setInterval(() => this.queueDueTargets(), CHECK_INTERVAL_MS);
 
     // Also reload targets periodically (every 5 minutes) to pick up new targets
     this.reloadIntervalId = setInterval(() => {
@@ -176,9 +254,10 @@ class ProbeScheduler {
           // object and clears `isProbing` on it when it finishes. A fresh copy
           // would inherit `isProbing: true` and be skipped forever after.
           Object.assign(existing, settings);
-          // A probe in flight has already claimed its slot; restoring the
-          // stored timestamp underneath it would schedule a duplicate run.
-          if (!existing.isProbing) existing.lastProbeTime = lastProbeTimes.get(target.id) ?? 0;
+          // Never moved back: a probe in flight has already claimed its
+          // interval, and so has a reading taken with Probe now, which is
+          // only known here.
+          existing.lastProbeTime = Math.max(existing.lastProbeTime, lastProbeTimes.get(target.id) ?? 0);
         } else {
           this.scheduledTargets.set(target.id, {
             id: target.id,
@@ -203,67 +282,29 @@ class ProbeScheduler {
     }
   }
 
-  /**
-   * Check all targets and probe those that need it
-   */
-  private async checkAndProbeTargets(): Promise<void> {
-    const now = Date.now();
-    const targetsToProbe: ScheduledTarget[] = [];
-
-    // Collect all targets that need probing
-    for (const target of this.scheduledTargets.values()) {
-      // Skip if already probing
-      if (target.isProbing) {
-        continue;
-      }
-
-      // Calculate time since last probe
-      const timeSinceLastProbe = now - target.lastProbeTime;
-      const intervalMs = target.interval * 1000;
-
-      // If it's time to probe (or never probed), add to list
-      if (timeSinceLastProbe >= intervalMs) {
-        targetsToProbe.push(target);
-      }
+  /** The lane a target waits in: its probe agent's, or this server's for its kind. */
+  private laneFor(target: ScheduledTarget): Lane {
+    if (!target.probeAgentId) return target.probeType === 'ping' ? this.pingLane : this.otherLane;
+    let lane = this.agentLanes.get(target.probeAgentId);
+    if (!lane) {
+      lane = new Lane(AGENT_CONCURRENCY);
+      this.agentLanes.set(target.probeAgentId, lane);
     }
-
-    if (targetsToProbe.length === 0) return;
-
-    const local = targetsToProbe.filter(t => !t.probeAgentId);
-    const pingTargets = local.filter(t => t.probeType === 'ping');
-    const otherTargets = local.filter(t => t.probeType !== 'ping');
-
-    // Each probe agent's targets queue on their own: a slow or distant agent
-    // holds up nothing but itself.
-    const byAgent = new Map<string, ScheduledTarget[]>();
-    for (const target of targetsToProbe) {
-      if (target.probeAgentId) byAgent.set(target.probeAgentId, [...(byAgent.get(target.probeAgentId) ?? []), target]);
-    }
-
-    // Pings and the rest are worked through side by side, a few at a time
-    // each. An unresponsive HTTP or TCP target spends its whole timeout on
-    // every attempt, and in one shared queue a handful of those in a row held
-    // up every ping waiting behind them.
-    await Promise.all([
-      this.probeEach(pingTargets),
-      this.probeEach(otherTargets),
-      ...[...byAgent.values()].map(targets => this.probeEach(targets, AGENT_CONCURRENCY)),
-    ]);
+    return lane;
   }
 
-  /** Probe targets individually, with bounded concurrency. */
-  private async probeEach(targets: ScheduledTarget[], concurrency = PROBE_CONCURRENCY): Promise<void> {
-    let next = 0;
+  /** Hand every target whose moment has come to its lane. */
+  queueDueTargets(now: number = Date.now()): void {
+    for (const target of this.scheduledTargets.values()) {
+      if (target.isProbing) continue;
+      const intervalMs = target.interval * 1000;
+      if (!isDue(now, target.lastProbeTime, intervalMs, phaseOf(target.id, intervalMs))) continue;
 
-    const worker = async () => {
-      while (next < targets.length) {
-        await this.probeTarget(targets[next++].id);
-      }
-    };
-
-    await Promise.all(
-      Array.from({ length: Math.min(concurrency, targets.length) }, worker)
-    );
+      // Claimed now, so the next look does not hand it over a second time
+      // while it waits.
+      target.isProbing = true;
+      this.laneFor(target).add(() => this.probeTarget(target.id));
+    }
   }
 
   /** Ask every paired probe agent how it is. One pass at a time. */
@@ -424,6 +465,16 @@ class ProbeScheduler {
     } finally {
       target.isProbing = false;
     }
+  }
+
+  /**
+   * A reading of this target was taken at `at` outside the schedule (Probe
+   * now). It stands for the one due in the same interval, which is then not
+   * taken: asking for a reading should not get two a few seconds apart.
+   */
+  noteProbed(targetId: string, at: number): void {
+    const target = this.scheduledTargets.get(targetId);
+    if (target) target.lastProbeTime = Math.max(target.lastProbeTime, at);
   }
 
   /**

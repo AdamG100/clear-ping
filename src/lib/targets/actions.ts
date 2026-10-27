@@ -58,7 +58,10 @@ export interface ProbedNow {
  * means nothing was taken or kept.
  */
 export async function probeNow(target: Target): Promise<ProbedNow> {
+  const startedAt = Date.now();
   const results = await runProbes(target);
+  // Counts as this interval's reading, so the scheduled one is not taken too.
+  getScheduler().noteProbed(target.id, startedAt);
   const measurements = results.map(result => measurementFrom(randomUUID(), result));
 
   for (const measurement of measurements) {
