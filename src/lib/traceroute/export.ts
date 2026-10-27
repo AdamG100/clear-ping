@@ -226,8 +226,8 @@ const PAGE_STYLE = `
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --page: #121212; --card: #1b2024; --text: oklch(0.96 0.004 240); --muted: oklch(0.70 0.014 240);
-    --border: #2b3237; --track: #272e34; --info: oklch(0.80 0.09 215); --bar: oklch(0.85 0.02 250);
+    --page: #0b0c0d; --card: #141719; --text: oklch(0.96 0.004 240); --muted: oklch(0.70 0.014 240);
+    --border: #242a2f; --track: #1f2427; --info: oklch(0.80 0.09 215); --bar: oklch(0.85 0.02 250);
     ${lossColours('oklch')}
   }
 }

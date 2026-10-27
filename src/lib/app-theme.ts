@@ -9,8 +9,8 @@
 /** `--surface`, which the sidebar and the bar across the top of a phone's screen are drawn in. */
 export const THEME_COLOR = {
   light: '#ffffff',
-  dark: '#1b2024',
+  dark: '#141719',
 } as const
 
 /** `--background` in the dark theme, behind the icon while the installed app starts. */
-export const SPLASH_BACKGROUND = '#121212'
+export const SPLASH_BACKGROUND = '#0b0c0d'

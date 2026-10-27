@@ -66,7 +66,7 @@ The UI is built from Arc UI (https://uiarc.dev) components in
 Use an Arc component wherever one fits before writing UI by hand; the charts
 and the traceroute diagram are the custom exceptions. Colours are Arc's tokens
 (`globals.css` maps the Tailwind names onto them); dark mode is
-`data-theme="dark"` on `<html>`, page `#121212`, surfaces `#1b2024`.
+`data-theme="dark"` on `<html>`, page `#0b0c0d`, surfaces `#141719`.
 
 Things that bite:
 - Arc's CSS modules are unlayered, so they beat Tailwind utilities: a class

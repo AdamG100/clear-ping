@@ -168,25 +168,26 @@
   --sidebar-control-hover: color-mix(in oklab, var(--surface) 81%, var(--foreground));
 }
 
-/* The dark theme on #121212, with surfaces (cards, the sidebar, fields) in
-   #1b2024. Everything above a surface steps up from that blue-grey, so a
-   menu over a card still reads as above it. */
+/* The dark theme on #0b0c0d, near black, with surfaces (cards, the sidebar,
+   fields) in #141719. Everything above a surface steps up from that
+   blue-grey, so a menu over a card still reads as above it. It was #121212
+   and #1b2024, which read as grey rather than dark. */
 :root[data-theme="dark"] {
-  --background: #121212;
-  --surface: #1b2024;
-  --surface-raised: #232a2f;
-  --surface-muted: #272e34;
+  --background: #0b0c0d;
+  --surface: #141719;
+  --surface-raised: #1b1f22;
+  --surface-muted: #1f2427;
   --foreground: oklch(0.96 0.004 240);
   --text-secondary: oklch(0.77 0.012 240);
   --text-muted: oklch(0.64 0.014 240);
-  --border: #2b3237;
-  --border-subtle: #22292d;
-  --border-strong: #3b444b;
+  --border: #242a2f;
+  --border-subtle: #1b2024;
+  --border-strong: #343d43;
 
   --accent: oklch(0.80 0.09 215);
   --accent-strong: oklch(0.88 0.07 215);
   --accent-subtle: oklch(0.80 0.09 215 / 0.14);
-  --accent-foreground: #121212;
+  --accent-foreground: #0b0c0d;
   --control-on: oklch(0.62 0.1 220);
   --control-thumb-on: oklch(1 0 0);
   --control-glyph: oklch(1 0 0);
