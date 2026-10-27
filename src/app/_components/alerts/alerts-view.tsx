@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Bell, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { useMemo, useState, type CSSProperties } from 'react'
+import { Bell, BellOff, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { Alert as Notice } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -18,6 +18,7 @@ import { Textarea } from '@/components/arc/textarea/textarea'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useToast } from '@/components/notifications'
 import { alertTitle, describeCondition, notifyUrlLabel, parseNotifyUrls } from '@/lib/alerts/delivery'
+import { cn } from '@/lib/utils'
 import { PANE, PANE_TITLE } from '../dashboard/pane-layout'
 import { PageFrame } from '../targets/target-page'
 import { TargetChecklist } from '../sidebar/target-checklist'
@@ -40,6 +41,29 @@ import {
  */
 
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
+
+/** The edge of an alert's card while it fires, and while it is on and quiet. */
+const FIRING_EDGE = { '--border': 'var(--danger)', '--border-strong': 'var(--danger)' }
+const ON_EDGE = {
+  '--border': 'color-mix(in oklab, var(--success) 45%, transparent)',
+  '--border-strong': 'color-mix(in oklab, var(--success) 70%, transparent)',
+}
+
+/**
+ * What an alert is doing, first thing on its card: firing, on and watching,
+ * or muted. The switch says whether it is on, but a switch in the corner of
+ * every card looks the same from across the room, firing or not.
+ */
+function AlertState({ enabled, firing, watching }: { enabled: boolean; firing: number; watching: number }) {
+  const dot = (pulse: boolean) => (
+    <span className={cn('size-1.5 rounded-full bg-current', pulse && 'motion-safe:animate-pulse')} aria-hidden="true" />
+  )
+  if (firing > 0) return <Badge tone="danger" icon={dot(true)}>Firing on {firing}</Badge>
+  if (enabled) {
+    return <Badge tone="success" icon={dot(false)}>On · watching {watching} target{watching === 1 ? '' : 's'}</Badge>
+  }
+  return <Badge icon={<BellOff size={12} strokeWidth={2} aria-hidden />}>Muted: not judged or sent</Badge>
+}
 
 /** An alert as the API sends it: its dates are still text. */
 export interface AlertResponse extends Omit<Alert, 'createdAt' | 'targets'> {
@@ -562,8 +586,13 @@ export function AlertsView({
             const condition = describeCondition(alert)
 
             return (
-              <li key={alert.id}>
+              // Muted is set back, so what is on stands out from what is not;
+              // pointing at it brings it forward to be worked on.
+              <li key={alert.id} className={cn('transition-opacity', !alert.enabled && 'opacity-60 focus-within:opacity-100 hover:opacity-100')}>
                 <Card
+                  // Arc's card draws its edge in --border: red while firing,
+                  // a touch of green while on and quiet, the usual grey muted.
+                  style={(isFiring ? FIRING_EDGE : alert.enabled ? ON_EDGE : undefined) as CSSProperties | undefined}
                   title={title}
                   description={[
                     title !== condition ? condition : null,
@@ -574,7 +603,6 @@ export function AlertsView({
                       ? `Traces the route, at most ${cooldownLabel(alert.traceCooldownMinutes)}`
                       : null,
                   ].filter(Boolean).join(' · ')}
-                  status={isFiring ? `Firing on ${firing.length}` : alert.enabled ? 'Watching' : 'Muted'}
                   action={
                     readOnly ? undefined : (
                       <span className="flex flex-wrap items-center gap-1">
@@ -610,10 +638,9 @@ export function AlertsView({
                     )
                   }
                 >
-                  {isFiring && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone="danger" size="sm">Firing on</Badge>
-                      {firing.map(entry => {
+                  <div className="flex flex-wrap items-center gap-2" role="status">
+                    <AlertState enabled={alert.enabled} firing={firing.length} watching={alert.targets.length} />
+                    {isFiring && firing.map(entry => {
                         const target = targetsById.get(entry.targetId)
                         if (!target) return null
                         return (
@@ -624,8 +651,7 @@ export function AlertsView({
                           </Tooltip>
                         )
                       })}
-                    </div>
-                  )}
+                  </div>
                 </Card>
               </li>
             )
