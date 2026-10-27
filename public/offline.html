@@ -4,7 +4,7 @@
   fetched. It is kept on the device and has to work with nothing else to hand,
   so everything it needs is in this file: no stylesheet, script or image of
   the app's is loaded. The colours are copies of the tokens in
-  src/app/globals.css.
+  src/app/globals.css, and the mark is the one in brand-mark.tsx.
 
   When this file changes, change the cache name in sw.js as well.
 -->
@@ -12,8 +12,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a1016" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f5f6" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0c0d" />
     <title>ClearPing: cannot reach the server</title>
     <script>
       // The same choice of theme as the app makes, from the same place.
@@ -23,29 +23,41 @@
           theme = localStorage.getItem('theme')
         } catch (e) {}
         if (!theme) theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-        document.documentElement.classList.toggle('dark', theme !== 'light')
+        document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark'
       })()
     </script>
     <style>
       :root {
         color-scheme: light;
-        --background: #ffffff;
-        --foreground: #0a0a0a;
-        --muted: #737373;
-        --border: #e5e5e5;
-        --button: #171717;
-        --button-text: #fafafa;
-        --signal: #1b9247;
+        --background: #f4f5f6;
+        --surface: #ffffff;
+        --surface-muted: #f1f2f3;
+        --foreground: #16181a;
+        --text-secondary: #5c636a;
+        --text-muted: #80878e;
+        --border: #e2e5e8;
+        --accent: oklch(0.52 0.2 262);
+        --accent-strong: oklch(0.44 0.19 262);
+        --accent-foreground: #ffffff;
+        --signal: oklch(0.58 0.15 150);
+        --critical: oklch(0.53 0.22 25);
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 12px 32px -12px rgb(0 0 0 / 0.12);
       }
-      .dark {
+      :root[data-theme='dark'] {
         color-scheme: dark;
-        --background: #0a1016;
-        --foreground: #eff2f5;
-        --muted: #95a0ab;
-        --border: rgb(149 160 171 / 0.2);
-        --button: #74cde2;
-        --button-text: #0a1016;
-        --signal: #5dc879;
+        --background: #0b0c0d;
+        --surface: #141719;
+        --surface-muted: #1f2427;
+        --foreground: oklch(0.96 0.004 240);
+        --text-secondary: oklch(0.77 0.012 240);
+        --text-muted: oklch(0.64 0.014 240);
+        --border: #242a2f;
+        --accent: oklch(0.60 0.19 258);
+        --accent-strong: oklch(0.74 0.13 255);
+        --accent-foreground: #ffffff;
+        --signal: oklch(0.75 0.15 150);
+        --critical: oklch(0.63 0.23 25);
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -16px rgb(0 0 0 / 0.6);
       }
       * {
         box-sizing: border-box;
@@ -59,91 +71,234 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: max(1.5rem, env(safe-area-inset-top)) max(1.5rem, env(safe-area-inset-right))
-          max(1.5rem, env(safe-area-inset-bottom)) max(1.5rem, env(safe-area-inset-left));
+        padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+          max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
         background: var(--background);
         color: var(--foreground);
-        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        font-family: 'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
         -webkit-font-smoothing: antialiased;
-        text-align: center;
       }
       main {
-        max-width: 22rem;
+        width: 100%;
+        max-width: 25rem;
+        border: 1px solid var(--border);
+        border-radius: 1.625rem;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        overflow: hidden;
       }
-      svg {
-        width: 8rem;
-        height: 2.5rem;
-        margin-bottom: 1.25rem;
+      header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .mark {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        background: var(--surface-muted);
+      }
+      .mark svg {
+        width: 1.25rem;
+        height: 0.875rem;
+      }
+      .name {
+        font-size: 0.875rem;
+        font-weight: 500;
+        line-height: 1.2;
+      }
+      .tagline {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-left: auto;
+        padding: 0.25rem 0.6rem;
+        border: 1px solid color-mix(in oklab, var(--critical) 35%, var(--border));
+        border-radius: 999px;
+        background: color-mix(in oklab, var(--critical) 10%, transparent);
+        color: var(--critical);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .dot {
+        position: relative;
+        width: 0.4rem;
+        height: 0.4rem;
+        border-radius: 999px;
+        background: var(--critical);
+      }
+      .dot::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: var(--critical);
+        animation: ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+      }
+      @keyframes ping {
+        75%,
+        100% {
+          transform: scale(2.6);
+          opacity: 0;
+        }
+      }
+      .body {
+        padding: 1.75rem 1.25rem 1.25rem;
+        text-align: center;
+      }
+      .trace {
+        display: block;
+        width: 10rem;
+        height: 2.75rem;
+        margin: 0 auto 1.25rem;
       }
       h1 {
         margin: 0 0 0.5rem;
         font-size: 1.125rem;
-        font-weight: 600;
+        font-weight: 500;
         letter-spacing: -0.01em;
       }
       p {
         margin: 0;
         font-size: 0.875rem;
-        line-height: 1.5;
-        color: var(--muted);
+        line-height: 1.55;
+        color: var(--text-secondary);
       }
       button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 100%;
         margin-top: 1.5rem;
         min-height: 2.75rem;
         padding: 0 1.25rem;
         border: 0;
-        border-radius: 0.5rem;
-        background: var(--button);
-        color: var(--button-text);
+        border-radius: 999px;
+        background: var(--accent);
+        color: var(--accent-foreground);
         font: inherit;
         font-size: 0.875rem;
         font-weight: 500;
         cursor: pointer;
+        transition: background-color 150ms ease, transform 150ms ease;
+      }
+      button:hover {
+        background: color-mix(in oklab, var(--accent) 88%, var(--foreground));
+      }
+      button:active {
+        transform: scale(0.98);
       }
       button:focus-visible {
-        outline: 2px solid var(--signal);
+        outline: 2px solid color-mix(in oklab, var(--accent-strong) 72%, transparent);
         outline-offset: 2px;
       }
+      button[aria-busy='true'] svg {
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
       #status {
-        margin-top: 0.75rem;
+        margin-top: 0.875rem;
         min-height: 1.25rem;
         font-size: 0.75rem;
+        color: var(--text-muted);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .dot::after,
+        button[aria-busy='true'] svg {
+          animation: none;
+        }
+        button {
+          transition: none;
+        }
       }
     </style>
   </head>
   <body>
     <main>
-      <!-- A trace that stops: the line the app draws, with the readings missing. -->
-      <svg viewBox="0 0 120 40" fill="none" aria-hidden="true">
-        <path
-          d="M2 28 L14 26 L26 30 L38 12 L50 22 L62 18"
-          stroke="var(--signal)"
-          stroke-width="1.75"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <path d="M70 20 L118 20" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="1 6" />
-      </svg>
-      <h1>Cannot reach ClearPing</h1>
-      <p>
-        The server is not answering. Check that this device is on a network that can reach it, and that ClearPing is
-        running.
-      </p>
-      <button type="button" id="retry">Try again</button>
-      <p id="status" role="status">This page reloads by itself when the server answers.</p>
+      <header>
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 20 14" fill="none">
+            <path
+              d="M1 9 L4 8 L7 10 L10 3 L13 7 L16 6 L19 6.5"
+              stroke="var(--signal)"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </span>
+        <span>
+          <span class="name">ClearPing</span><br />
+          <span class="tagline">Network monitor</span>
+        </span>
+        <span class="pill"><span class="dot" aria-hidden="true"></span>Offline</span>
+      </header>
+
+      <div class="body">
+        <!-- A trace that stops: the line the app draws, then the readings missing. -->
+        <svg class="trace" viewBox="0 0 160 44" fill="none" aria-hidden="true">
+          <path
+            d="M2 30 L16 28 L30 32 L44 12 L58 24 L72 20 L84 22"
+            stroke="var(--signal)"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <circle cx="84" cy="22" r="3" fill="var(--critical)" />
+          <path d="M94 22 L158 22" stroke="var(--text-muted)" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="1 6" />
+        </svg>
+        <h1>Cannot reach ClearPing</h1>
+        <p>
+          The server is not answering. Check that this device is on a network that can reach it, and that ClearPing is
+          running.
+        </p>
+        <button type="button" id="retry">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <path d="M21 3v6h-6" />
+          </svg>
+          Try again
+        </button>
+        <p id="status" role="status">This page reloads by itself when the server answers.</p>
+      </div>
     </main>
     <script>
       ;(function () {
         var RETRY_EVERY_MS = 10000
         var status = document.getElementById('status')
+        var retry = document.getElementById('retry')
         var checking = false
+
+        function clock() {
+          return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        }
 
         // Asks the server something small before reloading. Reloading blind
         // would only fetch this page again and flash for nothing.
         function check(byHand) {
           if (checking) return
           checking = true
-          if (byHand) status.textContent = 'Trying…'
+          if (byHand) {
+            status.textContent = 'Trying…'
+            retry.setAttribute('aria-busy', 'true')
+          }
 
           fetch('/api/scheduler/status', { cache: 'no-store' })
             .then(function (response) {
@@ -151,14 +306,15 @@
               else throw new Error('not ready')
             })
             .catch(function () {
-              if (byHand) status.textContent = 'Still no answer. This page reloads by itself when there is one.'
+              status.textContent = 'No answer at ' + clock() + '. Trying again every ' + RETRY_EVERY_MS / 1000 + ' seconds.'
             })
             .then(function () {
               checking = false
+              retry.removeAttribute('aria-busy')
             })
         }
 
-        document.getElementById('retry').addEventListener('click', function () {
+        retry.addEventListener('click', function () {
           check(true)
         })
         window.addEventListener('online', function () {

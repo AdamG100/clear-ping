@@ -10,6 +10,7 @@ import {
   subgroups,
   targetOrderUpdates,
   targetsWithin,
+  wholeGroups,
   withGroup,
   withoutEmptyGroup,
   type SidebarLayout,
@@ -118,6 +119,37 @@ describe('reading the tree', () => {
   it('finds a target however deep it sits', () => {
     expect(locateTarget(nested, 'sw2')).toEqual({ group: 'Home/Network/Switches', index: 1 })
     expect(locateTarget(nested, 'missing')).toBeNull()
+  })
+})
+
+describe('wholeGroups', () => {
+  const none = new Set<string>()
+
+  it('counts a group once everything in it, and in the groups inside it, is ticked', () => {
+    const ticked = new Set(['router', 'sw1', 'sw2'])
+    expect(wholeGroups(nested, ticked, none)).toEqual(['Home/Network', 'Home/Network/Switches'])
+    expect(wholeGroups(nested, new Set([...ticked, 'door', 'pi']), none)).toEqual([
+      'Home',
+      'Home/Network',
+      'Home/Network/Switches',
+      'Home/Lab',
+    ])
+  })
+
+  it('leaves out a group with a target in it left unticked', () => {
+    expect(wholeGroups(nested, new Set(['router', 'sw1']), none)).toEqual([])
+  })
+
+  it('counts a group with nothing in it only when it is ticked itself', () => {
+    const empty = buildSidebarLayout([target('a', 'Home', 0)], [], ['Home/Spare', 'Old'])
+    expect(wholeGroups(empty, new Set(['a']), none)).toEqual([])
+    expect(wholeGroups(empty, new Set(['a']), new Set(['Home/Spare']))).toEqual(['Home', 'Home/Spare'])
+    expect(wholeGroups(empty, none, new Set(['Old']))).toEqual(['Old'])
+  })
+
+  it('never counts the catch-all group for targets without one', () => {
+    const loose = buildSidebarLayout([target('a', undefined, 0)], [])
+    expect(wholeGroups(loose, new Set(['a']), new Set([UNGROUPED]))).toEqual([])
   })
 })
 

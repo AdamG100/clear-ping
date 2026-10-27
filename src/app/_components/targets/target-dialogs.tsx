@@ -35,7 +35,7 @@ import {
 } from '@/lib/probes/config'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { ResolverList } from './resolver-list'
-import { Gamepad2, Globe, MapPin, Network, Plug, Server, Wifi } from 'lucide-react'
+import { Gamepad2, Globe, MapPin, Network, Pause, Plug, Server, Trash2, Wifi } from 'lucide-react'
 
 /**
  * The add and edit forms, which are the same form, and asking before a
@@ -1057,27 +1057,44 @@ interface DeleteTargetDialogProps {
 export function DeleteTargetDialog({ target, onCancel, onConfirm, onPause }: DeleteTargetDialogProps) {
   return (
     <Dialog open={target !== null} onOpenChange={open => { if (!open) onCancel() }}>
-      <DialogContent
-        title={target ? `Delete ${target.name}?` : 'Delete the target?'}
-        description="This removes the target and everything recorded for it: its measurement history, its alert rules and its saved routes. It cannot be undone."
-      >
+      <DialogContent title="Delete this target?" description="It cannot be undone.">
         {target && (
-          <div className="space-y-4">
+          <div className="space-y-4 text-foreground">
+            {/* Which one, plainly: the name, what it is and where it is. */}
+            <div className="flex items-center gap-3 rounded-2xl border border-border bg-background p-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 truncate text-sm font-medium">{target.name}</span>
+                  <span className="shrink-0"><TypeBadge type={target.type ?? targetTypeFor(target.host, target.probeType)} /></span>
+                </div>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {targetAddressLabel(target)}
+                  {target.group ? <span className="font-sans"> · in {groupLabel(target.group)}</span> : null}
+                </p>
+              </div>
+            </div>
+
+            <Alert tone="danger" title="Everything recorded for it goes too">
+              Its measurement history, its alert rules and its saved routes, and its group if that is left empty.
+            </Alert>
+
             {target.status !== 'paused' && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-background p-3">
-                <p className="text-sm text-muted-foreground">To stop probing but keep the history, pause it instead.</p>
-                <Button type="button" size="sm" variant="secondary" onClick={() => { onPause(target); onCancel() }}>
-                  Pause {target.name}
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                <p className="text-sm text-muted-foreground">Only want the probing to stop?</p>
+                <Button type="button" size="sm" variant="ghost" onClick={() => { onPause(target); onCancel() }}>
+                  <Pause size={14} strokeWidth={1.75} aria-hidden="true" />
+                  Pause it instead
                 </Button>
               </div>
             )}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
               {/* Focused first, so Enter on a dialog opened by accident keeps the target. */}
               <Button type="button" variant="secondary" onClick={onCancel} autoFocus>
-                Cancel
+                Keep it
               </Button>
               <Button type="button" variant="danger" onClick={() => onConfirm(target.id)}>
+                <Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />
                 Delete target
               </Button>
             </div>

@@ -205,35 +205,24 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     return false
   }, [loadTargets, reportError])
 
-  const deleteTarget = useCallback(async (id: string) => {
-    try {
-      const response = await fetch(`/api/targets/${id}`, {
-        method: 'DELETE',
-      })
-      if (response.ok) {
-        await loadTargets()
-      } else {
-        reportError('Could not delete target', `Server responded ${response.status}`)
-      }
-    } catch (error) {
-      reportError('Could not delete target', error)
-    }
-  }, [loadTargets, reportError])
-
   const deleteTargets = useCallback(async (
     ids: string[],
+    groups: string[] = [],
     onProgress?: (done: number, total: number) => void
-  ): Promise<number | null> => {
+  ): Promise<{ targets: number; groups: number } | null> => {
     // In batches rather than one request: a long list takes the server a while,
     // and a request per batch is what lets the progress be told as it goes.
-    let deleted = 0
+    // The groups go with the last, once everything in them is gone; on their
+    // own when only empty groups were chosen.
+    const deleted = { targets: 0, groups: 0 }
     let failed = false
     try {
-      for (let start = 0; start < ids.length; start += DELETE_BATCH) {
+      for (let start = 0; start < Math.max(ids.length, 1); start += DELETE_BATCH) {
+        const last = start + DELETE_BATCH >= ids.length
         const response = await fetch('/api/targets', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: ids.slice(start, start + DELETE_BATCH) }),
+          body: JSON.stringify({ ids: ids.slice(start, start + DELETE_BATCH), groups: last ? groups : [] }),
         })
         if (!response.ok) {
           const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
@@ -241,7 +230,9 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
           failed = true
           break
         }
-        deleted += (await response.json()).deleted
+        const result = await response.json()
+        deleted.targets += result.deleted
+        deleted.groups += result.groupsRemoved
         // The list follows along, so the targets and the groups they leave
         // empty drop out of the sidebar as they go.
         await loadTargets()
@@ -325,7 +316,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     [changeGroups]
   )
 
-  return { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
+  return { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
 }
 
 function useAlerts(reportError: (title: string, error?: unknown) => void) {
@@ -582,12 +573,13 @@ function TargetAlerts({
 
 export function Dashboard() {
   const { notify, reportError } = useToast()
-  const { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
+  const { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
   // The sidebar's "probed from" filter: every target, this server's, or one probe agent's.
   const [probeFrom, setProbeFrom] = useState<ProbeFromFilter>('all')
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
-  // A bulk delete under way, which carries on in the background.
-  const [deleteJob, setDeleteJob] = useState<{ done: number; total: number } | null>(null)
+  // A delete under way, which carries on in the background, and the targets
+  // in it, greyed in the list until they are gone.
+  const [deleteJob, setDeleteJob] = useState<{ title: string; ids: Set<string>; done: number; total: number } | null>(null)
   // A page (alerts, settings) takes the place of a target or a group in the
   // main pane. Which one is part of the address.
   const { page, goTo } = useDashboardPage()
@@ -904,7 +896,7 @@ export function Dashboard() {
   )
 
   const handleDeleteTargets = useCallback(
-    async (ids: string[]) => {
+    async (ids: string[], groups: string[] = []) => {
       // One at a time: a second would be competing with the first for the
       // database, and the progress shown is the one's.
       if (deleteJob) {
@@ -913,20 +905,37 @@ export function Dashboard() {
       }
 
       // Runs on in the background; the caller is told it has started.
-      setDeleteJob({ done: 0, total: ids.length })
-      void deleteTargets(ids, (done, total) => setDeleteJob({ done, total })).then(deleted => {
+      const single = ids.length === 1 && groups.length === 0 ? targets.find(target => target.id === ids[0]) : undefined
+      const title = single
+        ? `Deleting ${single.name}`
+        : ids.length > 0 ? `Deleting ${ids.length} target${ids.length === 1 ? '' : 's'}` : 'Deleting groups'
+      const job = { title, ids: new Set(ids) }
+      setDeleteJob({ ...job, done: 0, total: ids.length })
+      void deleteTargets(ids, groups, (done, total) => setDeleteJob({ ...job, done, total })).then(deleted => {
         setDeleteJob(null)
         // A failure was reported where it happened.
         if (deleted === null) return
+        const removed = [
+          single && deleted.targets === 1 ? single.name : '',
+          !single && deleted.targets > 0 ? `${deleted.targets} target${deleted.targets === 1 ? '' : 's'}` : '',
+          deleted.groups > 0 ? `${deleted.groups} group${deleted.groups === 1 ? '' : 's'}` : '',
+        ].filter(Boolean)
         notify({
           tone: 'info',
-          title: `Deleted ${deleted} target${deleted === 1 ? '' : 's'}`,
-          detail: 'Their history, alert rules, saved routes and any group left empty went with them.',
+          title: removed.length > 0 ? `Deleted ${removed.join(' and ')}` : 'Nothing left to delete',
+          detail: deleted.targets > 0
+            ? `${deleted.targets === 1 ? 'Its' : 'Their'} history, alert rules and saved routes went with ${deleted.targets === 1 ? 'it' : 'them'}, and so did any group left empty.`
+            : undefined,
         })
       })
       return true
     },
-    [deleteJob, deleteTargets, notify, reportError]
+    [deleteJob, deleteTargets, notify, reportError, targets]
+  )
+
+  const handleDeleteTarget = useCallback(
+    (id: string) => void handleDeleteTargets([id]),
+    [handleDeleteTargets]
   )
 
   const current = useMemo(() => currentReadings(points), [points])
@@ -956,6 +965,7 @@ export function Dashboard() {
     return kinds.size === 1 ? probeVocabulary([...kinds][0]) : null
   }, [groupTargets])
 
+  const deletingIds = deleteJob?.ids
   const transformedTargets = useMemo(() => {
     const agentsById = new Map(probeAgents.map(agent => [agent.id, agent]))
     return targets.map(t => {
@@ -981,9 +991,10 @@ export function Dashboard() {
         avgLatency: lastMeasurement?.latency ?? undefined,
         packetLoss: lastMeasurement?.packetLoss,
         isNew: !lastMeasurement,
+        deleting: deletingIds?.has(t.id),
       }
     })
-  }, [targets, latest, probeAgents])
+  }, [targets, latest, probeAgents, deletingIds])
 
   // Alerts that are firing on at least one target, for the sidebar's count.
   const firingAlerts = useMemo(
@@ -1035,7 +1046,7 @@ export function Dashboard() {
     // `dvh`, not `vh`: on a phone `vh` is the height with the browser's bars
     // tucked away, so the bottom of the page sat underneath them.
     <div className="flex h-dvh bg-background">
-      {deleteJob && <DeleteProgress done={deleteJob.done} total={deleteJob.total} />}
+      {deleteJob && <DeleteProgress title={deleteJob.title} done={deleteJob.done} total={deleteJob.total} />}
       <Sidebar
         open={sidebarOpen}
         onClose={hideSidebar}
@@ -1061,7 +1072,7 @@ export function Dashboard() {
         onOpenEditTarget={openEditTarget}
         onImportTargets={handleImportTargets}
         onDeleteTargets={handleDeleteTargets}
-        onDeleteTarget={deleteTarget}
+        onDeleteTarget={handleDeleteTarget}
         onTogglePaused={handleTogglePaused}
         series={series}
         groups={groups}

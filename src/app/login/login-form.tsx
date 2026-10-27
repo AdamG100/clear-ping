@@ -247,7 +247,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
             <BrandMark />
             <div>
               <p className="text-sm font-medium text-foreground">ClearPing</p>
-              <p className="text-xs text-muted-foreground">Path monitor</p>
+              <p className="text-xs text-muted-foreground">Network monitor</p>
             </div>
           </div>
           <form onSubmit={sendReset} className="space-y-5 rounded-3xl border border-border bg-card p-6" noValidate>
@@ -350,7 +350,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
             <BrandMark />
             <div>
               <p className="text-sm font-medium text-foreground">ClearPing</p>
-              <p className="text-xs text-muted-foreground">Path monitor</p>
+              <p className="text-xs text-muted-foreground">Network monitor</p>
             </div>
           </div>
           <form
@@ -422,7 +422,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
           <BrandMark />
           <div>
             <p className="text-sm font-medium text-foreground">ClearPing</p>
-            <p className="text-xs text-muted-foreground">Path monitor</p>
+            <p className="text-xs text-muted-foreground">Network monitor</p>
           </div>
         </div>
 

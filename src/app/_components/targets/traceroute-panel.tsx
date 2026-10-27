@@ -279,15 +279,17 @@ function HopTable({ trace }: { trace: Traceroute }) {
           </span>
         </td>
 
-        {/* Cut short on one line where the table is wide. Where it is narrow
-            the name wraps instead: a name cut to a dozen letters says nothing,
-            and there is no hovering over it on a phone to read the rest. */}
-        <td className="w-full max-w-0 py-2 pl-1 pr-4 @md/main:w-2/5">
+        {/* Where the table is wide, the address and the name are columns of
+            their own, side by side, so a route can be read down either one.
+            Where it is narrow they share one, the name above the address, and
+            the name wraps: a name cut to a dozen letters says nothing, and
+            there is no hovering over it on a phone to read the rest. */}
+        <td className="w-full max-w-0 py-2 pl-1 pr-4 @md/main:w-2/5 @2xl/main:w-auto @2xl/main:max-w-none @2xl/main:whitespace-nowrap">
           {hop.address === null ? (
             <>
               <span className={cn('block', state === 'dead' ? 'text-signal-critical' : 'text-muted-foreground')}>No reply</span>
               {state === 'silent' && (
-                <span className="block text-[11px] text-muted-foreground/70">
+                <span className="block text-[11px] text-muted-foreground/70 @2xl/main:hidden">
                   Does not answer probes. Still passing traffic on.
                 </span>
               )}
@@ -298,7 +300,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
                 <Tooltip content={hop.hostname ?? hop.address}>
                   <span
                     className={cn(
-                      'min-w-0 break-all @2xl/main:truncate',
+                      'min-w-0 break-all @2xl/main:hidden',
                       hop.hostname ? 'text-foreground' : 'font-mono text-foreground',
                       state === 'destination' && 'font-medium'
                     )}
@@ -306,14 +308,31 @@ function HopTable({ trace }: { trace: Traceroute }) {
                     {hop.hostname ?? hop.address}
                   </span>
                 </Tooltip>
+                <span className={cn('hidden font-mono text-foreground @2xl/main:inline', state === 'destination' && 'font-medium')}>
+                  {hop.address}
+                </span>
                 {state === 'destination' && <Badge tone="success" size="sm">Target</Badge>}
               </span>
               {hop.hostname ? (
-                <span className="block break-all font-mono text-[11px] text-muted-foreground">{hop.address}</span>
+                <span className="block break-all font-mono text-[11px] text-muted-foreground @2xl/main:hidden">{hop.address}</span>
               ) : isAwaitingName(hop) ? (
-                <span className="block animate-pulse text-[11px] text-muted-foreground/60">looking up its name…</span>
+                <span className="block animate-pulse text-[11px] text-muted-foreground/60 @2xl/main:hidden">looking up its name…</span>
               ) : null}
             </>
+          )}
+        </td>
+
+        <td className="hidden max-w-0 py-2 pr-4 @2xl/main:table-cell @2xl/main:w-1/4">
+          {hop.hostname ? (
+            <Tooltip content={hop.hostname}>
+              <span className={cn('block truncate text-foreground', state === 'destination' && 'font-medium')}>{hop.hostname}</span>
+            </Tooltip>
+          ) : isAwaitingName(hop) ? (
+            <span className="block animate-pulse text-muted-foreground/60">looking up…</span>
+          ) : state === 'silent' ? (
+            <span className="block truncate text-muted-foreground/70">Does not answer probes. Still passing traffic on.</span>
+          ) : (
+            <span className="text-muted-foreground/60">—</span>
           )}
         </td>
 
@@ -343,7 +362,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
         <td className="hidden py-2 pr-4 text-right font-mono text-muted-foreground @3xl/main:table-cell">
           {silent ? '—' : ms(Math.max(...hop.rtts))}
         </td>
-        <td className="hidden w-2/5 min-w-24 py-2 pr-1 align-middle @md/main:table-cell">
+        <td className="hidden w-2/5 min-w-24 py-2 pr-2 align-middle @md/main:table-cell">
           <LatencyBar hop={hop} scale={scale} state={state} loss={loss} />
         </td>
       </tr>
@@ -360,12 +379,16 @@ function HopTable({ trace }: { trace: Traceroute }) {
         <thead>
           <tr className="text-left text-xs text-muted-foreground">
             <th className="pb-2 text-center font-medium">Hop</th>
-            <th className="pb-2 pl-1 pr-4 font-medium">Router</th>
+            <th className="pb-2 pl-1 pr-4 font-medium">
+              <span className="@2xl/main:hidden">Router</span>
+              <span className="hidden @2xl/main:inline">IP</span>
+            </th>
+            <th className="hidden pb-2 pr-4 font-medium @2xl/main:table-cell">Name</th>
             <th className="pb-2 pr-4 text-right font-medium">Loss</th>
             <th className="whitespace-nowrap pb-2 text-right font-medium @md/main:pr-4">Avg ms</th>
             <th className="hidden pb-2 pr-4 text-right font-medium @3xl/main:table-cell">Min</th>
             <th className="hidden pb-2 pr-4 text-right font-medium @3xl/main:table-cell">Max</th>
-            <th className="hidden pb-2 pr-1 @md/main:table-cell">
+            <th className="hidden pb-2 pr-2 @md/main:table-cell">
               {/* The ends of the scale the bars below are drawn on. */}
               <span className="flex justify-between font-mono font-normal">
                 <span>0</span>

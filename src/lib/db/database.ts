@@ -703,32 +703,12 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
 }
 
 /**
- * Delete a target and all its measurements.
- *
- * The measurements are removed explicitly rather than relying only on the
- * cascade, so databases created before foreign keys were enabled still get
- * cleaned up.
+ * Delete a target and all its measurements, as `deleteTargets` does: its
+ * history a few thousand rows at a time, so a long one does not hold up
+ * everything else that writes while it goes.
  */
 export async function deleteTarget(id: string): Promise<boolean> {
-  const database = await getDatabase();
-
-  await new Promise<void>((resolve, reject) => {
-    database.run('DELETE FROM measurements WHERE target_id = ?', [id], function (err) {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-
-  return new Promise<boolean>((resolve, reject) => {
-    database.run('DELETE FROM targets WHERE id = ?', [id], function(err) {
-      if (err) {
-        reject(err);
-        return;
-      }
-      saveDatabase();
-      resolve(this.changes > 0);
-    });
-  });
+  return (await deleteTargets([id])) > 0;
 }
 
 /**
@@ -1406,6 +1386,41 @@ export async function deleteGroup(group: string): Promise<boolean> {
     await runSql(database, 'ROLLBACK').catch(() => {});
     throw error;
   }
+}
+
+/**
+ * Delete groups chosen to go, with every group inside them, once there is no
+ * target left anywhere in them. One that still has a target, which happens
+ * when one was added to it meanwhile, is kept with everything in it. Returns
+ * the groups that went, those inside included.
+ */
+export async function deleteEmptyGroups(groups: string[]): Promise<string[]> {
+  const database = await getDatabase();
+
+  const chosen = [...new Set(groups.map(normalizeGroupPath).filter(Boolean))];
+  if (chosen.length === 0) return [];
+
+  const inUse = (await allSql<{ group_name: string }>(database, 'SELECT DISTINCT group_name FROM targets'))
+    .map(row => row.group_name)
+    .filter(Boolean);
+  const empty = chosen.filter(group => !inUse.some(used => isWithinGroup(used, group)));
+  if (empty.length === 0) return [];
+
+  const within = (rows: { group_name: string }[]) =>
+    rows.map(row => row.group_name).filter(name => empty.some(group => isWithinGroup(name, group)));
+  const kept = within(await allSql<{ group_name: string }>(database, 'SELECT group_name FROM target_groups'));
+  const ordered = within(await allSql<{ group_name: string }>(database, 'SELECT group_name FROM group_orders'));
+
+  await runSql(database, 'BEGIN IMMEDIATE');
+  try {
+    for (const group of kept) await runSql(database, 'DELETE FROM target_groups WHERE group_name = ?', [group]);
+    for (const group of ordered) await runSql(database, 'DELETE FROM group_orders WHERE group_name = ?', [group]);
+    await runSql(database, 'COMMIT');
+  } catch (error) {
+    await runSql(database, 'ROLLBACK').catch(() => {});
+    throw error;
+  }
+  return [...new Set([...empty, ...kept])];
 }
 
 /**

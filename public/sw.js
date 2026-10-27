@@ -18,7 +18,7 @@
 
 const CACHE_PREFIX = 'clearping-'
 /* Change the number when offline.html changes, so the new one is fetched. */
-const CACHE = CACHE_PREFIX + 'offline-v1'
+const CACHE = CACHE_PREFIX + 'offline-v2'
 const OFFLINE_URL = '/offline.html'
 
 /* What a reverse proxy answers with when the app behind it is not running. */

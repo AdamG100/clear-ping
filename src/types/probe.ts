@@ -211,6 +211,8 @@ export interface Target {
    * server this check cannot measure, shown grey rather than as down.
    */
   neverAnswered?: boolean;
+  /** Being deleted: still listed until the server is done, but greyed and out of reach. */
+  deleting?: boolean;
 }
 
 /**

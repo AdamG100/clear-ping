@@ -221,13 +221,13 @@ const PAGE_STYLE = `
 :root {
   color-scheme: light dark;
   --page: #f4f5f6; --card: #ffffff; --text: #1b1f23; --muted: #646b73; --border: #e2e5e8;
-  --track: #eceef0; --info: oklch(0.52 0.1 222); --bar: oklch(0.42 0.03 250);
+  --track: #eceef0; --info: oklch(0.52 0.2 262); --bar: oklch(0.42 0.03 250);
   ${lossColours('light')}
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --page: #0b0c0d; --card: #141719; --text: oklch(0.96 0.004 240); --muted: oklch(0.70 0.014 240);
-    --border: #242a2f; --track: #1f2427; --info: oklch(0.80 0.09 215); --bar: oklch(0.85 0.02 250);
+    --border: #242a2f; --track: #1f2427; --info: oklch(0.74 0.13 255); --bar: oklch(0.85 0.02 250);
     ${lossColours('oklch')}
   }
 }

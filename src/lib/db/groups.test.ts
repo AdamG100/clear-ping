@@ -20,6 +20,7 @@ const {
   getGroups,
   createGroup,
   deleteGroup,
+  deleteEmptyGroups,
 } = await import('./database')
 const { SCHEMA_VERSION, schemaVersion } = await import('./migrations')
 
@@ -198,6 +199,29 @@ describe('groups in their own right', () => {
   it('says so when there is no such group to delete', async () => {
     expect(await deleteGroup('Nowhere')).toBe(false)
     expect(await deleteGroup('')).toBe(false)
+  })
+})
+
+describe('deleteEmptyGroups', () => {
+  it('deletes a group chosen to go, with the empty groups inside it', async () => {
+    await createGroup('Closet/Drawer')
+    await createGroup('Closet/Box/Lid')
+    await createGroup('Closets')
+    await saveGroupOrders([{ groupName: 'Closet/Box', sortOrder: 1 }])
+
+    expect((await deleteEmptyGroups(['Closet'])).sort()).toEqual(['Closet', 'Closet/Box', 'Closet/Box/Lid', 'Closet/Drawer'])
+    const kept = await getGroups()
+    expect(kept.filter(group => group === 'Closet' || group.startsWith('Closet/'))).toEqual([])
+    expect(kept).toContain('Closets')
+    expect((await getGroupOrders()).map(order => order.groupName)).not.toContain('Closet/Box')
+  })
+
+  it('keeps a chosen group that still has a target in it, and all it holds', async () => {
+    await add('stays', 'Attic/Crate')
+    await createGroup('Attic/Empty')
+
+    expect(await deleteEmptyGroups(['Attic', ' / '])).toEqual([])
+    expect(await getGroups()).toEqual(expect.arrayContaining(['Attic', 'Attic/Crate', 'Attic/Empty']))
   })
 })
 

@@ -1,6 +1,6 @@
 # ClearPing
 
-A self-hosted network path monitor in the spirit of Smokeping. It probes your
+A self-hosted network monitor in the spirit of Smokeping. It probes your
 hosts, websites, DNS and game servers on a schedule, from your own network or
 from probe agents elsewhere, keeps the history in a single SQLite file, and
 draws latency as a spread rather than a single line, so a path that is merely

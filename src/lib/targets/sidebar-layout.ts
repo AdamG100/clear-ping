@@ -102,6 +102,21 @@ export function groupsInOrder(layout: SidebarLayout, parent = ''): string[] {
   return subgroups(layout, parent).flatMap(group => [group, ...groupsInOrder(layout, group)])
 }
 
+/**
+ * The groups ticked whole: every target in them ticked, and every group inside
+ * them ticked whole too. A group with no target anywhere in it has nothing to
+ * tick, so it counts only if it is in `tickedGroups` itself. Outermost first,
+ * as `groupsInOrder` lists them. The catch-all group is never one: it is not
+ * a group that exists, only where targets without one are shown.
+ */
+export function wholeGroups(layout: SidebarLayout, ticked: Set<string>, tickedGroups: Set<string>): string[] {
+  const whole = (group: string): boolean =>
+    (layout.items[group] ?? []).every(id => ticked.has(id)) &&
+    subgroups(layout, group).every(whole) &&
+    (targetsWithin(layout, group).length > 0 || tickedGroups.has(group))
+  return groupsInOrder(layout).filter(group => group !== UNGROUPED && whole(group))
+}
+
 /** Every target in a group and in the groups inside it, in sidebar order. */
 export function targetsWithin(layout: SidebarLayout, group: string): string[] {
   return [

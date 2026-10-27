@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTargetById, updateTarget, deleteTarget } from '@/lib/db/database';
+import { getTargetById, updateTarget, deleteTarget, pruneEmptyGroups } from '@/lib/db/database';
 import { IP_VERSIONS, isIpVersion, isValidHost, normalizeHost } from '@/lib/probes/host';
 import { isProbeType, PROBE_TYPES, validateProbeConfig } from '@/lib/probes/config';
 import { getScheduler } from '@/lib/scheduler';
@@ -191,6 +191,8 @@ export async function DELETE(
 
     const { id } = await params;
     const existing = await getTargetById(id);
+    // Before the rows go, so no probe is started or stored for it meanwhile.
+    getScheduler().forget([id]);
     const deleted = await deleteTarget(id);
 
     if (!deleted) {
@@ -200,6 +202,8 @@ export async function DELETE(
       );
     }
 
+    // As with deleting several: a group it leaves empty goes with it.
+    await pruneEmptyGroups([existing?.group ?? '']);
     await getScheduler().reloadTargets();
     const { actor, via } = await actorFor(request);
     await recordActivity(actor, via, 'target.delete', existing?.name ?? id);

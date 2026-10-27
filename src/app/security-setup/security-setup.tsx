@@ -27,7 +27,7 @@ export function SecuritySetup({ next }: { next: string }) {
             <BrandMark />
             <div>
               <p className="text-sm font-medium text-foreground">ClearPing</p>
-              <p className="text-xs text-muted-foreground">Path monitor</p>
+              <p className="text-xs text-muted-foreground">Network monitor</p>
             </div>
           </div>
           <Button type="button" size="sm" variant="secondary" onClick={signOut}>

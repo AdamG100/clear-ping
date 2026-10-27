@@ -30,7 +30,7 @@ import { copyText } from '@/lib/clipboard'
 import { StatusIndicator } from './status-indicator'
 import { addressFamilyFor, isDualStack } from '@/lib/probes/host'
 import { targetAddressLabel } from '@/lib/probes/config'
-import { groupLabel, groupName, groupWithAncestors, rebaseGroupPath } from '@/lib/targets/group-path'
+import { groupLabel, groupName, groupWithAncestors, isWithinGroup, rebaseGroupPath } from '@/lib/targets/group-path'
 import { combineSeries } from '@/lib/charts/group-series'
 import {
   UNGROUPED,
@@ -95,7 +95,7 @@ const GROUP_PANEL = [
 ] as const
 
 /** How the target on show is marked in the list. */
-const SELECTED_ROW = 'bg-primary/15 ring-1 ring-inset ring-primary/35 hover:bg-primary/20'
+const SELECTED_ROW = 'bg-primary/20 ring-1 ring-inset ring-primary/50 hover:bg-primary/25'
 
 // ─── Collapsing ─────────────────────────────────────────────────────────────
 
@@ -171,9 +171,11 @@ interface SidebarProps {
   onOpenEditTarget: (id: string) => void
   /** Add the targets out of a share link. Resolves to whether they were added. */
   onImportTargets: (targets: TargetDefinition[]) => Promise<boolean>
-  /** Delete several at once. Resolves to whether they were deleted. */
-  /** Resolves to whether the delete was started: it goes on in the background. */
-  onDeleteTargets: (ids: string[]) => Promise<boolean>
+  /**
+   * Delete several at once, and the groups given with them. Resolves to
+   * whether the delete was started: it goes on in the background.
+   */
+  onDeleteTargets: (ids: string[], groups?: string[]) => Promise<boolean>
   onDeleteTarget: (id: string) => void
   onTogglePaused: (target: Target) => void
   /** The group whose comparison chart is on screen, if one is. */
@@ -245,6 +247,7 @@ function TargetRow({
   onHandlePointerDown,
 }: TargetRowProps) {
   const paused = target.status === 'paused'
+  const deleting = target.deleting === true
   const address = targetAddressLabel(target)
   const dualStack = isDualStack(target.host, target.ipVersion)
   const usesIpv6 = addressFamilyFor(target.host, target.ipVersion) === 6
@@ -269,15 +272,18 @@ function TargetRow({
     { label: 'Duplicate', icon: Copy, danger: false, run: onDuplicateTarget && (() => onDuplicateTarget(target)) },
     { label: 'Delete', icon: Trash2, danger: true, run: onDeleteTarget && (() => onDeleteTarget(target.id)) },
   ].filter((action): action is typeof action & { run: () => void } => action.run !== undefined)
-  const draggable = floating || onHandlePointerDown !== undefined
+  // On its way out: nothing more is offered for it, not even a drag.
+  const draggable = !deleting && (floating || onHandlePointerDown !== undefined)
 
   return (
     // Selecting a target has to work from the keyboard, so the row is a real
     // interactive element rather than a div with a click handler.
     <div
       role="button"
-      tabIndex={floating ? -1 : 0}
+      tabIndex={floating || deleting ? -1 : 0}
       aria-current={selected}
+      aria-busy={deleting || undefined}
+      aria-disabled={deleting || undefined}
       onClick={() => onSelectTarget?.(target.id)}
       onKeyDown={e => {
         // Only a key pressed on the row itself. One pressed on a button
@@ -298,7 +304,9 @@ function TargetRow({
         // astray altogether when the list itself was moving: a group
         // collapsing, or the drawer sliding shut on a phone. Lit in the
         // accent: a grey a step lighter was lost on the groups' own greys.
-        selected && SELECTED_ROW
+        selected && SELECTED_ROW,
+        // Greyed until the server is done with it and the list lets it go.
+        deleting && 'pointer-events-none opacity-50 grayscale'
       )}
     >
       <div className="relative flex items-center gap-1.5">
@@ -352,7 +360,11 @@ function TargetRow({
             )}
             {/* Where it is measured from, when that is another machine. */}
             <ProbedFrom agent={target.probeAgent} />
-            {paused && (
+            {deleting ? (
+              <span className="shrink-0">
+                <Badge size="sm">Deleting</Badge>
+              </span>
+            ) : paused && (
               <span className="shrink-0">
                 <Badge size="sm">Paused</Badge>
               </span>
@@ -381,7 +393,7 @@ function TargetRow({
         {/* One button for the row's actions, the same with a mouse or a
             finger: four icons a few pixels apart were too small to aim at,
             and a touchscreen has no hover to reveal them. */}
-        {actions.length > 0 && !floating && (
+        {actions.length > 0 && !floating && !deleting && (
           <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
             <Tooltip content={actions.length > 1 ? 'Copy the address, pause, edit, duplicate or delete' : 'Copy the address'} side="right">
               <PopoverTrigger asChild>
@@ -657,6 +669,10 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
   const inside = subgroups(layout, group)
   const isCollapsed = collapsedGroups.has(group)
   const isCompared = selectedGroup === group
+  // A group inside the one being compared is on its chart too, so it is lit
+  // with it: the chart takes in everything beneath the group, not only its
+  // own rows.
+  const inCompared = !!selectedGroup && isWithinGroup(group, selectedGroup)
 
   // Everything under the group, not only what sits directly in it: that is
   // what collapsing it hides and what its chart compares.
@@ -682,7 +698,16 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
       value={group}
       dragListener={false}
       dragControls={dragControls}
-      className={cn('select-none', GROUP_PANEL[depth % 2])}
+      className={cn(
+        'select-none transition-colors duration-150',
+        GROUP_PANEL[depth % 2],
+        // The outline goes round the whole panel, the groups inside included,
+        // and the tint fills it: an inset shadow sits over the panel's own
+        // colour and under what is in it, gaps around nested groups and all.
+        inCompared && 'shadow-[inset_0_0_0_100vmax_color-mix(in_oklab,var(--accent)_6%,transparent)]',
+        // A group inside it is dashed: part of that chart, not the one chosen.
+        isCompared ? 'border-sidebar-ring/60' : inCompared && 'border-dashed border-sidebar-ring/50'
+      )}
       whileDrag={{ scale: 1.02, zIndex: 50 }}
       // Position only. Animating size as well scales the whole group while a
       // row enters or leaves it, which visibly stretches the header text.
@@ -697,8 +722,7 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
       <div
         className={cn(
           'rounded-[inherit] ring-1 ring-transparent transition-[background-color,box-shadow] duration-150',
-          isDropDestination && 'bg-primary/5 ring-primary/40',
-          isCompared && !isDropDestination && 'bg-primary/5 ring-sidebar-ring/40'
+          isDropDestination && 'bg-primary/5 ring-primary/40'
         )}
         data-group={group}
       >
@@ -1173,7 +1197,7 @@ export function Sidebar({
               ClearPing
             </h1>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              Path monitor
+              Network monitor
               <VersionBadge onOpen={onOpenPatchNotes} />
             </p>
           </div>
@@ -1567,6 +1591,7 @@ export function Sidebar({
         onOpenChange={setIsBulkDeleteOpen}
         targets={targets}
         groupOrders={groupOrders}
+        groups={groups}
         onDelete={onDeleteTargets}
       />
 
