@@ -95,7 +95,12 @@ export function useSidebarDrawer() {
   const storedCollapsed = useSyncExternalStore(subscribeToCollapsed, isCollapsed, () => false)
   const beside = useSyncExternalStore(subscribeToWidth, isBesideThePage, () => false)
 
-  const show = useCallback(() => setOpen(true), [])
+  // Only where it is a drawer. Opened beside the page, nothing showed, and
+  // the page was made inert all the same: a button that brought up the
+  // sidebar's list (Show, on the overview) left a page that ignored clicks.
+  const show = useCallback(() => {
+    if (!isBesideThePage()) setOpen(true)
+  }, [])
   const hide = useCallback(() => setOpen(false), [])
 
   useEffect(() => {
