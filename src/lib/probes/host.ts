@@ -183,15 +183,27 @@ export function defaultTraceFamilies(host: string, ipVersion: IpVersion = 'auto'
  * almost always means "watch this DNS service", so the dialog suggests a DNS
  * probe for them instead of a ping.
  */
-const WELL_KNOWN_RESOLVERS = new Set([
-  '1.1.1.1', '1.0.0.1', '2606:4700:4700::1111', '2606:4700:4700::1001',
-  '8.8.8.8', '8.8.4.4', '2001:4860:4860::8888', '2001:4860:4860::8844',
-  '9.9.9.9', '149.112.112.112', '2620:fe::fe', '2620:fe::9',
-  '208.67.222.222', '208.67.220.220', '2620:119:35::35', '2620:119:53::53',
+const WELL_KNOWN_RESOLVERS = new Map<string, string>([
+  ...['1.1.1.1', '1.0.0.1', '2606:4700:4700::1111', '2606:4700:4700::1001'].map(address => [address, 'cloudflare.com'] as const),
+  // Cloudflare's filtered resolvers: malware blocked, and adult content as well.
+  ...['1.1.1.2', '1.0.0.2', '1.1.1.3', '1.0.0.3'].map(address => [address, 'cloudflare.com'] as const),
+  ...['8.8.8.8', '8.8.4.4', '2001:4860:4860::8888', '2001:4860:4860::8844'].map(address => [address, 'google.com'] as const),
+  ...['9.9.9.9', '149.112.112.112', '2620:fe::fe', '2620:fe::9'].map(address => [address, 'quad9.net'] as const),
+  ...['208.67.222.222', '208.67.220.220', '2620:119:35::35', '2620:119:53::53'].map(address => [address, 'opendns.com'] as const),
+  ...['94.140.14.14', '94.140.15.15', '2a10:50c0::ad1:ff', '2a10:50c0::ad2:ff'].map(address => [address, 'adguard.com'] as const),
 ])
 
 export function isWellKnownResolver(host: string): boolean {
   return WELL_KNOWN_RESOLVERS.has(normalizeHost(host).toLowerCase())
+}
+
+/**
+ * The domain of whoever runs a well-known public resolver at this address,
+ * or null: `cloudflare.com` for 1.1.1.1. A name each one is bound to have to
+ * hand, and to answer for straight away.
+ */
+export function resolverDomain(host: string): string | null {
+  return WELL_KNOWN_RESOLVERS.get(normalizeHost(host).toLowerCase()) ?? null
 }
 
 /**

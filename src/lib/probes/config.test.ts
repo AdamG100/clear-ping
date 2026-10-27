@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_DNS_QUERY_NAME,
+  dnsQueryNameFor,
   httpUrlFor,
   isProbeType,
   nameRecordType,
@@ -7,6 +9,23 @@ import {
   targetAddressLabel,
   validateProbeConfig,
 } from './config'
+
+describe('dnsQueryNameFor', () => {
+  it("asks a well-known resolver for its own operator's domain", () => {
+    expect(dnsQueryNameFor('1.1.1.1')).toBe('cloudflare.com')
+    expect(dnsQueryNameFor('1.0.0.1')).toBe('cloudflare.com')
+    expect(dnsQueryNameFor('2606:4700:4700::1111')).toBe('cloudflare.com')
+    expect(dnsQueryNameFor('8.8.4.4')).toBe('google.com')
+    expect(dnsQueryNameFor('9.9.9.9')).toBe('quad9.net')
+    expect(dnsQueryNameFor('208.67.222.222')).toBe('opendns.com')
+    expect(dnsQueryNameFor('94.140.14.14')).toBe('adguard.com')
+  })
+
+  it('asks any other server for a name every resolver has to hand', () => {
+    expect(dnsQueryNameFor('154.0.1.1')).toBe(DEFAULT_DNS_QUERY_NAME)
+    expect(dnsQueryNameFor('192.168.1.1')).toBe(DEFAULT_DNS_QUERY_NAME)
+  })
+})
 
 describe('parseAddressInput', () => {
   it('leaves a plain host alone and suggests nothing', () => {

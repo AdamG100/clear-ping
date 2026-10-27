@@ -173,8 +173,11 @@ An alert can be set on the certificate running out (see [alerting.md](./alerting
 
 ### DNS settings
 
-A **server** target can be told what to ask: the name to look up (default
-`example.com`) and the record type (A, AAAA, CNAME, MX, NS, TXT).
+A **server** target can be told what to ask: the name to look up and the
+record type (A, AAAA, CNAME, MX, NS, TXT). Left empty, a well-known public
+resolver is asked for its own operator's domain (1.1.1.1 `cloudflare.com`,
+8.8.8.8 `google.com`, 9.9.9.9 `quad9.net`, and OpenDNS and AdGuard likewise),
+and any other server for `google.com`, a name every resolver has to hand.
 
 A **name** target can be told who to ask. Left alone it uses the system resolver.
 Given a list of resolvers, it asks every one of them on each probe:

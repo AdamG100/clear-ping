@@ -3,7 +3,7 @@ import { resolverLabel } from './dns/resolvers';
 import { openResolverSession, type QueryOutcome, type ResolverSession } from './dns/transport';
 import { classifyHost, normalizeHost } from './host';
 import { jitterFromLatencies, mean, round } from './metrics';
-import { DEFAULT_DNS_QUERY_NAME, DNS_QUERIES_PER_PROBE, isAddressRecord, nameRecordType } from './config';
+import { DNS_QUERIES_PER_PROBE, dnsQueryNameFor, isAddressRecord, nameRecordType } from './config';
 import { elapsedSince, failedProbe, pause, summarizeProbe } from './result';
 import { resolveHost } from './resolve';
 
@@ -285,7 +285,7 @@ export async function executeDnsProbe(
     session = { query: systemLookup(trimmedHost, options.ipVersion, timing.timeout), close: () => {} };
     description = `resolve ${trimmedHost}`;
   } else {
-    const queryName = options.queryName ?? DEFAULT_DNS_QUERY_NAME;
+    const queryName = options.queryName || dnsQueryNameFor(trimmedHost);
     recordType = options.recordType ?? (options.ipVersion === 'ipv6' ? 'AAAA' : 'A');
     try {
       session = await openResolverSession({ protocol: 'udp', server: trimmedHost }, queryName, recordType, timing.timeout);

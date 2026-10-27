@@ -1,7 +1,7 @@
 import type { IpVersion, ProbeConfig, ProbeType } from '@/types/probe'
 import { resolverLabel } from './dns/resolvers'
 import { classifyHost } from './host'
-import { DEFAULT_DNS_QUERY_NAME, DEFAULT_PING_PACKETS, GAME_QUERY_INFO, httpUrlFor, isAddressRecord, nameRecordType } from './config'
+import { DEFAULT_PING_PACKETS, dnsQueryNameFor, GAME_QUERY_INFO, httpUrlFor, isAddressRecord, nameRecordType } from './config'
 
 /**
  * The words used for a target's readings, by probe type.
@@ -191,7 +191,7 @@ export function describeProbe(
         return `Looks this name up through the system resolver and times the answer.${expected} No ping is sent.${family}`
       }
       const record = config.recordType ?? 'A'
-      const name = config.queryName || DEFAULT_DNS_QUERY_NAME
+      const name = config.queryName || dnsQueryNameFor(host)
       return `Asks this server for the ${record} record of ${name} and times its answer.${expected} No ping is sent.`
     }
   }

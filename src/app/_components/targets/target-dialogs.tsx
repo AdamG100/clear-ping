@@ -20,7 +20,7 @@ import { addressFamilyFor, classifyHost, isDualStack, isWellKnownResolver, targe
 import { groupLabel, joinGroupPath } from '@/lib/targets/group-path'
 import { describeProbe } from '@/lib/probes/labels'
 import {
-  DEFAULT_DNS_QUERY_NAME,
+  dnsQueryNameFor,
   DEFAULT_PING_PACKETS,
   DNS_RECORD_TYPES,
   isAddressRecord,
@@ -506,7 +506,7 @@ function ProbeConfigFields({
         <Input
           id={`${idPrefix}-query`}
           label="Name to look up"
-          placeholder={DEFAULT_DNS_QUERY_NAME}
+          placeholder={dnsQueryNameFor(host)}
           value={draft.queryName}
           onChange={e => onChange({ queryName: e.target.value })}
         />

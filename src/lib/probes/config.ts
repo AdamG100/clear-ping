@@ -1,6 +1,6 @@
 import type { DnsRecordType, IpVersion, ProbeConfig, ProbeType, Target, GameQuery } from '@/types/probe'
 import { validateResolvers } from './dns/resolvers'
-import { classifyHost, isIpv6, normalizeHost } from './host'
+import { classifyHost, isIpv6, normalizeHost, resolverDomain } from './host'
 
 /**
  * Per-probe settings: reading them out of what the user typed, checking them,
@@ -105,7 +105,27 @@ export const DEFAULT_PING_PACKETS = 20
 export const MIN_PING_PACKETS = 5
 export const MAX_PING_PACKETS = 100
 
-export const DEFAULT_DNS_QUERY_NAME = 'example.com'
+/**
+ * What a DNS server is asked for when it is not a resolver ClearPing knows
+ * and its target names nothing: a name so widely looked up that any resolver
+ * has it to hand, so the time is the server's own and not a lookup it had to
+ * make elsewhere first.
+ */
+export const DEFAULT_DNS_QUERY_NAME = 'google.com'
+
+/**
+ * The name a DNS server is asked for when its target names none: a
+ * well-known resolver its own operator's domain (1.1.1.1 `cloudflare.com`,
+ * 8.8.8.8 `google.com`), anything else DEFAULT_DNS_QUERY_NAME.
+ *
+ * Every server was asked for `example.com` once. A name that has nothing to
+ * do with the server can fail for reasons that are not the server's, and the
+ * failure is put down to the server; its own name is the one thing it can be
+ * relied on to answer for.
+ */
+export function dnsQueryNameFor(server: string): string {
+  return resolverDomain(server) ?? DEFAULT_DNS_QUERY_NAME
+}
 
 /** How many times a DNS probe puts its question, to each resolver it asks. */
 export const DNS_QUERIES_PER_PROBE = 5
