@@ -9,7 +9,7 @@ import { countryName } from '@/lib/bgp/countries'
 import { BGP_REGION_LABEL, type BgpPeerRoute } from '@/types/bgp'
 import { cn } from '@/lib/utils'
 import { shareColor } from './region-visibility'
-import { carrierLabel, viaLabel, whoseLabel } from './state'
+import { carrierLabel, viaLabel, type YourTrace } from './state'
 
 /**
  * Where in the world the prefix is seen, a level at a time: the five regions,
@@ -74,14 +74,17 @@ export function SeenFrom({
   colors,
   names,
   mine = {},
+  traced = [],
 }: {
   peers: BgpPeerRoute[]
   scope: Scope
   onScope: (scope: Scope) => void
   colors: Map<number, string>
   names: Record<number, string>
-  /** Your networks: the places your sessions are in are marked. */
+  /** Your networks, and whose each is: the places your sessions are in are marked. */
   mine?: Record<number, string>
+  /** Your vantage points' traffic: where each is is marked too. */
+  traced?: YourTrace[]
 }) {
   const [allCountries, setAllCountries] = useState(false)
   const rows = placeShares(peers, scope)
@@ -91,7 +94,14 @@ export function SeenFrom({
   for (const peer of peers) {
     if (!(peer.peerAsn in mine) || !inPlace(peer, scope)) continue
     const key = level === 'region' ? peer.region : level === 'country' ? peer.country : peer.collector
-    yours.set(key, new Set([...(yours.get(key) ?? []), whoseLabel(mine[peer.peerAsn])]))
+    yours.set(key, new Set([...(yours.get(key) ?? []), mine[peer.peerAsn]]))
+  }
+  // And where those of yours are whose networks share no routes with RIS, by where their network is registered.
+  for (const each of traced) {
+    if (each.hasRoutes || !each.place || level === 'exchange') continue
+    if (scope.region && each.place.region !== scope.region) continue
+    const key = level === 'region' ? each.place.region : each.place.country
+    yours.set(key, new Set([...(yours.get(key) ?? []), each.whose]))
   }
   const shown = level === 'country' && !allCountries ? rows.slice(0, COUNTRIES_AT_FIRST) : rows
   const viaColor = scope.upstream !== null ? (colors.get(scope.upstream) ?? 'var(--signal-none)') : null

@@ -15,6 +15,7 @@ import type {
 import { assess, effectiveRoutes, peerKey, takeBaseline } from './assess'
 import { collectorInfo, collectorName, peerPlace, type Place } from './collectors'
 import { agentChoices, homeCarriers, homeChanges, homeView, traceInto } from './home'
+import { learn } from './learn'
 import { LOOK_EVERY_MS, lookAtExchanges, offExchanges, originPresent } from './looking-glass'
 import { flattenPath } from './path'
 import { prefixWithin } from './prefix'
@@ -52,6 +53,9 @@ import {
  * The routes are read afresh from RIPEstat when monitoring starts, each time
  * the stream reconnects (it says nothing about what passed while it was
  * away), and every half hour besides, in case an update was missed.
+ *
+ * What is normal for each is taken from its first routes, and from then on
+ * learned from how it is carried (see learn.ts).
  */
 
 /** Asked to watch a prefix that is watched already: a 409, not a mistake in what was given. */
@@ -65,8 +69,12 @@ const PRUNE_EVERY_MS = 60 * 60 * 1000
 const SETTLE_MS = 1_500
 const ACTIVITY_HOURS = 24
 const ACTIVITY_SLICE_MS = 15 * 60 * 1000
-/** The updates a prefix's page lists: the newest of the day. */
-const UPDATES_LISTED = 300
+/**
+ * The updates a prefix's page lists: the newest of the day. Enough for every
+ * update of all but a busy day, so the bars are counted from the same updates
+ * the list shows, and narrow with it.
+ */
+const UPDATES_LISTED = 2000
 /** The most of a prefix's announced prefixes asked about at the exchanges: Alice is asked once for each. */
 const MOST_ASKED_AT_EXCHANGES = 8
 
@@ -419,6 +427,7 @@ class BgpMonitor {
   private async judge(watched: Watched): Promise<void> {
     if (!watched.synced) return
     const routes = [...watched.routes.values()]
+    await this.learnNormal(watched, routes)
     watched.status = assess(watched.prefix, routes, this.regionOf, this.offExchanges(watched))
     const prefix = watched.prefix.prefix
 
@@ -450,6 +459,28 @@ class BgpMonitor {
     this.traceLater(watched)
   }
 
+  /**
+   * Bring what is normal up to date with how it is carried now (see
+   * learn.ts), noting on its timeline anything learned or forgotten. Not
+   * while it looks hijacked or withdrawn: that is not a way of carrying it to
+   * learn from.
+   */
+  private async learnNormal(watched: Watched, routes: BgpRoute[]): Promise<void> {
+    const baseline = watched.prefix.baseline
+    if (!baseline || routes.length === 0 || watched.status.state === 'hijack' || watched.status.state === 'withdrawn') return
+    const at = Date.now()
+    const now = takeBaseline(routes, watched.prefix.prefix, watched.prefix.address, at)
+    const look = watched.exchanges
+    const carried = { ...now, directPeers: now.directPeers ?? [], exchanges: look && readWell(look) ? originPresent(look, baseline.origins) : undefined }
+    const { baseline: next, changed, reasons } = learn(baseline, carried, at)
+    if (!changed) return
+    watched.prefix = { ...watched.prefix, baseline: next }
+    await updateBgpPrefix(watched.prefix.id, { baseline: next }).catch(error => console.error('[BGP] Could not save what is normal:', error))
+    if (reasons.length === 0) return
+    console.log(`[BGP] ${watched.prefix.prefix}: ${reasons.join('; ')}`)
+    await recordBgpEvent(watched.prefix.id, at, watched.status.state, reasons, 'learned').catch(error => console.error('[BGP] Could not record a change:', error))
+  }
+
   // ─── Networks ───────────────────────────────────────────────────────────
 
   /** Your own network's name too: it may be in no path, so nothing else would ask for it. */
@@ -463,12 +494,17 @@ class BgpMonitor {
    * Once new countries are in, every prefix is judged again, as some of its
    * peers may now be placed in other regions.
    */
-  private lookUp(routes: Pick<BgpRoute, 'collector' | 'path'>[]): void {
+  private lookUp(routes: Pick<BgpRoute, 'collector' | 'path'>[], placing: readonly number[] = []): void {
     const wanted = new Map<number, { name: boolean; country: boolean }>()
     for (const route of routes) {
       for (const asn of route.path) if (!wanted.has(asn)) wanted.set(asn, { name: true, country: false })
       const peer = route.path[0]
       if (peer !== undefined && collectorInfo(route.collector).multihop && !this.countries.has(peer)) wanted.get(peer)!.country = true
+    }
+    // Your networks, to place your vantage points.
+    for (const asn of placing) {
+      if (this.countries.has(asn)) continue
+      wanted.set(asn, { name: wanted.get(asn)?.name ?? true, country: true })
     }
     void (async () => {
       const named = await knownAsNames([...wanted.keys()])
@@ -585,11 +621,16 @@ class BgpMonitor {
       path: update.path,
       previousPath: update.previousPath,
     }))
-    const home = await homeView(id, watched.prefix.prefix, watched.prefix.address, this.homeAsns, peers)
+    const home = await homeView(id, watched.prefix.prefix, watched.prefix.address, this.homeAsns, peers, asn => this.countries.get(asn))
     this.know(new Map(Object.entries(home.mine).map(([asn, whose]) => [Number(asn), whose])))
-    // The networks either side of where a trace probably crossed an exchange: named like the rest, and looked up if not yet.
-    const traced = home.vantages.flatMap(vantage => vantage.traces.flatMap(trace => (trace.likely ? [trace.likely.from, trace.likely.to] : [])))
-    if (traced.length > 0) this.lookUp([{ collector: '', path: traced }])
+    // The networks your traces passed through, and either side of where one
+    // probably crossed an exchange: named like the rest, and looked up if not
+    // yet; and where each of your networks is, to place it on the page.
+    const traced = home.vantages.flatMap(vantage => [
+      ...vantage.tracedPath,
+      ...vantage.traces.flatMap(trace => [...(trace.likely ? [trace.likely.from, trace.likely.to] : []), ...trace.hops.flatMap(hop => (hop.member ? [hop.member] : []))]),
+    ])
+    if (traced.length > 0) this.lookUp([{ collector: '', path: traced }], home.vantages.flatMap(vantage => vantage.asns))
     const asns = [
       ...new Set([
         ...routes.flatMap(route => route.path),
@@ -597,6 +638,7 @@ class BgpMonitor {
         ...updates.flatMap(update => [...(update.path ?? []), ...(update.previousPath ?? [])]),
         ...Object.keys(home.mine).map(Number),
         ...traced,
+        ...home.vantages.flatMap(vantage => vantage.tracedPath),
         ...(watched.exchanges?.views.flatMap(view => view.routes.flatMap(route => route.path)) ?? []),
       ]),
     ]
@@ -655,7 +697,10 @@ class BgpMonitor {
     return changed
   }
 
-  /** Take how it is carried now as normal: after a planned change of upstream, say. */
+  /**
+   * Take how it is carried now as normal at once, rather than learning it
+   * over a day: for a new network announcing it, which is never learned.
+   */
   async acceptAsNormal(id: string): Promise<BgpPrefixSummary | null> {
     const watched = this.watched.get(id)
     if (!watched) return null
@@ -667,6 +712,7 @@ class BgpMonitor {
     const baseline = look && readWell(look) ? { ...taken, exchanges: originPresent(look, taken.origins) } : taken
     await updateBgpPrefix(id, { baseline })
     watched.prefix = { ...watched.prefix, baseline }
+    await recordBgpEvent(id, Date.now(), watched.status.state, ['Taken as normal as it is carried now, including the networks announcing it'], 'learned').catch(() => {})
     await this.judge(watched)
     return this.summary(watched)
   }

@@ -82,6 +82,26 @@ export function isAddress(text: string): boolean {
   return parseAddress(text) !== null
 }
 
+/** The same address however it is written: 2001:DB8::1 and 2001:db8:0::1 alike. Null for anything that is not an address. */
+export function addressKey(text: string): string | null {
+  const parsed = parseAddress(text)
+  return parsed ? `${parsed.version}:${parsed.value.toString(16)}` : null
+}
+
+/**
+ * The /16 (IPv4) or /32 (IPv6) an address or prefix starts with, as a key:
+ * for finding which of many prefixes holds an address without trying each.
+ * Null for a prefix wider than that, or anything else.
+ */
+export function blockKey(text: string): string | null {
+  const parsed = text.includes('/') ? parsePrefix(text) : parseAddress(text)
+  if (!parsed) return null
+  const value = 'network' in parsed ? parsed.network : parsed.value
+  const block = parsed.version === 4 ? 16 : 32
+  if ('length' in parsed && parsed.length < block) return null
+  return `${parsed.version}:${(value >> BigInt(bits(parsed.version) - block)).toString(16)}`
+}
+
 export function isPrefix(text: string): boolean {
   return parsePrefix(text) !== null
 }

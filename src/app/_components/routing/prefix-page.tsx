@@ -1,14 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ArrowLeft, CheckCheck, CircleCheck, CircleMinus, CircleX, Database, Hourglass, Route, ShieldAlert, Shuffle, Trash2, X } from 'lucide-react'
+import { ArrowLeft, CircleCheck, CircleMinus, CircleX, Database, GraduationCap, Hourglass, Route, ShieldAlert, ShieldCheck, Shuffle, Trash2, X } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { MetricCard } from '@/components/arc/metric-card/metric-card'
-import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { Timeline, type TimelineEvent } from '@/components/arc/timeline/timeline'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useToast } from '@/components/notifications'
@@ -28,7 +27,8 @@ import { NetworkDialog } from './network-dialog'
 import { PathGraph } from './path-graph'
 import { PeerTable } from './peer-table'
 import { SeenFrom } from './seen-from'
-import { ago, asLabel, carrierLabel, SOURCE_NOTE, STATE_LABEL, STATE_TONE, viaLabel } from './state'
+import { PrefixSkeleton } from './skeleton'
+import { ago, asLabel, carrierLabel, SOURCE_NOTE, STATE_LABEL, STATE_TONE, viaLabel, yoursOf } from './state'
 import { upstreamColors, UpstreamMix } from './upstream-mix'
 import { UpdateList } from './update-list'
 import { useBgpPrefix } from './use-bgp'
@@ -37,6 +37,10 @@ import { useBgpPrefix } from './use-bgp'
  * One watched prefix in full: how it stands, where in the world it is seen,
  * which upstreams carry it, the paths drawn, what changed and when, the
  * ClearPing targets inside it, and every collector peer's route.
+ *
+ * What is normal is learned (see learn.ts): there is nothing to accept after
+ * a planned change. Only a new network announcing it, which is never learned,
+ * can be taken as normal here, from the hijack warning.
  */
 
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
@@ -191,6 +195,9 @@ export function PrefixPage({
     let was: BgpState | null = null
     return byTime.map(event => {
       const list = event.reasons.length > 1 ? <ul className="list-disc space-y-1 pl-4">{event.reasons.slice(1).map(reason => <li key={reason}>{reason}</li>)}</ul> : undefined
+      if (event.kind === 'learned') {
+        return { id: String(event.id), at: event.at, title: 'Learned what is normal', meta: event.reasons[0], detail: list, tone: 'neutral', icon: <GraduationCap {...ICON} /> }
+      }
       if (event.kind === 'home') {
         const direct = event.reasons.every(reason => reason.includes('now reaches it directly'))
         return { id: String(event.id), at: event.at, title: direct ? 'Your route is direct again' : 'Your route changed', meta: event.reasons[0], detail: list, tone: direct ? 'success' : 'danger', icon: <Route {...ICON} /> }
@@ -214,7 +221,7 @@ export function PrefixPage({
       const body = await response.json().catch(() => null)
       if (!response.ok) reportError('Could not take it as normal', body?.error ?? `Server responded ${response.status}`)
       else {
-        notify({ tone: 'success', title: 'Taken as normal', detail: 'Its upstreams and peers now are what it is judged against.' })
+        notify({ tone: 'success', title: 'Taken as normal', detail: 'The networks announcing it now are its own from here on.' })
         await reload()
       }
     } catch (error) {
@@ -253,7 +260,7 @@ export function PrefixPage({
     return (
       <div className={PANE}>
         {back}
-        <div className={PANEL}><Skeleton label="Loading the prefix" lines={6} /></div>
+        <PrefixSkeleton />
       </div>
     )
   }
@@ -270,15 +277,28 @@ export function PrefixPage({
   const placed = detail.peers.filter(peer => inPlace(peer, scope))
   const scoped = detail.peers.filter(peer => inScope(peer, scope))
   const where = placeLabel(scope)
-  // Yours: the networks of this server and your probe agents, marked wherever they show.
-  const mine = detail.home.mine
+  // Yours: the networks of this server and your probe agents, marked wherever
+  // they show; and where their traffic went, for those whose network shares
+  // no routes with RIS, from where their network is.
+  const { mine, traced } = yoursOf(detail.home.vantages)
+  const tracedHere = traced.filter(each => (!scope.region && !scope.country) || (each.place !== null && inPlace(each.place, scope)))
   const yourWays = new Map<number, string[]>()
+  const markWay = (way: number, said: string) => {
+    const held = yourWays.get(way) ?? []
+    if (!held.includes(said)) yourWays.set(way, [...held, said])
+  }
   for (const peer of placed) {
     const whose = mine[peer.peerAsn]
     const way = upstreamOfPeer(peer)
-    if (whose === undefined || way === null) continue
-    const held = yourWays.get(way) ?? []
-    if (!held.includes(whose)) yourWays.set(way, [...held, whose])
+    if (whose !== undefined && way !== null) markWay(way, `${whose}’s route`)
+  }
+  for (const each of tracedHere) {
+    const origins = status.origins
+    if (each.hasRoutes || each.path.length === 0) continue
+    // Its upstream: the network before the origin, if the trace got that far, or the last it reached.
+    const reached = origins.includes(each.path[each.path.length - 1])
+    const way = reached ? (each.path.length === 2 ? BGP_DIRECT : each.path[each.path.length - 2]) : each.path[each.path.length - 1]
+    if (status.upstreams.some(upstream => upstream.asn === way)) markWay(way, `${each.whose}’s traffic`)
   }
   // The exchanges that matter to this prefix, found from what their collectors
   // hold: those it is offered at, or was when normal was taken. An exchange
@@ -293,8 +313,7 @@ export function PrefixPage({
   // routes through the upstream chosen (before or after), in the bar chosen.
   const peerAt = new Map(detail.peers.map(peer => [`${peer.collector}|${peer.peer}`, peer]))
   const sliceEnd = slice === null ? null : slice + detail.activitySliceMs
-  const scopedUpdates = detail.updates.filter(update => {
-    if (slice !== null && (update.at < slice || update.at >= sliceEnd!)) return false
+  const dayUpdates = detail.updates.filter(update => {
     if (scope.region !== null || scope.country !== null) {
       const peer = peerAt.get(`${update.collector}|${update.peer}`)
       if (!peer || !inPlace(peer, scope)) return false
@@ -306,6 +325,18 @@ export function PrefixPage({
     }
     return true
   })
+  const scopedUpdates = slice === null ? dayUpdates : dayUpdates.filter(update => update.at >= slice && update.at < sliceEnd!)
+  // The bars counted from the same updates as the list, so a bar never holds
+  // one the list then leaves out: when every update of the day is listed.
+  // Past the most the page is sent, the whole day's counts, unnarrowed.
+  const narrowed = scope.region !== null || scope.country !== null || scope.upstream !== null
+  const allListed = detail.updates.length >= updates
+  const activity = allListed
+    ? detail.activity.map(each => {
+        const inside = dayUpdates.filter(update => update.at >= each.start && update.at < each.start + detail.activitySliceMs)
+        return { ...each, announcements: inside.filter(update => update.kind === 'announce').length, withdrawals: inside.filter(update => update.kind === 'withdraw').length }
+      })
+    : detail.activity
 
   return (
     <div className={PANE}>
@@ -334,14 +365,6 @@ export function PrefixPage({
         </div>
         {!readOnly && (
           <div className="flex flex-wrap items-center gap-2">
-            <Tooltip content="Take how it is carried now as normal: after a planned change of upstream, say. What it is judged against starts again from here.">
-              <span>
-                <Button variant="secondary" onClick={() => void acceptNormal()} loading={accepting} disabled={status.state === 'withdrawn'}>
-                  <CheckCheck {...ICON} />
-                  Take as normal
-                </Button>
-              </span>
-            </Tooltip>
             <ConfirmMorph
               label="Stop watching"
               icon={<Trash2 {...ICON} />}
@@ -357,7 +380,20 @@ export function PrefixPage({
 
       {troubled && (
         <Alert tone={status.state === 'diverted' || status.state === 'partial' ? 'warning' : 'danger'} title={status.reasons[0]}>
-          {status.reasons.length > 1 ? status.reasons.slice(1).join('. ') : 'Compared with how it was carried when normal was taken.'}
+          <p>
+            {status.reasons.length > 1 ? `${status.reasons.slice(1).join('. ')}. ` : ''}
+            {status.state === 'hijack'
+              ? 'A new network announcing it is never learned as normal: if it is yours, or one you moved it to, say so.'
+              : 'Compared with how it is usually carried. A change that lasts a day is learned as normal.'}
+          </p>
+          {status.state === 'hijack' && !readOnly && (
+            <div className="mt-3">
+              <Button variant="secondary" size="sm" onClick={() => void acceptNormal()} loading={accepting}>
+                <ShieldCheck {...ICON} />
+                It is ours: take it as normal
+              </Button>
+            </div>
+          )}
         </Alert>
       )}
 
@@ -370,7 +406,7 @@ export function PrefixPage({
         <MetricCard
           label="Upstreams"
           value={status.upstreams.length}
-          context={usual.length === status.upstreams.length ? 'all of them usual' : `${status.upstreams.length - usual.length} not seen when normal was taken`}
+          context={usual.length === status.upstreams.length ? 'all of them usual' : `${status.upstreams.length - usual.length} not usual yet`}
         />
         <MetricCard
           label="Regions"
@@ -413,7 +449,7 @@ export function PrefixPage({
 
       <div className="grid gap-4 @5xl/main:grid-cols-2 @2xl/main:gap-6">
         <Panel title="Where it is seen" note={scope.upstream !== null ? `Peers, and those ${viaLabel(scope.upstream)}` : 'Collector peers, by where they are'}>
-          <SeenFrom peers={detail.peers} scope={scope} onScope={setScope} colors={colors} names={names} mine={mine} />
+          <SeenFrom peers={detail.peers} scope={scope} onScope={setScope} colors={colors} names={names} mine={mine} traced={traced} />
         </Panel>
         <Panel title="Who carries it" note={`The network before the origin, in ${where}`}>
           <UpstreamMix
@@ -444,13 +480,17 @@ export function PrefixPage({
                   )
           }
           mine={mine}
+          traced={tracedHere}
           byCountry={scope.region !== null}
         />
       </Panel>
 
-      <Panel title="Activity" note={`BGP updates from RIS Live over 24 hours, in ${where}. Choose a bar to see just those`}>
+      <Panel
+        title="Activity"
+        note={`BGP updates from RIS Live over 24 hours, ${narrowed && !allListed ? `the bars everywhere, the list in ${where}` : `in ${where}`}. Choose a bar to see just those`}
+      >
         <div className="space-y-4">
-          <ActivityStrip activity={detail.activity} sliceMs={detail.activitySliceMs} selected={slice} onSelect={setSlice} />
+          <ActivityStrip activity={activity} sliceMs={detail.activitySliceMs} selected={slice} onSelect={setSlice} />
           <UpdateList
             updates={scopedUpdates}
             prefix={detail.prefix}
@@ -459,6 +499,8 @@ export function PrefixPage({
             sliceLabel={slice === null ? null : `${clock(slice)} to ${clock(sliceEnd!)}`}
             onClearSlice={() => setSlice(null)}
             mine={mine}
+            peers={detail.peers}
+            now={fetchedAt}
           />
         </div>
       </Panel>

@@ -22,6 +22,8 @@ const ENABLED_KEY = 'bgp.enabled'
 const HOME_KEY = 'bgp.home_asns'
 const EXCLUDED_AGENTS_KEY = 'bgp.excluded_agents'
 const EXCHANGES_KEY = 'bgp.exchanges'
+/** IXPDB's exchanges and their members' addresses (see ixpdb.ts). */
+export const IXPDB_KEY = 'bgp.ixpdb'
 
 function run(database: Database, sql: string, params: unknown[] = []): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -95,9 +97,12 @@ export async function setExcludedAgents(ids: readonly string[]): Promise<void> {
 
 // ─── Exchanges ──────────────────────────────────────────────────────────────
 
-/** The exchanges' peering LANs as last read from PeeringDB, and when: kept so a restart need not read them again. */
-export async function readExchangeCopy<T>(): Promise<{ at: number; lans: T } | null> {
-  const [row] = await all<{ value: string }>(await getDatabase(), 'SELECT value FROM settings WHERE key = ?', [EXCHANGES_KEY])
+/**
+ * The exchanges' peering LANs as last read from PeeringDB, and when: kept so a
+ * restart need not read them again. With `key`, another such copy: IXPDB's.
+ */
+export async function readExchangeCopy<T>(key = EXCHANGES_KEY): Promise<{ at: number; lans: T } | null> {
+  const [row] = await all<{ value: string }>(await getDatabase(), 'SELECT value FROM settings WHERE key = ?', [key])
   try {
     return row ? (JSON.parse(row.value) as { at: number; lans: T }) : null
   } catch {
@@ -105,11 +110,11 @@ export async function readExchangeCopy<T>(): Promise<{ at: number; lans: T } | n
   }
 }
 
-export async function saveExchangeCopy<T>(at: number, lans: T): Promise<void> {
+export async function saveExchangeCopy<T>(at: number, lans: T, key = EXCHANGES_KEY): Promise<void> {
   await run(
     await getDatabase(),
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-    [EXCHANGES_KEY, JSON.stringify({ at, lans })]
+    [key, JSON.stringify({ at, lans })]
   )
 }
 

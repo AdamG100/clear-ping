@@ -5,7 +5,7 @@ import { BGP_DIRECT, BGP_REGIONS, type BgpPeerRoute, type BgpRegion, type BgpUps
 import { countryName } from '@/lib/bgp/countries'
 import { hops, upstreamOf } from '@/lib/bgp/path'
 import { cn } from '@/lib/utils'
-import { asLabel, whoseLabel } from './state'
+import { asLabel, type YourTrace } from './state'
 
 /**
  * The way the world reaches the prefix, as one picture: the regions the
@@ -13,6 +13,10 @@ import { asLabel, whoseLabel } from './state'
  * comes through, and the network announcing it. A band is as thick as the
  * peers that take it and has the colour of its upstream, so a move from one
  * upstream to another shows as a band changing colour across the regions.
+ *
+ * Yours are drawn over the bands as dashed lines: your networks' routes where
+ * they share them with RIS, and otherwise the way your traffic went, by
+ * traceroute, from where your network is.
  */
 
 const WIDTH = 1000
@@ -84,6 +88,7 @@ export function PathGraph({
   onSelect,
   onPlace,
   mine = {},
+  traced = [],
   byCountry = false,
 }: {
   peers: BgpPeerRoute[]
@@ -97,6 +102,8 @@ export function PathGraph({
   onPlace?: (place: string) => void
   /** Your networks, and whose each is: their routes are drawn over the bands. */
   mine?: Record<number, string>
+  /** Where your vantage points' traffic went: drawn for those whose network has no route here to draw. */
+  traced?: YourTrace[]
   /** Start from the peers' countries rather than their regions: for a region chosen. */
   byCountry?: boolean
 }) {
@@ -130,7 +137,7 @@ export function PathGraph({
         neighbour: path[Math.max(0, path.length - 3)],
         upstream,
         origin: path[path.length - 1],
-        whose: each.peerAsn in mine ? whoseLabel(mine[each.peerAsn]) : null,
+        whose: each.peerAsn in mine ? mine[each.peerAsn] : null,
       })
     }
 
@@ -182,6 +189,39 @@ export function PathGraph({
       link(upstreamId, `3:${flow.origin}`, flow.upstream)
     }
 
+    // Your traffic, for those whose network has no route drawn above: its own
+    // line through the nodes it passed, those not drawn yet added. A trace
+    // that stopped short of the origin is taken on to it when there is one.
+    const drawn = new Set(flows.flatMap(flow => (flow.whose ? flow.whose.split(', ') : [])))
+    const origins = [...new Set(flows.map(flow => flow.origin))]
+    for (const each of traced) {
+      if (drawn.has(each.whose) || each.path.length === 0) continue
+      const ends = origins.includes(each.path[each.path.length - 1])
+      const path = ends ? each.path : origins.length === 1 ? [...each.path, origins[0]] : null
+      if (!path || path.length < 2) continue
+      whose = `${each.whose}’s traffic`
+      const upstream = path.length === 2 ? BGP_DIRECT : path[path.length - 2]
+      const ids = [
+        each.place ? `0:${byCountry ? each.place.country : each.place.region}` : null,
+        `1:${path[Math.max(0, path.length - 3)]}`,
+        `2:${upstream}`,
+        `3:${path[path.length - 1]}`,
+      ]
+      if (each.place && !nodes.has(ids[0]!)) {
+        add({ id: ids[0]!, column: 0, label: byCountry ? countryName(each.place.country) : REGION_SHORT[each.place.region], detail: '', peers: 0 })
+      }
+      if (!nodes.has(ids[1]!)) add(asNode(path[Math.max(0, path.length - 3)], 1, 0, names))
+      if (!nodes.has(ids[2]!)) add({ ...asNode(upstream, 2, 0, names), color: colors.get(upstream) })
+      if (!nodes.has(ids[3]!)) add(asNode(path[path.length - 1], 3, 0, names))
+      const along = ids.filter((id): id is string => id !== null)
+      for (let index = 1; index < along.length; index++) {
+        const key = `${along[index - 1]}>${along[index]}`
+        myLinks.set(key, new Set([...(myLinks.get(key) ?? []), whose]))
+      }
+      for (const id of along) myNodes.set(id, new Set([...(myNodes.get(id) ?? []), whose]))
+    }
+    whose = null
+
     // Regions in their usual order; countries, and every other column, biggest first.
     const columns = [0, 1, 2, 3].map(column =>
       [...nodes.values()]
@@ -193,7 +233,7 @@ export function PathGraph({
         )
     )
     for (const node of [...columns[0], ...columns[1].filter(each => each.id.endsWith(`:${OTHER}`))]) {
-      node.detail = String(node.peers)
+      node.detail = node.peers > 0 ? String(node.peers) : ''
     }
     const rows = Math.max(1, ...columns.map(column => column.length))
     const height = TOP * 2 + rows * ROW
@@ -204,11 +244,11 @@ export function PathGraph({
       column.forEach((node, row) => position.set(node.id, { x, y: offset + row * ROW + (ROW - NODE_HEIGHT) / 2 }))
     })
     // Everyone drawn, "Your ISP" first: each keeps a line of its own, in the order they are listed here.
-    const owners = [...new Set(flows.flatMap(flow => (flow.whose ? [flow.whose] : [])))].sort(
-      (a, b) => Number(b === whoseLabel('This server')) - Number(a === whoseLabel('This server')) || a.localeCompare(b)
+    const owners = [...new Set([...myLinks.values()].flatMap(each => [...each]))].sort(
+      (a, b) => Number(b.startsWith('Your ISP')) - Number(a.startsWith('Your ISP')) || a.localeCompare(b)
     )
     return { nodes: [...nodes.values()], edges: [...edges.values()], position, height, flows: flows.length, myLinks, myNodes, owners }
-  }, [peers, upstreams, names, colors, byCountry, mine])
+  }, [peers, upstreams, names, colors, byCountry, mine, traced])
 
   if (graph.flows === 0) {
     return <p className="text-sm text-muted-foreground">No collector peer has a route to it now, so there is no path to draw.</p>
@@ -373,7 +413,7 @@ export function PathGraph({
                   </g>
                 )
               })()}
-              <title>{`${node.label}${node.detail ? ` ${node.detail}` : ''}: ${node.peers} peer${node.peers === 1 ? '' : 's'}${node.unusual ? ', not one of its usual upstreams' : ''}${graph.myNodes.has(node.id) ? `. The route of ${[...graph.myNodes.get(node.id)!].join(' and ')} passes through here` : ''}${action ? `. ${what}` : ''}`}</title>
+              <title>{`${node.label}${node.detail ? ` ${node.detail}` : ''}: ${node.peers > 0 ? `${node.peers} peer${node.peers === 1 ? '' : 's'}` : 'no collector peer'}${node.unusual ? ', not one of its usual upstreams' : ''}${graph.myNodes.has(node.id) ? `. Yours through here: ${[...graph.myNodes.get(node.id)!].join(' and ')}` : ''}${action ? `. ${what}` : ''}`}</title>
             </g>
           )
         })}
@@ -383,7 +423,7 @@ export function PathGraph({
           {graph.owners.map((owner, index) => {
             const style = ownerLine(index)
             const networks = Object.entries(mine)
-              .filter(([, whose]) => whoseLabel(whose) === owner)
+              .filter(([, whose]) => whose === owner)
               .map(([asn]) => asLabel(Number(asn), names))
             return (
               <li key={owner} className="flex items-center gap-2">

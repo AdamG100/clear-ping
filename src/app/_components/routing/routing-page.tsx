@@ -7,7 +7,6 @@ import { Button } from '@/components/arc/button/button'
 import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { Input } from '@/components/arc/input/input'
-import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useToast } from '@/components/notifications'
 import { addressIn, isAddress, isPublicAddress } from '@/lib/bgp/prefix'
@@ -16,6 +15,7 @@ import type { GroupOrder, Target } from '@/types/probe'
 import { PANE, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
 import { TargetChecklist } from '../sidebar/target-checklist'
 import { RegionBars } from './region-visibility'
+import { RoutingSkeleton } from './skeleton'
 import { asLabel, ago, CONNECTION_LABEL, CONNECTION_TONE, SOURCE_NOTE, STATE_COLOR, STATE_LABEL, STATE_TONE } from './state'
 import { UpstreamBar } from './upstream-mix'
 import { NetworkDialog } from './network-dialog'
@@ -375,7 +375,7 @@ export function RoutingPage({
       </header>
 
       {!overview ? (
-        <div className={PANEL}><Skeleton label="Loading BGP monitoring" lines={4} /></div>
+        <RoutingSkeleton />
       ) : !overview.enabled ? (
         <Intro onTurnOn={onTurnOn} />
       ) : (

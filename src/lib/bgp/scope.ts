@@ -17,7 +17,7 @@ export interface Scope {
 
 export const WORLD: Scope = { region: null, country: null, upstream: null }
 
-export function inPlace(peer: BgpPeerRoute, scope: Scope): boolean {
+export function inPlace(peer: Pick<BgpPeerRoute, 'region' | 'country'>, scope: Scope): boolean {
   return (scope.region === null || peer.region === scope.region) && (scope.country === null || peer.country === scope.country)
 }
 

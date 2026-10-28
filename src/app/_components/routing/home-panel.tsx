@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useMemo, useState } from 'react'
-import { Activity, ArrowRightLeft, Network, RadioTower, Route, Server, Settings2 } from 'lucide-react'
+import { Activity, ArrowRightLeft, Check, Network, RadioTower, Route, Server, Settings2 } from 'lucide-react'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { Timeline, type TimelineEvent } from '@/components/arc/timeline/timeline'
@@ -11,7 +11,7 @@ import { hops, upstreamOf } from '@/lib/bgp/path'
 import { displayLocale, displayTimeZone } from '@/lib/time-zone'
 import { BGP_DIRECT, type BgpCrossingRun, type BgpHomeTrace, type BgpPrefixDetail, type BgpUpdate, type BgpVantage } from '@/types/bgp'
 import { cn } from '@/lib/utils'
-import { asLabel, whoseLabel } from './state'
+import { asLabel, vantageLabel } from './state'
 
 /**
  * "From your networks": what the rest of the page cannot say, from each place
@@ -19,6 +19,9 @@ import { asLabel, whoseLabel } from './state'
  * the prefix, where that network shares them with RIS; and which exchange its
  * traffic actually crosses, by traceroute, which tells JINX from NAPAfrica
  * where BGP cannot.
+ *
+ * Which probe agents are among them is chosen here: one left out is not
+ * traced from, and its network is not marked across the page.
  */
 
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
@@ -35,7 +38,8 @@ function oneOf(names: readonly string[]): string {
  */
 function crossingSaid(trace: BgpHomeTrace, known: boolean, names: Record<number, string>): { title: string; detail: string | null; color: string } {
   if (trace.crossing) {
-    return { title: `Crosses ${trace.crossing.name}`, detail: `at ${trace.crossing.address}, hop ${trace.crossing.hop}`, color: 'var(--signal-perfect)' }
+    const into = trace.crossing.member ? `, into ${asLabel(trace.crossing.member, names)}` : ''
+    return { title: `Crosses ${trace.crossing.name}`, detail: `at ${trace.crossing.address}, hop ${trace.crossing.hop}${into}`, color: 'var(--signal-perfect)' }
   }
   if (!known) return { title: 'Exchange not known', detail: 'PeeringDB could not be read', color: 'var(--signal-none)' }
   if (trace.likely) {
@@ -66,7 +70,7 @@ function targetSaid(trace: BgpHomeTrace): string {
   return trace.targetName && trace.targetName !== trace.address ? `${trace.targetName} (${trace.address})` : trace.address
 }
 
-function Hops({ trace }: { trace: BgpHomeTrace }) {
+function Hops({ trace, names }: { trace: BgpHomeTrace; names: Record<number, string> }) {
   return (
     <ol className="space-y-0.5 font-mono text-[11px]">
       {trace.hops.map(hop => (
@@ -75,6 +79,8 @@ function Hops({ trace }: { trace: BgpHomeTrace }) {
           <span className="min-w-0 flex-1 truncate">
             {hop.address ?? '*'}
             {hop.hostname ? <span className="font-sans"> {hop.hostname}</span> : null}
+            {/* Whose router answered on the exchange, by IXPDB. */}
+            {hop.member ? <span className="font-sans" title={asLabel(hop.member, names)}> AS{hop.member}{names[hop.member] ? ` ${names[hop.member]}` : ''}</span> : null}
           </span>
           {hop.exchange && <Badge size="sm" tone="success">{hop.exchange}</Badge>}
           <span className="w-14 shrink-0 text-right">{hop.rtt !== null ? `${hop.rtt.toFixed(1)} ms` : ''}</span>
@@ -121,7 +127,7 @@ function TraceLine({ trace, known, names }: { trace: BgpHomeTrace; known: boolea
           {open ? 'Hide hops' : `Show ${trace.hops.length} hops`}
         </button>
       )}
-      {open && <Hops trace={trace} />}
+      {open && <Hops trace={trace} names={names} />}
     </li>
   )
 }
@@ -179,7 +185,7 @@ function moments(
         meta: [`To ${targetSaid(trace)}`, failed ? trace.error : said.detail, !failed && !trace.reached ? 'did not reach it' : null, !failed ? trace.error && `the newest failed: ${trace.error}` : null]
           .filter(Boolean)
           .join(' · '),
-        detail: failed ? undefined : <Hops trace={trace} />,
+        detail: failed ? undefined : <Hops trace={trace} names={names} />,
         tone: failed ? 'danger' : trace.crossing ? 'success' : 'neutral',
         icon: <Route {...ICON} />,
       })
@@ -314,6 +320,7 @@ function Vantage({
 }) {
   const network = vantage.asns.map(asn => asLabel(asn, names)).join(', ')
   const lost = vantage.routes.filter(peer => !peer.route)
+  const tracedPath = vantage.tracedPath ?? []
   return (
     <article className="min-w-0 space-y-4 rounded-2xl border border-primary/30 bg-background/40 p-4">
       <header className="flex items-start gap-3">
@@ -323,7 +330,7 @@ function Vantage({
         <div className="min-w-0">
           <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
             {vantage.kind === 'server' ? 'This server' : `Probe agent: ${vantage.name}`}
-            <Badge size="sm" tone="info">{whoseLabel(vantage.kind === 'server' ? 'This server' : vantage.name)}</Badge>
+            <Badge size="sm" tone="info">{vantageLabel(vantage)}</Badge>
             {flapping.length > 0 && <Badge size="sm" tone="warning">Flapping</Badge>}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -339,11 +346,20 @@ function Vantage({
             </p>
           )}
           {network && vantage.routes.length === 0 && (
-            <p className="mt-0.5 text-xs text-muted-foreground">It does not share its routes with RIPE RIS&apos;s collectors, so only its traces show here.</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              It does not share its routes with RIPE RIS&apos;s collectors, so its traffic&apos;s way in, by trace, is what is drawn across
+              the page{vantage.place ? '' : ' (placed once where its network is registered is looked up)'}.
+            </p>
+          )}
+          {tracedPath.length > 1 && (
+            <div className="mt-1.5">
+              <p className="text-[11px] text-muted-foreground">Its traffic&apos;s way in, by its newest trace</p>
+              <Path path={tracedPath} names={names} />
+            </div>
           )}
           {lost.length > 0 && (
             <p className="mt-0.5 text-xs text-signal-critical">
-              No route at {lost.map(peer => peer.location).join(', ')}: it reached it there when normal was taken, and no longer does.
+              No route at {lost.map(peer => peer.location).join(', ')}: it usually reaches it there, and no longer does.
             </p>
           )}
           {flapping.length > 0 && (
@@ -402,6 +418,23 @@ export function HomePanel({
   )
   const flapping = [...seen.values()].some(each => each.flapping.length > 0)
   const agents = home.vantages.filter(each => each.kind === 'probe-agent').length
+  const [choosing, setChoosing] = useState<string | null>(null)
+
+  /** Put a probe agent in Routing, or take it out: it is traced from, and marked, or not. */
+  const choose = async (id: string, included: boolean) => {
+    setChoosing(id)
+    try {
+      const left = home.agents.filter(agent => (agent.id === id ? !included : !agent.included)).map(agent => agent.id)
+      const response = await fetch('/api/bgp', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ excludedAgents: left }) })
+      const body = await response.json().catch(() => null)
+      if (!response.ok) reportError('Could not change the probe agents in Routing', body?.error ?? `Server responded ${response.status}`)
+      else await onTraced()
+    } catch (error) {
+      reportError('Could not change the probe agents in Routing', error)
+    } finally {
+      setChoosing(null)
+    }
+  }
 
   const traceNow = async () => {
     setTracing(true)
@@ -453,6 +486,47 @@ export function HomePanel({
           </div>
         )}
       </div>
+
+      {home.agents.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Probe agents in Routing">
+          <span className="text-xs text-muted-foreground">{readOnly ? 'Looking from' : 'Looking from, choose which'}:</span>
+          <span className="flex items-center gap-1.5 rounded-full border border-primary/50 bg-primary/15 py-0.5 pl-2 pr-2.5 text-xs">
+            <Server size={12} strokeWidth={1.75} aria-hidden="true" />
+            This server
+          </span>
+          {home.agents.map(agent =>
+            readOnly ? (
+              <span
+                key={agent.id}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full border py-0.5 pl-2 pr-2.5 text-xs',
+                  agent.included ? 'border-primary/50 bg-primary/15' : 'border-border text-muted-foreground line-through'
+                )}
+              >
+                <RadioTower size={12} strokeWidth={1.75} aria-hidden="true" />
+                {agent.name}
+              </span>
+            ) : (
+              <button
+                key={agent.id}
+                type="button"
+                aria-pressed={agent.included}
+                disabled={choosing !== null}
+                onClick={() => void choose(agent.id, !agent.included)}
+                title={agent.included ? `Leave ${agent.name} out: not traced from, nor marked on the page` : `Look from ${agent.name} too`}
+                className={cn(
+                  'flex cursor-pointer items-center gap-1.5 rounded-full border py-0.5 pl-2 pr-2.5 text-xs transition-colors disabled:cursor-wait',
+                  agent.included ? 'border-primary/50 bg-primary/15 hover:bg-primary/25' : 'border-border text-muted-foreground hover:bg-muted',
+                  choosing === agent.id && 'opacity-60'
+                )}
+              >
+                {agent.included ? <Check size={12} strokeWidth={2} aria-hidden="true" /> : <RadioTower size={12} strokeWidth={1.75} aria-hidden="true" />}
+                {agent.name}
+              </button>
+            )
+          )}
+        </div>
+      )}
 
       <div className={cn('grid gap-4', home.vantages.length > 1 && '@4xl/main:grid-cols-2')}>
         {home.vantages.map(vantage => (

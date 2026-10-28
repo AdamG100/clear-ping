@@ -27,7 +27,9 @@ ClearPing asks nothing of RIPE, PeeringDB or the exchanges' looking glasses.
 - **Your traffic:** traceroutes into the prefix from this server and from each
   probe agent. Each hop's address is checked against the exchanges' peering
   LANs from PeeringDB (peeringdb.com), which names the exchange the traffic
-  crosses.
+  crosses, and against the members' addresses on the exchanges from IXPDB
+  (ixpdb.euro-ix.net, Euro-IX's database, built from the exchanges' own member
+  lists), which names the network the traffic went into there.
 
 Nothing is asked of your routers, and nothing needs setting up on them.
 
@@ -53,7 +55,7 @@ then:
   then), and takes how it is carried when they arrive as **normal**: the networks announcing it, the upstreams it is
   reached through, the peers that reach it directly, the peers that see it,
   the prefixes announced within it, and the exchanges whose route collectors
-  have it from the origin itself;
+  have it from the origin itself. From then on normal is learned (below);
 - follows every change as it happens;
 - reads the routes afresh whenever the connection to RIS Live comes back, and
   every half hour, so nothing missed while it was down stays wrong.
@@ -83,23 +85,49 @@ exchanges**, and a traceroute, in **From your networks**.
 
 | State | When |
 |---|---|
-| Normal | Carried as it was when normal was taken. |
+| Normal | Carried as it usually is. |
 | Diverted | A fifth or more of the peers reach it through upstreams it was not reached through before; or, at one collector, half or more of the peers that reached it directly now go through an upstream ("Off the exchange at Johannesburg, NAPAfrica"); or the origin no longer offers it itself at an exchange whose route collector had it from the origin ("Off the exchange at JINX"); or a more-specific of it has appeared. |
 | Partly withdrawn | Fewer than 80% of the peers that saw it still do. The page says in which regions. |
 | Withdrawn | Fewer than 10% do. |
 | Suspected hijack | Two or more peers see another network announcing it. |
 | Learning | No routes were seen when it was added, so there is no normal yet. |
 
-After a planned change, such as a new upstream, **Take as normal** on the
-prefix's page makes how it is carried now the normal it is judged against.
+## Normal is learned
+
+Normal follows how the prefix is carried, slowly, so there is nothing to
+accept after a planned change:
+
+- **Something new** (an upstream, a more-specific, a peer that sees it or
+  reaches it directly, an exchange the origin offers it at) is normal once it
+  has been there for a day without a break. A diversion that lasts a day is
+  then how the prefix is carried; one that ends sooner is flagged for as long
+  as it lasted. A break starts the day again.
+- **Something normal that has gone** is forgotten after a week away: an
+  upstream dropped, a collector's session closed. Until then its return is no
+  news.
+- **The networks announcing it** are never learned, as a new one is what a
+  hijack looks like. When one is yours, or one you moved the prefix to, **It
+  is ours: take it as normal** in the warning takes how it is carried now as
+  normal at once.
+- Nothing is learned while it looks hijacked or withdrawn.
+
+Each time something is learned or forgotten, What changed says what ("AS64510
+is one of its usual upstreams now: it has carried it for a day"). What is
+waiting to be learned is kept with the prefix, so a restart does not start the
+wait again.
 
 ## The prefix's page
 
 - **From your networks:** a card for each place you look from: this server,
   and each of your probe agents, with a timeline of what was seen from there,
-  newest first, by day.
+  newest first, by day. Above them, a chip for each probe agent says which are
+  looked from: choose one to leave it out (it is no longer traced from, and its
+  network is no longer marked) or to take it back in. Every probe agent is in
+  until left out, one added later too.
   - **Its network:** set for this server, or found from its traces (the
     network of the first hop on the internet).
+  - **Its traffic's way in:** the networks its newest trace passed through, its
+    own first.
   - **Its network's routes:** the routes that network shares with RIS's
     collectors, each "Directly connected" or "Through" an upstream, with where
     it was seen, from when it was first seen; and every time one of them
@@ -112,7 +140,8 @@ prefix's page makes how it is carried now the normal it is judged against.
     of your targets inside the prefix (or, with none, to an address in it), as
     one entry saying the exchange they crossed ("Crosses JINX to all 4 addresses", or
     "Crosses NAPAfrica IX Johannesburg to 3 addresses; crosses JINX to 1");
-    open it for each address and its hops. Below it, each time the traffic
+    open it for each address and its hops. A hop on an exchange is named with
+    the member whose address it is, by IXPDB: where the traffic went next. Below it, each time the traffic
     began crossing somewhere else ("Changed to JINX, was NAPAfrica IX
     Johannesburg"), one entry however many addresses changed together. An
     address that keeps going back and forth, as traffic spread over two ways
@@ -122,9 +151,9 @@ prefix's page makes how it is carried now the normal it is judged against.
     address are kept. A hop on an exchange's peering LAN is a
     sure crossing. Many routers answer a traceroute from another of their
     addresses, though, so a crossing can leave no hop on the LAN: then, where
-    the trace passes from one network to the next and PeeringDB lists both as
-    members of an exchange, it says "Probably crosses" that exchange (or the
-    ones they share). Two members can also be joined by a private link, hence
+    the trace passes from one network to the next and PeeringDB or IXPDB
+    lists both as members of an exchange, it says "Probably crosses" that
+    exchange (or the ones they share). Two members can also be joined by a private link, hence
     probably. Without PeeringDB it says the exchange is not known rather than
     that there is none.
   - **When it is traced:** whenever how the prefix stands changes, whenever a
@@ -143,17 +172,18 @@ prefix's page makes how it is carried now the normal it is judged against.
   or not at all; and the members that offer it, each with its path. An
   exchange the origin offered it at when normal was taken, and no longer does,
   is marked "Origin gone from here".
-- **Your routes, across the page:** your networks' routes are marked by whose
-  they are, "Your ISP" for this server's network and each probe agent by name,
-  in Where it is seen, Who carries it, the paths (each drawn as a
-  dashed line over the bands, "Your ISP" in the text colour and each probe
-  agent in a colour and dash of its own, with a key beneath), the updates and
-  the collector peers, which can be filtered to your networks.
-- **Which probe agents:** every probe agent is a vantage point in Routing, and
-  one added later joins them. Under "Set your network" (or "Change") untick
-  any to leave it out: it is no longer traced from, and its network is no
-  longer marked. "Add a probe agent", beside it on a prefix's page, opens
-  Settings at Probe agents (for an admin).
+- **Yours, across the page:** your networks' routes are marked by whose they
+  are, "Your ISP" for this server's network and each probe agent by name (two
+  on one network share a mark), in Where it is seen, Who carries it, the paths
+  (each drawn as a dashed line over the bands, "Your ISP" in the text colour
+  and each probe agent in a colour and dash of its own, with a key beneath),
+  the updates and the collector peers, which can be filtered to your networks.
+  Where a network of yours shares no routes with RIS, its traffic is drawn
+  instead: its way in by trace, on the paths from where its network is
+  registered ("Probe agent London's traffic"), marked in Where it is seen and
+  against the upstream it came through in Who carries it. A trace that stopped
+  short of the origin is drawn on to it. "Add a probe agent", on a prefix's
+  page, opens Settings at Probe agents (for an admin).
 - **Where it is seen:** the share of collector peers that see it in each of the
   five regions the registries hand out addresses in. Choose a region to see its
   countries, and a country to see its exchanges.
@@ -166,11 +196,18 @@ prefix's page makes how it is carried now the normal it is judged against.
   band to follow that upstream, or a network to light its bands.
 - **Activity:**
   - **The day at a glance:** the updates received, a bar for each quarter of an
-    hour. Choose a bar to list just its updates.
+    hour, counted from the same updates as the list below, so a region or an
+    upstream chosen narrows the bars too. Choose a bar to list just its
+    updates; a bar of one opens it. On a day of more than 2,000 updates the
+    bars count them all, everywhere, and say so.
   - **Each update listed:** who sent it, from which exchange, what was
     announced or withdrawn, and the path it replaced. For example, "Now through
     AS64502, was directly connected", or "Announced again on the same path",
-    which is a change to something else about the route.
+    which is a change to something else about the route. Open one (anywhere on
+    its row) for the whole of it: the prefix announced or withdrawn, the peer
+    and its address, the RIS collector and where it is, the route before and
+    the one announced a network at a time with each one's part (the peer, the
+    upstream, the origin), and the route that peer has now, if any.
 - **What changed:** changes in how the prefix stands, and in your network's
   route, over two weeks.
 - **Your targets in this prefix:** ClearPing targets whose address is in it,
@@ -198,6 +235,10 @@ Only a little, and briefly:
 - **Routing's traces:** two weeks.
 - **Routes:** not stored. They are read again from RIPEstat when ClearPing
   starts, and the exchanges' collectors are asked again.
+- **Members' addresses on the exchanges:** read from IXPDB once a day (three
+  or four megabytes; no key needed), with a copy kept. Without it, hops on an
+  exchange are not named with their member, and only PeeringDB says who is a
+  member where.
 - **Exchange LANs and members:** read from PeeringDB once a day, with a copy kept so a
   restart need not read them again. PeeringDB throttles anonymous reads of its
   whole lists, so a read can time out or be turned away. When it cannot be

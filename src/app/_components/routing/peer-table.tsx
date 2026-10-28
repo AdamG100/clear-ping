@@ -10,12 +10,12 @@ import { hops } from '@/lib/bgp/path'
 import { upstreamOfPeer } from '@/lib/bgp/scope'
 import { BGP_DIRECT, BGP_REGIONS, type BgpPeerRoute, type BgpUpstreamShare } from '@/types/bgp'
 import { cn } from '@/lib/utils'
-import { ago, whoseLabel, whoseNetwork } from './state'
+import { ago, asLabel } from './state'
 
 /**
  * Every collector peer in the page's scope and the route it has, by the
  * exchange it is at: the detail behind the bars, down to the AS path each one
- * sees. A peer that saw the prefix when normal was taken and no longer does is
+ * sees. A peer that usually sees the prefix and no longer does is
  * listed with no route.
  */
 
@@ -95,7 +95,7 @@ function PeerRow({
   names: Record<number, string>
   colors: Map<number, string>
   unusual: boolean
-  /** Whose network the peer is, when it is one of yours: "This server", or a probe agent's name. */
+  /** Whose network the peer is, when it is one of yours: "Your ISP", "Probe agent London". */
   whose: string | undefined
   now: number
 }) {
@@ -118,8 +118,8 @@ function PeerRow({
           </span>
           {whose && (
             // Its network is named on the line above: the badge says only whose it is, kept to the column.
-            <span className="mt-0.5 block max-w-full overflow-hidden" title={whoseNetwork(whose, peer.peerAsn, names)}>
-              <Badge size="sm" tone="info">{whoseLabel(whose)}</Badge>
+            <span className="mt-0.5 block max-w-full overflow-hidden" title={`${whose}, ${asLabel(peer.peerAsn, names)}`}>
+              <Badge size="sm" tone="info">{whose}</Badge>
             </span>
           )}
           <span className="block truncate font-mono text-[11px] text-muted-foreground">{peer.peer}</span>
@@ -135,7 +135,7 @@ function PeerRow({
             {unusual && <span className="text-[11px] text-signal-moderate">New upstream</span>}
           </div>
         ) : (
-          <span className="text-xs text-signal-critical">No route: it saw the prefix when normal was taken, and no longer does</span>
+          <span className="text-xs text-signal-critical">No route: it usually sees the prefix, and no longer does</span>
         )}
       </div>
       <div className="pl-4.5 text-xs text-muted-foreground @3xl/main:pl-0 @3xl/main:text-right">

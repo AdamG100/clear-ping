@@ -1,10 +1,11 @@
 import { BGP_DIRECT, type BgpCrossingRun, type BgpHome, type BgpHomeTrace, type BgpPeerRoute, type BgpRoute, type BgpVantage } from '@/types/bgp'
+import { countryRegion } from './countries'
 import type { Target } from '@/types/probe'
 import { getAllTargets } from '../db/database'
 import { runTrace } from '../probe-agents/client'
 import { listProbeAgents } from '../probe-agents/store'
 import { collectorInfo } from './collectors'
-import { crossingOf, exchangeData, exchangeOf, likelyCrossing, type ExchangeData } from './exchanges'
+import { crossingOf, exchangeData, exchangeOf, likelyCrossing, memberOf, type ExchangeData } from './exchanges'
 import { upstreamOf } from './path'
 import { addressIn, firstHost, isAddress, isPublicAddress } from './prefix'
 import { addressAsn } from './ripestat'
@@ -167,6 +168,15 @@ function asnOf(address: string | null): number | null {
   return null
 }
 
+/**
+ * The network a hop's address belongs to: on an exchange's LAN, the member
+ * IXPDB says it is (RIPEstat would name the exchange's own network, or
+ * nothing); elsewhere as asnOf finds it.
+ */
+function hopAsn(address: string | null, data: ExchangeData | null): number | null {
+  return memberOf(address, data?.ports ?? {}) ?? asnOf(address)
+}
+
 /** The network of the first hop on the internet in a trace: the one that vantage point reaches the internet through. */
 function networkOf(trace: Pick<BgpTraceRow, 'hops'> | undefined): number | null {
   const hop = trace?.hops.find(each => each.address && isPublicAddress(each.address))
@@ -226,11 +236,21 @@ export async function traceInto(
   return counts.reduce((sum, count) => sum + count, 0)
 }
 
+/**
+ * The networks a trace passed through, from each hop's network in turn: the
+ * same one twice in a row once, those not known left out. Pure.
+ */
+export function asPathOf(asns: readonly (number | null)[]): number[] {
+  const path: number[] = []
+  for (const asn of asns) if (asn !== null && asn > 0 && path[path.length - 1] !== asn) path.push(asn)
+  return path
+}
+
 /** Where a trace crossed, by hop on a LAN or else by the members either side of a hop. */
 function crossedBy(hops: BgpTraceRow['hops'], data: ExchangeData | null): Pick<BgpCrossingRun, 'crossing' | 'likely'> {
   const crossing = crossingOf(hops, data?.lans ?? [])
   if (crossing) return { crossing: crossing.name, likely: null }
-  const likely = data ? likelyCrossing(hops.map(hop => ({ hop: hop.hop, asn: asnOf(hop.address) })), data) : null
+  const likely = data ? likelyCrossing(hops.map(hop => ({ hop: hop.hop, asn: hopAsn(hop.address, data) })), data) : null
   return { crossing: null, likely: likely ? likely.exchanges.map(exchange => exchange.name) : null }
 }
 
@@ -255,12 +275,13 @@ function homeTrace(traces: BgpTraceRow[], targetName: string | null, data: Excha
   const [latest] = traces
   if (!latest) return null
   const lans = data?.lans ?? []
+  const ports = data?.ports ?? {}
   const usable = traces.filter(trace => trace.hops.length > 0)
   const shown = usable[0] ?? latest
-  const crossing = crossingOf(shown.hops, lans)
+  const crossing = crossingOf(shown.hops, lans, ports)
   const history = crossingRuns(usable.map(trace => ({ at: trace.at, crossed: crossedBy(trace.hops, data) })))
   // No hop on an exchange's LAN: where it passes between two members of one, it probably crossed there.
-  const likely = !crossing && data ? likelyCrossing(shown.hops.map(hop => ({ hop: hop.hop, asn: asnOf(hop.address) })), data) : null
+  const likely = !crossing && data ? likelyCrossing(shown.hops.map(hop => ({ hop: hop.hop, asn: hopAsn(hop.address, data) })), data) : null
   return {
     address: shown.address,
     targetName,
@@ -273,6 +294,7 @@ function homeTrace(traces: BgpTraceRow[], targetName: string | null, data: Excha
       hostname: hop.hostname ?? null,
       rtt: hop.rtts.length > 0 ? Math.min(...hop.rtts) : null,
       exchange: hop.address ? (exchangeOf(hop.address, lans)?.exchange.name ?? null) : null,
+      member: memberOf(hop.address, ports),
     })),
     crossing,
     likely: likely ? { names: likely.exchanges.map(exchange => exchange.name), from: likely.from, to: likely.to, hop: likely.hop } : null,
@@ -286,7 +308,9 @@ export async function homeView(
   prefix: string,
   watchedFor: string | null,
   homeAsns: readonly number[],
-  peers: readonly BgpPeerRoute[]
+  peers: readonly BgpPeerRoute[],
+  /** The country a network is registered in, where it has been looked up. */
+  countryOf: (asn: number) => string | undefined = () => undefined
 ): Promise<BgpHome> {
   const [points, toward, traces, exchanges, agents] = await Promise.all([
     vantages(),
@@ -306,6 +330,11 @@ export async function homeView(
     const shown = toward
       .map(each => homeTrace(own.filter(trace => trace.address === each.address), names.get(each.address) ?? null, exchanges))
       .filter((trace): trace is BgpHomeTrace => trace !== null)
+    // The way its traffic went, by the newest trace to any of them that got somewhere, starting from its own network.
+    const newest = own.find(trace => trace.hops.length > 0 && toward.some(each => each.address === trace.address))
+    const traced = newest ? asPathOf(newest.hops.map(hop => hopAsn(hop.address, exchanges))) : []
+    const tracedPath = asns[0] !== undefined && traced.length > 0 && traced[0] !== asns[0] ? [asns[0], ...traced] : traced
+    const country = asns[0] !== undefined ? countryOf(asns[0]) : undefined
     return {
       id: point.id,
       name: point.name,
@@ -314,6 +343,8 @@ export async function homeView(
       found,
       routes: peers.filter(peer => asns.includes(peer.peerAsn)),
       traces: shown,
+      tracedPath,
+      place: country ? { country, region: countryRegion(country) } : null,
       unavailable: point.unavailable,
     }
   })
@@ -322,6 +353,6 @@ export async function homeView(
     vantages: views,
     mine: Object.fromEntries(mine),
     agents,
-    exchangesKnown: exchanges !== null,
+    exchangesKnown: (exchanges?.lans.length ?? 0) > 0,
   }
 }

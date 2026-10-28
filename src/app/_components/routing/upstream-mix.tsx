@@ -4,7 +4,7 @@ import { Badge } from '@/components/arc/badge/badge'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { BGP_DIRECT, type BgpUpstreamShare } from '@/types/bgp'
 import { cn } from '@/lib/utils'
-import { carrierLabel, whoseLabel } from './state'
+import { carrierLabel } from './state'
 
 /**
  * Which networks the world reaches the prefix through, and in what share:
@@ -89,7 +89,7 @@ export function UpstreamMix({
   colors: Map<number, string>
   selected: number | null
   onSelect: (asn: number | null) => void
-  /** The ways in your networks' sessions use, and whose they are. */
+  /** The ways in yours use, each said whole: "Your ISP’s route", "Probe agent London’s traffic". */
   yours?: Map<number, string[]>
 }) {
   const total = upstreams.reduce((sum, each) => sum + each.peers, 0)
@@ -132,7 +132,7 @@ export function UpstreamMix({
                   </span>
                   {yours.has(upstream.asn) && (
                     <Badge tone="info" size="sm">
-                      {`${yours.get(upstream.asn)!.map(whoseLabel).join(', ')}’s route`}
+                      {yours.get(upstream.asn)!.join(', ')}
                     </Badge>
                   )}
                   {!upstream.expected && <Badge tone="warning" size="sm">New</Badge>}

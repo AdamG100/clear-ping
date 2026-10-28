@@ -1,5 +1,5 @@
 import type { BadgeTone } from '@/components/arc/badge/badge'
-import { BGP_DIRECT, type BgpConnectionState, type BgpState } from '@/types/bgp'
+import { BGP_DIRECT, type BgpConnectionState, type BgpState, type BgpVantage } from '@/types/bgp'
 
 /** How each state of a prefix is named and coloured on the routing pages. */
 
@@ -78,14 +78,36 @@ export function whoseLabel(whose: string): string {
   return whose === 'This server' ? 'Your ISP' : `Probe agent ${whose}`
 }
 
-/** The same with the network: "Your ISP, AS64500 Example ISP". */
-export function whoseNetwork(whose: string, asn: number, names: Record<number, string>): string {
-  return `${whoseLabel(whose)}, ${asLabel(asn, names)}`
+/** A vantage point, said the same way: "Your ISP" for this server, "Probe agent London". */
+export function vantageLabel(vantage: Pick<BgpVantage, 'kind' | 'name'>): string {
+  return whoseLabel(vantage.kind === 'server' ? 'This server' : vantage.name)
 }
 
-/** Every one of yours among these networks, labelled once each: "Your ISP, Probe agent London". */
-export function whoseAmong(asns: Iterable<number>, mine: Record<number, string>): string[] {
-  return [...new Set([...asns].filter(asn => asn in mine).map(asn => whoseLabel(mine[asn])))]
+/** Where one of your vantage points' traffic went, by its newest trace, and where it is. */
+export interface YourTrace {
+  whose: string
+  path: number[]
+  place: BgpVantage['place']
+  /** Whether its network shares its routes with RIS: then those are drawn, and this is not. */
+  hasRoutes: boolean
+}
+
+/**
+ * Your networks as the page marks them: each network, and whose it is said
+ * plainly ("Your ISP", "Probe agent London", or both, where two of yours are
+ * on one network); and the way each vantage point's traffic went.
+ */
+export function yoursOf(vantages: readonly BgpVantage[]): { mine: Record<number, string>; traced: YourTrace[] } {
+  const owners = new Map<number, string[]>()
+  for (const vantage of vantages) {
+    for (const asn of vantage.asns) owners.set(asn, [...new Set([...(owners.get(asn) ?? []), vantageLabel(vantage)])])
+  }
+  return {
+    mine: Object.fromEntries([...owners].map(([asn, whose]) => [asn, whose.join(', ')])),
+    traced: vantages
+      .filter(vantage => (vantage.tracedPath ?? []).length > 0)
+      .map(vantage => ({ whose: vantageLabel(vantage), path: vantage.tracedPath, place: vantage.place ?? null, hasRoutes: vantage.routes.some(peer => peer.route) })),
+  }
 }
 
 /** "3 minutes ago", "2 hours ago", for when a route last changed. */

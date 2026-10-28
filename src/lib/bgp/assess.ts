@@ -184,7 +184,7 @@ export function assess(
     worse('diverted')
   }
 
-  if (state === 'normal') reasons.push('Carried as it was when normal was taken')
+  if (state === 'normal') reasons.push('Carried as it usually is')
   return status(state, reasons)
 }
 

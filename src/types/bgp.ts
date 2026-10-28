@@ -71,6 +71,13 @@ export interface BgpBaseline {
    * looking glasses were first read for it.
    */
   exchanges?: string[]
+  /**
+   * What is waiting to be learned as normal (see learn.ts), as `part:value`
+   * (`upstreams:64510`), and since when it has been there.
+   */
+  pending?: Record<string, number>
+  /** What normal holds that has gone, as `part:value`, and since when: forgotten after a week. */
+  missing?: Record<string, number>
 }
 
 export interface BgpPrefix {
@@ -125,8 +132,10 @@ export interface BgpEvent {
   /**
    * `state`: how the prefix stands changed. `home`: the route your own
    * network has to it changed, whether or not that changed how it stands.
+   * `learned`: what is normal for it changed, learned from how it has been
+   * carried (see learn.ts), or taken as it is now.
    */
-  kind: 'state' | 'home'
+  kind: 'state' | 'home' | 'learned'
   state: BgpState
   reasons: string[]
 }
@@ -214,6 +223,8 @@ export interface BgpExchange {
 export interface BgpCrossing extends BgpExchange {
   address: string
   hop: number
+  /** The member whose address that is, by IXPDB: the network the traffic went into there. */
+  member: number | null
 }
 
 /** The latest traceroute from a vantage point to an address inside the prefix. */
@@ -225,7 +236,8 @@ export interface BgpHomeTrace {
   at: number
   reached: boolean
   error: string | null
-  hops: { hop: number; address: string | null; hostname: string | null; rtt: number | null; exchange: string | null }[]
+  /** Each hop, with the exchange whose LAN its address is on and, from IXPDB, the member whose address it is. */
+  hops: { hop: number; address: string | null; hostname: string | null; rtt: number | null; exchange: string | null; member: number | null }[]
   /** The exchange it crossed, or null when it crossed none it could name. */
   crossing: BgpCrossing | null
   /**
@@ -271,6 +283,15 @@ export interface BgpVantage {
   /** Its network's sessions with RIS collectors, and the route each has. */
   routes: BgpPeerRoute[]
   traces: BgpHomeTrace[]
+  /**
+   * The networks its traffic passed through to the prefix, by its newest
+   * trace that got somewhere: its own network first. Each hop's network, the
+   * same one twice in a row once, those not known left out. It need not reach
+   * the origin, where the trace stopped short. Empty with no such trace.
+   */
+  tracedPath: number[]
+  /** Where it is, by the country its network is registered in, once looked up. */
+  place: { country: string; region: BgpRegion } | null
   /** Why it cannot be traced from now, such as a probe agent offline. */
   unavailable: string | null
 }

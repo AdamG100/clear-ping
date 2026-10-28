@@ -1,9 +1,11 @@
 import type { BgpCrossing, BgpExchange } from '@/types/bgp'
-import { addressIn, prefixLength } from './prefix'
+import { ixpdbData, type IxpdbData } from './ixpdb'
+import { addressIn, addressKey, blockKey, prefixLength } from './prefix'
 import { readExchangeCopy, saveExchangeCopy } from './store'
 
 /**
- * Internet exchanges, their peering LANs and their members, from PeeringDB.
+ * Internet exchanges, their peering LANs and their members, from PeeringDB,
+ * with IXPDB's members' addresses on the exchanges (see ixpdb.ts) beside them.
  *
  * A traceroute hop on an exchange's LAN is where the traffic crossed that
  * exchange. BGP cannot say which exchange carries a route (the route servers
@@ -30,6 +32,8 @@ export interface ExchangeData {
   exchanges: BgpExchange[]
   /** Each network's exchanges, as places in `exchanges`, by its AS number. */
   members: Record<string, number[]>
+  /** The member each address on an exchange belongs to, by addressKey, from IXPDB. Empty without it. */
+  ports: Record<string, number>
 }
 
 const PEERINGDB = 'https://www.peeringdb.com/api'
@@ -38,8 +42,12 @@ const REFRESH_MS = 24 * 60 * 60 * 1000
 const RETRY_MS = 60 * 60 * 1000
 const TIMEOUT_MS = 30_000
 
-let held: { at: number; data: ExchangeData | null } | null = null
-let reading: Promise<ExchangeData | null> | null = null
+type PeeringDbData = Omit<ExchangeData, 'ports'>
+
+let held: { at: number; data: PeeringDbData | null } | null = null
+let reading: Promise<PeeringDbData | null> | null = null
+/** The two put together, for as long as neither changes. */
+let joined: { peeringDb: PeeringDbData | null; ixpdb: IxpdbData | null; data: ExchangeData | null } | null = null
 /** The key a read failed with: a key set or changed since is tried at once, not after the wait. */
 let failedWith: string | undefined | null = null
 
@@ -63,7 +71,7 @@ async function ask<T>(path: string): Promise<T[]> {
   return body.data ?? []
 }
 
-async function read(): Promise<ExchangeData> {
+async function read(): Promise<Omit<ExchangeData, 'ports'>> {
   const [prefixes, lans, exchanges, memberships] = await Promise.all([
     ask<{ prefix: string; ixlan_id: number }>('ixpfx?fields=prefix,ixlan_id'),
     ask<{ id: number; ix_id: number }>('ixlan?fields=id,ix_id'),
@@ -91,14 +99,65 @@ async function read(): Promise<ExchangeData> {
 }
 
 /** A copy kept before the members were read: its LANs still serve, but it is read again at once. */
-function fromCopy(copy: { at: number; lans: unknown }): { at: number; data: ExchangeData } | null {
+function fromCopy(copy: { at: number; lans: unknown }): { at: number; data: PeeringDbData } | null {
   if (Array.isArray(copy.lans)) return { at: 0, data: { lans: copy.lans as ExchangeLan[], exchanges: [], members: {} } }
-  const data = copy.lans as ExchangeData | null
+  const data = copy.lans as PeeringDbData | null
   return data && Array.isArray(data.lans) ? { at: copy.at, data } : null
 }
 
-/** The exchanges, their LANs and their members, or null when PeeringDB could not be read and no copy is kept. */
+/**
+ * PeeringDB's exchanges with IXPDB's members' addresses: each address put on
+ * the exchange whose LAN holds it, and its member counted as on that exchange
+ * where PeeringDB did not say so. With no PeeringDB, the addresses alone,
+ * which still say whose a hop is. Pure, for the tests.
+ */
+export function joinExchanges(peeringDb: PeeringDbData | null, ixpdb: IxpdbData | null): ExchangeData | null {
+  if (!peeringDb) return ixpdb ? { lans: [], exchanges: [], members: {}, ports: ixpdb.ports } : null
+  if (!ixpdb) return { ...peeringDb, ports: {} }
+  const placeOf = new Map(peeringDb.exchanges.map((exchange, index) => [exchange, index]))
+  // The LANs by the /16 or /32 they start in, so each of tens of thousands of
+  // addresses is tried against a few LANs rather than every one.
+  const byBlock = new Map<string, ExchangeLan[]>()
+  const wide: ExchangeLan[] = []
+  for (const lan of peeringDb.lans) {
+    const key = blockKey(lan.prefix)
+    if (key) byBlock.set(key, [...(byBlock.get(key) ?? []), lan])
+    else wide.push(lan)
+  }
+  const members: Record<string, number[]> = Object.fromEntries(Object.entries(peeringDb.members).map(([asn, places]) => [asn, [...places]]))
+  for (const [key, asn] of Object.entries(ixpdb.ports)) {
+    const address = addressFromKey(key)
+    const block = address ? blockKey(address) : null
+    if (!address || !block) continue
+    const lan = exchangeOf(address, [...(byBlock.get(block) ?? []), ...wide])
+    const place = lan ? placeOf.get(lan.exchange) : undefined
+    if (place === undefined) continue
+    const held = (members[asn] ??= [])
+    if (!held.includes(place)) held.push(place)
+  }
+  return { ...peeringDb, members, ports: ixpdb.ports }
+}
+
+/** An address back from its addressKey. */
+function addressFromKey(key: string): string | null {
+  const [version, hex] = key.split(':')
+  if (!hex) return null
+  const value = BigInt(`0x${hex}`)
+  if (version === '4') return [24, 16, 8, 0].map(shift => Number((value >> BigInt(shift)) & BigInt(255))).join('.')
+  const groups: string[] = []
+  for (let shift = 112; shift >= 0; shift -= 16) groups.push(((value >> BigInt(shift)) & BigInt(0xffff)).toString(16))
+  return groups.join(':')
+}
+
+/** The exchanges, their LANs and their members, or null when neither PeeringDB nor IXPDB could be read and no copy is kept. */
 export async function exchangeData(now = Date.now()): Promise<ExchangeData | null> {
+  const [peeringDb, ixpdb] = await Promise.all([peeringDbData(now), ixpdbData(now).catch(() => null)])
+  if (joined?.peeringDb !== peeringDb || joined.ixpdb !== ixpdb) joined = { peeringDb, ixpdb, data: joinExchanges(peeringDb, ixpdb) }
+  return joined.data
+}
+
+/** PeeringDB's exchanges, their LANs and their members, or null when it could not be read and no copy is kept. */
+async function peeringDbData(now: number): Promise<PeeringDbData | null> {
   const newKey = failedWith !== null && failedWith !== apiKey()
   if (held && !newKey && now - held.at < (held.data ? REFRESH_MS : RETRY_MS)) return held.data
   reading ??= (async () => {
@@ -128,10 +187,6 @@ export async function exchangeData(now = Date.now()): Promise<ExchangeData | nul
   return reading
 }
 
-/** Every exchange's peering LANs, or null when PeeringDB could not be read and no copy is kept. */
-export async function exchangeLans(now = Date.now()): Promise<ExchangeLan[] | null> {
-  return (await exchangeData(now))?.lans ?? null
-}
 
 /** The exchange whose peering LAN holds the address, the most specific LAN if more than one does. */
 export function exchangeOf(address: string, lans: readonly ExchangeLan[]): ExchangeLan | null {
@@ -142,12 +197,22 @@ export function exchangeOf(address: string, lans: readonly ExchangeLan[]): Excha
   return best
 }
 
-/** The first exchange a traceroute crossed, by its hops' addresses. */
-export function crossingOf(hops: readonly { hop: number; address: string | null }[], lans: readonly ExchangeLan[]): BgpCrossing | null {
+/** The member an address on an exchange belongs to, by IXPDB: the network whose router answered there. */
+export function memberOf(address: string | null, ports: Readonly<Record<string, number>>): number | null {
+  const key = address ? addressKey(address) : null
+  return key ? (ports[key] ?? null) : null
+}
+
+/** The first exchange a traceroute crossed, by its hops' addresses, and whose router it reached there. */
+export function crossingOf(
+  hops: readonly { hop: number; address: string | null }[],
+  lans: readonly ExchangeLan[],
+  ports: Readonly<Record<string, number>> = {}
+): BgpCrossing | null {
   for (const hop of hops) {
     if (!hop.address) continue
     const lan = exchangeOf(hop.address, lans)
-    if (lan) return { ...lan.exchange, address: hop.address, hop: hop.hop }
+    if (lan) return { ...lan.exchange, address: hop.address, hop: hop.hop, member: memberOf(hop.address, ports) }
   }
   return null
 }

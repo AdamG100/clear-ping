@@ -5,7 +5,7 @@ import { Badge, type BadgeTone } from '@/components/arc/badge/badge'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import type { BgpExchangeLook, BgpExchangeRoute, BgpExchangeView } from '@/types/bgp'
 import { cn } from '@/lib/utils'
-import { ago, asLabel, whoseLabel } from './state'
+import { ago, asLabel } from './state'
 
 /**
  * "At the exchanges": what each exchange's own route collector has for the
@@ -78,7 +78,7 @@ function Exchange({
         <p className="text-xs text-muted-foreground">The origin last changed its route here {ago(Math.min(...since), now)}.</p>
       )}
       {was && own.length === 0 && view.ready && (
-        <p className="text-xs text-signal-critical">The origin offered it here itself when normal was taken.</p>
+        <p className="text-xs text-signal-critical">The origin usually offers it here itself.</p>
       )}
       {others.length > 0 && (
         <div className="space-y-1.5">
@@ -91,7 +91,7 @@ function Exchange({
                 <p className="flex flex-wrap items-center gap-1.5 text-xs">
                   <span className="text-foreground">{asLabel(member.asn, names)}</span>
                   {member.sessions > 1 && <span className="text-muted-foreground">{member.sessions} sessions</span>}
-                  {member.asn in mine && <Badge size="sm" tone="info">{whoseLabel(mine[member.asn])}</Badge>}
+                  {member.asn in mine && <Badge size="sm" tone="info">{mine[member.asn]}</Badge>}
                 </p>
                 <p className="truncate font-mono text-[11px] text-muted-foreground">
                   {member.path.map((asn, index) => (

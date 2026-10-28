@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { crossingOf, exchangeOf, likelyCrossing, sharedExchanges, type ExchangeLan } from './exchanges'
+import { crossingOf, exchangeOf, joinExchanges, likelyCrossing, sharedExchanges, type ExchangeLan } from './exchanges'
+import { readIxpdb } from './ixpdb'
+import { addressKey } from './prefix'
 
 const NAPAFRICA = { name: 'NAPAfrica IX Johannesburg', city: 'Johannesburg', country: 'ZA' }
 const JINX = { name: 'JINX', city: 'Johannesburg', country: 'ZA' }
@@ -26,8 +28,13 @@ describe('exchanges', () => {
       { hop: 6, address: '198.19.8.129' },
       { hop: 7, address: '102.218.212.29' },
     ]
-    expect(crossingOf(hops, lans)).toEqual({ ...NAPAFRICA, address: '198.19.8.129', hop: 6 })
+    expect(crossingOf(hops, lans)).toEqual({ ...NAPAFRICA, address: '198.19.8.129', hop: 6, member: null })
     expect(crossingOf(hops.slice(0, 3), lans)).toBeNull()
+  })
+
+  it('names the member whose address the hop on the exchange is, from IXPDB', () => {
+    const ports = { [addressKey('198.19.8.129')!]: 64501 }
+    expect(crossingOf([{ hop: 6, address: '198.19.8.129' }], lans, ports)?.member).toBe(64501)
   })
 
   // Members by AS number, as places in the list: AS64500 and AS64501 meet at
@@ -53,5 +60,28 @@ describe('exchanges', () => {
 
   it('says nothing where the networks either side share no exchange', () => {
     expect(likelyCrossing([{ hop: 1, asn: 64502 }, { hop: 2, asn: 64999 }], members)).toBeNull()
+  })
+
+  it('puts IXPDB members on the exchange whose LAN holds their address', () => {
+    const ixpdb = readIxpdb([
+      { asn: 64503, ip_addresses: ['198.19.97.20', '2001:43F8:6D0::0:12', null, ''] },
+      { asn: 64500, ip_addresses: ['198.19.8.1'] },
+      { asn: 64504, ip_addresses: ['192.0.2.1'] },
+    ])
+    expect(ixpdb.ports[addressKey('2001:43f8:6d0::12')!]).toBe(64503)
+    const joined = joinExchanges({ lans, ...members }, ixpdb)!
+    // AS64503 is on JINX and NAPAfrica by its addresses, though PeeringDB had it on neither.
+    expect(joined.members[64503]).toEqual([1, 0])
+    // AS64500 was already on NAPAfrica: not listed twice.
+    expect(joined.members[64500]).toEqual([0, 1])
+    // An address on no LAN known adds nothing.
+    expect(joined.members[64504]).toBeUndefined()
+  })
+
+  it('keeps IXPDB addresses with no PeeringDB, and PeeringDB with no IXPDB', () => {
+    const ixpdb = readIxpdb([{ asn: 64503, ip_addresses: ['198.19.97.20'] }])
+    expect(joinExchanges(null, ixpdb)).toEqual({ lans: [], exchanges: [], members: {}, ports: ixpdb.ports })
+    expect(joinExchanges({ lans, ...members }, null)?.ports).toEqual({})
+    expect(joinExchanges(null, null)).toBeNull()
   })
 })
