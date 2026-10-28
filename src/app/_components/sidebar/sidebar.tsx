@@ -71,6 +71,7 @@ import {
   LayoutDashboard,
   ListX,
   MoreHorizontal,
+  Network,
   PanelLeftClose,
   Settings,
   X,
@@ -96,6 +97,73 @@ const GROUP_PANEL = [
 
 /** How the target on show is marked in the list. */
 const SELECTED_ROW = 'bg-primary/20 ring-1 ring-inset ring-primary/50 hover:bg-primary/25'
+
+/** One of the pages beside the list, as a tile with its icon in a well. */
+function PageTile({
+  icon,
+  label,
+  open,
+  onOpen,
+  off,
+  count,
+  countLabel,
+}: {
+  icon: ReactNode
+  label: string
+  open: boolean
+  /** Without it, while off, the tile cannot be pressed. */
+  onOpen?: () => void
+  /** Why it is greyed out, when it is turned off: said in its tooltip. */
+  off?: string
+  /** Something there wants a look: shown as a count in the warning colour. */
+  count?: number
+  countLabel?: string
+}) {
+  const tile = (
+    <button
+      type="button"
+      onClick={onOpen}
+      disabled={!onOpen}
+      aria-current={open ? 'page' : undefined}
+      aria-label={off ? `${label}: ${off}` : undefined}
+      className={cn(
+        'flex w-full min-w-0 items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left text-sm font-medium transition-colors',
+        off
+          ? 'border-dashed border-sidebar-border text-muted-foreground'
+          : open
+            ? 'border-primary/60 bg-primary/15 text-sidebar-foreground hover:bg-primary/20'
+            : 'border-sidebar-border bg-sidebar-group text-sidebar-foreground hover:border-sidebar-group-border hover:bg-sidebar-row-hover',
+        onOpen ? 'cursor-pointer' : 'cursor-not-allowed',
+        off && onOpen && 'hover:bg-sidebar-row-hover'
+      )}
+      suppressHydrationWarning
+    >
+      <span
+        className={cn(
+          'flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors',
+          off ? 'bg-muted text-muted-foreground' : open ? 'bg-primary text-primary-foreground' : 'bg-primary/15 text-primary'
+        )}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 truncate">{label}</span>
+      {/* Off, it says so in its tooltip: a tag beside the name cut the name short. */}
+      {!off && count !== undefined && (
+        <span className="ml-auto rounded-full bg-signal-moderate/15 px-1.5 font-mono text-[10px] tabular-nums text-signal-moderate" aria-label={countLabel}>
+          {count}
+        </span>
+      )}
+    </button>
+  )
+  // A disabled button gives a tooltip nothing to hang on: the span does.
+  return off ? (
+    <Tooltip content={off}>
+      <span className="flex min-w-0">{tile}</span>
+    </Tooltip>
+  ) : (
+    tile
+  )
+}
 
 // ─── Collapsing ─────────────────────────────────────────────────────────────
 
@@ -195,6 +263,15 @@ interface SidebarProps {
   /** Whether the overview is what the main pane is showing. */
   overviewOpen?: boolean
   onOpenOverview?: () => void
+  /** Whether BGP monitoring is what the main pane is showing. */
+  routingOpen?: boolean
+  onOpenRouting?: () => void
+  /** How many watched prefixes are not carried as normal. */
+  routingTrouble?: number
+  /** Whether BGP monitoring is on. Off, Routing is greyed out. */
+  routingEnabled?: boolean
+  /** Open Settings where Routing is turned on, for whoever may; otherwise its tile does nothing while off. */
+  onTurnOnRouting?: () => void
   /** Whether the alerts screen is what the main pane is showing. */
   alertsOpen?: boolean
   onOpenAlerts?: () => void
@@ -930,6 +1007,11 @@ export function Sidebar({
   onMoveGroup,
   overviewOpen = false,
   onOpenOverview,
+  routingOpen = false,
+  onOpenRouting,
+  routingTrouble = 0,
+  routingEnabled = true,
+  onTurnOnRouting,
   alertsOpen = false,
   onOpenAlerts,
   firingAlerts = 0,
@@ -1276,22 +1358,33 @@ export function Sidebar({
           </div>
         </div>
 
-        {/* Home: first in the sidebar, above the list it sums up, and marked
-            the way the target on show is when it is the page on show. */}
-        {onOpenOverview && (
-          <button
-            type="button"
-            onClick={onOpenOverview}
-            aria-current={overviewOpen ? 'page' : undefined}
-            className={cn(
-              'mt-3 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-sidebar-foreground transition-colors',
-              overviewOpen ? SELECTED_ROW : 'hover:bg-sidebar-row-hover'
+        {/* The pages beside the list: the overview first, then Routing, a
+            tool of its own (BGP monitoring, for networks that announce their
+            own prefixes) rather than a setting. Tiles, not rows: as rows they
+            read as two more targets and went unnoticed. */}
+        {(onOpenOverview || onOpenRouting) && (
+          <nav aria-label="Pages" className={cn('mt-3 grid gap-2', onOpenOverview && onOpenRouting ? 'grid-cols-2' : 'grid-cols-1')}>
+            {onOpenOverview && (
+              <PageTile icon={<LayoutDashboard {...ICON} />} label="Overview" open={overviewOpen} onOpen={onOpenOverview} />
             )}
-            suppressHydrationWarning
-          >
-            <LayoutDashboard {...ICON} />
-            Overview
-          </button>
+            {onOpenRouting && (
+              <PageTile
+                icon={<Network {...ICON} />}
+                label="Routing"
+                open={routingOpen}
+                onOpen={routingEnabled ? onOpenRouting : onTurnOnRouting}
+                off={
+                  routingEnabled
+                    ? undefined
+                    : onTurnOnRouting
+                      ? 'Routing is off. Turn it on in Settings'
+                      : 'Routing is off. An admin can turn it on in Settings'
+                }
+                count={routingTrouble > 0 ? routingTrouble : undefined}
+                countLabel={`${routingTrouble} prefix${routingTrouble === 1 ? '' : 'es'} not as normal`}
+              />
+            )}
+          </nav>
         )}
         {/* Always there once there is something to find: behind a button it
             went unnoticed. Its placeholder says what it is, so its label is
@@ -1548,6 +1641,10 @@ export function Sidebar({
               onExpand={onExpand}
               overviewOpen={overviewOpen}
               onOpenOverview={onOpenOverview}
+              routingOpen={routingOpen}
+              onOpenRouting={onOpenRouting}
+              routingEnabled={routingEnabled}
+              onTurnOnRouting={onTurnOnRouting}
               alertsOpen={alertsOpen}
               onOpenAlerts={onOpenAlerts}
               firingAlerts={firingAlerts}

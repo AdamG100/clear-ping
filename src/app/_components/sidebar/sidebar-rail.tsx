@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Bell, LayoutDashboard, PanelLeftOpen, Plus, Settings, Share2 } from 'lucide-react'
+import { Bell, LayoutDashboard, Network, PanelLeftOpen, Plus, Settings, Share2 } from 'lucide-react'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
@@ -34,6 +34,11 @@ interface SidebarRailProps {
   /** Whether the overview is open. */
   overviewOpen?: boolean
   onOpenOverview?: () => void
+  routingOpen?: boolean
+  onOpenRouting?: () => void
+  /** Off, its icon is greyed out, and opens Settings for whoever may turn it on. */
+  routingEnabled?: boolean
+  onTurnOnRouting?: () => void
   alertsOpen: boolean
   onOpenAlerts?: () => void
   /** How many alerts are firing on at least one target. */
@@ -66,6 +71,10 @@ export function SidebarRail({
   onExpand,
   overviewOpen = false,
   onOpenOverview,
+  routingOpen = false,
+  onOpenRouting,
+  routingEnabled = true,
+  onTurnOnRouting,
   alertsOpen,
   onOpenAlerts,
   firingAlerts,
@@ -110,6 +119,22 @@ export function SidebarRail({
             <Button type="button" variant={overviewOpen ? 'primary' : 'ghost'} size="sm" onClick={onOpenOverview} aria-pressed={overviewOpen} aria-label="Overview">
               <LayoutDashboard {...ICON} />
             </Button>
+          </Beside>
+        )}
+        {onOpenRouting && (
+          <Beside name={routingEnabled ? 'Routing' : onTurnOnRouting ? 'Routing is off. Turn it on in Settings' : 'Routing is off. An admin can turn it on in Settings'}>
+            {routingEnabled ? (
+              <Button type="button" variant={routingOpen ? 'primary' : 'ghost'} size="sm" onClick={onOpenRouting} aria-pressed={routingOpen} aria-label="Routing">
+                <Network {...ICON} />
+              </Button>
+            ) : (
+              // Greyed out, but still a way to where it is turned on.
+              <span className="opacity-45">
+                <Button type="button" variant="ghost" size="sm" onClick={onTurnOnRouting} disabled={!onTurnOnRouting} aria-label="Routing is off">
+                  <Network {...ICON} />
+                </Button>
+              </span>
+            )}
           </Beside>
         )}
         {groups.map(({ group, memberIds, health }) => {

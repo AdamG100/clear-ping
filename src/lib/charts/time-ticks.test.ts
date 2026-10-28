@@ -17,7 +17,7 @@ describe('timeTicks', () => {
     expect(ticks).toHaveLength(12)
     expect(ticks[0].time).toBe(new Date(2026, 9, 12, 14, 10).getTime())
     expect(new Set(gaps(ticks.map(tick => tick.time)))).toEqual(new Set([5 * MINUTE]))
-    expect(ticks.map(tick => tick.label).slice(0, 3)).toEqual(['02:10 PM', '02:15 PM', '02:20 PM'])
+    expect(ticks.map(tick => tick.label).slice(0, 3)).toEqual(['14:10', '14:15', '14:20'])
   })
 
   it('keeps every mark inside the period', () => {
@@ -52,7 +52,7 @@ describe('timeTicks', () => {
     }
     const midnight = ticks.find(tick => new Date(tick.time).getHours() === 0)
     expect(midnight?.label).toBe('Oct 13')
-    expect(ticks.filter(tick => /^\d\d:00 [AP]M$/.test(tick.label))).toHaveLength(ticks.length - 1)
+    expect(ticks.filter(tick => /^\d\d:00$/.test(tick.label))).toHaveLength(ticks.length - 1)
   })
 
   it('marks a month by the date, at midnight', () => {
@@ -80,7 +80,7 @@ describe('timeTicks', () => {
 
   it('shows seconds once zoomed in far enough to need them', () => {
     const ticks = timeTicks(start, start + 90_000, 800)
-    expect(ticks[0].label).toMatch(/^\d\d:\d\d:\d\d [AP]M$/)
+    expect(ticks[0].label).toMatch(/^\d\d:\d\d:\d\d$/)
   })
 
   it('marks the clock of the zone it is given, not the machine’s', () => {
@@ -89,18 +89,18 @@ describe('timeTicks', () => {
     // A day at this width is marked every two hours.
     const hourly = timeTicks(utc, utc + DAY, 800, 'Asia/Kolkata')
     expect(hourly[0].time).toBe(Date.UTC(2026, 9, 12, 10, 30))
-    expect(hourly[0].label).toBe('04:00 PM')
+    expect(hourly[0].label).toBe('16:00')
     expect(hourly.find(tick => tick.label === 'Oct 13')?.time).toBe(Date.UTC(2026, 9, 12, 18, 30))
 
     const fiveMinutes = timeTicks(utc, utc + HOUR, 800, 'Asia/Kolkata')
-    expect(fiveMinutes[0].label).toBe('02:40 PM')
+    expect(fiveMinutes[0].label).toBe('14:40')
   })
 
   it('stays on the hour across a change of the clocks', () => {
     // New York moves its clocks back an hour early on 1 November 2026.
     const from = Date.UTC(2026, 9, 31, 12)
     const ticks = timeTicks(from, from + 2 * DAY, 800, 'America/New_York')
-    for (const tick of ticks) expect(tick.label).toMatch(/^(\d\d:00 [AP]M|Nov \d)$/)
+    for (const tick of ticks) expect(tick.label).toMatch(/^(\d\d:00|Nov \d)$/)
     expect(ticks.filter(tick => tick.label === 'Nov 1')).toHaveLength(1)
   })
 

@@ -365,6 +365,7 @@ All optional. With Docker, pass them with `-e`.
 | `CLEARPING_TRUST_PROXY` | `0` | How many proxies in front of ClearPing add to `X-Forwarded-For` (`1` for Traefik). Without it the header is ignored, and sign-in attempts are counted per username only |
 | `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard. Still works, as a key that can change things; keys made in Settings are better, one per assistant |
 | `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes the token over plain HTTP from anywhere, for when a VPN or tunnel does the encrypting. Otherwise it is taken only over HTTPS or from ClearPing's own network |
+| `CLEARPING_PEERINGDB_API_KEY` | unset | A PeeringDB API key, for Routing to read the exchanges' peering LANs with. Without one PeeringDB throttles anonymous reads; ClearPing reads them once a day and keeps a copy, so it is rarely needed ([docs/bgp-monitoring.md](docs/bgp-monitoring.md)) |
 | `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check of the registry for a newer image. The dashboard then shows the version it runs but not whether it is the latest |
 
 ## API
@@ -393,6 +394,10 @@ Everything the interface does goes through these.
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 | `GET /api/probe-agents` | The probe agents targets can be probed from, and whether each can be reached. A target's `probeAgentId` says which it uses (`null` for this server), and is set the same way in `POST` and `PATCH /api/targets` |
 | `/api/security/probe-agents/…` | Add, change and remove probe agents, connect to one (`…/:id/connect`) and make it a new token (`…/:id/token`); admins only ([docs/probe-agents.md](docs/probe-agents.md)) |
+| `GET /api/bgp` | BGP monitoring: whether it is on, the connection to RIS Live, and every watched prefix with how it stands ([docs/bgp-monitoring.md](docs/bgp-monitoring.md)) |
+| `POST`, `PUT /api/bgp` | Watch a prefix (`{ resource, label? }`, a prefix or an IP address); turn monitoring on or off (`{ enabled }`, admins only); set your own network (`{ homeAsns: [64500] }`) |
+| `GET /api/bgp/lookup?resource=` | What watching an address or prefix would watch: the announced prefix that holds it, who announces it, and the announced prefixes around it |
+| `GET`, `POST`, `PATCH`, `DELETE /api/bgp/:id` | One watched prefix in full, with every update and how your network reaches it; trace into it now from this server and each probe agent (`POST`); rename it (`{ label }`) or take how it is carried now as normal (`{ acceptNormal: true }`); stop watching it |
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
 | `GET /api/health` | Whether the server is up; open even with sign-in on |
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
@@ -433,6 +438,7 @@ SQLite.
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
 - [docs/alerting.md](docs/alerting.md): alerts, and sending them with Apprise
 - [docs/probe-agents.md](docs/probe-agents.md): probing targets from other machines, over a tailnet or the internet
+- [docs/bgp-monitoring.md](docs/bgp-monitoring.md): watching your own prefixes in BGP, as RIPE RIS's route collectors see them
 - [docs/mcp.md](docs/mcp.md): connecting an AI assistant, and the report for an ISP
 - [docs/security.md](docs/security.md): sign-in, roles, single sign-on with Authentik, keys for scripts and assistants, and the activity record
 - [docs/structure.md](docs/structure.md): for changing ClearPing: where files go, how they are named, and what may import what

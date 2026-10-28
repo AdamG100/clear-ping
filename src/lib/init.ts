@@ -6,6 +6,7 @@
  * request can never be served against an uninitialised database.
  */
 
+import { getBgpMonitor } from './bgp/monitor';
 import { startScheduler } from './scheduler';
 import { initDatabase } from './db/database';
 import { startMaintenanceSchedule } from './db/maintenance';
@@ -50,6 +51,10 @@ export function initializeServer(): Promise<void> {
       // Whichever process does the probing, this one holds the settings and
       // the database the schedule is read from.
       startMaintenanceSchedule();
+
+      // BGP monitoring, if it is turned on. Not awaited: it reads every
+      // watched prefix from RIPE first, and nothing else waits on that.
+      void getBgpMonitor().start().catch(error => console.error('[BGP] Could not start:', error));
 
       if ((await countUsers()) === 0 && !recoveryMode()) announceSetupCode();
 

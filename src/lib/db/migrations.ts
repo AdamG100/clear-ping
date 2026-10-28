@@ -517,6 +517,60 @@ async function probeAgents(database: Database): Promise<void> {
   }
 }
 
+/**
+ * BGP monitoring: the prefixes watched, with what was normal for each, and a
+ * short record of what happened to them. The routes themselves are not kept:
+ * they are read afresh from RIPE whenever monitoring starts.
+ */
+async function bgpMonitoring(database: Database): Promise<void> {
+  await run(database, `CREATE TABLE IF NOT EXISTS bgp_prefixes (
+    id TEXT PRIMARY KEY,
+    prefix TEXT NOT NULL UNIQUE,
+    label TEXT,
+    address TEXT,
+    baseline TEXT,
+    created_at INTEGER NOT NULL
+  )`);
+  await run(database, `CREATE TABLE IF NOT EXISTS bgp_updates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prefix_id TEXT NOT NULL REFERENCES bgp_prefixes(id) ON DELETE CASCADE,
+    at INTEGER NOT NULL,
+    collector TEXT NOT NULL,
+    peer TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('announce', 'withdraw')),
+    path TEXT,
+    previous_path TEXT
+  )`);
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_bgp_updates ON bgp_updates(prefix_id, at)');
+  await run(database, `CREATE TABLE IF NOT EXISTS bgp_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prefix_id TEXT NOT NULL REFERENCES bgp_prefixes(id) ON DELETE CASCADE,
+    at INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'state',
+    state TEXT NOT NULL,
+    reasons TEXT NOT NULL
+  )`);
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_bgp_events ON bgp_events(prefix_id, at)');
+  await run(database, `CREATE TABLE IF NOT EXISTS bgp_traces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prefix_id TEXT NOT NULL REFERENCES bgp_prefixes(id) ON DELETE CASCADE,
+    vantage TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    address TEXT NOT NULL,
+    reached INTEGER NOT NULL,
+    error TEXT,
+    hops TEXT NOT NULL
+  )`);
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_bgp_traces ON bgp_traces(prefix_id, vantage, address, at)');
+  await run(database, `CREATE TABLE IF NOT EXISTS bgp_networks (
+    asn INTEGER PRIMARY KEY,
+    name TEXT,
+    country TEXT,
+    fetched_at INTEGER NOT NULL
+  )`);
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
@@ -529,6 +583,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'roles', up: roles },
   { name: 'alert traceroutes', up: alertTraceroutes },
   { name: 'probe agents', up: probeAgents },
+  { name: 'bgp monitoring', up: bgpMonitoring },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

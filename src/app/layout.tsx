@@ -117,7 +117,10 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className="antialiased bg-background text-foreground">
+      {/* Browser extensions (Grammarly, for one) put attributes of their own
+          on <body> before the page hydrates. Only the body's own attributes
+          are let off: a mismatch inside the page is still reported. */}
+      <body className="antialiased bg-background text-foreground" suppressHydrationWarning>
         <NotificationsProvider>{children}</NotificationsProvider>
         <InstallPrompt />
         <ServiceWorker />

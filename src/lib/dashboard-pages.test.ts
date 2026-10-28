@@ -32,6 +32,17 @@ describe('dashboard pages', () => {
   })
 })
 
+describe('the routing pages', () => {
+  it('reads each from its address, and gives each an address that reads back as itself', () => {
+    expect(pageFromPath('/routing')).toEqual({ kind: 'routing' })
+    expect(pageFromPath('/routing/abc-123')).toEqual({ kind: 'routing-prefix', id: 'abc-123' })
+    expect(pageFromPath('/routing/abc/more')).toBeNull()
+    for (const page of [{ kind: 'routing' }, { kind: 'routing-prefix', id: 'a b/c' }] as DashboardPage[]) {
+      expect(pageFromPath(pathOf(page))).toEqual(page)
+    }
+  })
+})
+
 describe('the pages for making and editing an alert', () => {
   it('reads each from its address, and gives each an address that reads back as itself', () => {
     expect(pageFromPath('/alerts/new')).toEqual({ kind: 'alert-new' })

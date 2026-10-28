@@ -9,7 +9,7 @@
  */
 
 /** The sections of Settings, in the order its menu lists them. */
-export const SETTINGS_SECTIONS = ['access', 'sign-in', 'keys', 'sso', 'accounts', 'probe-agents', 'activity', 'maintenance', 'assistant'] as const
+export const SETTINGS_SECTIONS = ['access', 'sign-in', 'keys', 'sso', 'accounts', 'probe-agents', 'routing', 'activity', 'maintenance', 'assistant'] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
 /** Where Settings opens when no section is asked for. */
@@ -28,6 +28,9 @@ export type DashboardPage =
   | { kind: 'target-edit'; id: string }
   /** What changed in each version, opened from the version badge. */
   | { kind: 'patch-notes' }
+  /** BGP monitoring: every watched prefix, and one of them in full. */
+  | { kind: 'routing' }
+  | { kind: 'routing-prefix'; id: string }
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
   return typeof value === 'string' && (SETTINGS_SECTIONS as readonly string[]).includes(value)
@@ -72,6 +75,11 @@ export function pageFromPath(pathname: string): DashboardPage | null {
     return null
   }
 
+  if (first === 'routing') {
+    if (!second) return { kind: 'routing' }
+    return rest.length === 0 ? { kind: 'routing-prefix', id: decodeSegment(second) } : null
+  }
+
   if (rest.length > 0) return null
   if (first === 'overview' && !second) return { kind: 'overview' }
   if (first === 'alerts' && !second) return { kind: 'alerts' }
@@ -92,6 +100,7 @@ export function pathOf(page: DashboardPage | null): string {
     return section === DEFAULT_SETTINGS_SECTION ? '/settings' : `/settings/${section}`
   }
   if (page.kind === 'target-edit') return `/targets/${encodeURIComponent(page.id)}/edit`
+  if (page.kind === 'routing-prefix') return `/routing/${encodeURIComponent(page.id)}`
   if (page.kind === 'alert-new') return '/alerts/new'
   if (page.kind === 'alert-edit') return `/alerts/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'target-new') {

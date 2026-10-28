@@ -55,7 +55,7 @@ function labelFormatter(kind: 'date' | 'minutes' | 'seconds', zone: string | und
       'en-US',
       kind === 'date'
         ? { month: 'short', day: 'numeric', timeZone: zone }
-        : { hour: '2-digit', minute: '2-digit', second: kind === 'seconds' ? '2-digit' : undefined, timeZone: zone }
+        : { hour: '2-digit', minute: '2-digit', second: kind === 'seconds' ? '2-digit' : undefined, hourCycle: 'h23', timeZone: zone }
     )
     labelFormatters.set(key, formatter)
   }
@@ -65,7 +65,7 @@ function labelFormatter(kind: 'date' | 'minutes' | 'seconds', zone: string | und
 function labelFor(time: number, step: number, zone: string | undefined): string {
   const date = new Date(time)
 
-  // Midnight is where the date changes, which is worth more than "12:00 AM".
+  // Midnight is where the date changes, which is worth more than "00:00".
   const clock = wallClock(time, zone)
   const midnight = clock.hour === 0 && clock.minute === 0 && clock.second === 0
   if (step >= DAY || midnight) return labelFormatter('date', zone).format(date)

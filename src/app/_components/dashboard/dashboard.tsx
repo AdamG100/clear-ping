@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import type {
   AddressFamily,
   FamilyReading,
@@ -50,6 +50,9 @@ import { CopyAddress } from './copy-address'
 import { ComparePanel } from '../charts/compare-panel'
 import { PatchNotesPage } from './patch-notes'
 import { OverviewPage } from './overview'
+import { PrefixPage } from '../routing/prefix-page'
+import { RoutingPage } from '../routing/routing-page'
+import { useRoutingStatus } from '../routing/use-bgp'
 import { FamilySection } from './family-section'
 import { formatWindowEdge } from '../charts/chart-brush'
 import { MapPin } from 'lucide-react'
@@ -571,6 +574,21 @@ function TargetAlerts({
   )
 }
 
+const noSubscription = () => () => {}
+
+/**
+ * A value kept in the tab's storage, or null on the server and while the
+ * page hydrates. Storage says nothing when it changes, so this is read again
+ * whenever the dashboard renders; what it is used for is chosen in state.
+ */
+function useRemembered(key: string): string | null {
+  return useSyncExternalStore(
+    noSubscription,
+    () => sessionStorage.getItem(key),
+    () => null
+  )
+}
+
 export function Dashboard() {
   const { notify, reportError } = useToast()
   const { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
@@ -588,7 +606,12 @@ export function Dashboard() {
   const alertEditor = page?.kind === 'alert-new' ? 'new' : page?.kind === 'alert-edit' ? page.id : null
   const targetPage = page?.kind === 'target-new' || page?.kind === 'target-edit' ? page : null
   // A viewer is shown everything and offered nothing to change.
-  const readOnly = useSignedIn()?.role === 'viewer'
+  const signedIn = useSignedIn()
+  const readOnly = signedIn?.role === 'viewer'
+  // BGP monitoring, a tool of its own: its list, or one prefix in full.
+  const routingPrefix = page?.kind === 'routing-prefix' ? page.id : null
+  const showingRouting = page?.kind === 'routing' || routingPrefix !== null
+  const routing = useRoutingStatus()
   // On a narrow screen the sidebar is a drawer over the page. Choosing
   // anything in it is the reason it was opened, so every choice closes it.
   // On a wide one it sits beside the page and can be collapsed to a rail of icons.
@@ -609,24 +632,24 @@ export function Dashboard() {
   // For a target probed over both address families: which is on screen.
   const [familyView, setFamilyView] = useState<FamilyView>('both')
 
-  // The remembered selection is read once, lazily, so there is no post-mount
-  // effect writing state back into the component. Storage is unavailable
-  // during SSR, hence the guard rather than a plain initialiser.
-  //
   // Remembered for the tab, not for good: a reload stays on what was being
   // looked at, and opening ClearPing afresh starts at the overview.
-  const [selectedTargetId, setSelectedTargetIdState] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null
-    return sessionStorage.getItem('selectedTargetId')
-  })
+  //
+  // What is remembered stands until something is chosen (undefined until
+  // then). It is read through useSyncExternalStore, not in a state
+  // initialiser: the server has no storage and renders nothing remembered,
+  // and the first render in the browser has to match it, or hydration fails.
+  // The remembered one is put on screen straight after.
+  const rememberedTargetId = useRemembered('selectedTargetId')
+  const rememberedGroup = useRemembered('selectedGroup')
+  const [chosenTargetId, setSelectedTargetIdState] = useState<string | null | undefined>(undefined)
+  const selectedTargetId = chosenTargetId === undefined ? rememberedTargetId : chosenTargetId
 
   // A group can be on screen instead of a target: every target in it on one
   // chart. The target selection is kept underneath, so leaving the group view
   // (or the group disappearing) lands back on something.
-  const [selectedGroup, setSelectedGroupState] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null
-    return sessionStorage.getItem('selectedGroup')
-  })
+  const [chosenGroup, setSelectedGroupState] = useState<string | null | undefined>(undefined)
+  const selectedGroup = chosenGroup === undefined ? rememberedGroup : chosenGroup
 
   // Persisting belongs with the act of choosing, not in an effect watching the
   // value afterwards.
@@ -657,6 +680,12 @@ export function Dashboard() {
   }, [goTo, hideSidebar])
   const openOverview = useCallback(() => openPage({ kind: 'overview' }), [openPage])
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
+  const openRouting = useCallback(() => openPage({ kind: 'routing' }), [openPage])
+  const openRoutingSettings = useCallback(() => openPage({ kind: 'settings', section: 'routing' }), [openPage])
+  // Routing is turned on in Settings, which is an admin's. Before anyone has
+  // signed in (no accounts yet), Settings is where an account is made first.
+  const canTurnOnRouting = !signedIn || signedIn.role === 'admin'
+  const openRoutingPrefix = useCallback((id: string) => goTo({ kind: 'routing-prefix', id }), [goTo])
   const openPatchNotes = useCallback(() => openPage({ kind: 'patch-notes' }), [openPage])
   const openAlertEditor = useCallback(
     (which: 'new' | string) => goTo(which === 'new' ? { kind: 'alert-new' } : { kind: 'alert-edit', id: which }),
@@ -1061,6 +1090,11 @@ export function Dashboard() {
         onMoveGroup={handleMoveGroup}
         overviewOpen={showingOverview}
         onOpenOverview={openOverview}
+        routingOpen={showingRouting}
+        onOpenRouting={openRouting}
+        routingTrouble={routing.trouble}
+        routingEnabled={routing.enabled !== false}
+        onTurnOnRouting={canTurnOnRouting ? openRoutingSettings : undefined}
         alertsOpen={showingAlerts}
         onOpenAlerts={openAlerts}
         settingsOpen={page?.kind === 'settings'}
@@ -1139,6 +1173,8 @@ export function Dashboard() {
                 onSelectGroup={selectGroup}
                 onShowTargetsFrom={showTargetsFrom}
                 onAddTarget={() => openAddTarget()}
+                onOpenRouting={openRouting}
+                onOpenRoutingPrefix={openRoutingPrefix}
                 reportError={reportError}
               />
             </ErrorBoundary>
@@ -1168,6 +1204,34 @@ export function Dashboard() {
               />
             </ErrorBoundary>
           </motion.div>
+          ) : showingRouting ? (
+          <motion.div
+            key={pathOf(page)}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+          >
+            <ErrorBoundary label="Routing">
+              {routingPrefix ? (
+                <PrefixPage
+                  id={routingPrefix}
+                  readOnly={readOnly}
+                  targets={transformedTargets}
+                  onBack={openRouting}
+                  onSelectTarget={setSelectedTargetId}
+                  reportError={reportError}
+                />
+              ) : (
+                <RoutingPage
+                  readOnly={readOnly}
+                  onOpenPrefix={openRoutingPrefix}
+                  onTurnOn={canTurnOnRouting ? openRoutingSettings : undefined}
+                  reportError={reportError}
+                />
+              )}
+            </ErrorBoundary>
+          </motion.div>
           ) : page?.kind === 'patch-notes' ? (
           <motion.div
             key="patch-notes"
@@ -1193,6 +1257,7 @@ export function Dashboard() {
                   going back leaves Settings rather than stepping through it. */}
               <SettingsPage
                 section={page.section}
+                onOpenRouting={openRouting}
                 onSection={section => goTo({ kind: 'settings', section }, 'replace')}
                 onShowTargetsFrom={agentId => {
                   // The list of that agent's targets is in the sidebar, which

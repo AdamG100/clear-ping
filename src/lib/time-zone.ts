@@ -34,9 +34,25 @@ export function displayTimeZone(): string | undefined {
   return configuredTimeZone(process.env.TZ) ?? undefined
 }
 
-/** Options for toLocaleString and friends, set to the zone times are shown in. */
-export function inDisplayZone<T extends Intl.DateTimeFormatOptions>(options: T): T & { timeZone?: string } {
-  return { ...options, timeZone: displayTimeZone() }
+/**
+ * Options for toLocaleString and friends, set to the zone times are shown in,
+ * on a 24-hour clock: "14:05", never "02:05 PM". h23, as midnight is 00:00.
+ */
+export function inDisplayZone<T extends Intl.DateTimeFormatOptions>(options: T): T & { timeZone?: string; hourCycle: 'h23' } {
+  return { ...options, timeZone: displayTimeZone(), hourCycle: 'h23' }
+}
+
+/**
+ * The viewer's language with the 24-hour clock, for components that take a
+ * locale rather than options (Arc's Timeline). On the server, US English.
+ */
+export function displayLocale(): string {
+  const language = typeof navigator === 'undefined' ? 'en-US' : navigator.language
+  try {
+    return new Intl.Locale(language, { hourCycle: 'h23' }).toString()
+  } catch {
+    return 'en-US-u-hc-h23'
+  }
 }
 
 /** The zone this machine is in, asked once: a chart asks it hundreds of times a render. */

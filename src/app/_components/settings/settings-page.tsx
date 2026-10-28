@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, Fingerprint, History, KeyRound, LogIn, LogOut, RadioTower, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
+import { Bot, Fingerprint, History, KeyRound, LogIn, LogOut, Network, RadioTower, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -15,7 +15,6 @@ import { Select } from '@/components/arc/select/select'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
 import { Switch } from '@/components/arc/switch/switch'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/arc/tabs/tabs'
 import { Timeline } from '@/components/arc/timeline/timeline'
 import { useToast } from '@/components/notifications'
 import type { SettingsSection } from '@/lib/dashboard-pages'
@@ -25,11 +24,12 @@ import { cn } from '@/lib/utils'
 import { FactorPolicyForm, SignInFactors, useMyFactors } from './sign-in-factors'
 import { MaintenanceTab } from './maintenance-tab'
 import { ProbeAgentsTab } from './probe-agents-tab'
+import { RoutingTab } from './routing-tab'
 import { AddAccount } from './add-account'
 import { PasswordDialog } from './password-dialog'
 import { AssistantSettings, CopyField, PAGE_CARD } from './mcp-setup'
 import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
-import { displayTimeZone, inDisplayZone } from '@/lib/time-zone'
+import { displayLocale, displayTimeZone, inDisplayZone } from '@/lib/time-zone'
 
 /**
  * Who may use this ClearPing, and what they have done.
@@ -168,7 +168,7 @@ function SettingSwitch({
  */
 function RowRoleSelect({ label, value, onChange, disabled }: { label: string; value: Role; onChange: (role: Role) => void; disabled?: boolean }) {
   return (
-    <div className="w-36 [&_label]:sr-only">
+    <div className="relative w-36 [&_label]:sr-only">
       <Select label={label} value={value} disabled={disabled} onValueChange={next => onChange(next as Role)} options={ROLE_OPTIONS} />
     </div>
   )
@@ -877,6 +877,14 @@ const ACTIONS: Record<string, string> = {
   'alert.add': 'made an alert',
   'alert.change': 'changed an alert',
   'alert.delete': 'deleted an alert',
+  'bgp.enable': 'turned on BGP monitoring',
+  'bgp.disable': 'turned off BGP monitoring',
+  'bgp.add': 'started watching a prefix',
+  'bgp.change': 'changed a watched prefix',
+  'bgp.accept': 'took a prefix’s routing as normal',
+  'bgp.remove': 'stopped watching a prefix',
+  'bgp.trace': 'traced the targets in a watched prefix',
+  'bgp.network': 'set their own network for Routing',
   'key.create': 'created a key',
   'key.revoke': 'revoked a key',
   'account.create': 'created the account',
@@ -957,7 +965,7 @@ function ActivityTab() {
         label="Activity"
         now={now}
         timeZone={timeZone}
-        locale={typeof navigator === 'undefined' ? 'en-US' : navigator.language}
+        locale={displayLocale()}
         maxHeight={560}
         scrollToNew={false}
         events={entries.map(entry => ({
@@ -980,16 +988,20 @@ function ActivityTab() {
 }
 
 /** The sections of Settings, Security's first. */
-const SECTIONS: { value: SettingsSection; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
-  { value: 'access', label: 'Access', icon: ShieldCheck, adminOnly: true },
-  { value: 'sign-in', label: 'Sign-in', icon: Fingerprint },
-  { value: 'keys', label: 'Keys', icon: KeyRound },
-  { value: 'sso', label: 'Single sign-on', icon: LogIn },
-  { value: 'accounts', label: 'Accounts', icon: Users },
-  { value: 'probe-agents', label: 'Probe agents', icon: RadioTower, adminOnly: true },
-  { value: 'activity', label: 'Activity', icon: History, adminOnly: true },
-  { value: 'maintenance', label: 'Maintenance', icon: Wrench, adminOnly: true },
-  { value: 'assistant', label: 'AI assistant', icon: Bot },
+/** The groups the sections are listed under, in order. */
+const GROUPS = ['Security', 'Monitoring', 'More'] as const
+
+const SECTIONS: { value: SettingsSection; label: string; icon: LucideIcon; group: (typeof GROUPS)[number]; adminOnly?: boolean }[] = [
+  { value: 'access', label: 'Access', icon: ShieldCheck, group: 'Security', adminOnly: true },
+  { value: 'sign-in', label: 'Sign-in', icon: Fingerprint, group: 'Security' },
+  { value: 'keys', label: 'Keys', icon: KeyRound, group: 'Security' },
+  { value: 'sso', label: 'Single sign-on', icon: LogIn, group: 'Security' },
+  { value: 'accounts', label: 'Accounts', icon: Users, group: 'Security' },
+  { value: 'probe-agents', label: 'Probe agents', icon: RadioTower, group: 'Monitoring', adminOnly: true },
+  { value: 'routing', label: 'Routing', icon: Network, group: 'Monitoring', adminOnly: true },
+  { value: 'maintenance', label: 'Maintenance', icon: Wrench, group: 'Monitoring', adminOnly: true },
+  { value: 'activity', label: 'Activity', icon: History, group: 'More', adminOnly: true },
+  { value: 'assistant', label: 'AI assistant', icon: Bot, group: 'More' },
 ]
 
 interface SettingsPageProps {
@@ -998,6 +1010,8 @@ interface SettingsPageProps {
   onSection: (section: SettingsSection) => void
   /** Go to the dashboard, listing only the targets probed from this probe agent. */
   onShowTargetsFrom?: (probeAgentId: string) => void
+  /** Go to the Routing page. */
+  onOpenRouting?: () => void
 }
 
 /**
@@ -1005,7 +1019,7 @@ interface SettingsPageProps {
  * single sign-on, accounts, the activity record, and connecting an AI
  * assistant, each a tab of its own.
  */
-export function SettingsPage({ section, onSection, onShowTargetsFrom }: SettingsPageProps) {
+export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRouting }: SettingsPageProps) {
   const { reportError } = useToast()
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
 
@@ -1079,67 +1093,100 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom }: Settings
         )}
       </header>
 
-      <Tabs value={current.value} onValueChange={value => onSection(value as SettingsSection)}>
-        <TabsList aria-label="Settings">
-          {sections.map(item => {
-            const Icon = item.icon
+      {/* A list of sections down the side, as settings usually are: ten in a
+          row of tabs ran off the side and had to be scrolled. On a phone,
+          a choice of section above it instead. */}
+      <div className="grid gap-6 @3xl/main:grid-cols-[13rem_minmax(0,1fr)] @3xl/main:items-start">
+        <div className="@3xl/main:hidden">
+          <Select
+            id="settings-section"
+            label="Section"
+            value={current.value}
+            onValueChange={value => onSection(value as SettingsSection)}
+            options={sections.map(item => ({ value: item.value, label: `${item.group}: ${item.label}` }))}
+          />
+        </div>
+        <nav aria-label="Settings" className="hidden space-y-5 @3xl/main:sticky @3xl/main:top-4 @3xl/main:block">
+          {GROUPS.map(group => {
+            const inGroup = sections.filter(item => item.group === group)
+            if (inGroup.length === 0) return null
             return (
-              <TabsTrigger key={item.value} value={item.value}>
-                <span className="inline-flex items-center gap-2">
-                  <Icon {...ICON} />
-                  {item.label}
-                </span>
-              </TabsTrigger>
+              <div key={group}>
+                <p className="mb-1.5 px-3 text-xs font-medium text-muted-foreground">{group}</p>
+                <ul className="space-y-0.5">
+                  {inGroup.map(item => {
+                    const Icon = item.icon
+                    const here = item.value === current.value
+                    return (
+                      <li key={item.value}>
+                        <button
+                          type="button"
+                          onClick={() => onSection(item.value)}
+                          aria-current={here ? 'page' : undefined}
+                          className={cn(
+                            'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+                            here ? 'bg-primary/15 font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                          )}
+                        >
+                          <Icon {...ICON} />
+                          {item.label}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
             )
           })}
-        </TabsList>
+        </nav>
 
-        <TabsContent value={current.value}>
-          {current.value === 'assistant' ? (
-            <AssistantSettings onMakeKey={() => onSection('keys')} />
-          ) : (
-            <>
-              {loaded.state === 'loading' && <Skeleton label="Loading the settings" lines={5} />}
+        <section aria-label={current.label} className="min-w-0 text-foreground">
+        {current.value === 'assistant' ? (
+          <AssistantSettings onMakeKey={() => onSection('keys')} />
+        ) : (
+          <>
+            {loaded.state === 'loading' && <Skeleton label="Loading the settings" lines={5} />}
 
-              {loaded.state === 'failed' && <Alert tone="danger" title="Could not load the settings">{loaded.error}</Alert>}
+            {loaded.state === 'failed' && <Alert tone="danger" title="Could not load the settings">{loaded.error}</Alert>}
 
-              {(loaded.state === 'needsAccount' || loaded.state === 'needsSignIn') && (
-                <EmptyState
-                  icon={<ShieldCheck size={24} strokeWidth={1.75} />}
-                  title={loaded.state === 'needsAccount' ? 'No account yet' : 'Sign in to change these'}
-                  description={
-                    loaded.state === 'needsAccount'
-                      ? 'Security is set up with an account: it is what turns sign-in on, creates keys, and is the name changes are recorded under.'
-                      : 'Security settings are changed signed in.'
-                  }
-                  action={
-                    <Button
-                      type="button"
-                      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- the sign-in page is its own app shell; a full load, as signing in is
-                      onClick={() => { window.location.href = `/login?next=${encodeURIComponent(here)}` }}
-                    >
-                      {loaded.state === 'needsAccount' ? 'Create an account' : 'Sign in'}
-                    </Button>
-                  }
-                />
-              )}
+            {(loaded.state === 'needsAccount' || loaded.state === 'needsSignIn') && (
+              <EmptyState
+                icon={<ShieldCheck size={24} strokeWidth={1.75} />}
+                title={loaded.state === 'needsAccount' ? 'No account yet' : 'Sign in to change these'}
+                description={
+                  loaded.state === 'needsAccount'
+                    ? 'Security is set up with an account: it is what turns sign-in on, creates keys, and is the name changes are recorded under.'
+                    : 'Security settings are changed signed in.'
+                }
+                action={
+                  <Button
+                    type="button"
+                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- the sign-in page is its own app shell; a full load, as signing in is
+                    onClick={() => { window.location.href = `/login?next=${encodeURIComponent(here)}` }}
+                  >
+                    {loaded.state === 'needsAccount' ? 'Create an account' : 'Sign in'}
+                  </Button>
+                }
+              />
+            )}
 
-              {loaded.state === 'ready' && (
-                <div className={PAGE_CARD}>
-                  {current.value === 'access' && <AccessTab data={loaded.data} onChange={change} />}
-                  {current.value === 'sign-in' && <SignInTab data={loaded.data} reload={reload} />}
-                  {current.value === 'keys' && <KeysTab data={loaded.data} reload={reload} />}
-                  {current.value === 'sso' && <SsoTab data={loaded.data} reload={reload} />}
-                  {current.value === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}
-                  {current.value === 'activity' && <ActivityTab />}
-                  {current.value === 'maintenance' && <MaintenanceTab />}
-                  {current.value === 'probe-agents' && <ProbeAgentsTab onShowTargets={onShowTargetsFrom} />}
-                </div>
-              )}
-            </>
-          )}
-        </TabsContent>
-      </Tabs>
+            {loaded.state === 'ready' && (
+              <div className={PAGE_CARD}>
+                {current.value === 'access' && <AccessTab data={loaded.data} onChange={change} />}
+                {current.value === 'sign-in' && <SignInTab data={loaded.data} reload={reload} />}
+                {current.value === 'keys' && <KeysTab data={loaded.data} reload={reload} />}
+                {current.value === 'sso' && <SsoTab data={loaded.data} reload={reload} />}
+                {current.value === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}
+                {current.value === 'activity' && <ActivityTab />}
+                {current.value === 'maintenance' && <MaintenanceTab />}
+                {current.value === 'probe-agents' && <ProbeAgentsTab onShowTargets={onShowTargetsFrom} />}
+                {current.value === 'routing' && <RoutingTab onOpenRouting={() => onOpenRouting?.()} />}
+              </div>
+            )}
+          </>
+        )}
+        </section>
+      </div>
     </div>
   )
 }

@@ -20,12 +20,13 @@ import { humanDuration } from '@/lib/reports/evidence'
 import { describeGroupHealth, groupIsOnline, groupIsPaused, summarizeGroupHealth } from '@/lib/targets/group-health'
 import { groupLabel, groupName } from '@/lib/targets/group-path'
 import { buildSidebarLayout, subgroups, targetsWithin } from '@/lib/targets/sidebar-layout'
-import { displayTimeZone, inDisplayZone, wallClock } from '@/lib/time-zone'
+import { displayLocale, displayTimeZone, inDisplayZone, wallClock } from '@/lib/time-zone'
 import { cn } from '@/lib/utils'
 import type { AlertResponse } from '../alerts/alerts-view'
 import { PROBE_AGENT_STATE } from '../settings/probe-agent-labels'
 import { StatusIndicator } from '../sidebar/status-indicator'
 import { PANE, PANE_HEADER, PANE_TITLE } from './pane-layout'
+import { RoutingGlance } from './routing-glance'
 import { useOverview } from './use-overview'
 
 /**
@@ -59,6 +60,8 @@ interface OverviewPageProps {
   /** Lists the targets probed from one place in the sidebar: a probe agent's id, or `local` for this server. */
   onShowTargetsFrom: (from: string) => void
   onAddTarget: () => void
+  onOpenRouting: () => void
+  onOpenRoutingPrefix: (id: string) => void
   reportError: (title: string, error?: unknown) => void
 }
 
@@ -374,7 +377,7 @@ function Events({
             events={events}
             now={report.end}
             timeZone={displayTimeZone() ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
-            locale={typeof navigator === 'undefined' ? 'en-US' : navigator.language}
+            locale={displayLocale()}
             maxHeight={560}
             scrollToNew={false}
             headingLevel={3}
@@ -616,6 +619,8 @@ export function OverviewPage({
   onSelectGroup,
   onShowTargetsFrom,
   onAddTarget,
+  onOpenRouting,
+  onOpenRoutingPrefix,
   reportError,
 }: OverviewPageProps) {
   // The day leaves out the checks that have never answered; so does now.
@@ -711,6 +716,8 @@ export function OverviewPage({
       {/* Now, from the top: what is wrong, the network as a whole, and where
           it is seen from. Then the day. */}
       <Attention now={now} latest={latest} report={report} onSelectTarget={onSelectTarget} />
+
+      <RoutingGlance onOpenRouting={onOpenRouting} onOpenPrefix={onOpenRoutingPrefix} />
 
       <Network
         targets={targets}
