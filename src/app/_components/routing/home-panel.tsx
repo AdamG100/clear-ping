@@ -265,7 +265,14 @@ export function HomePanel({
       </div>
 
       {!home.exchangesKnown && (
-        <p className="mt-3 text-xs text-signal-moderate">PeeringDB could not be read, so the exchanges crossed are not named.</p>
+        <p className="mt-3 text-xs text-signal-moderate">
+          PeeringDB could not be read (it may have timed out or turned ClearPing away), so the exchanges crossed are not named. Create a free
+          API key in your{' '}
+          <a href="https://www.peeringdb.com/profile" target="_blank" rel="noreferrer" className="underline">
+            PeeringDB profile
+          </a>{' '}
+          and set it as <span className="font-mono">CLEARPING_PEERINGDB_API_KEY</span>, then restart ClearPing.
+        </p>
       )}
     </section>
   )

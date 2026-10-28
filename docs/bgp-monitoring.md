@@ -159,8 +159,11 @@ Only a little, and briefly:
   starts, and the exchanges' collectors are asked again.
 - **Exchange LANs:** read from PeeringDB once a day, with a copy kept so a
   restart need not read them again. PeeringDB throttles anonymous reads of its
-  whole lists; set `CLEARPING_PEERINGDB_API_KEY` to a PeeringDB API key if it
-  turns ClearPing away.
+  whole lists, so a read can time out or be turned away. When it cannot be
+  read and no copy is kept, Routing says so under your network and asks for a
+  PeeringDB API key: make one for free in your PeeringDB profile, set it as
+  `CLEARPING_PEERINGDB_API_KEY` and restart ClearPing. A key set or changed
+  is tried at once rather than after the hour's wait.
 
 ## Limits
 
