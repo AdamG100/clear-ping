@@ -51,6 +51,8 @@ export interface TimelineProps {
   defaultExpanded?: string[];
   /** Heading level for the day labels. */
   headingLevel?: 2 | 3 | 4 | 5 | 6;
+  /** What the day count counts, singular and plural. Defaults to "update", "updates". */
+  unit?: [string, string];
   className?: string;
 }
 
@@ -171,7 +173,7 @@ function TimelineRow({ row, last, expanded, onToggle, timeLabel, timeFull }: { r
   </motion.li>;
 }
 
-export function Timeline({ events, now, label, timeZone = "UTC", locale = "en-US", maxHeight, scrollToNew = true, defaultExpanded = [], headingLevel = 3, className }: TimelineProps) {
+export function Timeline({ events, now, label, timeZone = "UTC", locale = "en-US", maxHeight, scrollToNew = true, defaultExpanded = [], headingLevel = 3, unit = ["update", "updates"], className }: TimelineProps) {
   const reduced = useReducedMotionSafe();
   const id = useId();
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -254,8 +256,8 @@ export function Timeline({ events, now, label, timeZone = "UTC", locale = "en-US
           {groups.map(group => <DaySection key={group.day} id={`${id}-${group.day}`} fresh={!initialDays.has(group.day)} reduced={reduced}>
             <div className={styles.day} role="heading" aria-level={headingLevel} id={`${id}-${group.day}`}>
               <span>{group.label}</span>
-              <span className={styles.count} aria-hidden="true"><RollingCount value={group.rows.length} reduced={reduced} /> {group.rows.length === 1 ? "update" : "updates"}</span>
-              <span className={styles.srOnly}>{`, ${group.rows.length} ${group.rows.length === 1 ? "update" : "updates"}`}</span>
+              <span className={styles.count} aria-hidden="true"><RollingCount value={group.rows.length} reduced={reduced} /> {group.rows.length === 1 ? unit[0] : unit[1]}</span>
+              <span className={styles.srOnly}>{`, ${group.rows.length} ${group.rows.length === 1 ? unit[0] : unit[1]}`}</span>
             </div>
             <ol className={styles.list}>
               <AnimatePresence>

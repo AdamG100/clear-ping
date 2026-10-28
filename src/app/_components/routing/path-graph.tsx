@@ -42,6 +42,19 @@ interface Edge {
   upstream: number
 }
 
+/**
+ * The line of one of yours: "Your ISP" the foreground colour, each probe agent
+ * a colour and a dash of its own, taken from the far end of the chart palette
+ * so they are not the upstream bands' first colours.
+ */
+function ownerLine(index: number): { color: string; dash: string } {
+  const dashes = ['6 4', '2 4', '10 3 2 3', '1 3']
+  return {
+    color: index === 0 ? 'var(--foreground)' : `var(--line-${16 - ((index - 1) % 8)})`,
+    dash: dashes[index % dashes.length],
+  }
+}
+
 function truncate(text: string, length: number): string {
   return text.length > length ? `${text.slice(0, length - 1)}…` : text
 }
@@ -99,7 +112,7 @@ export function PathGraph({
   const graph = useMemo(() => {
     // Each peer once: the first route listed for it is the one that counts.
     const seen = new Set<string>()
-    const flows: { place: string; label: string; neighbour: number | null; upstream: number; origin: number; whose: string | null }[] = []
+    const flows: { place: string; label: string; neighbour: number; upstream: number; origin: number; whose: string | null }[] = []
     for (const each of peers) {
       const key = `${each.collector}|${each.peer}`
       if (!each.route || seen.has(key)) continue
@@ -110,7 +123,11 @@ export function PathGraph({
       flows.push({
         place: byCountry ? each.country : each.region,
         label: byCountry ? countryName(each.country) : REGION_SHORT[each.region],
-        neighbour: path.length >= 3 ? path[path.length - 3] : null,
+        // The network before the upstream; for a peer that reaches the origin
+        // directly, the peer itself. Every route then passes through a node in
+        // each column: one that skipped "Heard from" was drawn across it,
+        // joined to nothing there.
+        neighbour: path[Math.max(0, path.length - 3)],
         upstream,
         origin: path[path.length - 1],
         whose: each.peerAsn in mine ? whoseLabel(mine[each.peerAsn]) : null,
@@ -122,10 +139,9 @@ export function PathGraph({
       for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1)
       return [...counts].sort((a, b) => b[1] - a[1])
     }
-    const keptNeighbours = new Set(count(flows.flatMap(flow => (flow.neighbour === null ? [] : [flow.neighbour]))).slice(0, MOST_NEIGHBOURS).map(([asn]) => asn))
+    const keptNeighbours = new Set(count(flows.map(flow => flow.neighbour)).slice(0, MOST_NEIGHBOURS).map(([asn]) => asn))
     const keptUpstreams = new Set(count(flows.map(flow => flow.upstream)).slice(0, MOST_UPSTREAMS).map(([asn]) => asn))
-    const neighbourOf = (flow: (typeof flows)[number]) =>
-      flow.neighbour === null ? null : keptNeighbours.has(flow.neighbour) ? flow.neighbour : OTHER
+    const neighbourOf = (flow: (typeof flows)[number]) => (keptNeighbours.has(flow.neighbour) ? flow.neighbour : OTHER)
     const upstreamNode = (asn: number) => (keptUpstreams.has(asn) ? asn : OTHER)
 
     const nodes = new Map<string, Node>()
@@ -136,7 +152,7 @@ export function PathGraph({
     }
     const edges = new Map<string, Edge>()
     // Your networks' routes: the links and the nodes they pass through, and whose they are.
-    const myLinks = new Set<string>()
+    const myLinks = new Map<string, Set<string>>()
     const myNodes = new Map<string, Set<string>>()
     let whose: string | null = null
     const link = (from: string, to: string, upstream: number) => {
@@ -145,7 +161,7 @@ export function PathGraph({
       if (held) held.peers++
       else edges.set(key, { from, to, peers: 1, upstream })
       if (whose) {
-        myLinks.add(`${from}>${to}`)
+        myLinks.set(`${from}>${to}`, new Set([...(myLinks.get(`${from}>${to}`) ?? []), whose]))
         for (const id of [from, to]) myNodes.set(id, new Set([...(myNodes.get(id) ?? []), whose]))
       }
     }
@@ -159,14 +175,10 @@ export function PathGraph({
       const upstreamId = `2:${up}`
       add({ ...asNode(up, 2, 1, names), color: up === OTHER ? 'var(--signal-none)' : colors.get(up), unusual: upstreams.find(each => each.asn === up)?.expected === false })
       add(asNode(flow.origin, 3, 1, names))
-      if (neighbour !== null) {
-        const neighbourId = `1:${neighbour}`
-        add(asNode(neighbour, 1, 1, names))
-        link(region, neighbourId, flow.upstream)
-        link(neighbourId, upstreamId, flow.upstream)
-      } else {
-        link(region, upstreamId, flow.upstream)
-      }
+      const neighbourId = `1:${neighbour}`
+      add(asNode(neighbour, 1, 1, names))
+      link(region, neighbourId, flow.upstream)
+      link(neighbourId, upstreamId, flow.upstream)
       link(upstreamId, `3:${flow.origin}`, flow.upstream)
     }
 
@@ -191,7 +203,11 @@ export function PathGraph({
       const offset = (height - column.length * ROW) / 2
       column.forEach((node, row) => position.set(node.id, { x, y: offset + row * ROW + (ROW - NODE_HEIGHT) / 2 }))
     })
-    return { nodes: [...nodes.values()], edges: [...edges.values()], position, height, flows: flows.length, myLinks, myNodes }
+    // Everyone drawn, "Your ISP" first: each keeps a line of its own, in the order they are listed here.
+    const owners = [...new Set(flows.flatMap(flow => (flow.whose ? [flow.whose] : [])))].sort(
+      (a, b) => Number(b === whoseLabel('This server')) - Number(a === whoseLabel('This server')) || a.localeCompare(b)
+    )
+    return { nodes: [...nodes.values()], edges: [...edges.values()], position, height, flows: flows.length, myLinks, myNodes, owners }
   }, [peers, upstreams, names, colors, byCountry, mine])
 
   if (graph.flows === 0) {
@@ -251,29 +267,35 @@ export function PathGraph({
           )
         })}
 
-        {[...graph.myLinks].map(key => {
+        {[...graph.myLinks].flatMap(([key, whoseLinks]) => {
           const [fromId, toId] = key.split('>')
           const from = graph.position.get(fromId)
           const to = graph.position.get(toId)
-          if (!from || !to) return null
+          if (!from || !to) return []
           const x1 = from.x + NODE_WIDTH
           const y1 = from.y + NODE_HEIGHT / 2
           const x2 = to.x
           const y2 = to.y + NODE_HEIGHT / 2
           const bend = (x2 - x1) / 2
-          return (
-            <path
-              key={`mine:${key}`}
-              d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`}
-              fill="none"
-              stroke="var(--foreground)"
-              strokeWidth={2}
-              strokeDasharray="6 4"
-              strokeLinecap="round"
-              opacity={0.9}
-              pointerEvents="none"
-            />
-          )
+          // Where several share a link, each is a little to one side of the others.
+          const sharing = graph.owners.filter(owner => whoseLinks.has(owner))
+          return sharing.map((owner, index) => {
+            const style = ownerLine(graph.owners.indexOf(owner))
+            const shift = (index - (sharing.length - 1) / 2) * 3.5
+            return (
+              <path
+                key={`mine:${key}:${owner}`}
+                d={`M ${x1} ${y1 + shift} C ${x1 + bend} ${y1 + shift}, ${x2 - bend} ${y2 + shift}, ${x2} ${y2 + shift}`}
+                fill="none"
+                stroke={style.color}
+                strokeWidth={2}
+                strokeDasharray={style.dash}
+                strokeLinecap="round"
+                opacity={0.95}
+                pointerEvents="none"
+              />
+            )
+          })
         })}
 
         {graph.nodes.map(node => {
@@ -357,15 +379,23 @@ export function PathGraph({
         })}
       </svg>
       {graph.myLinks.size > 0 && (
-        <p className="mt-2 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-          <svg width="28" height="6" aria-hidden="true">
-            <line x1="1" y1="3" x2="27" y2="3" stroke="var(--foreground)" strokeWidth="2" strokeDasharray="6 4" strokeLinecap="round" />
-          </svg>
-          Dashed:{' '}
-          {Object.entries(mine)
-            .map(([asn, whose]) => `${whoseLabel(whose)} (${asLabel(Number(asn), names)})`)
-            .join(', ')}
-        </p>
+        <ul className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {graph.owners.map((owner, index) => {
+            const style = ownerLine(index)
+            const networks = Object.entries(mine)
+              .filter(([, whose]) => whoseLabel(whose) === owner)
+              .map(([asn]) => asLabel(Number(asn), names))
+            return (
+              <li key={owner} className="flex items-center gap-2">
+                <svg width="28" height="6" aria-hidden="true">
+                  <line x1="1" y1="3" x2="27" y2="3" stroke={style.color} strokeWidth="2" strokeDasharray={style.dash} strokeLinecap="round" />
+                </svg>
+                {owner}
+                {networks.length > 0 ? ` (${networks.join(', ')})` : ''}
+              </li>
+            )
+          })}
+        </ul>
       )}
     </div>
   )

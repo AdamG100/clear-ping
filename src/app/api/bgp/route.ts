@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { initializeServer } from '@/lib/init'
-import { getBgpMonitor } from '@/lib/bgp/monitor'
+import { AlreadyWatchedError, getBgpMonitor } from '@/lib/bgp/monitor'
 import { actorFor } from '@/lib/security/access'
 import { requireAdmin } from '@/lib/security/http'
 import { recordActivity } from '@/lib/security/store'
@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
     try {
       added = await getBgpMonitor().add(resource, label)
     } catch (error) {
+      if (error instanceof AlreadyWatchedError) return NextResponse.json({ error: error.message }, { status: 409 })
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not watch that' }, { status: 400 })
     }
     const { actor, via } = await actorFor(request)
@@ -49,7 +50,8 @@ export async function POST(request: NextRequest) {
 /**
  * PUT /api/bgp - Turn BGP monitoring on or off, `{ enabled }`, which is a
  * setting and an admin's to change; or set your own network's AS numbers,
- * `{ homeAsns: [64500] }`.
+ * `{ homeAsns: [64500] }`; or choose the probe agents Routing uses, by those
+ * to leave out, `{ excludedAgents: ["<id>"] }`.
  */
 export async function PUT(request: NextRequest) {
   try {
@@ -63,6 +65,16 @@ export async function PUT(request: NextRequest) {
       const saved = await getBgpMonitor().setHomeAsns(asns)
       const { actor, via } = await actorFor(request)
       await recordActivity(actor, via, 'bgp.network', saved.length > 0 ? `Your network: ${saved.map(asn => `AS${asn}`).join(', ')}` : 'Your network: none')
+      return NextResponse.json(await getBgpMonitor().overview())
+    }
+    if (Array.isArray(body?.excludedAgents)) {
+      const ids = body.excludedAgents as unknown[]
+      if (ids.some(id => typeof id !== 'string') || ids.length > 200) {
+        return NextResponse.json({ error: 'Give the probe agents to leave out as a list of ids' }, { status: 400 })
+      }
+      await getBgpMonitor().setExcludedAgents(ids as string[])
+      const { actor, via } = await actorFor(request)
+      await recordActivity(actor, via, 'bgp.agents', ids.length > 0 ? `${ids.length} probe agent${ids.length === 1 ? '' : 's'} left out of Routing` : 'All probe agents in Routing')
       return NextResponse.json(await getBgpMonitor().overview())
     }
     if (typeof body?.enabled !== 'boolean') {

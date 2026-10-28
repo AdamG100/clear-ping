@@ -11,10 +11,12 @@ import { isAddress, isPrefix, tooWide } from './prefix'
 
 const BASE = 'https://stat.ripe.net/data'
 const TIMEOUT_MS = 20_000
+/** Every collector peer's route to a prefix is a large answer, and slower to build: it is given longer. */
+const LOOKING_GLASS_TIMEOUT_MS = 60_000
 
-async function ask<T>(endpoint: string, resource: string): Promise<T> {
+async function ask<T>(endpoint: string, resource: string, timeoutMs = TIMEOUT_MS): Promise<T> {
   const url = `${BASE}/${endpoint}/data.json?resource=${encodeURIComponent(resource)}&sourceapp=clearping`
-  const response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { accept: 'application/json' } })
+  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { accept: 'application/json' } })
   if (!response.ok) throw new Error(`RIPEstat answered ${response.status} for ${endpoint}`)
   const body = (await response.json()) as { data?: T; status?: string; messages?: [string, string][] }
   if (!body.data) throw new Error(body.messages?.map(([, text]) => text).join(' ') || `RIPEstat had nothing for ${resource}`)
@@ -60,7 +62,7 @@ function utc(text: string): number {
 
 /** Every collector peer's route to the prefix right now. */
 export async function currentRoutes(prefix: string): Promise<BgpRoute[]> {
-  const data = await ask<{ rrcs: { rrc: string; peers: LookingGlassPeer[] }[] }>('looking-glass', prefix)
+  const data = await ask<{ rrcs: { rrc: string; peers: LookingGlassPeer[] }[] }>('looking-glass', prefix, LOOKING_GLASS_TIMEOUT_MS)
   const routes: BgpRoute[] = []
   for (const collector of data.rrcs ?? []) {
     for (const peer of collector.peers ?? []) {

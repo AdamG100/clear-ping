@@ -212,9 +212,12 @@ export function TargetChecklist({
                         <label htmlFor={targetId} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <span className="min-w-0 truncate text-sm text-foreground">{target.name}</span>
                           {target.note && <Badge size="sm">{target.note}</Badge>}
-                          <span className="ml-auto min-w-0 max-w-[45%] truncate font-mono text-xs text-muted-foreground">
-                            {target.host}
-                          </span>
+                          {/* A target named by its address would say it twice. */}
+                          {target.host !== target.name && (
+                            <span className="ml-auto min-w-0 max-w-[45%] truncate font-mono text-xs text-muted-foreground">
+                              {target.host}
+                            </span>
+                          )}
                         </label>
                       </div>
                     )

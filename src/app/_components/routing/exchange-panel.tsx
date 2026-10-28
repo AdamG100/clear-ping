@@ -2,15 +2,17 @@
 
 import { Fragment } from 'react'
 import { Badge, type BadgeTone } from '@/components/arc/badge/badge'
+import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import type { BgpExchangeLook, BgpExchangeRoute, BgpExchangeView } from '@/types/bgp'
 import { cn } from '@/lib/utils'
 import { ago, asLabel, whoseLabel } from './state'
 
 /**
  * "At the exchanges": what each exchange's own route collector has for the
- * prefix (see looking-glass.ts). RIS has no collector at JINX, CINX or DINX;
- * these say whether the origin offers it there itself, or is reached there
- * only through another member.
+ * prefix (see looking-glass.ts). RIS has no collector at these exchanges;
+ * they say whether the origin offers it there itself, or is reached there
+ * only through another member. Which exchanges are shown is left to the page,
+ * from what the collectors hold: none are named here.
  */
 
 const MEMBERS_SHOWN = 6
@@ -73,7 +75,7 @@ function Exchange({
         <Badge size="sm" tone={state.tone}>{state.label}</Badge>
       </header>
       {own.length > 0 && since.length > 0 && now > 0 && (
-        <p className="text-xs text-muted-foreground">Offered by the origin here since {ago(Math.min(...since), now)}.</p>
+        <p className="text-xs text-muted-foreground">The origin last changed its route here {ago(Math.min(...since), now)}.</p>
       )}
       {was && own.length === 0 && view.ready && (
         <p className="text-xs text-signal-critical">The origin offered it here itself when normal was taken.</p>
@@ -125,13 +127,13 @@ export function ExchangePanel({
   mine: Record<number, string>
   now: number
 }) {
-  if (!look) return <p className="text-sm text-muted-foreground">Reading the exchanges&apos; route collectors.</p>
+  if (!look) return <Skeleton label="Reading the exchanges' route collectors" lines={3} />
   const sources = [...new Set(look.views.map(view => view.source))]
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
         From the exchanges&apos; own route collectors{sources.length > 0 ? `, through ${sources.join(', ')}'s looking glass` : ''}, read every 5
-        minutes{now > 0 ? `, last ${ago(look.at, now)}` : ''}. RIPE RIS has no collector at these exchanges.
+        minutes{now > 0 ? `, last ${ago(look.at, now)}` : ''}. RIPE RIS has no collector at {look.views.length === 1 ? 'this exchange' : 'these exchanges'}.
       </p>
       {look.error && <p className="text-xs text-signal-moderate">{look.error}</p>}
       {look.views.length > 0 && (

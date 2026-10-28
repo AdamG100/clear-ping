@@ -164,6 +164,7 @@ export function PrefixPage({
   targets,
   onBack,
   onSelectTarget,
+  onAddProbeAgent,
   reportError,
 }: {
   id: string
@@ -171,6 +172,8 @@ export function PrefixPage({
   targets: Target[]
   onBack: () => void
   onSelectTarget: (id: string) => void
+  /** Open Settings where probe agents are added: for an admin. */
+  onAddProbeAgent?: () => void
   reportError: (title: string, error?: unknown) => void
 }) {
   const { notify } = useToast()
@@ -277,6 +280,15 @@ export function PrefixPage({
     const held = yourWays.get(way) ?? []
     if (!held.includes(whose)) yourWays.set(way, [...held, whose])
   }
+  // The exchanges that matter to this prefix, found from what their collectors
+  // hold: those it is offered at, or was when normal was taken. An exchange
+  // that has nothing to do with it, a South African one for a prefix elsewhere,
+  // is left out, and with none the panel is not shown. Until the collectors
+  // have been read it is a placeholder.
+  const wasAt = detail.baseline?.exchanges ?? []
+  const exchangeViews = detail.exchanges?.views.filter(view => view.routes.length > 0 || wasAt.includes(view.exchange)) ?? []
+  const exchangeLook = detail.exchanges ? { ...detail.exchanges, views: exchangeViews, error: exchangeViews.length > 0 ? detail.exchanges.error : null } : null
+  const exchangeSources = [...new Set(exchangeViews.map(view => view.source))]
   // The updates in the page's scope: from peers in the place chosen, about
   // routes through the upstream chosen (before or after), in the bar chosen.
   const peerAt = new Map(detail.peers.map(peer => [`${peer.collector}|${peer.peer}`, peer]))
@@ -315,7 +327,8 @@ export function PrefixPage({
           <Tooltip content={SOURCE_NOTE}>
             <p className="mt-1.5 inline-flex cursor-default items-center gap-1.5 text-xs text-muted-foreground">
               <Database size={12} strokeWidth={1.75} aria-hidden="true" />
-              From RIPE RIS route collectors, via RIPEstat and RIS Live, and INX-ZA&apos;s route collectors
+              From RIPE RIS route collectors, via RIPEstat and RIS Live
+              {exchangeSources.length > 0 ? `, and ${exchangeSources.join(', ')}'s route collectors` : ''}
             </p>
           </Tooltip>
         </div>
@@ -369,27 +382,32 @@ export function PrefixPage({
 
       <HomePanel
         detail={detail}
-        colors={colors}
         readOnly={readOnly}
         now={fetchedAt}
         onSetNetwork={() => setSettingNetwork(true)}
+        onAddProbeAgent={onAddProbeAgent}
         onTraced={reload}
         reportError={reportError}
       />
       {!readOnly && (
-        <NetworkDialog key={detail.home.asns.join()} open={settingNetwork} onOpenChange={setSettingNetwork} asns={detail.home.asns} onSaved={() => void reload()} />
+        <NetworkDialog key={detail.home.asns.join()} open={settingNetwork} onOpenChange={setSettingNetwork} asns={detail.home.asns} agents={detail.home.agents} onSaved={() => void reload()} />
       )}
 
-      <Panel title="At the exchanges" note="JINX, CINX, DINX and NMBINX, by their own route collectors">
-        <ExchangePanel
-          look={detail.exchanges}
-          origins={detail.baseline?.origins ?? status.origins}
-          was={detail.baseline?.exchanges}
-          names={names}
-          mine={mine}
-          now={fetchedAt}
-        />
-      </Panel>
+      {(exchangeLook === null || exchangeViews.length > 0) && (
+        <Panel
+          title="At the exchanges"
+          note={exchangeLook === null ? undefined : `${exchangeViews.map(view => view.exchange).join(', ')}, by their own route collectors`}
+        >
+          <ExchangePanel
+            look={exchangeLook}
+            origins={detail.baseline?.origins ?? status.origins}
+            was={detail.baseline?.exchanges}
+            names={names}
+            mine={mine}
+            now={fetchedAt}
+          />
+        </Panel>
+      )}
 
       <ScopeBar scope={scope} names={names} onScope={setScope} />
 
@@ -457,6 +475,7 @@ export function PrefixPage({
               maxHeight={320}
               scrollToNew={false}
               headingLevel={3}
+              unit={['change', 'changes']}
             />
           ) : (
             <p className="text-sm text-muted-foreground">Nothing has changed since it was added.</p>

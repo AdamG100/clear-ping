@@ -39,10 +39,18 @@ server (the announced prefix that holds it is watched, and the most specific
 route to that address followed). As it is typed, the dialog says which
 announced prefix that is and who announces it, with the announced prefixes it
 is part of and those inside it: an address in a provider's space belongs to
-one of its announcements, and which one is not always plain. ClearPing then:
+one of its announcements, and which one is not always plain. The box takes several,
+separated by commas. Below it, your existing targets with a public address can
+be ticked: ticking one puts its address in the box and unticking takes it out,
+so the box always says what will be watched. Each is labelled with the
+target's name unless a label is given, and a target whose address a watched
+prefix already holds is shown as already watched. ClearPing
+then:
 
-- reads every collector peer's current route to it, and takes how it is
-  carried then as **normal**: the networks announcing it, the upstreams it is
+- adds it at once, then reads every collector peer's current route to it in
+  the background (RIPEstat can take up to a minute over a busy prefix, and a
+  read that fails is tried again every minute; it shows as "Learning" until
+  then), and takes how it is carried when they arrive as **normal**: the networks announcing it, the upstreams it is
   reached through, the peers that reach it directly, the peers that see it,
   the prefixes announced within it, and the exchanges whose route collectors
   have it from the origin itself;
@@ -88,31 +96,64 @@ prefix's page makes how it is carried now the normal it is judged against.
 ## The prefix's page
 
 - **From your networks:** a card for each place you look from: this server,
-  and each of your probe agents.
+  and each of your probe agents, with a timeline of what was seen from there,
+  newest first, by day.
   - **Its network:** set for this server, or found from its traces (the
     network of the first hop on the internet).
   - **Its network's routes:** the routes that network shares with RIS's
     collectors, each "Directly connected" or "Through" an upstream, with where
-    it was seen.
-  - **Its traffic:** the latest traceroute from there to each of your targets
-    inside the prefix (or, with none, to an address in it), the exchange it
-    crossed (for example "Crosses JINX at 192.0.2.32"), when it last crossed
-    somewhere else, and every hop.
+    it was seen, from when it was first seen; and every time one of them
+    changed ("Now through AS64500 at Johannesburg, was directly connected").
+    Open one for its path. A route whose way in changed three times or more in
+    24 hours is **flapping**: its changes are one entry ("Flapping at
+    Johannesburg: 5 changes in 24 hours", with the ways it went between), and
+    the card and the section are marked Flapping.
+  - **Its traffic:** the latest round of traceroutes from there, one to each
+    of your targets inside the prefix (or, with none, to an address in it), as
+    one entry saying the exchange they crossed ("Crosses JINX to all 4 addresses", or
+    "Crosses NAPAfrica IX Johannesburg to 3 addresses; crosses JINX to 1");
+    open it for each address and its hops. Below it, each time the traffic
+    began crossing somewhere else ("Changed to JINX, was NAPAfrica IX
+    Johannesburg"), one entry however many addresses changed together. An
+    address that keeps going back and forth, as traffic spread over two ways
+    in does, has a single entry ("Switches between JINX and NAPAfrica IX
+    Johannesburg") instead of one for each change, and is marked Flapping
+    too. The last 20 traces to each
+    address are kept. A hop on an exchange's peering LAN is a
+    sure crossing. Many routers answer a traceroute from another of their
+    addresses, though, so a crossing can leave no hop on the LAN: then, where
+    the trace passes from one network to the next and PeeringDB lists both as
+    members of an exchange, it says "Probably crosses" that exchange (or the
+    ones they share). Two members can also be joined by a private link, hence
+    probably. Without PeeringDB it says the exchange is not known rather than
+    that there is none.
   - **When it is traced:** whenever how the prefix stands changes, whenever a
     route of yours changes, when **Trace now** is pressed, and when the newest
-    trace is over six hours old. These traces are kept with the prefix, not in
+    trace is over six hours old; unasked, not more than once in 15 minutes,
+    however often the routes change. These traces are kept with the prefix, not in
     the targets' traceroute history. A probe agent that is offline is skipped.
-- **At the exchanges:** a card for each of JINX, CINX, DINX and NMBINX, from
-  the exchange's own route collector: whether the origin offers the prefix
+- **At the exchanges:** a card for each exchange that has something to do
+  with the prefix, built from what the exchanges' own route collectors hold
+  (today those of INX-ZA's looking glass, JINX, CINX, DINX and NMBINX): only
+  the exchanges where the prefix is offered, or was when normal was taken. A
+  prefix with nothing at any of them has no such section, so nobody not
+  watching South African prefixes sees one. It shows as a placeholder until
+  the collectors have been read. Each card says whether the origin offers the prefix
   there itself (and over how many sessions), or only through other members,
   or not at all; and the members that offer it, each with its path. An
   exchange the origin offered it at when normal was taken, and no longer does,
   is marked "Origin gone from here".
 - **Your routes, across the page:** your networks' routes are marked by whose
   they are, "Your ISP" for this server's network and each probe agent by name,
-  in Where it is seen, Who carries it, the paths (drawn as a dashed line over
-  the bands), the updates and the collector peers, which can be filtered to
-  your networks.
+  in Where it is seen, Who carries it, the paths (each drawn as a
+  dashed line over the bands, "Your ISP" in the text colour and each probe
+  agent in a colour and dash of its own, with a key beneath), the updates and
+  the collector peers, which can be filtered to your networks.
+- **Which probe agents:** every probe agent is a vantage point in Routing, and
+  one added later joins them. Under "Set your network" (or "Change") untick
+  any to leave it out: it is no longer traced from, and its network is no
+  longer marked. "Add a probe agent", beside it on a prefix's page, opens
+  Settings at Probe agents (for an admin).
 - **Where it is seen:** the share of collector peers that see it in each of the
   five regions the registries hand out addresses in. Choose a region to see its
   countries, and a country to see its exchanges.
@@ -157,7 +198,7 @@ Only a little, and briefly:
 - **Routing's traces:** two weeks.
 - **Routes:** not stored. They are read again from RIPEstat when ClearPing
   starts, and the exchanges' collectors are asked again.
-- **Exchange LANs:** read from PeeringDB once a day, with a copy kept so a
+- **Exchange LANs and members:** read from PeeringDB once a day, with a copy kept so a
   restart need not read them again. PeeringDB throttles anonymous reads of its
   whole lists, so a read can time out or be turned away. When it cannot be
   read and no copy is kept, Routing says so under your network and asks for a

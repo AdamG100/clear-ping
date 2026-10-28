@@ -682,6 +682,7 @@ export function Dashboard() {
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
   const openRouting = useCallback(() => openPage({ kind: 'routing' }), [openPage])
   const openRoutingSettings = useCallback(() => openPage({ kind: 'settings', section: 'routing' }), [openPage])
+  const openProbeAgentSettings = useCallback(() => openPage({ kind: 'settings', section: 'probe-agents' }), [openPage])
   // Routing is turned on in Settings, which is an admin's. Before anyone has
   // signed in (no accounts yet), Settings is where an account is made first.
   const canTurnOnRouting = !signedIn || signedIn.role === 'admin'
@@ -1220,11 +1221,14 @@ export function Dashboard() {
                   targets={transformedTargets}
                   onBack={openRouting}
                   onSelectTarget={setSelectedTargetId}
+                  onAddProbeAgent={canTurnOnRouting ? openProbeAgentSettings : undefined}
                   reportError={reportError}
                 />
               ) : (
                 <RoutingPage
                   readOnly={readOnly}
+                  targets={transformedTargets}
+                  groupOrders={groupOrders}
                   onOpenPrefix={openRoutingPrefix}
                   onTurnOn={canTurnOnRouting ? openRoutingSettings : undefined}
                   reportError={reportError}

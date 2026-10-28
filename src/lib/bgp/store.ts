@@ -20,6 +20,7 @@ export const EVENTS_KEPT_MS = 14 * 24 * 60 * 60 * 1000
 
 const ENABLED_KEY = 'bgp.enabled'
 const HOME_KEY = 'bgp.home_asns'
+const EXCLUDED_AGENTS_KEY = 'bgp.excluded_agents'
 const EXCHANGES_KEY = 'bgp.exchanges'
 
 function run(database: Database, sql: string, params: unknown[] = []): Promise<number> {
@@ -70,6 +71,25 @@ export async function setHomeAsns(asns: readonly number[]): Promise<void> {
     await getDatabase(),
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
     [HOME_KEY, JSON.stringify([...new Set(asns)])]
+  )
+}
+
+/** The probe agents taken out of Routing: every other one is a vantage point, new ones included. */
+export async function getExcludedAgents(): Promise<string[]> {
+  const [row] = await all<{ value: string }>(await getDatabase(), 'SELECT value FROM settings WHERE key = ?', [EXCLUDED_AGENTS_KEY])
+  try {
+    const parsed: unknown = row ? JSON.parse(row.value) : []
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export async function setExcludedAgents(ids: readonly string[]): Promise<void> {
+  await run(
+    await getDatabase(),
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    [EXCLUDED_AGENTS_KEY, JSON.stringify([...new Set(ids)])]
   )
 }
 

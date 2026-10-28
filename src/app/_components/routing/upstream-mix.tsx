@@ -116,24 +116,27 @@ export function UpstreamMix({
                 )}
               >
                 <span className="size-2.5 shrink-0 rounded-full" style={{ background: colors.get(upstream.asn) }} aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate">
-                  {upstream.asn === BGP_DIRECT ? (
-                    <>
-                      Directly connected{' '}
-                      <span className="text-xs text-muted-foreground">at an exchange, privately or as its upstream</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="font-mono text-xs text-muted-foreground">AS{upstream.asn}</span> {names[upstream.asn] ?? ''}
-                    </>
+                {/* On a narrow screen the badges go under the name rather than squeezing it to a few letters. */}
+                <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="min-w-[min(12rem,100%)] max-w-full flex-1 truncate">
+                    {upstream.asn === BGP_DIRECT ? (
+                      <>
+                        Directly connected{' '}
+                        <span className="text-xs text-muted-foreground">at an exchange, privately or as its upstream</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-mono text-xs text-muted-foreground">AS{upstream.asn}</span> {names[upstream.asn] ?? ''}
+                      </>
+                    )}
+                  </span>
+                  {yours.has(upstream.asn) && (
+                    <Badge tone="info" size="sm">
+                      {`${yours.get(upstream.asn)!.map(whoseLabel).join(', ')}’s route`}
+                    </Badge>
                   )}
+                  {!upstream.expected && <Badge tone="warning" size="sm">New</Badge>}
                 </span>
-                {yours.has(upstream.asn) && (
-                  <Badge tone="info" size="sm">
-                    {`${yours.get(upstream.asn)!.map(whoseLabel).join(', ')}’s route`}
-                  </Badge>
-                )}
-                {!upstream.expected && <Badge tone="warning" size="sm">New</Badge>}
                 <span className="w-24 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
                   {upstream.peers} · {percent(upstream.peers, total)}
                 </span>

@@ -14,7 +14,7 @@ import type {
 } from '@/types/bgp'
 import { assess, effectiveRoutes, peerKey, takeBaseline } from './assess'
 import { collectorInfo, collectorName, peerPlace, type Place } from './collectors'
-import { homeCarriers, homeChanges, homeView, traceInto } from './home'
+import { agentChoices, homeCarriers, homeChanges, homeView, traceInto } from './home'
 import { LOOK_EVERY_MS, lookAtExchanges, offExchanges, originPresent } from './looking-glass'
 import { flattenPath } from './path'
 import { prefixWithin } from './prefix'
@@ -37,6 +37,7 @@ import {
   recordBgpUpdates,
   saveNetwork,
   setBgpEnabled,
+  setExcludedAgents,
   setHomeAsns,
   updateBgpPrefix,
   EVENTS_KEPT_MS,
@@ -53,7 +54,12 @@ import {
  * away), and every half hour besides, in case an update was missed.
  */
 
+/** Asked to watch a prefix that is watched already: a 409, not a mistake in what was given. */
+export class AlreadyWatchedError extends Error {}
+
 const RESYNC_EVERY_MS = 30 * 60 * 1000
+/** After RIPEstat fails to answer, how long before a prefix's routes are asked for again, rather than waiting for the next re-read. */
+const RESYNC_RETRY_MS = 60 * 1000
 const PRUNE_EVERY_MS = 60 * 60 * 1000
 /** Updates come in bursts; a prefix is judged once a burst has passed. */
 const SETTLE_MS = 1_500
@@ -102,6 +108,8 @@ class BgpMonitor {
   private running = false
   /** Networks being looked up, and those RIPEstat had nothing on, so they are not asked about again. */
   private looking = new Set<number>()
+  /** Prefixes whose routes could not be read and are waiting to be asked for again. */
+  private retrying = new Set<string>()
   private unknown = new Set<number>()
   /** The country each network is registered in, where looked up: places the peers of multihop collectors. */
   private countries = new Map<number, string>()
@@ -138,6 +146,7 @@ class BgpMonitor {
     this.countries = await knownAsCountries().catch(() => new Map())
     this.homeAsns = await getHomeAsns().catch(() => [])
     this.know(new Map(this.homeAsns.map(asn => [asn, 'This server'])))
+    this.lookUpHome()
     for (const prefix of await listBgpPrefixes()) this.track(prefix)
     // The stream's opening reads every prefix afresh (onOpen).
     this.stream.start([...this.watched.values()].map(each => each.prefix.prefix))
@@ -171,7 +180,14 @@ class BgpMonitor {
     await setHomeAsns(asns)
     this.homeAsns = await getHomeAsns()
     this.know(new Map(this.homeAsns.map(asn => [asn, 'This server'])))
+    this.lookUpHome()
     return this.homeAsns
+  }
+
+  /** Choose which probe agents Routing uses: all but these. Their routes are followed afresh, as with a changed network. */
+  async setExcludedAgents(ids: readonly string[]): Promise<void> {
+    await setExcludedAgents(ids)
+    for (const watched of this.watched.values()) watched.home = null
   }
 
   /**
@@ -239,6 +255,7 @@ class BgpMonitor {
       watched.routes = new Map(routes.map(route => [routeKey(route), route]))
       watched.synced = true
       this.remember(routes)
+      await this.takeFirstNormal(watched, routes)
       await this.recordDirectPeers(watched, routes)
       if (!watched.exchanges) await this.look(watched).catch(() => {})
       await this.judge(watched)
@@ -246,7 +263,31 @@ class BgpMonitor {
       this.traceLater(watched, { staleOnly: true })
     } catch (error) {
       console.warn(`[BGP] Could not read the routes to ${watched.prefix.prefix}:`, error instanceof Error ? error.message : error)
+      this.resyncLater(watched)
     }
+  }
+
+  /** Ask again soon, until RIPEstat answers: the names, countries and traces all wait on these routes. */
+  private resyncLater(watched: Watched): void {
+    if (this.retrying.has(watched.prefix.id)) return
+    this.retrying.add(watched.prefix.id)
+    const timer = setTimeout(() => {
+      this.retrying.delete(watched.prefix.id)
+      if (this.running && this.watched.get(watched.prefix.id) === watched && !watched.synced) void this.resync(watched)
+    }, RESYNC_RETRY_MS)
+    timer.unref?.()
+  }
+
+  /**
+   * Normal is how it is carried when first read: a prefix just added, or one
+   * no collector saw when it was. With no routes at all there is none to take.
+   * Where the origin offers it at the exchanges is added when they are read (see look).
+   */
+  private async takeFirstNormal(watched: Watched, routes: BgpRoute[]): Promise<void> {
+    if (watched.prefix.baseline || routes.length === 0) return
+    const baseline = takeBaseline(routes, watched.prefix.prefix, watched.prefix.address, Date.now())
+    await updateBgpPrefix(watched.prefix.id, { baseline })
+    watched.prefix = { ...watched.prefix, baseline }
   }
 
   /**
@@ -411,6 +452,11 @@ class BgpMonitor {
 
   // ─── Networks ───────────────────────────────────────────────────────────
 
+  /** Your own network's name too: it may be in no path, so nothing else would ask for it. */
+  private lookUpHome(): void {
+    this.lookUp(this.homeAsns.map(asn => ({ collector: '', path: [asn] })))
+  }
+
   /**
    * Look up, in the background and a few at a time, the names of the networks
    * in these paths, and the countries of the peers of multihop collectors.
@@ -434,18 +480,20 @@ class BgpMonitor {
       const worker = async () => {
         for (let each = work.shift(); each !== undefined; each = work.shift()) {
           try {
+            // RIPEstat failing to answer is not its having nothing: only the latter is remembered as unknown.
+            let failed = false
             const [name, country] = await Promise.all([
-              each.name ? asName(each.asn).catch(() => null) : null,
-              each.country ? asCountry(each.asn).catch(() => null) : null,
+              each.name ? asName(each.asn).catch(() => { failed = true; return null }) : null,
+              each.country ? asCountry(each.asn).catch(() => { failed = true; return null }) : null,
             ])
             if (name || country) await saveNetwork(each.asn, { name, country })
             if (country) {
               this.countries.set(each.asn, country)
               placed = true
             }
-            if (!name && !country) this.unknown.add(each.asn)
+            if (!name && !country && !failed) this.unknown.add(each.asn)
           } catch {
-            this.unknown.add(each.asn)
+            // Saving it failed, not the lookup: asked about again at the next read.
           } finally {
             this.looking.delete(each.asn)
           }
@@ -484,6 +532,7 @@ class BgpMonitor {
       prefixes,
       asNames: Object.fromEntries(await knownAsNames(asns)),
       homeAsns,
+      agents: await agentChoices(),
     }
   }
 
@@ -538,12 +587,16 @@ class BgpMonitor {
     }))
     const home = await homeView(id, watched.prefix.prefix, watched.prefix.address, this.homeAsns, peers)
     this.know(new Map(Object.entries(home.mine).map(([asn, whose]) => [Number(asn), whose])))
+    // The networks either side of where a trace probably crossed an exchange: named like the rest, and looked up if not yet.
+    const traced = home.vantages.flatMap(vantage => vantage.traces.flatMap(trace => (trace.likely ? [trace.likely.from, trace.likely.to] : [])))
+    if (traced.length > 0) this.lookUp([{ collector: '', path: traced }])
     const asns = [
       ...new Set([
         ...routes.flatMap(route => route.path),
         ...peers.map(each => each.peerAsn),
         ...updates.flatMap(update => [...(update.path ?? []), ...(update.previousPath ?? [])]),
         ...Object.keys(home.mine).map(Number),
+        ...traced,
         ...(watched.exchanges?.views.flatMap(view => view.routes.flatMap(route => route.path)) ?? []),
       ]),
     ]
@@ -563,25 +616,24 @@ class BgpMonitor {
 
   // ─── Changes ────────────────────────────────────────────────────────────
 
-  /** Watch the prefix that holds an address, or a prefix as given. */
+  /**
+   * Watch the prefix that holds an address, or a prefix as given. It is saved
+   * at once and its routes read in the background: RIPEstat can take most of
+   * a minute over every peer's route to a prefix, too long to keep the dialog
+   * waiting, and a timeout then would lose the prefix. Until they are read it
+   * is "learning", and normal is taken from the first routes read (see resync).
+   */
   async add(input: string, label: string | null): Promise<BgpPrefixSummary> {
     const resolved = await resolveResource(input)
-    if (await findBgpPrefix(resolved.prefix)) throw new Error(`${resolved.prefix} is already being watched`)
-    const routes = await currentRoutes(resolved.prefix)
-    const now = Date.now()
-    // Normal is how it is carried now. With no routes at all there is no normal to take.
-    const baseline = routes.length > 0 ? takeBaseline(routes, resolved.prefix, resolved.address, now) : null
-    const prefix = await addBgpPrefix({ prefix: resolved.prefix, label, address: resolved.address, baseline })
+    if (await findBgpPrefix(resolved.prefix)) throw new AlreadyWatchedError(`${resolved.prefix} is already being watched`)
+    const prefix = await addBgpPrefix({ prefix: resolved.prefix, label, address: resolved.address, baseline: null })
     if (this.running) {
-      const watched = this.track(prefix, routes)
+      const watched = this.track(prefix)
       this.stream.subscribe(prefix.prefix)
-      await this.judge(watched)
-      this.lookUp(routes)
-      // The exchanges take a few seconds to answer: they are read after, and add to normal then.
-      void this.look(watched).then(() => this.judge(watched)).catch(() => {})
+      void this.resync(watched)
       return this.summary(watched)
     }
-    return { ...prefix, status: assess(prefix, routes) }
+    return { ...prefix, status: assess(prefix, []) }
   }
 
   async remove(id: string): Promise<boolean> {

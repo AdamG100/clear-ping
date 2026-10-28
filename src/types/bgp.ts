@@ -178,6 +178,8 @@ export interface BgpOverview {
   asNames: Record<number, string>
   /** Your own network's AS numbers, for "From your network". */
   homeAsns: number[]
+  /** Every probe agent, and whether Routing uses it. */
+  agents: { id: string; name: string; included: boolean }[]
 }
 
 /** A collector peer as the prefix page lists it: its route, or the lack of one. */
@@ -226,8 +228,31 @@ export interface BgpHomeTrace {
   hops: { hop: number; address: string | null; hostname: string | null; rtt: number | null; exchange: string | null }[]
   /** The exchange it crossed, or null when it crossed none it could name. */
   crossing: BgpCrossing | null
-  /** The last trace before it that crossed somewhere else, if one is kept. */
-  before: { at: number; crossing: BgpCrossing | null } | null
+  /**
+   * With no hop on an exchange's LAN: the exchanges it probably crossed, those
+   * the two networks either side of the hop are both members of. Many routers
+   * answer a traceroute from another address, so a crossing can leave no hop
+   * on the LAN. Null when there is no such pair, or a hop on a LAN was found.
+   */
+  likely: { names: string[]; from: number; to: number; hop: number } | null
+  /**
+   * Where the kept traces to this address crossed, newest first: each a run
+   * of traces that crossed the same exchange (or the same likely ones, or
+   * none), from the first of them to the last. Failed traces are left out.
+   */
+  history: BgpCrossingRun[]
+}
+
+/** A stretch of traces that crossed the same way, for the timeline in "From your networks". */
+export interface BgpCrossingRun {
+  /** The first trace and the last that crossed this way. */
+  from: number
+  to: number
+  traces: number
+  /** The exchange crossed, when a hop was on its LAN. */
+  crossing: string | null
+  /** With no hop on a LAN: the exchanges it probably crossed. */
+  likely: string[] | null
 }
 
 /**
@@ -257,6 +282,8 @@ export interface BgpHome {
   vantages: BgpVantage[]
   /** Every network of yours, and whose it is: "This server", or a probe agent's name. For marking yours across the page. */
   mine: Record<number, string>
+  /** Every probe agent, and whether Routing uses it as a vantage point. All are, until one is taken out. */
+  agents: { id: string; name: string; included: boolean }[]
   /** Whether the exchanges' peering LANs could be read from PeeringDB. */
   exchangesKnown: boolean
 }

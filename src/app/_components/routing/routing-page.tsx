@@ -10,8 +10,11 @@ import { Input } from '@/components/arc/input/input'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useToast } from '@/components/notifications'
+import { addressIn, isAddress, isPublicAddress } from '@/lib/bgp/prefix'
 import type { BgpOverview, BgpPrefixSummary } from '@/types/bgp'
+import type { GroupOrder, Target } from '@/types/probe'
 import { PANE, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
+import { TargetChecklist } from '../sidebar/target-checklist'
 import { RegionBars } from './region-visibility'
 import { asLabel, ago, CONNECTION_LABEL, CONNECTION_TONE, SOURCE_NOTE, STATE_COLOR, STATE_LABEL, STATE_TONE } from './state'
 import { UpstreamBar } from './upstream-mix'
@@ -81,50 +84,136 @@ function Intro({ onTurnOn }: { onTurnOn?: () => void }) {
   )
 }
 
-/** Adding a prefix to watch, in a dialog: the page is the list, not the form. */
-function AddPrefixDialog({ open, onOpenChange, onAdded }: { open: boolean; onOpenChange: (open: boolean) => void; onAdded: () => void }) {
+/** The IP address a target is at, if it is known: a public one is what BGP can follow. */
+function addressOf(target: Target): string | null {
+  const address = isAddress(target.host) ? target.host : target.resolvedAddress
+  return address && isPublicAddress(address) ? address : null
+}
+
+/** What was typed, as the separate addresses and prefixes in it. */
+function wordsOf(text: string): string[] {
+  return [...new Set(text.split(/[\s,;]+/).filter(Boolean))]
+}
+
+/**
+ * Adding a prefix to watch, in a dialog: the page is the list, not the form.
+ * The box holds every address and prefix to watch, separated by commas;
+ * ticking a target puts its address there and unticking takes it out, so what
+ * will be watched is always what the box says.
+ */
+function AddPrefixDialog({
+  open,
+  onOpenChange,
+  onAdded,
+  targets,
+  groupOrders,
+  watched,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onAdded: () => void
+  /** Your targets, to choose from. */
+  targets: Target[]
+  groupOrders: GroupOrder[]
+  /** The prefixes already watched. */
+  watched: string[]
+}) {
   const { notify, reportError } = useToast()
   const [resource, setResource] = useState('')
   const [label, setLabel] = useState('')
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // Targets with a public address. Those a watched prefix already holds are
+  // not offered: ticking one could do nothing.
+  const usable = targets.flatMap(target => {
+    const address = addressOf(target)
+    return address ? [{ target, address }] : []
+  })
+  const choices = usable.filter(each => !watched.some(prefix => addressIn(each.address, prefix)))
+  const coveredCount = usable.length - choices.length
+  const words = wordsOf(resource)
+  // A target is ticked when its address is in the box, however it got there.
+  const chosen = new Set(choices.filter(each => words.includes(each.address)).map(each => each.target.id))
+
+  const tick = (next: Set<string>) => {
+    const added = choices.filter(each => next.has(each.target.id) && !chosen.has(each.target.id)).map(each => each.address)
+    // Targets that share an address tick and untick together: unticking one takes the address out.
+    const removed = new Set(choices.filter(each => !next.has(each.target.id) && chosen.has(each.target.id)).map(each => each.address))
+    const kept = words.filter(word => !removed.has(word))
+    setResource([...new Set([...kept, ...added])].join(', '))
+    setProblem(null)
+  }
+
+  // Closed, it starts empty next time rather than with what was ticked before.
   const change = (next: boolean) => {
+    if (busy) return
     if (!next) {
+      setResource('')
+      setLabel('')
       setProblem(null)
-      setBusy(false)
     }
     onOpenChange(next)
   }
 
+  /** The label for one address or prefix: what was typed for a single one, else a ticked target's own name. */
+  const labelFor = (word: string) => {
+    const typed = label.trim()
+    if (typed && words.length === 1) return typed
+    return choices.find(each => each.address === word)?.target.name ?? typed
+  }
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!resource.trim()) {
-      setProblem('Give an IP address or a prefix')
+    if (busy) return
+    if (words.length === 0) {
+      setProblem('Give an IP address or a prefix, or tick a target')
       return
     }
     setBusy(true)
     setProblem(null)
     try {
-      const response = await fetch('/api/bgp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resource, label }),
-      })
-      const body = await response.json().catch(() => null)
-      if (!response.ok) {
-        setProblem(body?.error ?? `Server responded ${response.status}`)
+      const added: BgpPrefixSummary[] = []
+      // Two addresses in one announced prefix: the second finds it watched already, which is not a failure.
+      const already: string[] = []
+      const failed: { word: string; reason: string }[] = []
+      for (const word of words) {
+        const response = await fetch('/api/bgp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resource: word, label: labelFor(word) }),
+        })
+        const body = await response.json().catch(() => null)
+        if (response.ok) added.push(body as BgpPrefixSummary)
+        else if (response.status === 409) already.push(word)
+        else failed.push({ word, reason: body?.error ?? `Server responded ${response.status}` })
+      }
+      if (added.length > 0) {
+        notify({
+          tone: 'success',
+          title: added.length === 1 ? `Watching ${added[0].prefix}` : `Watching ${added.length} prefixes`,
+          detail:
+            added.length === 1
+              ? `${added[0].address ? `The announced prefix that holds ${added[0].address}. ` : ''}Its routes are being read from RIPEstat, which can take a minute.`
+              : `${added.map(each => each.prefix).join(', ')}. Their routes are being read from RIPEstat, which can take a minute.`,
+        })
+        onAdded()
+      }
+      if (already.length > 0) {
+        notify({
+          tone: 'info',
+          title: `${already.length === 1 ? already[0] : `${already.length} of them`} already watched`,
+          detail: 'The announced prefix that holds it is watched already, so nothing more was added.',
+        })
+      }
+      if (failed.length > 0) {
+        // What was added is done; what failed stays in the box to be put right.
+        setResource(failed.map(each => each.word).join(', '))
+        setProblem(failed.map(each => (words.length > 1 ? `${each.word}: ${each.reason}` : each.reason)).join('. '))
         return
       }
-      const added = body as BgpPrefixSummary
-      notify({
-        tone: 'success',
-        title: `Watching ${added.prefix}`,
-        detail: added.address ? `The announced prefix that holds ${added.address}.` : 'Its routes are being followed now.',
-      })
       setResource('')
       setLabel('')
-      onAdded()
       onOpenChange(false)
     } catch (error) {
       reportError('Could not watch that', error)
@@ -138,11 +227,12 @@ function AddPrefixDialog({ open, onOpenChange, onAdded }: { open: boolean; onOpe
       <DialogContent
         title="Watch a prefix"
         description="An IP address watches the announced prefix that holds it, and follows the most specific route to that address."
+        style={{ width: 'min(calc(100vw - 2rem), 600px)' }}
       >
         <form onSubmit={submit} noValidate className="space-y-4 text-foreground">
           <Input
-            label="IP address or prefix"
-            placeholder="203.0.113.10 or 203.0.113.0/24"
+            label="IP addresses or prefixes"
+            placeholder="203.0.113.10 or 203.0.113.0/24, separated by commas"
             value={resource}
             onChange={event => setResource(event.target.value)}
             error={problem ?? undefined}
@@ -151,10 +241,40 @@ function AddPrefixDialog({ open, onOpenChange, onAdded }: { open: boolean; onOpe
             autoComplete="off"
             autoFocus
           />
-          <ResourcePreview resource={resource} />
-          <Input label="Label" placeholder="Game servers, Johannesburg" value={label} onChange={event => setLabel(event.target.value)} />
+          <ResourcePreview resource={words.length === 1 ? words[0] : ''} />
+          <Input
+            label="Label"
+            placeholder={words.length > 1 ? 'Each ticked target is labelled with its name' : 'Game servers, Johannesburg'}
+            value={label}
+            onChange={event => setLabel(event.target.value)}
+          />
+          {choices.length > 0 && (
+            // Disabled while watching, so what is ticked cannot change under it.
+            <fieldset className="space-y-2" disabled={busy}>
+              <legend className="text-sm font-medium">Or tick your targets</legend>
+              <p className="text-xs text-muted-foreground">
+                Ticking a target puts its address in the box above, and unticking takes it out. Each is labelled with the
+                target&apos;s name; a label given is used when there is only one.
+              </p>
+              <TargetChecklist
+                targets={choices.map(({ target, address }) => ({ ...target, host: address }))}
+                groupOrders={groupOrders}
+                selected={chosen}
+                onChange={tick}
+                searchable
+                maxHeight="min(14rem, 28dvh)"
+              />
+            </fieldset>
+          )}
+          {coveredCount > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {coveredCount === usable.length ? 'Every one of your targets is' : `${coveredCount} of your targets ${coveredCount === 1 ? 'is' : 'are'}`} in
+              a prefix already watched, so {coveredCount === 1 ? 'it is' : 'they are'} not listed.
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
-            Its routes are read from RIPEstat now, and how it is carried at this moment is taken as normal.
+            It is added at once and its routes read from RIPEstat in the background; how it is carried when they arrive
+            is taken as normal.
           </p>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => change(false)}>
@@ -211,11 +331,16 @@ function PrefixCard({ prefix, names, now, onOpen }: { prefix: BgpPrefixSummary; 
 
 export function RoutingPage({
   readOnly,
+  targets,
+  groupOrders,
   onOpenPrefix,
   onTurnOn,
   reportError,
 }: {
   readOnly: boolean
+  /** Your targets, to choose prefixes to watch from. */
+  targets: Target[]
+  groupOrders: GroupOrder[]
   onOpenPrefix: (id: string) => void
   /** Open Settings where it is turned on: for an admin, who can. */
   onTurnOn?: () => void
@@ -313,9 +438,18 @@ export function RoutingPage({
             </p>
           </Tooltip>
 
-          {!readOnly && <AddPrefixDialog open={adding} onOpenChange={setAdding} onAdded={() => void reload()} />}
           {!readOnly && (
-            <NetworkDialog key={overview.homeAsns.join()} open={settingNetwork} onOpenChange={setSettingNetwork} asns={overview.homeAsns} onSaved={() => void reload()} />
+            <AddPrefixDialog
+              open={adding}
+              onOpenChange={setAdding}
+              onAdded={() => void reload()}
+              targets={targets}
+              groupOrders={groupOrders}
+              watched={overview.prefixes.map(each => each.prefix)}
+            />
+          )}
+          {!readOnly && (
+            <NetworkDialog key={overview.homeAsns.join()} open={settingNetwork} onOpenChange={setSettingNetwork} asns={overview.homeAsns} agents={overview.agents} onSaved={() => void reload()} />
           )}
         </>
       )}
