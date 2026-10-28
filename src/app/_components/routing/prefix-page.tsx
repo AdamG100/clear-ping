@@ -21,14 +21,14 @@ import { BGP_DIRECT, BGP_REGION_LABEL, type BgpPrefixDetail, type BgpState } fro
 import { PANE, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
 import { StatusIndicator } from '../sidebar/status-indicator'
 import { ActivityStrip, clock } from './activity-strip'
-import { ExchangePanel } from './exchange-panel'
+import { ExchangePanel, sameExchange, type ExchangeCrossing } from './exchange-panel'
 import { HomePanel } from './home-panel'
 import { NetworkDialog } from './network-dialog'
 import { PathGraph } from './path-graph'
 import { PeerTable } from './peer-table'
 import { SeenFrom } from './seen-from'
 import { PrefixSkeleton } from './skeleton'
-import { ago, asLabel, carrierLabel, SOURCE_NOTE, STATE_LABEL, STATE_TONE, viaLabel, yoursOf } from './state'
+import { ago, asLabel, carrierLabel, SOURCE_NOTE, STATE_LABEL, STATE_TONE, vantageLabel, viaLabel, yoursOf } from './state'
 import { upstreamColors, UpstreamMix } from './upstream-mix'
 import { UpdateList } from './update-list'
 import { useBgpPrefix } from './use-bgp'
@@ -305,8 +305,24 @@ export function PrefixPage({
   // that has nothing to do with it, a South African one for a prefix elsewhere,
   // is left out, and with none the panel is not shown. Until the collectors
   // have been read it is a placeholder.
+  // And where your traffic crosses them, by each vantage point's latest traces.
+  const crossings: ExchangeCrossing[] = detail.home.vantages.flatMap(vantage =>
+    vantage.traces.flatMap((trace): ExchangeCrossing[] =>
+      trace.crossing
+        ? [{ whose: vantageLabel(vantage), exchanges: [trace.crossing.name], member: trace.crossing.member, to: trace.targetName ?? trace.address, sure: true }]
+        : trace.likely
+          ? [{ whose: vantageLabel(vantage), exchanges: trace.likely.names, member: null, to: trace.targetName ?? trace.address, sure: false }]
+          : []
+    )
+  )
   const wasAt = detail.baseline?.exchanges ?? []
-  const exchangeViews = detail.exchanges?.views.filter(view => view.routes.length > 0 || wasAt.includes(view.exchange)) ?? []
+  const exchangeViews =
+    detail.exchanges?.views.filter(
+      view =>
+        view.routes.length > 0 ||
+        wasAt.includes(view.exchange) ||
+        crossings.some(crossing => crossing.sure && crossing.exchanges.some(name => sameExchange(view.exchange, name)))
+    ) ?? []
   const exchangeLook = detail.exchanges ? { ...detail.exchanges, views: exchangeViews, error: exchangeViews.length > 0 ? detail.exchanges.error : null } : null
   const exchangeSources = [...new Set(exchangeViews.map(view => view.source))]
   // The updates in the page's scope: from peers in the place chosen, about
@@ -438,6 +454,7 @@ export function PrefixPage({
             look={exchangeLook}
             origins={detail.baseline?.origins ?? status.origins}
             was={detail.baseline?.exchanges}
+            crossings={crossings}
             names={names}
             mine={mine}
             now={fetchedAt}

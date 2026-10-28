@@ -161,17 +161,28 @@ wait again.
     trace is over six hours old; unasked, not more than once in 15 minutes,
     however often the routes change. These traces are kept with the prefix, not in
     the targets' traceroute history. A probe agent that is offline is skipped.
-- **At the exchanges:** a card for each exchange that has something to do
-  with the prefix, built from what the exchanges' own route collectors hold
-  (today those of INX-ZA's looking glass, JINX, CINX, DINX and NMBINX): only
-  the exchanges where the prefix is offered, or was when normal was taken. A
-  prefix with nothing at any of them has no such section, so nobody not
-  watching South African prefixes sees one. It shows as a placeholder until
-  the collectors have been read. Each card says whether the origin offers the prefix
-  there itself (and over how many sessions), or only through other members,
-  or not at all; and the members that offer it, each with its path. An
-  exchange the origin offered it at when normal was taken, and no longer does,
-  is marked "Origin gone from here".
+- **At the exchanges:** the exchanges that have something to do with the
+  prefix, from what their own route collectors hold (today those of INX-ZA's
+  looking glass, JINX, CINX, DINX and NMBINX): those where the prefix is
+  offered, where the origin usually offers it, and those your traffic
+  crosses. A prefix with nothing at any of them has no such section, so
+  nobody not watching South African prefixes sees one. It shows as a
+  placeholder until the collectors have been read.
+  - **A tile for each exchange** says whether the origin offers the prefix
+    there itself (and over how many sessions), only through other members,
+    or not at all, and how many members offer it. One the origin usually
+    offers it at and no longer does is "Origin gone from here". A tile is
+    marked where your traffic crosses that exchange, by your traces ("Your
+    ISP's traffic"), or probably does. Choose a tile to open that exchange;
+    the one your traffic crosses opens first.
+  - **The exchange opened** says where your traffic crosses it, and into
+    which member (by IXPDB), then lists the members that offer the prefix
+    there: the origin first, then the shortest way to it. Filter them to the
+    origin, the other members or yours (your networks, and the member your
+    traffic goes into), or search by network, AS number, address or prefix.
+    Open a member for each of its sessions: its address on the exchange, the
+    prefix, the path, whether it is the collector's best route, and since
+    when.
 - **Yours, across the page:** your networks' routes are marked by whose they
   are, "Your ISP" for this server's network and each probe agent by name (two
   on one network share a mark), in Where it is seen, Who carries it, the paths
