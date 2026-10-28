@@ -10,7 +10,6 @@ import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { MetricCard } from '@/components/arc/metric-card/metric-card'
-import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { Timeline, type TimelineEvent } from '@/components/arc/timeline/timeline'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { alertTitle } from '@/lib/alerts/delivery'
@@ -27,6 +26,7 @@ import { PROBE_AGENT_STATE } from '../settings/probe-agent-labels'
 import { StatusIndicator } from '../sidebar/status-indicator'
 import { PANE, PANE_HEADER, PANE_TITLE } from './pane-layout'
 import { RoutingGlance } from './routing-glance'
+import { OverviewDaySkeleton, OverviewSkeleton } from './skeleton'
 import { useOverview } from './use-overview'
 
 /**
@@ -669,6 +669,23 @@ export function OverviewPage({
   const sourcesLine =
     probeAgents.length === 0 ? 'probed from this server' : `probed from this server and ${plural(probeAgents.length, 'probe agent')}`
 
+  // Until the targets are in, the page has nothing true to say: its figures
+  // would read 0 of 0 and its headline that it waits for the first readings.
+  // A placeholder in its shape holds the place instead.
+  if (!loaded) {
+    return (
+      <div className={PANE}>
+        <header className={PANE_HEADER}>
+          <div className="min-w-0">
+            <h1 className={PANE_TITLE}>Overview</h1>
+            <div className="mt-2 h-4 w-64 max-w-full animate-pulse rounded-md bg-muted motion-reduce:animate-none" aria-hidden="true" />
+          </div>
+        </header>
+        <OverviewSkeleton />
+      </div>
+    )
+  }
+
   return (
     <div className={PANE}>
       <header className={PANE_HEADER}>
@@ -684,7 +701,7 @@ export function OverviewPage({
         )}
       </header>
 
-      {loaded ? <Headline now={now} agentsDown={agentsDown} /> : <Skeleton label="Loading targets" lines={2} />}
+      <Headline now={now} agentsDown={agentsDown} />
 
       {/* Two by two on a phone: four tiles one under another were a screen
           of scrolling before anything else. */}
@@ -741,9 +758,7 @@ export function OverviewPage({
           </div>
         </>
       ) : (
-        <section className={PANEL}>
-          <Skeleton label="Reading the last 24 hours" lines={6} />
-        </section>
+        <OverviewDaySkeleton />
       )}
     </div>
   )
