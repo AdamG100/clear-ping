@@ -12,9 +12,9 @@ import packageJson from '../../package.json'
  * "Is this the latest?" is answered by the registry rather than the source
  * repository: the newest version is whatever `:latest` is, because that is
  * what an update would pull. The image is public even where the repository
- * is not, so the question needs no token. Asked at most once an hour, and
- * turned off with CLEARPING_UPDATE_CHECK=off for an install that should not
- * reach out at all.
+ * is not, so the question needs no token. Asked at most every quarter of an
+ * hour, and turned off with CLEARPING_UPDATE_CHECK=off for an install that
+ * should not reach out at all.
  */
 
 export interface Build {
@@ -201,7 +201,7 @@ async function anonymousToken(challenge: string | null, fetchFn: FetchFn): Promi
 
 // ─── Remembered between requests ────────────────────────────────────────────
 
-const CHECK_EVERY_MS = 60 * 60 * 1000
+const CHECK_EVERY_MS = 15 * 60 * 1000
 /** Sooner after a failure: a registry that was briefly unreachable should not hide an update for an hour. */
 const RETRY_AFTER_MS = 10 * 60 * 1000
 

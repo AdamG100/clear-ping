@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import type { Target, TargetDefinition, GroupOrder, SparklinePoint } from '@/types/probe'
 import { BrandMark } from '../shell/brand-mark'
-import { VersionBadge } from './version-badge'
+import { UpdateNotice, useVersionStatus, VersionBadge } from './version-badge'
 import { Sparkline } from './sparkline'
 import { SidebarSkeleton } from '../dashboard/skeleton'
 import { DeleteTargetDialog } from '../targets/target-dialogs'
@@ -1207,6 +1207,8 @@ export function Sidebar({
   // says their server is down, only that this check cannot reach it.
   const silentCount = targets.filter(t => t.status !== 'paused' && !t.onHold && t.neverAnswered).length
 
+  const version = useVersionStatus()
+
   const draggedTarget = drag.active ? targetsById.get(drag.active.id) : undefined
   const deletingTarget = deletingId ? targetsById.get(deletingId) ?? null : null
 
@@ -1263,9 +1265,10 @@ export function Sidebar({
         inert={collapsed}
         className="flex min-h-0 flex-1 flex-col lg:min-w-[calc(20rem-1px)] lg:sidebar-collapsed:hidden"
       >
-      {/* Header */}
-      <div className="p-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-2 mb-3">
+      {/* Header: who this is and what version, the pages, then finding a
+          target and how the targets stand. */}
+      <div className="space-y-3 border-b border-sidebar-border p-4">
+        <div className="flex h-9 items-center gap-2">
           {/* The mark goes home, as a site's does. */}
           {onOpenOverview ? (
             <button type="button" onClick={onOpenOverview} className="flex shrink-0 cursor-pointer rounded-lg" aria-label="Overview">
@@ -1274,37 +1277,99 @@ export function Sidebar({
           ) : (
             <BrandMark />
           )}
-          <div>
-            <h1 className="text-sm font-medium text-sidebar-foreground">
-              ClearPing
-            </h1>
-            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              Network monitor
-              <VersionBadge onOpen={onOpenPatchNotes} />
-            </p>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="shrink-0 text-base font-medium text-sidebar-foreground">ClearPing</h1>
+            <VersionBadge version={version} onOpen={onOpenPatchNotes} />
           </div>
-          <span className="ml-auto">
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
             <ThemeSwitch theme={theme} variant="rise" iconOnly onThemeChange={next => setTheme(next)} />
-          </span>
-          <span className="lg:hidden">
-            <Button ref={closeRef} type="button" variant="ghost" size="sm" onClick={onClose} aria-label="Close targets">
-              <X {...ICON} />
-            </Button>
-          </span>
-          {onCollapse && (
-            <span className="hidden lg:block">
-              <Tooltip content="Collapse sidebar">
-                <Button id={SIDEBAR_COLLAPSE_BUTTON_ID} type="button" variant="ghost" size="sm" onClick={onCollapse} aria-label="Collapse sidebar">
-                  <PanelLeftClose {...ICON} />
-                </Button>
-              </Tooltip>
+            <span className="lg:hidden">
+              <Button ref={closeRef} type="button" variant="ghost" size="sm" onClick={onClose} aria-label="Close targets">
+                <X {...ICON} />
+              </Button>
             </span>
-          )}
+            {onCollapse && (
+              <span className="hidden lg:block">
+                <Tooltip content="Collapse sidebar">
+                  <Button id={SIDEBAR_COLLAPSE_BUTTON_ID} type="button" variant="ghost" size="sm" onClick={onCollapse} aria-label="Collapse sidebar">
+                    <PanelLeftClose {...ICON} />
+                  </Button>
+                </Tooltip>
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* As tall as it is with the delete button in it, which only appears
-            past one target, so the header is the same height either way. */}
-        <div className="flex min-h-5.5 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <UpdateNotice version={version} onOpen={onOpenPatchNotes} />
+
+        {/* The pages beside the list: the overview first, then Routing, a
+            tool of its own (BGP monitoring, for networks that announce their
+            own prefixes) rather than a setting. Tiles, not rows: as rows they
+            read as two more targets and went unnoticed. */}
+        {(onOpenOverview || onOpenRouting) && (
+          <nav aria-label="Pages" className={cn('grid gap-2', onOpenOverview && onOpenRouting ? 'grid-cols-2' : 'grid-cols-1')}>
+            {onOpenOverview && (
+              <PageTile icon={<LayoutDashboard {...ICON} />} label="Overview" open={overviewOpen} onOpen={onOpenOverview} />
+            )}
+            {onOpenRouting && (
+              <PageTile
+                icon={<Network {...ICON} />}
+                label="Routing"
+                open={routingOpen}
+                onOpen={routingEnabled ? onOpenRouting : onTurnOnRouting}
+                off={
+                  routingEnabled
+                    ? undefined
+                    : onTurnOnRouting
+                      ? 'Routing is off. Turn it on in Settings'
+                      : 'Routing is off. An admin can turn it on in Settings'
+                }
+                count={routingTrouble > 0 ? routingTrouble : undefined}
+                countLabel={`${routingTrouble} prefix${routingTrouble === 1 ? '' : 'es'} not as normal`}
+              />
+            )}
+          </nav>
+        )}
+        {/* Always there once there is something to find: behind a button it
+            went unnoticed. Its placeholder says what it is, so its label is
+            said, not shown. Clearing out several targets sits beside it. */}
+        {targets.length > 0 && (
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1 [&_label]:sr-only">
+              <SearchField label="Search targets" placeholder="Search name or address" value={searchQuery} onValueChange={setSearchQuery} />
+            </div>
+            {/* One target is deleted from its own row. This is for clearing
+                out several, so it is not there until there are several. */}
+            {targets.length > 1 && (
+              <Tooltip content="Delete several targets">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setIsBulkDeleteOpen(true)} aria-label="Delete several targets">
+                  <ListX {...ICON} />
+                </Button>
+              </Tooltip>
+            )}
+          </div>
+        )}
+        {/* Each choice says the whole of what it means, so the label, like the
+            search's, is for a screen reader. */}
+        {agentsInUse.length > 0 && onProbeFromChange && (
+          <div className="[&_label]:sr-only">
+            <Select
+              id="sidebar-probe-from"
+              label="Probed from"
+              value={fromFilter}
+              onValueChange={value => onProbeFromChange(value)}
+              options={[
+                { value: 'all', label: 'Probed from anywhere' },
+                { value: 'local', label: 'Probed from this server' },
+                ...agentsInUse.map(agent => ({ value: agent.id, label: `Probed from ${agent.name}` })),
+              ]}
+            />
+          </div>
+        )}
+
+        {/* How the targets stand, just over their list. As tall while loading
+            as after, so the list does not jump when the counts arrive. */}
+        <div className="flex min-h-4 flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs">
           {/* Not "0 online, 0 offline" while the list is on its way: that
               is a count of nothing, and it reads as everything being gone. */}
           {loading ? (
@@ -1345,72 +1410,7 @@ export function Sidebar({
               <span className="text-muted-foreground">{pausedCount} paused</span>
             </div>
           )}
-          <div className="ml-auto flex items-center gap-0.5">
-            {/* One target is deleted from its own row. This is for clearing
-                out several, so it is not there until there are several. */}
-            {targets.length > 1 && (
-              <Tooltip content="Delete several targets">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setIsBulkDeleteOpen(true)} aria-label="Delete several targets">
-                  <ListX {...ICON} />
-                </Button>
-              </Tooltip>
-            )}
-          </div>
         </div>
-
-        {/* The pages beside the list: the overview first, then Routing, a
-            tool of its own (BGP monitoring, for networks that announce their
-            own prefixes) rather than a setting. Tiles, not rows: as rows they
-            read as two more targets and went unnoticed. */}
-        {(onOpenOverview || onOpenRouting) && (
-          <nav aria-label="Pages" className={cn('mt-3 grid gap-2', onOpenOverview && onOpenRouting ? 'grid-cols-2' : 'grid-cols-1')}>
-            {onOpenOverview && (
-              <PageTile icon={<LayoutDashboard {...ICON} />} label="Overview" open={overviewOpen} onOpen={onOpenOverview} />
-            )}
-            {onOpenRouting && (
-              <PageTile
-                icon={<Network {...ICON} />}
-                label="Routing"
-                open={routingOpen}
-                onOpen={routingEnabled ? onOpenRouting : onTurnOnRouting}
-                off={
-                  routingEnabled
-                    ? undefined
-                    : onTurnOnRouting
-                      ? 'Routing is off. Turn it on in Settings'
-                      : 'Routing is off. An admin can turn it on in Settings'
-                }
-                count={routingTrouble > 0 ? routingTrouble : undefined}
-                countLabel={`${routingTrouble} prefix${routingTrouble === 1 ? '' : 'es'} not as normal`}
-              />
-            )}
-          </nav>
-        )}
-        {/* Always there once there is something to find: behind a button it
-            went unnoticed. Its placeholder says what it is, so its label is
-            said, not shown. */}
-        {targets.length > 0 && (
-          <div className="mt-3 [&_label]:sr-only">
-            <SearchField label="Search targets" placeholder="Search name or address" value={searchQuery} onValueChange={setSearchQuery} />
-          </div>
-        )}
-        {/* Each choice says the whole of what it means, so the label, like the
-            search's, is for a screen reader. */}
-        {agentsInUse.length > 0 && onProbeFromChange && (
-          <div className="mt-2 [&_label]:sr-only">
-            <Select
-              id="sidebar-probe-from"
-              label="Probed from"
-              value={fromFilter}
-              onValueChange={value => onProbeFromChange(value)}
-              options={[
-                { value: 'all', label: 'Probed from anywhere' },
-                { value: 'local', label: 'Probed from this server' },
-                ...agentsInUse.map(agent => ({ value: agent.id, label: `Probed from ${agent.name}` })),
-              ]}
-            />
-          </div>
-        )}
       </div>
 
       {/* Target List */}

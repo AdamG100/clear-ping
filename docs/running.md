@@ -156,13 +156,15 @@ into the image, tags the image with it (`ghcr.io/adamg100/clear-ping:0.1.4`
 beside `:latest`), and makes a GitHub release `v0.1.4` listing what changed.
 To go back to an earlier one, run its tag instead of `:latest`.
 
-The dashboard shows the version it is running under the ClearPing name in the
-sidebar, and once an hour asks the registry what `:latest` is:
+The dashboard shows the version it is running beside the ClearPing name at the
+top of the sidebar, and every quarter of an hour asks the registry what
+`:latest` is (and again when you come back to a page left open):
 
-- a **green dot** is the latest version;
-- an **amber dot** means a newer one has been published; it links to that
-  release, and the tooltip says which;
-- **reload** means the server has been updated while the page was open.
+- the version in **green** is the latest;
+- when a newer one has been published, a notice under the name says which
+  ("v0.15.0 is available") and opens the patch notes;
+- **Updated to …, reload** under the name means the server has been updated
+  while the page was open.
 
 `GET /api/version` answers the same as JSON. The registry is asked without any
 credentials, because the image is public. Set `CLEARPING_UPDATE_CHECK=off` to
