@@ -66,6 +66,14 @@ interface CompareTraceProps {
 }
 
 const PAD = { top: 14, right: 16, bottom: 26, left: 54 }
+
+/**
+ * The share of the plot's height given to spikes, at the top, when there are
+ * any: their own squeezed scale from where the usual readings end to the
+ * highest spike, so a spike stays on the chart with its height in ms beside
+ * it, and the usual readings still get most of the height.
+ */
+const SPIKE_BAND = 0.2
 const LANE_GAP = 18
 const STRIP_GAP = 2
 
@@ -220,7 +228,7 @@ export const CompareTrace = memo(function CompareTrace({
   const lossBottom = lossTop + laneHeight
   const totalHeight = lossBottom + PAD.bottom
 
-  const { plottedLines, yTicks, yMin, yMax, ceiling } = useMemo(() => {
+  const { plottedLines, yTicks, yFor, spikes } = useMemo(() => {
     const values: number[] = []
     for (const line of lines) {
       for (const point of line.points) {
@@ -233,8 +241,16 @@ export const CompareTrace = memo(function CompareTrace({
     const ceiling = spikeCeiling(values)
     const { min: lo, max: hi } = latencyDomain(ceiling === null ? values : values.filter(v => v <= ceiling))
 
+    const peak = values.length > 0 ? Math.max(...values) : hi
+    const band = ceiling !== null && peak > hi ? Math.max(28, Math.round(traceH * SPIKE_BAND)) : 0
+    const usualH = traceH - band
+
     const xFor = (t: number) => PAD.left + (end === start ? plotW / 2 : ((t - start) / (end - start)) * plotW)
-    const yFor = (v: number) => PAD.top + (hi === lo ? traceH / 2 : (1 - (v - lo) / (hi - lo)) * traceH)
+    const yFor = (v: number) => {
+      // Above the usual readings: squeezed into the band at the top.
+      if (band > 0 && v > hi) return PAD.top + band - ((Math.min(v, peak) - hi) / (peak - hi)) * band
+      return PAD.top + band + (hi === lo ? usualH / 2 : (1 - (v - lo) / (hi - lo)) * usualH)
+    }
 
     const result: PlottedLine[] = lines.map(line => {
       const plotted = line.points.map(point => {
@@ -250,11 +266,15 @@ export const CompareTrace = memo(function CompareTrace({
       return { ...line, plotted, spacing }
     })
 
-    return { plottedLines: result, yTicks: niceTicks(lo, hi), yMin: lo, yMax: hi, ceiling }
+    return {
+      plottedLines: result,
+      yTicks: niceTicks(lo, hi),
+      yFor,
+      spikes: band > 0 ? { from: hi, peak, edge: PAD.top + band } : null,
+    }
   }, [lines, start, end, plotW, traceH])
 
-  const yPos = (v: number) =>
-    PAD.top + (yMax === yMin ? traceH / 2 : (1 - (v - yMin) / (yMax - yMin)) * traceH)
+  const yPos = yFor
 
   const brush = useChartBrush({
     svgRef,
@@ -402,10 +422,35 @@ export const CompareTrace = memo(function CompareTrace({
         <text x={4} y={PAD.top - 3} className="fill-muted-foreground/70 font-mono" fontSize={9}>
           ms
         </text>
-        {ceiling !== null && (
-          <text x={PAD.left + plotW} y={PAD.top - 4} textAnchor="end" className="fill-muted-foreground font-mono" fontSize={9}>
-            spikes above {Math.round(yMax)} ms run off the top
-          </text>
+        {spikes && (
+          <g>
+            {/* The highest spike, at the top of its band. */}
+            <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top} y2={PAD.top} stroke="currentColor" className="text-border" strokeWidth={1} />
+            <text x={PAD.left - 8} y={PAD.top} textAnchor="end" dominantBaseline="middle" className="fill-signal-critical font-mono" fontSize={10}>
+              {Math.round(spikes.peak)}
+            </text>
+            {/* Where the scale changes: dashed across, and a break in the axis. */}
+            <line
+              x1={PAD.left}
+              x2={PAD.left + plotW}
+              y1={spikes.edge}
+              y2={spikes.edge}
+              stroke="currentColor"
+              className="text-muted-foreground/50"
+              strokeWidth={1}
+              strokeDasharray="4 4"
+            />
+            <path
+              d={`M ${PAD.left - 5} ${spikes.edge + 3} l 4 -3 l 2 3 l 4 -3`}
+              fill="none"
+              stroke="currentColor"
+              className="text-muted-foreground"
+              strokeWidth={1}
+            />
+            <text x={PAD.left + plotW} y={PAD.top - 4} textAnchor="end" className="fill-muted-foreground font-mono" fontSize={9}>
+              scale squeezed above {Math.round(spikes.from)} ms
+            </text>
+          </g>
         )}
         <TimeGrid start={start} end={end} left={PAD.left} width={plotW} top={PAD.top} bottom={lossBottom} />
 
