@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 // The script CI writes each release's patch notes with.
-import { markdownFor, noteFor } from './release-notes.mjs'
+import { markdownFor, noteFor, RELEASE_CORRECTIONS } from './release-notes.mjs'
 
 describe('noteFor', () => {
   it('joins a wrapped body back into paragraphs, and leaves the trailers out', () => {
@@ -47,5 +47,14 @@ describe('markdownFor', () => {
 
   it('says so when nothing but the number changed', () => {
     expect(markdownFor({ notes: [] })).toMatch(/Nothing but the version/)
+  })
+})
+
+describe('corrections to notes already out', () => {
+  it('name each commit by its full hash, and a part of the notes that exists', () => {
+    for (const [hash, release] of Object.entries(RELEASE_CORRECTIONS)) {
+      expect(hash).toMatch(/^[0-9a-f]{40}$/)
+      expect(['patch', 'minor', 'major']).toContain(release)
+    }
   })
 })

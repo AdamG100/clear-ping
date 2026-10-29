@@ -30,6 +30,18 @@ export const SECTIONS = [
   { kind: 'improved', title: 'Fixes and improvements' },
 ]
 
+/**
+ * Commits that went out without the trailer they should have had, by full
+ * hash, and the one they should have had. A commit message cannot be changed
+ * once it is pushed, and every build writes the notes of every release again
+ * from them, so this is where a note filed in the wrong part is put right.
+ */
+export const RELEASE_CORRECTIONS = {
+  // 0.16.0: the trailer was only on the last commit of the push.
+  a284aa625e9c0b890ae9f20c18fbe447038c24cb: 'minor', // Maintenance step by step, on a schedule by default
+  '97fd9e91c275912642346dda177e39a1d83765e8': 'minor', // The reworked Overview
+}
+
 /** Trailers are for git and CI, not for the reader. */
 const TRAILER = /^(Co-Authored-By|Release|Signed-off-by|Reviewed-by|Change-Id|Refs?):/i
 
@@ -82,14 +94,14 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer
 
 /** The commits in a range, newest first, as notes. Merges are left out: their commits are there already. */
 function notesBetween(range) {
-  const log = git('log', '--no-merges', '--format=%s%x1f%(trailers:key=Release,valueonly,separator=%x2c)%x1f%b%x1e', range)
+  const log = git('log', '--no-merges', '--format=%H%x1f%s%x1f%(trailers:key=Release,valueonly,separator=%x2c)%x1f%b%x1e', range)
   return log
     .split('\x1e')
     .map(entry => entry.replace(/^\s+/, ''))
     .filter(Boolean)
     .map(entry => {
-      const [subject, release, body = ''] = entry.split('\x1f')
-      return noteFor({ subject, release: release.split(',')[0], body })
+      const [hash, subject, release, body = ''] = entry.split('\x1f')
+      return noteFor({ subject, release: RELEASE_CORRECTIONS[hash] ?? release.split(',')[0], body })
     })
 }
 
