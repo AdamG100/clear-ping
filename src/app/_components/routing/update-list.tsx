@@ -62,7 +62,9 @@ function summary(update: BgpUpdate, names: Record<number, string>): string {
   const was = update.previousPath ? upstreamOf(update.previousPath) : null
   const through = (carrier: number | null) => (carrier === BGP_DIRECT ? 'directly connected' : carrier === null ? 'nothing' : `through ${carrierLabel(carrier, names)}`)
   if (update.kind === 'withdraw') {
-    return was === null ? `Withdrew its route to ${update.prefix}` : `Withdrew its route to ${update.prefix}, which went ${through(was)}`
+    return was === null
+      ? `This peer no longer has a route to ${update.prefix}`
+      : `This peer no longer has a route to ${update.prefix}. It went ${through(was)}`
   }
   // Recorded before the path before was kept: what it replaced is not known.
   if (update.previousPath === undefined) return `Announced, ${through(now)}`
@@ -218,6 +220,12 @@ export function UpdateList({
     })
   return (
     <div className="space-y-2">
+      <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+        Each update is one network that feeds a RIPE route collector (a peer) reporting its own route to this prefix.
+        Announced: the peer has a new or changed route. Withdrew: that peer lost its route, which on its own is a problem
+        at or near that peer. When the prefix itself is pulled, nearly every peer withdraws within seconds and the
+        prefix is marked withdrawn.
+      </p>
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>
           {updates.length === 0 ? 'No updates' : `${updates.length} update${updates.length === 1 ? '' : 's'}`}
@@ -264,7 +272,7 @@ export function UpdateList({
                   <span className="min-w-0 space-y-1">
                     <span className="flex flex-wrap items-center gap-2">
                       <Badge size="sm" tone={update.kind === 'withdraw' ? 'danger' : repeat ? 'neutral' : 'info'}>
-                        {update.kind === 'withdraw' ? 'Withdrawn' : repeat ? 'Announced again' : 'Announced'}
+                        {update.kind === 'withdraw' ? 'Peer withdrew' : repeat ? 'Peer announced again' : 'Peer announced'}
                       </Badge>
                       <span className="font-mono text-[11px] text-muted-foreground">
                         {update.prefix}

@@ -429,7 +429,7 @@ export function PrefixPage({
           value={regionsSeeing}
           context={`of ${regionsWithPeers} see it from most of their peers`}
         />
-        <MetricCard label="Updates, 24h" value={updates} context={updates === 0 ? 'A quiet, stable prefix' : 'Announcements and withdrawals'} />
+        <MetricCard label="Updates, 24h" value={updates} context={updates === 0 ? 'A quiet, stable prefix' : 'Route changes reported by collector peers'} />
       </div>
 
       <HomePanel
