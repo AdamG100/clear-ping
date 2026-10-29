@@ -9,7 +9,8 @@ import { SearchResults } from '@/components/search-results'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
-import type { BgpExchangeLook, BgpExchangeRoute, BgpExchangeView } from '@/types/bgp'
+import type { BgpExchangeLook, BgpExchangeRoute, BgpExchangeView, BgpPeerRoute } from '@/types/bgp'
+import { isDirect } from '@/lib/bgp/path'
 import { cn } from '@/lib/utils'
 import { ago, asLabel } from './state'
 
@@ -469,6 +470,68 @@ export function ExchangePanel({
           crossings={current.crossings}
           now={now}
         />
+      )}
+    </div>
+  )
+}
+
+/** RIPE RIS collectors shown before the rest are only counted. */
+const RIS_SHOWN = 8
+
+/**
+ * The exchanges RIPE RIS has a collector at (NAPAfrica, LINX, DE-CIX and the
+ * rest), and how the prefix looks there: how many of the collector's peers
+ * carry it, and how many reach the origin with nothing in between. These
+ * exchanges publish no looking glass ClearPing reads, so this is what is known
+ * of them, from RIS's own sessions there.
+ */
+export function RisExchanges({ peers }: { peers: readonly BgpPeerRoute[] }) {
+  const [all, setAll] = useState(false)
+  const byCollector = new Map<string, { exchange: string; city: string; collector: string; total: number; carrying: number; direct: number }>()
+  for (const peer of peers) {
+    const [city, exchange] = peer.location.split(', ')
+    // A multihop collector is at no exchange: its peers are anywhere.
+    if (!exchange) continue
+    const row = byCollector.get(peer.collector) ?? { exchange, city, collector: peer.collector, total: 0, carrying: 0, direct: 0 }
+    row.total++
+    if (peer.route) {
+      row.carrying++
+      if (isDirect(peer.route.path)) row.direct++
+    }
+    byCollector.set(peer.collector, row)
+  }
+  const rows = [...byCollector.values()].sort((a, b) => b.direct - a.direct || b.carrying - a.carrying || a.exchange.localeCompare(b.exchange))
+  if (rows.length === 0) return null
+  const shown = all ? rows : rows.slice(0, RIS_SHOWN)
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Also seen at these exchanges by RIPE RIS, which has a route collector at each. Directly: the peer reaches the origin with no
+        network in between.
+      </p>
+      <ul className="grid gap-2 @2xl/main:grid-cols-2">
+        {shown.map(row => (
+          <li key={row.collector} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+            <span className="min-w-0">
+              <span className="block truncate text-sm">{row.exchange}</span>
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {row.city} · {row.collector}
+              </span>
+            </span>
+            <span className="shrink-0 text-right text-xs">
+              <span className={cn('block', row.carrying === 0 ? 'text-signal-critical' : 'text-foreground')}>
+                {row.carrying} of {row.total} peer{row.total === 1 ? '' : 's'}
+              </span>
+              <span className="block text-muted-foreground">{row.direct > 0 ? `${row.direct} directly` : 'none directly'}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {rows.length > shown.length && (
+        <Button type="button" variant="ghost" size="sm" onClick={() => setAll(true)}>
+          Show all {rows.length} exchanges
+        </Button>
       )}
     </div>
   )
