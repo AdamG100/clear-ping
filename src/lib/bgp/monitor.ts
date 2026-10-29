@@ -14,6 +14,7 @@ import type {
 } from '@/types/bgp'
 import { assess, effectiveRoutes, peerKey, takeBaseline } from './assess'
 import { collectorInfo, collectorName, peerPlace, type Place } from './collectors'
+import { exchangeData } from './exchanges'
 import { agentChoices, homeCarriers, homeChanges, homeView, traceInto } from './home'
 import { learn } from './learn'
 import { LOOK_EVERY_MS, lookAtExchanges, offExchanges, originPresent } from './looking-glass'
@@ -162,6 +163,9 @@ class BgpMonitor {
     this.timers.push(setInterval(() => void pruneBgp().catch(error => console.error('[BGP] Pruning failed:', error)), PRUNE_EVERY_MS))
     this.timers.push(setInterval(() => void this.lookAll(), LOOK_EVERY_MS))
     void pruneBgp().catch(() => {})
+    // Read now, not when someone first opens a prefix: it is a few seconds of
+    // work, and the page would wait on it.
+    void exchangeData().catch(() => {})
   }
 
   stop(): void {

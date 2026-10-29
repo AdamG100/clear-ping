@@ -10,11 +10,30 @@ import type { BgpOverview, BgpPrefixDetail } from '@/types/bgp'
  */
 const REFRESH_MS = 8_000
 
+/**
+ * What each address last answered, kept while the dashboard is open: going
+ * back to a page shows it at once, and the fresh answer replaces it when it
+ * comes, rather than a skeleton until then.
+ */
+const lastAnswer = new Map<string, { data: unknown; at: number }>()
+
 function usePolled<T>(url: string | null, what: string, reportError: (title: string, error?: unknown) => void) {
-  const [data, setData] = useState<T | null>(null)
+  const kept = url ? lastAnswer.get(url) : undefined
+  const [data, setStoredData] = useState<T | null>((kept?.data as T | undefined) ?? null)
   const [missing, setMissing] = useState<string | null>(null)
   // When it arrived: what "3 minutes ago" is counted from.
-  const [fetchedAt, setFetchedAt] = useState(0)
+  const [fetchedAt, setFetchedAt] = useState(kept?.at ?? 0)
+
+  const setData = useCallback(
+    (next: T | null | ((was: T | null) => T | null)) => {
+      setStoredData(was => {
+        const value = typeof next === 'function' ? (next as (was: T | null) => T | null)(was) : next
+        if (url && value) lastAnswer.set(url, { data: value, at: Date.now() })
+        return value
+      })
+    },
+    [url]
+  )
   const asking = useRef(false)
   const reported = useRef(false)
 
@@ -43,7 +62,7 @@ function usePolled<T>(url: string | null, what: string, reportError: (title: str
     } finally {
       asking.current = false
     }
-  }, [url, what, reportError])
+  }, [url, what, reportError, setData])
 
   useEffect(() => {
     // The first right away, from a timer as the rest are.

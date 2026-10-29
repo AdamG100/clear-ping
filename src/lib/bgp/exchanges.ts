@@ -1,6 +1,6 @@
 import type { BgpCrossing, BgpExchange } from '@/types/bgp'
 import { ixpdbData, type IxpdbData } from './ixpdb'
-import { addressIn, addressKey, blockKey, prefixLength } from './prefix'
+import { addressKey, blockKey, prefixHolder, prefixLength } from './prefix'
 import { readExchangeCopy, saveExchangeCopy } from './store'
 
 /**
@@ -115,21 +115,11 @@ export function joinExchanges(peeringDb: PeeringDbData | null, ixpdb: IxpdbData 
   if (!peeringDb) return ixpdb ? { lans: [], exchanges: [], members: {}, ports: ixpdb.ports } : null
   if (!ixpdb) return { ...peeringDb, ports: {} }
   const placeOf = new Map(peeringDb.exchanges.map((exchange, index) => [exchange, index]))
-  // The LANs by the /16 or /32 they start in, so each of tens of thousands of
-  // addresses is tried against a few LANs rather than every one.
-  const byBlock = new Map<string, ExchangeLan[]>()
-  const wide: ExchangeLan[] = []
-  for (const lan of peeringDb.lans) {
-    const key = blockKey(lan.prefix)
-    if (key) byBlock.set(key, [...(byBlock.get(key) ?? []), lan])
-    else wide.push(lan)
-  }
   const members: Record<string, number[]> = Object.fromEntries(Object.entries(peeringDb.members).map(([asn, places]) => [asn, [...places]]))
   for (const [key, asn] of Object.entries(ixpdb.ports)) {
     const address = addressFromKey(key)
-    const block = address ? blockKey(address) : null
-    if (!address || !block) continue
-    const lan = exchangeOf(address, [...(byBlock.get(block) ?? []), ...wide])
+    if (!address) continue
+    const lan = exchangeOf(address, peeringDb.lans)
     const place = lan ? placeOf.get(lan.exchange) : undefined
     if (place === undefined) continue
     const held = (members[asn] ??= [])
@@ -188,13 +178,54 @@ async function peeringDbData(now: number): Promise<PeeringDbData | null> {
 }
 
 
+interface LanIndex {
+  /** The LANs by the /16 or /32 they start in, each read once, most specific first. */
+  byBlock: Map<string, { lan: ExchangeLan; holds: (address: string) => boolean }[]>
+  /** LANs wider than that, tried for every address. */
+  wide: { lan: ExchangeLan; holds: (address: string) => boolean }[]
+  /** What each address asked about was found on. */
+  found: Map<string, ExchangeLan | null>
+}
+
+/**
+ * The LANs made ready to look addresses up in, once per list. Trying every
+ * one of thousands of LANs for every hop of every trace, reading both each
+ * time, took seconds of the server's one thread for a single routing page:
+ * long enough that the whole dashboard stalled behind it.
+ */
+const indexes = new WeakMap<readonly ExchangeLan[], LanIndex>()
+
+function indexOf(lans: readonly ExchangeLan[]): LanIndex {
+  let index = indexes.get(lans)
+  if (index) return index
+  index = { byBlock: new Map(), wide: [], found: new Map() }
+  const ordered = [...lans].sort((a, b) => prefixLength(b.prefix) - prefixLength(a.prefix))
+  for (const lan of ordered) {
+    const holds = prefixHolder(lan.prefix)
+    if (!holds) continue
+    const key = blockKey(lan.prefix)
+    if (!key) index.wide.push({ lan, holds })
+    else {
+      const block = index.byBlock.get(key)
+      if (block) block.push({ lan, holds })
+      else index.byBlock.set(key, [{ lan, holds }])
+    }
+  }
+  indexes.set(lans, index)
+  return index
+}
+
 /** The exchange whose peering LAN holds the address, the most specific LAN if more than one does. */
 export function exchangeOf(address: string, lans: readonly ExchangeLan[]): ExchangeLan | null {
-  let best: ExchangeLan | null = null
-  for (const lan of lans) {
-    if (addressIn(address, lan.prefix) && (!best || prefixLength(lan.prefix) > prefixLength(best.prefix))) best = lan
-  }
-  return best
+  const index = indexOf(lans)
+  const known = index.found.get(address)
+  if (known !== undefined) return known
+  const key = blockKey(address)
+  const inBlock = key ? (index.byBlock.get(key) ?? []) : []
+  // Both lists run most specific first; a block's LANs are never wider than the wide ones.
+  const found = inBlock.find(each => each.holds(address))?.lan ?? index.wide.find(each => each.holds(address))?.lan ?? null
+  index.found.set(address, found)
+  return found
 }
 
 /** The member an address on an exchange belongs to, by IXPDB: the network whose router answered there. */

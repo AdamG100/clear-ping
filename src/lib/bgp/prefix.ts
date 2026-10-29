@@ -115,6 +115,20 @@ export function prefixWithin(inner: string, outer: string): boolean {
   return a.network >> host === b.network >> host
 }
 
+/**
+ * A prefix read once, to test many addresses against without reading it again
+ * each time: null for anything that is not a prefix.
+ */
+export function prefixHolder(prefix: string): ((address: string) => boolean) | null {
+  const parsed = parsePrefix(prefix)
+  if (!parsed) return null
+  const host = BigInt(bits(parsed.version) - parsed.length)
+  return address => {
+    const each = parseAddress(address)
+    return !!each && each.version === parsed.version && each.value >> host === parsed.network >> host
+  }
+}
+
 /** Whether an address falls inside a prefix. */
 export function addressIn(address: string, prefix: string): boolean {
   const parsed = parseAddress(address)
