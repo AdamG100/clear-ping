@@ -79,6 +79,7 @@ import {
 } from 'lucide-react'
 import { SidebarRail } from './sidebar-rail'
 import { SIDEBAR_COLLAPSE_BUTTON_ID, useSidebarCollapsed } from './use-sidebar-drawer'
+import { Masked } from '../privacy/masked'
 
 /** What a grey dot says for a closed-port check that has never had an answer. */
 const NEVER_ANSWERED = 'No answer yet: this server does not answer the closed-port check, so it cannot be measured this way'
@@ -513,7 +514,7 @@ function TargetRow({
               'min-w-0 truncate text-sm font-medium',
               paused ? 'text-muted-foreground line-through' : 'text-sidebar-foreground'
             )}>
-              {target.name}
+              <Masked text value={target.name} />
             </span>
             {target.type && (
               <span className="shrink-0">
@@ -536,8 +537,8 @@ function TargetRow({
           <div className="flex items-center gap-2">
             {/* An IPv6 address rarely fits; the tooltip carries it in full,
                 along with where a domain last resolved to. */}
-            <Tooltip side="right" content={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address}>
-              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{address}</span>
+            <Tooltip side="right" content={<Masked text value={target.resolvedAddress ? `${address} → ${target.resolvedAddress}` : address} />}>
+              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"><Masked text value={address} /></span>
             </Tooltip>
             {/* The family sits with the address it describes, and off the
                 name's line, where every badge costs the name some letters. */}
@@ -1537,13 +1538,13 @@ export function Sidebar({
                               />
                               <div className={cn('flex-1 min-w-0', target.status === 'paused' && 'opacity-60 grayscale')}>
                                 <div className="flex items-center gap-2">
-                                  <span className="font-medium text-sm text-sidebar-foreground truncate">{target.name}</span>
+                                  <span className="font-medium text-sm text-sidebar-foreground truncate"><Masked text value={target.name} /></span>
                                   {target.type && <TypeBadge type={target.type} />}
                                   <ProbedFrom agent={target.probeAgent} />
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-                                    {targetAddressLabel(target)}
+                                    <Masked text value={targetAddressLabel(target)} />
                                   </span>
                                   <span className="ml-auto shrink-0">
                                     <Sparkline

@@ -6,6 +6,7 @@ import { inDisplayZone } from '@/lib/time-zone'
 import { cn } from '@/lib/utils'
 import type { ProbeAgentSummary } from '@/types/probe-agent'
 import { PROBE_AGENT_STATE } from '../settings/probe-agent-labels'
+import { useMask } from '../privacy/use-privacy'
 
 /**
  * A colour no other badge has: grey and blue say what a target is, green,
@@ -29,9 +30,10 @@ const REMOTE_COLOURS = {
  * the target's readings have stopped because of the agent, not the target.
  */
 export function ProbedFrom({ agent, className }: { agent?: ProbeAgentSummary; className?: string }) {
+  const mask = useMask()
   if (!agent) return null
   const down = agent.state !== 'online' && agent.state !== 'unpaired'
-  const machine = [agent.hostname, agent.address].filter(Boolean).join(', ')
+  const machine = [agent.hostname, agent.address].filter((part): part is string => !!part).map(mask.address).join(', ')
 
   return (
     <Tooltip

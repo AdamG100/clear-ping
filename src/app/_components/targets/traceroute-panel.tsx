@@ -42,6 +42,7 @@ import {
 import type { IpVersion, Traceroute, TracerouteHop } from '@/types/probe'
 import { inDisplayZone } from '@/lib/time-zone'
 import { LossFigure } from '../charts/loss-figure'
+import { Masked } from '../privacy/masked'
 
 /**
  * The route to a target, hop by hop.
@@ -297,7 +298,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
           ) : (
             <>
               <span className="flex items-center gap-2">
-                <Tooltip content={hop.hostname ?? hop.address}>
+                <Tooltip content={<Masked value={hop.hostname ?? hop.address} />}>
                   <span
                     className={cn(
                       'min-w-0 break-all @2xl/main:hidden',
@@ -305,16 +306,16 @@ function HopTable({ trace }: { trace: Traceroute }) {
                       state === 'destination' && 'font-medium'
                     )}
                   >
-                    {hop.hostname ?? hop.address}
+                    <Masked value={hop.hostname ?? hop.address} />
                   </span>
                 </Tooltip>
                 <span className={cn('hidden font-mono text-foreground @2xl/main:inline', state === 'destination' && 'font-medium')}>
-                  {hop.address}
+                  <Masked value={hop.address} />
                 </span>
                 {state === 'destination' && <Badge tone="success" size="sm">Target</Badge>}
               </span>
               {hop.hostname ? (
-                <span className="block break-all font-mono text-[11px] text-muted-foreground @2xl/main:hidden">{hop.address}</span>
+                <span className="block break-all font-mono text-[11px] text-muted-foreground @2xl/main:hidden"><Masked value={hop.address} /></span>
               ) : isAwaitingName(hop) ? (
                 <span className="block animate-pulse text-[11px] text-muted-foreground/60 @2xl/main:hidden">looking up its name…</span>
               ) : null}
@@ -324,8 +325,8 @@ function HopTable({ trace }: { trace: Traceroute }) {
 
         <td className="hidden max-w-0 py-2 pr-4 @2xl/main:table-cell @2xl/main:w-1/4">
           {hop.hostname ? (
-            <Tooltip content={hop.hostname}>
-              <span className={cn('block truncate text-foreground', state === 'destination' && 'font-medium')}>{hop.hostname}</span>
+            <Tooltip content={<Masked value={hop.hostname} />}>
+              <span className={cn('block truncate text-foreground', state === 'destination' && 'font-medium')}><Masked value={hop.hostname} /></span>
             </Tooltip>
           ) : isAwaitingName(hop) ? (
             <span className="block animate-pulse text-muted-foreground/60">looking up…</span>
@@ -653,7 +654,7 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
                         {took !== null && <span className="font-mono text-muted-foreground">{ms(took)} ms</span>}
                         {item.trigger === 'alert' && <Badge tone="danger" size="sm">Taken on alert</Badge>}
                         <span className="ml-auto flex flex-wrap items-center justify-end gap-x-3 font-mono text-[11px] text-muted-foreground">
-                          <span className="break-all">{item.address}</span>
+                          <span className="break-all"><Masked value={item.address} /></span>
                           <span className="whitespace-nowrap">{time}</span>
                         </span>
                       </button>

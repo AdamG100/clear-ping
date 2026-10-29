@@ -29,6 +29,8 @@ import { LossFigure } from './loss-figure'
 import { LossKey } from './loss-key'
 import { TraceSkeleton } from '../dashboard/skeleton'
 import { ProbedFrom } from '../targets/probed-from'
+import { Masked } from '../privacy/masked'
+import { useMask } from '../privacy/use-privacy'
 
 /**
  * A comparison chart with its legend: the lines, and under them a table that
@@ -288,6 +290,7 @@ export function ComparePanel({
 }: ComparePanelProps) {
   const { snapshot, pending, initialLoad } = useComparison(targets, timeRange, zoom, refreshKey, reportError, split, splitFamily)
   const [highlighted, setHighlighted] = useState<string | null>(null)
+  const mask = useMask()
 
   const rows = useMemo(() => {
     if (!snapshot) return []
@@ -301,13 +304,13 @@ export function ComparePanel({
       // one does not repaint the rest.
       const line: CompareLine = {
         key: series.key,
-        label: nameSeries(target, series.family, series.resolver),
+        label: mask.text(nameSeries(target, series.family, series.resolver)),
         color: seriesColor(index),
         points: series.points,
       }
       return [{ line, target, statistics: series.statistics, now: latestReading(series.points) }]
     })
-  }, [snapshot, targets, nameSeries])
+  }, [snapshot, targets, nameSeries, mask])
 
   // Lines taken off the chart from the legend. The rest are rescaled to fill
   // it, so hiding the slow one shows the fast ones in detail. Held for one set
@@ -514,7 +517,7 @@ export function ComparePanel({
                           <ProbedFrom agent={target.probeAgentId ? agentsById.get(target.probeAgentId) : undefined} />
                           {showAddress && (
                             <span className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground @4xl/main:inline">
-                              {targetAddressLabel(target)}
+                              <Masked text value={targetAddressLabel(target)} />
                             </span>
                           )}
                         </span>

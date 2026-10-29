@@ -228,7 +228,39 @@ revocable without a restart, named in the record. Move to them and unset it.
   passkey), and failed sign-ins with the address they came from.
 
 Each entry says who (the account, the key, or *Anonymous* while sign-in is off)
-and how it arrived: the dashboard, the API or MCP. Entries are kept for a year.
+and how it arrived: the dashboard, the API or MCP. Entries are kept for a year,
+or as long as **Settings → Privacy** says (30 days, 90 days or a year).
+
+## Privacy
+
+**Settings → Privacy** decides what ClearPing shows, hands to AI assistants,
+keeps and asks of the internet. Anyone can open it; only an admin changes what
+applies to everyone.
+
+- **Hide addresses on screen**: off, from viewers (and anyone using ClearPing
+  without signing in), or from everyone. IP addresses and host names show as
+  dots, keeping just enough to tell them apart: `203.0.113.10` is
+  `•••.•••.•••.10`, `vps1.example.net` is `v•••.•••.net`. It covers targets,
+  traceroutes and probe agents, and target names that are addresses. Routing's
+  prefixes and AS numbers are public in BGP, so they stay. This changes what is
+  shown, not what is sent: anyone signed in can still read addresses through
+  the API.
+- **Hide addresses in this browser**: the same, for one browser only, for
+  sharing a screen or taking screenshots. Anyone can turn it on for themselves.
+- **Hide addresses from AI assistants**: everything ClearPing gives an
+  assistant over MCP has its addresses hidden, so they never reach whoever runs
+  the assistant. The assistant can still name, compare and explain targets.
+- **Record sign-in addresses**: on by default. Off, sign-ins and failed
+  sign-ins in Activity no longer say the IP address they came from. The server
+  log keeps failed sign-ins' addresses either way, to spot someone guessing
+  passwords.
+- **Keep Activity for**: 30 days, 90 days or a year.
+- **Check for updates**: on by default. Off, ClearPing never asks GitHub's
+  container registry whether a newer version is out (the same as
+  `CLEARPING_UPDATE_CHECK=off`).
+
+How long readings and saved routes are kept is set where ClearPing runs, with
+`CLEARPING_RETENTION_DAYS` (90 days unless set); the page shows it.
 
 ## Passwords
 

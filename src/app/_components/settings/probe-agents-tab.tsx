@@ -29,6 +29,7 @@ import type { ProbeAgent } from '@/types/probe-agent'
 import { CopyField } from './mcp-setup'
 import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
 import { addressOf, ago, ExposureNote, HINT, ICON, isOutdated, OutcomeAlert, OutdatedBadge, ProbeAgentDetails, send, uninstallCommands, when, type Outcome } from './probe-agent-details'
+import { Masked } from '../privacy/masked'
 
 /**
  * Settings → Probe agents: the other machines targets can be probed from.
@@ -437,7 +438,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
                         <span className="font-medium wrap-break-word">{agent.name}</span>
                         {agent.hostname && agent.hostname !== agent.name && (
                           <span className="text-xs wrap-break-word text-muted-foreground" title="The name the machine gives itself">
-                            on {agent.hostname}
+                            on <Masked value={agent.hostname} />
                           </span>
                         )}
                       </span>
@@ -446,7 +447,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
                   {
                     key: 'address',
                     label: 'IP and port',
-                    render: (_, { agent }) => <span className="break-all font-mono text-xs">{addressOf(agent)}</span>,
+                    render: (_, { agent }) => <span className="break-all font-mono text-xs"><Masked value={addressOf(agent)} /></span>,
                   },
                   {
                     key: 'exposure',

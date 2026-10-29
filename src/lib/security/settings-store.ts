@@ -1,5 +1,6 @@
 import type sqlite3 from 'sqlite3'
 import { getDatabase } from '../db/database'
+import { privacyNow, signInDetail } from '../privacy/current'
 import { isFactorPolicy, NO_FACTOR_POLICY, type FactorPolicy } from './factors'
 import type { Actor, Via } from './store'
 
@@ -114,8 +115,13 @@ export interface ActivityEntry {
   detail: string | null
 }
 
-/** Kept for a year, then dropped as new entries arrive. */
-const KEEP_ACTIVITY_MS = 365 * 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** What is written down about it: a sign-in's address only where Privacy keeps them. */
+export function keptDetail(action: string, detail: string | undefined): string | null {
+  const kept = action === 'signin' || action === 'signin.failed' ? signInDetail(detail ?? '') : detail
+  return kept?.slice(0, 2000) || null
+}
 
 /**
  * Note a change in the record. Never throws: failing to write down that
@@ -128,9 +134,10 @@ export async function recordSecurityActivity(actor: Actor, via: Via, action: str
     await run(
       database,
       'INSERT INTO activity (at, actor_kind, actor_id, actor_name, via, action, detail) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [now, actor.kind, actor.kind === 'anonymous' ? null : actor.id, actor.name, via, action, detail?.slice(0, 2000) ?? null]
+      [now, actor.kind, actor.kind === 'anonymous' ? null : actor.id, actor.name, via, action, keptDetail(action, detail)]
     )
-    await run(database, 'DELETE FROM activity WHERE at < ?', [now - KEEP_ACTIVITY_MS])
+    // Kept as long as Privacy says (a year unless changed), then dropped as new entries arrive.
+    await run(database, 'DELETE FROM activity WHERE at < ?', [now - privacyNow().keepActivityDays * DAY_MS])
   } catch (error) {
     console.error('[Activity] Could not record:', action, error)
   }

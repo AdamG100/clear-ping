@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, Fingerprint, History, KeyRound, LogIn, LogOut, Network, RadioTower, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
+import { Bot, EyeOff, Fingerprint, History, KeyRound, LogIn, LogOut, Network, RadioTower, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -23,6 +23,7 @@ import type { FactorPolicy } from '@/lib/security/factors'
 import { cn } from '@/lib/utils'
 import { FactorPolicyForm, SignInFactors, useMyFactors } from './sign-in-factors'
 import { MaintenanceTab } from './maintenance-tab'
+import { PrivacyTab } from './privacy-tab'
 import { ProbeAgentsTab } from './probe-agents-tab'
 import { RoutingTab } from './routing-tab'
 import { AddAccount } from './add-account'
@@ -1017,6 +1018,7 @@ const ACTIONS: Record<string, string> = {
   'probe-agent.online': 'reached a probe agent again',
   'maintenance.run': 'ran maintenance',
   'maintenance.settings': 'changed the maintenance schedule',
+  'privacy.settings': 'changed the privacy settings',
 }
 
 const VIA: Record<ActivityEntry['via'], string> = { dashboard: 'dashboard', api: 'API', mcp: 'MCP' }
@@ -1099,10 +1101,11 @@ const SECTIONS: Section[] = [
   { value: 'keys', label: 'Keys', intro: "Let scripts and AI assistants use ClearPing's API and MCP server without signing in.", icon: KeyRound, group: 'Security' },
   { value: 'sso', label: 'Single sign-on', intro: 'Let people sign in with Authentik or another OpenID Connect provider instead of a ClearPing password.', icon: LogIn, group: 'Security' },
   { value: 'accounts', label: 'Accounts', intro: 'Who can sign in, and what each person can do.', icon: Users, group: 'Security' },
+  { value: 'privacy', label: 'Privacy', intro: 'What ClearPing shows on screen, hands to AI assistants, keeps in its records and asks of the internet.', icon: EyeOff, group: 'Security' },
   { value: 'probe-agents', label: 'Probe agents', intro: 'Take readings from other machines, such as a VPS abroad, as well as from this server. Nothing to do with AI agents.', icon: RadioTower, group: 'Monitoring', adminOnly: true },
   { value: 'routing', label: 'Routing', intro: 'Watch how the rest of the internet reaches your own IP prefixes in BGP.', icon: Network, group: 'Monitoring', adminOnly: true },
   { value: 'maintenance', label: 'Maintenance', intro: 'Check the database for damage, clear out leftovers and old data, and keep the file tidy.', icon: Wrench, group: 'Monitoring', adminOnly: true },
-  { value: 'activity', label: 'Activity', intro: 'Every change, sign-in and failed sign-in, with who did it and how. Kept for a year.', icon: History, group: 'More', adminOnly: true },
+  { value: 'activity', label: 'Activity', intro: 'Every change, sign-in and failed sign-in, with who did it and how. How long it is kept is under Privacy.', icon: History, group: 'More', adminOnly: true },
   { value: 'assistant', label: 'AI assistant', intro: 'Connect an assistant such as Claude over MCP, then ask it about your network in plain words.', icon: Bot, group: 'More' },
 ]
 
@@ -1255,6 +1258,15 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
         </header>
         {current.value === 'assistant' ? (
           <AssistantSettings onMakeKey={() => onSection('keys')} />
+        ) : current.value === 'privacy' ? (
+          // Open to everyone, signed in or not: hiding addresses in your own
+          // browser needs no account. The rest needs an admin.
+          <div className={PAGE_CARD}>
+            <PrivacyTab
+              canChange={loaded.state === 'ready' && canAdminister(loaded.data.me.role)}
+              onOpenRouting={loaded.state === 'ready' && canAdminister(loaded.data.me.role) ? () => onSection('routing') : undefined}
+            />
+          </div>
         ) : (
           <>
             {loaded.state === 'loading' && <Skeleton label="Loading the settings" lines={5} />}

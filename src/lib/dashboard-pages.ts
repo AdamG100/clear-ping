@@ -9,7 +9,7 @@
  */
 
 /** The sections of Settings, in the order its menu lists them. */
-export const SETTINGS_SECTIONS = ['access', 'sign-in', 'keys', 'sso', 'accounts', 'probe-agents', 'routing', 'activity', 'maintenance', 'assistant'] as const
+export const SETTINGS_SECTIONS = ['access', 'sign-in', 'keys', 'sso', 'accounts', 'privacy', 'probe-agents', 'routing', 'activity', 'maintenance', 'assistant'] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
 /** Where Settings opens when no section is asked for. */

@@ -55,6 +55,7 @@ src/
 | `reports/` | Readings turned into words: outages, evidence for an ISP, where a target's loss is. |
 | `mcp/` | The MCP server: the protocol and the tools. |
 | `security/` | Sign-in and everything around it, all through Better Auth. |
+| `privacy/` | Settings → Privacy (`settings.ts`, with what is in force held in memory in `current.ts`), hiding addresses (`mask.ts`, pure) and hiding them from AI assistants (`assistant.ts`). |
 | `__fixtures__/` | Captured output that tests read: ping, traceroute and DNS messages. |
 
 A few modules are about the app as a whole and sit directly in `lib/`:
@@ -74,6 +75,7 @@ installs Arc components that import it as `@/lib/utils`.
 | `alerts/` | The alerts page. |
 | `routing/` | BGP monitoring: the list of watched prefixes and a prefix's page, with its charts, and placeholders shaped like them for while they load (`skeleton.tsx`). |
 | `settings/` | The settings page and each of its tabs. |
+| `privacy/` | Hiding addresses on screen: whether this page hides them (`use-privacy.ts`) and the component that does (`masked.tsx`). |
 
 A component used by one page only lives beside that page (`app/login/login-form.tsx`),
 not here.

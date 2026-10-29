@@ -1,4 +1,5 @@
 import packageJson from '../../package.json'
+import { privacyNow } from './privacy/current'
 
 /**
  * Which build of ClearPing this is, and whether a newer one has been published.
@@ -234,6 +235,7 @@ export async function versionStatus(now = Date.now()): Promise<VersionStatus> {
   })
 
   if (updateCheckDisabled()) return unknown('Checking for updates is turned off (CLEARPING_UPDATE_CHECK)')
+  if (!privacyNow().checkForUpdates) return unknown('Checking for updates is turned off in Settings → Privacy')
   if (!current.image) return unknown('This build was not published, so there is nowhere to look for updates')
   const image = current.image
 

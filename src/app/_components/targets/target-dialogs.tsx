@@ -36,6 +36,7 @@ import {
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { ResolverList } from './resolver-list'
 import { Gamepad2, Globe, MapPin, Network, Pause, Plug, Server, Trash2, Wifi } from 'lucide-react'
+import { Masked } from '../privacy/masked'
 
 /**
  * The add and edit forms, which are the same form, and asking before a
@@ -220,7 +221,7 @@ function ProbeFromPicker({
               value: agent.id,
               // Wrapped rather than cut short: the name is how the card is told apart.
               label: <span className="block whitespace-normal wrap-break-word">{agent.name}</span>,
-              description: <span className="break-all">{agent.hostname ?? agent.address}</span>,
+              description: <span className="break-all"><Masked value={agent.hostname ?? agent.address} /></span>,
               icon: <MapPin {...ICON} />,
               meta: agent.state === 'online'
                 ? undefined
@@ -1064,11 +1065,11 @@ export function DeleteTargetDialog({ target, onCancel, onConfirm, onPause }: Del
             <div className="flex items-center gap-3 rounded-2xl border border-border bg-background p-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="min-w-0 truncate text-sm font-medium">{target.name}</span>
+                  <span className="min-w-0 truncate text-sm font-medium"><Masked text value={target.name} /></span>
                   <span className="shrink-0"><TypeBadge type={target.type ?? targetTypeFor(target.host, target.probeType)} /></span>
                 </div>
                 <p className="truncate font-mono text-xs text-muted-foreground">
-                  {targetAddressLabel(target)}
+                  <Masked text value={targetAddressLabel(target)} />
                   {target.group ? <span className="font-sans"> · in {groupLabel(target.group)}</span> : null}
                 </p>
               </div>

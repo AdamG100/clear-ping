@@ -12,18 +12,21 @@ export function SegmentedField({
   value,
   onValueChange,
   options,
+  disabled = false,
 }: {
   label: string
   value: string
   onValueChange: (value: string) => void
   options: { value: string; label: string }[]
+  /** Shown as it is, and not to be changed: a fieldset disables every button inside it. */
+  disabled?: boolean
 }) {
   return (
     <div className="space-y-2">
       <p className="text-sm font-medium text-card-foreground" aria-hidden="true">{label}</p>
-      <div className="flex max-w-full">
+      <fieldset disabled={disabled} className="flex max-w-full disabled:opacity-60">
         <SegmentedControl label={label} value={value} onValueChange={onValueChange} options={options} />
-      </div>
+      </fieldset>
     </div>
   )
 }

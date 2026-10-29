@@ -179,6 +179,14 @@ captured.
 The assistant is told to use only figures that are in the data, to keep the
 caveats in, and to say so if the period shows no real problem.
 
+## Keeping addresses from assistants
+
+With **Hide addresses from AI assistants** on, under Settings → Privacy,
+everything ClearPing gives an assistant has its IP addresses and host names
+hidden: `203.0.113.10` becomes `•••.•••.•••.10`. What an assistant is given
+goes on to whoever runs it, and this keeps your addresses out of it. Targets
+keep their names, so the assistant can still say which one went down and why.
+
 ## Keys
 
 Each assistant gets a key of its own, made under Settings → Keys: **read only**,

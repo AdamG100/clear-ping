@@ -64,6 +64,7 @@ import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { inDisplayZone } from '@/lib/time-zone'
+import { Masked } from '../privacy/masked'
 
 /** Content that replaces a placeholder fades in over it instead of cutting. */
 const FADE_IN = {
@@ -1397,13 +1398,13 @@ export function Dashboard() {
             <header className={PANE_HEADER}>
               <div className="min-w-0">
                 <h1 className={PANE_TITLE}>
-                  {selectedTarget.name}
+                  <Masked text value={selectedTarget.name} />
                 </h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                   {/* Each with a way to copy it. The domain or IP alone, not
                       the URL or port the label may wrap it in. */}
                   <span className="flex min-w-0 items-center gap-0.5">
-                    <span className="break-all font-mono text-muted-foreground">{targetAddressLabel(selectedTarget)}</span>
+                    <span className="break-all font-mono text-muted-foreground"><Masked text value={targetAddressLabel(selectedTarget)} /></span>
                     <CopyAddress value={selectedTarget.host} />
                   </span>
                   {/* Where a domain pointed on its last probe: the address the
@@ -1413,7 +1414,7 @@ export function Dashboard() {
                       <span className="break-all font-mono text-muted-foreground/70">
                         <span aria-hidden="true">→ </span>
                         <span className="sr-only">resolves to </span>
-                        {selectedTarget.resolvedAddress}
+                        <Masked value={selectedTarget.resolvedAddress} />
                       </span>
                       <CopyAddress value={selectedTarget.resolvedAddress} />
                     </span>

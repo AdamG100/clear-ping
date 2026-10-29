@@ -10,6 +10,7 @@ import { SearchResults } from '@/components/search-results'
 import { groupDepth, groupName, isWithinGroup } from '@/lib/targets/group-path'
 import { buildSidebarLayout, groupsInOrder, targetsWithin, wholeGroups } from '@/lib/targets/sidebar-layout'
 import type { GroupOrder, Target } from '@/types/probe'
+import { Masked } from '../privacy/masked'
 
 /**
  * A list of targets to tick, used wherever something applies to some targets
@@ -211,12 +212,12 @@ export function TargetChecklist({
                           aria-label={target.name}
                         />
                         <label htmlFor={targetId} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-                          <span className="min-w-0 truncate text-sm text-foreground">{target.name}</span>
+                          <span className="min-w-0 truncate text-sm text-foreground"><Masked text value={target.name} /></span>
                           {target.note && <Badge size="sm">{target.note}</Badge>}
                           {/* A target named by its address would say it twice. */}
                           {target.host !== target.name && (
                             <span className="ml-auto min-w-0 max-w-[45%] truncate font-mono text-xs text-muted-foreground">
-                              {target.host}
+                              <Masked value={target.host} />
                             </span>
                           )}
                         </label>

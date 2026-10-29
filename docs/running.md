@@ -167,7 +167,8 @@ top of the sidebar, and every quarter of an hour asks the registry what
   while the page was open.
 
 `GET /api/version` answers the same as JSON. The registry is asked without any
-credentials, because the image is public. Set `CLEARPING_UPDATE_CHECK=off` to
+credentials, because the image is public. Turn off **Check for updates** under
+Settings → Privacy, or set `CLEARPING_UPDATE_CHECK=off`, to
 never ask, and a build made by hand, not by CI, calls itself a development
 build and is not compared with anything.
 

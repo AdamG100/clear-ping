@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { initializeServer } from '@/lib/init';
 import { handleMessage, JSON_RPC, MCP_PROTOCOL_VERSIONS, originAllowed, tokenTravelsSafely } from '@/lib/mcp/protocol';
 import { clearPingMcp } from '@/lib/mcp/tools';
+import { withAddressesHidden } from '@/lib/privacy/assistant';
+import { privacyNow } from '@/lib/privacy/settings';
 import { identify, presentedKey, securityPolicy } from '@/lib/security/access';
 import { canChange } from '@/lib/security/roles';
 import { ANONYMOUS, recordActivity } from '@/lib/security/store';
@@ -102,7 +104,8 @@ export async function POST(request: NextRequest) {
 
     // Nothing in it wanted an answer: taken, with nothing to say back.
     if (answers.length === 0) return new NextResponse(null, { status: 202 });
-    return NextResponse.json(Array.isArray(body) ? answers : answers[0]);
+    const sent = privacyNow().hideFromAssistants ? await withAddressesHidden(answers) : answers;
+    return NextResponse.json(Array.isArray(body) ? sent : sent[0]);
   } catch (error) {
     console.error('Error answering an MCP request:', error);
     return refuse(500, JSON_RPC.internalError, 'ClearPing could not answer');

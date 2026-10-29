@@ -6,6 +6,7 @@ import { Alert } from "@/components/arc/alert/alert"
 import { Button } from "@/components/arc/button/button"
 import { lastAnsweringHop } from "@/lib/traceroute/parse"
 import type { Target, TracerouteHop } from "@/types/probe"
+import { Masked } from '../privacy/masked'
 
 /**
  * Says why a closed-port check that has never had an answer is shown grey:
@@ -103,8 +104,8 @@ export function SilentServerNote({
         {found.state === "found" && (
           <span className="block">
             What can be watched is the way to it.{" "}
-            <span className="font-mono text-foreground">{found.hop.hostname || found.hop.address}</span>
-            {found.hop.hostname && <span className="font-mono"> ({found.hop.address})</span>}, hop {found.hop.hop} of{" "}
+            <span className="font-mono text-foreground"><Masked value={found.hop.hostname || found.hop.address!} /></span>
+            {found.hop.hostname && <span className="font-mono"> (<Masked value={found.hop.address!} />)</span>}, hop {found.hop.hop} of{" "}
             {found.ofHops} in the latest trace, is the furthest point on the way that answers: usually where your
             traffic enters the host&apos;s network. Pinging it shows whether lag starts on your side of it.
           </span>

@@ -12,6 +12,7 @@ import { displayLocale, displayTimeZone } from '@/lib/time-zone'
 import { BGP_DIRECT, type BgpCrossingRun, type BgpHomeTrace, type BgpPrefixDetail, type BgpUpdate, type BgpVantage } from '@/types/bgp'
 import { cn } from '@/lib/utils'
 import { asLabel, vantageLabel } from './state'
+import { Masked } from '../privacy/masked'
 
 /**
  * "From your networks": what the rest of the page cannot say, from each place
@@ -77,8 +78,8 @@ function Hops({ trace, names }: { trace: BgpHomeTrace; names: Record<number, str
         <li key={hop.hop} className={cn('flex gap-3', hop.exchange ? 'text-foreground' : 'text-muted-foreground')}>
           <span className="w-5 shrink-0 text-right">{hop.hop}</span>
           <span className="min-w-0 flex-1 truncate">
-            {hop.address ?? '*'}
-            {hop.hostname ? <span className="font-sans"> {hop.hostname}</span> : null}
+            {hop.address ? <Masked value={hop.address} /> : '*'}
+            {hop.hostname ? <span className="font-sans"> <Masked value={hop.hostname} /></span> : null}
             {/* Whose router answered on the exchange, by IXPDB. */}
             {hop.member ? <span className="font-sans" title={asLabel(hop.member, names)}> AS{hop.member}{names[hop.member] ? ` ${names[hop.member]}` : ''}</span> : null}
           </span>
@@ -116,7 +117,7 @@ function TraceLine({ trace, known, names }: { trace: BgpHomeTrace; known: boolea
   const said = crossingSaid(trace, known, names)
   return (
     <li className="space-y-1">
-      <p className="text-sm text-foreground">{targetSaid(trace)}</p>
+      <p className="text-sm text-foreground"><Masked text value={targetSaid(trace)} /></p>
       <p className="text-xs text-muted-foreground">
         {failed
           ? `Could not trace${trace.error ? `: ${trace.error}` : ''}`

@@ -10,6 +10,7 @@ import { getBgpMonitor } from './bgp/monitor';
 import { startScheduler } from './scheduler';
 import { initDatabase } from './db/database';
 import { startMaintenanceSchedule } from './db/maintenance';
+import { getPrivacySettings } from './privacy/settings';
 import { recoveryMode } from './security/settings-store';
 import { announceSetupCode } from './security/setup-code';
 import { countUsers } from './security/store';
@@ -38,6 +39,8 @@ export function initializeServer(): Promise<void> {
     store[INIT_KEY] = (async () => {
       console.log('[Init] Initializing ClearPing server...');
       await initDatabase();
+      // Held in memory from here on, for what reads it without waiting.
+      await getPrivacySettings();
 
       if (process.env.CLEARPING_EXTERNAL_PROBER === '1') {
         console.log('[Init] External prober configured; scheduler not started here');

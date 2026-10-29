@@ -32,6 +32,7 @@ import { ago, asLabel, carrierLabel, SOURCE_NOTE, STATE_LABEL, STATE_TONE, vanta
 import { upstreamColors, UpstreamMix } from './upstream-mix'
 import { UpdateList } from './update-list'
 import { useBgpPrefix } from './use-bgp'
+import { Masked } from '../privacy/masked'
 
 /**
  * One watched prefix in full: how it stands, where in the world it is seen,
@@ -146,9 +147,9 @@ function TargetsInside({ detail, targets, onSelectTarget }: { detail: BgpPrefixD
           >
             <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} onHold={target.onHold} bare />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm">{target.name}</span>
+              <span className="block truncate text-sm"><Masked text value={target.name} /></span>
               <span className="block truncate font-mono text-xs text-muted-foreground">
-                {target.host}
+                <Masked value={target.host} />
                 {target.probeAgent ? ` · from ${target.probeAgent.name}` : ''}
               </span>
             </span>

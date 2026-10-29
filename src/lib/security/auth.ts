@@ -13,7 +13,7 @@ import { databasePath, getDatabase } from '../db/database'
 import { discover, getSsoConfig, groupsOf, inAllowedGroup, ssoRole, ssoUsable, usernameFrom, type Claims, type SsoConfig } from './oidc'
 import { ROLE_LABEL, type Role } from './roles'
 import { hashPassword, KEY_PREFIX, newToken, verifyPassword } from './secrets'
-import { securitySwitches } from './settings-store'
+import { keptDetail, securitySwitches } from './settings-store'
 import type { Actor, Via } from './store'
 
 /**
@@ -117,7 +117,7 @@ function recordOnAuthDb(db: Database.Database, actor: Actor, via: Via, action: s
       actor.name,
       via,
       action,
-      detail?.slice(0, 2000) ?? null
+      keptDetail(action, detail)
     )
   } catch (error) {
     console.error('[Activity] Could not record:', action, error)

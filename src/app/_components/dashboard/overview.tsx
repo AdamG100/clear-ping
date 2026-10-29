@@ -28,6 +28,7 @@ import { PANE, PANE_HEADER, PANE_TITLE } from './pane-layout'
 import { RoutingGlance } from './routing-glance'
 import { OverviewDaySkeleton, OverviewSkeleton } from './skeleton'
 import { useOverview } from './use-overview'
+import { Masked } from '../privacy/masked'
 
 /**
  * Everything at a glance, and where the dashboard opens.
@@ -187,7 +188,7 @@ function Attention({
               >
                 <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} onHold={target.onHold} bare />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{target.name}</span>
+                  <span className="block truncate text-sm"><Masked text value={target.name} /></span>
                   <span className="block truncate text-xs text-muted-foreground">{why}</span>
                 </span>
                 {started !== undefined && (
@@ -481,7 +482,7 @@ function Day({
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm">{targetsById.get(problem.targetId)?.name ?? problem.label}</span>
+                      <span className="truncate text-sm"><Masked text value={targetsById.get(problem.targetId)?.name ?? problem.label} /></span>
                       {problem.ongoing && <Badge size="sm" tone="danger">Now</Badge>}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
@@ -660,7 +661,7 @@ function ProbeAgents({
           {members.length === 0 ? 'No targets' : `${plural(members.length, 'target')}: ${describeGroupHealth(summarizeGroupHealth(members))}`}
         </span>
         {lines.filter(Boolean).map(line => (
-          <span key={line} className="truncate text-xs text-muted-foreground">{line}</span>
+          <span key={line} className="truncate text-xs text-muted-foreground"><Masked text value={line} /></span>
         ))}
       </button>
     </li>

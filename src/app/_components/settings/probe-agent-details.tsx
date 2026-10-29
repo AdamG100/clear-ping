@@ -18,6 +18,7 @@ import { compareVersions } from '@/lib/version'
 import { cn } from '@/lib/utils'
 import type { ProbeAgent, ProbeAgentExposure, ProbeAgentState } from '@/types/probe-agent'
 import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
+import { Masked } from '../privacy/masked'
 
 /**
  * One probe agent's details, in the panel that opens from its row in
@@ -309,7 +310,7 @@ export function ProbeAgentDetails({
         <>
           <Facts title="Connection">
             <Fact label="Address">
-              <span className="break-all font-mono text-xs">{addressOf(agent)}</span>
+              <span className="break-all font-mono text-xs"><Masked value={addressOf(agent)} /></span>
             </Fact>
             <Fact label="Reached over" below={<p className={cn(HINT, 'text-left')}>{exposure.detail}</p>}>
               <Badge size="sm" tone={exposure.tone}>{exposure.label}</Badge>
