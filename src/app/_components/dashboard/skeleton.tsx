@@ -129,36 +129,38 @@ export function OverviewDaySkeleton() {
             <Block key={index} className="h-3" style={{ width: `${width * 0.25}rem` }} />
           ))}
         </div>
-      </section>
-      <div className="grid items-start gap-4 @2xl/main:gap-6 @5xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <section className={PANEL} aria-hidden="true">
-          <PanelTitle />
-          <Block className="mt-4 h-4 w-20" />
-          <div className="mt-3 space-y-4">
-            {[0, 1, 2, 3].map(row => (
-              <div key={row} className="flex gap-3">
-                <Block className="size-6 shrink-0 rounded-full" />
+        {/* Who had trouble. */}
+        <div className="mt-5 border-t border-border pt-4">
+          <Block className="h-4 w-28" />
+          <div className="mt-2 divide-y divide-border">
+            {[0, 1, 2].map(row => (
+              <div key={row} className="flex items-center gap-3 px-2 py-2.5">
+                <Block className="size-2.5 shrink-0 rounded-full" />
                 <div className="min-w-0 flex-1">
-                  <Block className="h-3.5 w-2/3" />
-                  <Block className="mt-1.5 h-3 w-5/6" />
+                  <Block className="h-3.5 w-40 max-w-full" />
+                  <Block className="mt-1.5 h-3 w-56 max-w-full" />
                 </div>
-                <Block className="h-3 w-10 shrink-0" />
+                <Block className="h-3 w-16 shrink-0" />
               </div>
             ))}
           </div>
-        </section>
-        <section className={PANEL} aria-hidden="true">
-          <PanelTitle />
-          <div className="mt-4 divide-y divide-border">
-            {[0, 1, 2, 3, 4].map(row => (
-              <div key={row} className="flex items-center justify-between gap-3 py-2.5">
-                <Block className="h-3.5 w-32" />
-                <Block className="h-3 w-24" />
+        </div>
+      </section>
+      <section className={PANEL} aria-hidden="true">
+        <PanelTitle />
+        <div className="mt-3 space-y-4">
+          {[0, 1, 2].map(row => (
+            <div key={row} className="flex gap-3">
+              <Block className="size-6 shrink-0 rounded-full" />
+              <div className="min-w-0 flex-1">
+                <Block className="h-3.5 w-2/3" />
+                <Block className="mt-1.5 h-3 w-5/6" />
               </div>
-            ))}
-          </div>
-        </section>
-      </div>
+              <Block className="h-3 w-10 shrink-0" />
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }

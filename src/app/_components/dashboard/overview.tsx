@@ -1,19 +1,20 @@
 'use client'
 
-import { useMemo, type ReactNode } from 'react'
-import { Activity, ChartLine, CircleX, MapPin, Plus, RadioTower, Server } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { Activity, ChartLine, ChevronRight, CircleX, MapPin, Plus, RadioTower, Server, X } from 'lucide-react'
 import type { GroupOrder, LatestMeasurement, Target } from '@/types/probe'
 import type { ProbeAgentSummary } from '@/types/probe-agent'
-import type { OverviewEvent, OverviewReport, OverviewSlice } from '@/types/overview'
+import type { IncidentKind, OverviewEvent, OverviewReport, OverviewSlice } from '@/types/overview'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { MetricCard } from '@/components/arc/metric-card/metric-card'
+import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { Timeline, type TimelineEvent } from '@/components/arc/timeline/timeline'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { alertTitle } from '@/lib/alerts/delivery'
-import { isMeaningfulLoss, NO_DATA_COLOR, NO_REPLY_COLOR, SIGNAL_VARS } from '@/lib/charts/packet-loss-colors'
+import { NO_DATA_COLOR, NO_REPLY_COLOR, SIGNAL_VARS } from '@/lib/charts/packet-loss-colors'
 import { probeVocabulary } from '@/lib/probes/labels'
 import { humanDuration } from '@/lib/reports/evidence'
 import { describeGroupHealth, groupIsOnline, groupIsPaused, summarizeGroupHealth } from '@/lib/targets/group-health'
@@ -32,10 +33,11 @@ import { useOverview } from './use-overview'
 /**
  * Everything at a glance, and where the dashboard opens.
  *
- * Two questions, in order: is anything wrong now, and how has the day gone.
- * What is wrong now comes from the readings the sidebar already has. The day
- * comes from /api/overview, which reads every probe in it and puts the
- * failures that happened together into one event, with where the fault lay.
+ * Most important first: is anything wrong now, then how the day has gone,
+ * then the network as a whole. What is wrong now comes from the readings the
+ * sidebar already has. The day comes from /api/overview, which reads every
+ * probe in it and puts the failures that happened together into one event,
+ * with where the fault lay. Every problem leads to the target it was on.
  */
 
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
@@ -220,9 +222,67 @@ function sliceNote(slice: OverviewSlice, sliceMs: number): string {
   return `${when}: ${parts.length > 0 ? parts.join(', ') : `all ${slice.watched} answering`}`
 }
 
-/** The day in quarters of an hour: green where everything answered, red where something did not. */
-function DayStrip({ report }: { report: OverviewReport }) {
+/** One target's trouble over a stretch of the day, from the events it was in. */
+interface Problem {
+  targetId: string
+  label: string
+  /** The worse of what happened to it: an outage outranks loss. */
+  kind: IncidentKind
+  spells: number
+  totalMs: number
+  ongoing: boolean
+  /** When its latest spell began. */
+  latest: number
+  reasons: string[]
+}
+
+/** Every target that went wrong between `from` and `to`, the ones still wrong first, then the longest. */
+function problemsBetween(report: OverviewReport, from: number, to: number, targetsById: Map<string, Target>): Problem[] {
+  const byTarget = new Map<string, Problem>()
+  for (const event of report.events) {
+    if ((event.end ?? report.end) <= from || event.start >= to) continue
+    for (const each of event.targets) {
+      if (!targetsById.has(each.targetId)) continue
+      const was = byTarget.get(each.targetId)
+      const problem: Problem = was ?? { targetId: each.targetId, label: each.label, kind: each.kind, spells: 0, totalMs: 0, ongoing: false, latest: 0, reasons: [] }
+      problem.spells++
+      problem.totalMs += event.durationMs
+      problem.ongoing ||= event.ongoing
+      problem.latest = Math.max(problem.latest, event.start)
+      if (each.kind === 'outage') problem.kind = 'outage'
+      for (const reason of each.reasons) if (!problem.reasons.includes(reason)) problem.reasons.push(reason)
+      byTarget.set(each.targetId, problem)
+    }
+  }
+  return [...byTarget.values()].sort(
+    (a, b) => Number(b.ongoing) - Number(a.ongoing) || Number(b.kind === 'outage') - Number(a.kind === 'outage') || b.totalMs - a.totalMs
+  )
+}
+
+type Show = 'all' | IncidentKind
+
+/** Rows listed before "Show all". */
+const PROBLEM_ROWS = 8
+
+/**
+ * The day in quarters of an hour, and under it who had trouble: the whole
+ * day's, or one quarter's when it is picked on the strip. Each row opens its
+ * target, so a red stretch leads straight to the probe that caused it.
+ */
+function Day({
+  report,
+  targetsById,
+  onSelectTarget,
+}: {
+  report: OverviewReport
+  targetsById: Map<string, Target>
+  onSelectTarget: (id: string) => void
+}) {
   const { slices, sliceMs } = report
+  const [picked, setPicked] = useState<number | null>(null)
+  const [show, setShow] = useState<Show>('all')
+  const [everything, setEverything] = useState(false)
+
   const troubled = slices.filter(slice => slice.down > 0).length
   // "All day" only of a day that was watched all through.
   const watched = slices.filter(slice => slice.watched > 0).length
@@ -236,26 +296,62 @@ function DayStrip({ report }: { report: OverviewReport }) {
       return minute === 0 && hour % 6 === 0
     })
 
+  const slice = picked !== null ? slices.find(each => each.start === picked) : undefined
+  const from = slice ? slice.start : report.start
+  const to = slice ? slice.start + sliceMs : report.end + 1
+  const problems = problemsBetween(report, from, to, targetsById)
+  const counts = {
+    all: problems.length,
+    outage: problems.filter(problem => problem.kind === 'outage').length,
+    loss: problems.filter(problem => problem.kind === 'loss').length,
+  }
+  const shown = show === 'all' ? problems : problems.filter(problem => problem.kind === show)
+  const rows = everything ? shown : shown.slice(0, PROBLEM_ROWS)
+  const pick = (start: number) => {
+    setPicked(was => (was === start ? null : start))
+    setEverything(false)
+  }
+
   return (
     <section className={PANEL} aria-labelledby="overview-day">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="overview-day" className="text-sm font-medium">Last 24 hours</h2>
         <p className="text-xs text-muted-foreground">
-          {troubled === 0 ? quiet : `Something was not answering in ${humanDuration(troubled * sliceMs)} of it`}
+          {troubled === 0 ? quiet : `Something was not answering in ${humanDuration(troubled * sliceMs)} of it. Pick a red or amber stretch to see who.`}
         </p>
       </div>
-      <div className="mt-4 flex h-8 @xl/main:h-10 @xl/main:gap-px" role="img" aria-label={`The last 24 hours in quarters of an hour. ${troubled} had a target not answering.`}>
-        {slices.map(slice => (
-          <Tooltip key={slice.start} content={sliceNote(slice, sliceMs)}>
-            <span className="h-full min-w-0 flex-1 @xl/main:rounded-xs" style={{ background: sliceColour(slice) }} />
-          </Tooltip>
-        ))}
+      <div className="mt-4 flex h-8 @xl/main:h-10 @xl/main:gap-px" role="group" aria-label={`The last 24 hours in quarters of an hour. ${troubled} had a target not answering.`}>
+        {slices.map(each => {
+          const trouble = each.down > 0 || each.lossy > 0
+          const style = { background: sliceColour(each) }
+          const dimmed = picked !== null && picked !== each.start
+          return (
+            <Tooltip key={each.start} content={trouble ? `${sliceNote(each, sliceMs)}. Click to see who.` : sliceNote(each, sliceMs)}>
+              {trouble ? (
+                <button
+                  type="button"
+                  onClick={() => pick(each.start)}
+                  aria-pressed={picked === each.start}
+                  aria-label={sliceNote(each, sliceMs)}
+                  className={cn(
+                    'h-full min-w-0 flex-1 cursor-pointer transition-opacity @xl/main:rounded-xs hover:opacity-80',
+                    dimmed && 'opacity-35',
+                    picked === each.start && 'relative z-10 outline-2 outline-offset-1 outline-foreground'
+                  )}
+                  style={style}
+                />
+              ) : (
+                <span className={cn('h-full min-w-0 flex-1 transition-opacity @xl/main:rounded-xs', dimmed && 'opacity-35')} style={style} />
+              )}
+            </Tooltip>
+          )
+        })}
       </div>
       <div className="relative mt-1.5 h-4 font-mono text-[11px] text-muted-foreground" aria-hidden="true">
         {/* At the left edge of the slice that starts on the hour. */}
-        {ticks.map(({ slice, index }) => (
-          <span key={slice.start} className="absolute -translate-x-1/2" style={{ left: `${(index / slices.length) * 100}%` }}>
-            {clock(slice.start)}
+        {ticks.map(({ slice: each, index }) => (
+          <span key={each.start} className="absolute -translate-x-1/2" style={{ left: `${(index / slices.length) * 100}%` }}>
+            {clock(each.start)}
           </span>
         ))}
       </div>
@@ -272,6 +368,93 @@ function DayStrip({ report }: { report: OverviewReport }) {
           </li>
         ))}
       </ul>
+
+      <div className="mt-5 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="text-sm font-medium">{slice ? 'Trouble at that time' : 'Trouble today'}</h3>
+            {slice && (
+              <button
+                type="button"
+                onClick={() => setPicked(null)}
+                className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-border px-2 py-0.5 font-mono text-xs text-muted-foreground hover:bg-muted/40"
+                aria-label="Show the whole day again"
+              >
+                {clock(slice.start)} to {clock(slice.start + sliceMs)}
+                <X size={12} strokeWidth={2} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          {counts.outage > 0 && counts.loss > 0 && (
+            <SegmentedControl
+              label="Which trouble"
+              value={show}
+              onValueChange={value => {
+                setShow(value as Show)
+                setEverything(false)
+              }}
+              options={[
+                { value: 'all', label: `All ${counts.all}` },
+                { value: 'outage', label: `Not answering ${counts.outage}` },
+                { value: 'loss', label: `Losing packets ${counts.loss}` },
+              ]}
+            />
+          )}
+        </div>
+
+        {shown.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {slice && slice.lossy > 0
+              ? 'Only brief packet loss then, too short to list. A target\'s chart shows it.'
+              : slice
+                ? 'Every target answered then.'
+                : report.briefLossSpells > 0
+                  ? `No outages and no lasting loss, only ${plural(report.briefLossSpells, 'brief spell')} of packet loss.`
+                  : 'No outages and no lasting loss today.'}
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y divide-border">
+            {rows.map(problem => (
+              <li key={problem.targetId}>
+                <button
+                  type="button"
+                  onClick={() => onSelectTarget(problem.targetId)}
+                  className="group flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-muted/40"
+                >
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ background: problem.kind === 'outage' ? NO_REPLY_COLOR : SIGNAL_VARS.minor }}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm">{targetsById.get(problem.targetId)?.name ?? problem.label}</span>
+                      {problem.ongoing && <Badge size="sm" tone="danger">Now</Badge>}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {problem.kind === 'outage' ? 'Not answering' : 'Losing packets'}
+                      {problem.reasons.length > 0 ? `: ${problem.reasons.slice(0, 2).join('; ')}` : ''}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right font-mono text-xs text-muted-foreground">
+                    <span className="block">
+                      {humanDuration(problem.totalMs)}
+                      {problem.spells > 1 ? `, ${problem.spells} times` : ''}
+                    </span>
+                    <span className="block">{problem.ongoing ? `since ${clock(problem.latest)}` : `last at ${clock(problem.latest)}`}</span>
+                  </span>
+                  <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {shown.length > rows.length && (
+          <Button type="button" size="sm" variant="ghost" className="mt-1" onClick={() => setEverything(true)}>
+            Show all {shown.length}
+          </Button>
+        )}
+      </div>
     </section>
   )
 }
@@ -361,7 +544,7 @@ function Events({
   return (
     <section className={PANEL} aria-labelledby="overview-events">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="overview-events" className="text-sm font-medium">What happened</h2>
+        <h2 id="overview-events" className="text-sm font-medium">What happened, and where the fault lay</h2>
         {report.briefLossSpells > 0 && (
           <p className="text-xs text-muted-foreground">
             And {plural(report.briefLossSpells, 'brief spell')} of packet loss, too short to list
@@ -550,59 +733,6 @@ function ProbeAgents({
   )
 }
 
-/** The targets that did worst over the day, for where to look first. */
-/** The five that did worst: lowest uptime first, then most loss. Only ones that lost anything worth saying. */
-function leastReliable(report: OverviewReport, targetsById: Map<string, Target>) {
-  return report.targets
-    .filter(each => each.probes > 0 && targetsById.has(each.targetId) && (each.uptimePercent < 100 || isMeaningfulLoss(each.lossPercent)))
-    .sort((a, b) => a.uptimePercent - b.uptimePercent || b.lossPercent - a.lossPercent)
-    .slice(0, 5)
-}
-
-function LeastReliable({
-  worst,
-  targetsById,
-  onSelectTarget,
-}: {
-  worst: OverviewReport['targets']
-  targetsById: Map<string, Target>
-  onSelectTarget: (id: string) => void
-}) {
-  return (
-    <section className={PANEL} aria-labelledby="overview-worst">
-      <h2 id="overview-worst" className="text-sm font-medium">Least reliable today</h2>
-      <table className="mt-3 w-full text-sm">
-        <thead className="text-left text-xs text-muted-foreground">
-          <tr>
-            <th className="pb-2 font-normal">Target</th>
-            <th className="pb-2 text-right font-normal">Uptime</th>
-            <th className="pb-2 text-right font-normal">Loss</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {worst.map(each => (
-            <tr key={each.targetId}>
-              <td className="max-w-0 py-2 pr-2">
-                <button
-                  type="button"
-                  className="block w-full cursor-pointer truncate text-left hover:underline"
-                  onClick={() => onSelectTarget(each.targetId)}
-                >
-                  {targetsById.get(each.targetId)?.name}
-                </button>
-              </td>
-              <td className={cn('py-2 text-right font-mono text-xs', each.uptimePercent < 99 ? 'text-destructive' : 'text-muted-foreground')}>
-                {each.uptimePercent.toFixed(2)}%
-              </td>
-              <td className="py-2 pl-2 text-right font-mono text-xs text-muted-foreground">{each.lossPercent.toFixed(2)}%</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
-  )
-}
-
 // ─── The page ───────────────────────────────────────────────────────────────
 
 export function OverviewPage({
@@ -642,8 +772,6 @@ export function OverviewPage({
       uptimeById: new Map(measured.map(each => [each.targetId, each.uptimePercent])),
     }
   }, [report, targetsById])
-
-  const worst = useMemo(() => (report ? leastReliable(report, targetsById) : []), [report, targetsById])
 
   const uptimeOf = (ids: string[]) => {
     const known = ids.map(id => day?.uptimeById.get(id)).filter((uptime): uptime is number => uptime !== undefined)
@@ -730,9 +858,18 @@ export function OverviewPage({
         />
       </div>
 
-      {/* Now, from the top: what is wrong, the network as a whole, and where
-          it is seen from. Then the day. */}
+      {/* Most important first: what is wrong now, then the day and who had
+          trouble in it, then the network as a whole. */}
       <Attention now={now} latest={latest} report={report} onSelectTarget={onSelectTarget} />
+
+      {report ? (
+        <>
+          <Day report={report} targetsById={targetsById} onSelectTarget={onSelectTarget} />
+          <Events report={report} targetsById={targetsById} probeAgents={probeAgents} onSelectTarget={onSelectTarget} />
+        </>
+      ) : (
+        <OverviewDaySkeleton />
+      )}
 
       <RoutingGlance onOpenRouting={onOpenRouting} onOpenPrefix={onOpenRoutingPrefix} />
 
@@ -746,20 +883,6 @@ export function OverviewPage({
       />
 
       <ProbeAgents targets={targets} probeAgents={probeAgents} report={report} onShowTargetsFrom={onShowTargetsFrom} />
-
-      {report ? (
-        <>
-          <DayStrip report={report} />
-          {/* Side by side where there is a list of the worst; the events the
-              whole width where there is not. */}
-          <div className={cn('grid items-start gap-4 @2xl/main:gap-6', worst.length > 0 && '@5xl/main:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]')}>
-            <Events report={report} targetsById={targetsById} probeAgents={probeAgents} onSelectTarget={onSelectTarget} />
-            {worst.length > 0 && <LeastReliable worst={worst} targetsById={targetsById} onSelectTarget={onSelectTarget} />}
-          </div>
-        </>
-      ) : (
-        <OverviewDaySkeleton />
-      )}
     </div>
   )
 }
