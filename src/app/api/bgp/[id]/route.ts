@@ -70,7 +70,7 @@ export async function PATCH(request: NextRequest, { params }: Context) {
       try {
         accepted = await monitor.acceptAsNormal(id)
       } catch (error) {
-        return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not take it as normal' }, { status: 400 })
+        return NextResponse.json({ error: error instanceof Error ? error.message : 'Could not accept it as normal' }, { status: 400 })
       }
       if (!accepted) return NextResponse.json({ error: 'BGP monitoring is off' }, { status: 409 })
       await recordActivity(actor, via, 'bgp.accept', prefix.prefix)

@@ -180,8 +180,8 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
     <div className="space-y-5">
       {environment.recovery && (
         <Alert tone="warning" title="CLEARPING_AUTH=off is set where ClearPing runs">
-          Sign-in is not asked for whatever the switch below says, and a new account can be made from the sign-in page.
-          Remove it once you are back in.
+          Sign-in is off whatever the switch below says, and anyone can make an account from the sign-in page. Remove it
+          once you are back in.
         </Alert>
       )}
 
@@ -191,9 +191,9 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
         label="Require sign-in for the dashboard and API"
         detail={
           <>
-            Anyone opening ClearPing has to sign in, and the API answers only to someone signed in or a script sending
-            a key (<span className="font-mono">Authorization: Bearer &lt;key&gt;</span>). Leave it off if ClearPing is
-            only on your own network, or already behind a sign-in such as Authentik.
+            Everyone has to sign in to see ClearPing, and the API only answers someone signed in or a script with a key
+            (<span className="font-mono">Authorization: Bearer &lt;key&gt;</span>). Leave it off if ClearPing is only
+            reachable on your own network, or already sits behind a sign-in such as Authentik.
           </>
         }
       />
@@ -205,21 +205,21 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
         label="Require a key for AI assistants (MCP)"
         detail={
           inForce.loginRequired ? (
-            'On, because sign-in is on: an open MCP address would hand out what sign-in protects.'
+            'On, because sign-in is on: without a key, the MCP address would give away what sign-in protects.'
           ) : environment.legacyMcpToken ? (
             <>
               On, because <span className="font-mono">CLEARPING_MCP_TOKEN</span> is set where ClearPing runs. That
-              token still works, as a key that can change things; keys made here are better, one per assistant.
+              token still works and can change things. Keys made here are better: one per assistant.
             </>
           ) : (
-            'Off: an assistant without a key can read, but never change anything. On: every assistant needs a key, even to read.'
+            'Off: assistants without a key can read but not change anything. On: every assistant needs a key, even to read.'
           )
         }
       />
 
-      <Alert tone="info" title="Changed signed in, always">
-        Changes to these settings, to keys and to accounts are always made signed in, even while the dashboard does not
-        ask for it. Locked out? Start ClearPing with CLEARPING_AUTH=off to turn sign-in off and make a new account.
+      <Alert tone="info" title="Changing these always needs a sign-in">
+        These settings, keys and accounts can only be changed signed in, even while the dashboard itself is open to
+        everyone. Locked out? Start ClearPing with CLEARPING_AUTH=off, which turns sign-in off so you can make a new account.
       </Alert>
     </div>
   )
@@ -321,8 +321,8 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
         <div className="space-y-1">
           <p className={SECTION_TITLE}>Create a key</p>
           <p className={HINT}>
-            One for each script or assistant, so each can be cut off alone and the activity record says which did what.
-            A key is yours, and never does more than your account may: if your role changes, so does what your keys can do.
+            Make one per script or assistant, so you can revoke each on its own and Activity shows which did what. A key
+            can never do more than your account can: if your role changes, so do your keys.
           </p>
         </div>
         <Input
@@ -1074,7 +1074,7 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
         <div className="min-w-0">
           <h1 className={PANE_TITLE}>Settings</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Who may open this ClearPing, keys for scripts and AI assistants, and a record of every change and who made it.
+            Who can sign in and what they can do, where readings are taken from, and keeping ClearPing in good shape.
           </p>
         </div>
         {loaded.state === 'ready' && (

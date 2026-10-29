@@ -57,16 +57,15 @@ function Intro({ onTurnOn }: { onTurnOn?: () => void }) {
         <div className="space-y-2">
           <h2 className="text-lg font-medium">Watch your prefixes in BGP</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            For networks that announce their own address space. ClearPing follows the routes to the prefixes you choose
-            as RIPE RIS&apos;s route collectors see them, at exchanges on every continent, live as the updates arrive. It
-            tells you when a prefix is withdrawn, when the world starts reaching it through a different upstream (a DDoS
-            mitigation moving your traffic from the exchange to a scrubbing network, say), when a more-specific appears,
-            and when another network announces it.
+            For networks that announce their own address space. ClearPing follows the routes to the prefixes you pick,
+            live, as RIPE RIS route collectors at exchanges on every continent see them. You are told when a prefix is
+            withdrawn, when traffic to it moves to a different upstream (DDoS scrubbing taking over from the exchange, say),
+            when a more-specific appears, and when another network announces it.
           </p>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            It is off. Turned on, in Settings, it keeps one connection open to RIS Live (ris-live.ripe.net) and asks
-            RIPEstat (stat.ripe.net) and PeeringDB (peeringdb.com) about the prefixes watched. What arrives is kept for two
-            days, and the changes it adds up to for two weeks.
+            It is off until you turn it on in Settings. Then ClearPing keeps one connection open to RIS Live
+            (ris-live.ripe.net) and asks RIPEstat (stat.ripe.net) and PeeringDB (peeringdb.com) about the prefixes you
+            watch. Updates are kept for two days, and the changes they add up to for two weeks.
           </p>
         </div>
         {onTurnOn ? (
@@ -226,7 +225,7 @@ function AddPrefixDialog({
     <Dialog open={open} onOpenChange={change}>
       <DialogContent
         title="Watch a prefix"
-        description="An IP address watches the announced prefix that holds it, and follows the most specific route to that address."
+        description="Give a prefix, or an IP address to watch the announced prefix it sits in, following the most specific route to it."
         style={{ width: 'min(calc(100vw - 2rem), 600px)' }}
       >
         <form onSubmit={submit} noValidate className="space-y-4 text-foreground">
@@ -397,7 +396,7 @@ export function RoutingPage({
             <section className={`${PANEL} flex justify-center`}>
               <EmptyState
                 title="Nothing watched yet"
-                description="Add a server's IP address or one of your prefixes, and how the world reaches it shows here."
+                description="Add a server's IP address or one of your prefixes to see how the rest of the internet reaches it."
                 action={
                   readOnly ? undefined : (
                     <Button onClick={() => setAdding(true)}>
@@ -434,7 +433,7 @@ export function RoutingPage({
           <Tooltip content={SOURCE_NOTE}>
             <p className="inline-flex cursor-default items-center gap-1.5 text-xs text-muted-foreground">
               <Database size={12} strokeWidth={1.75} aria-hidden="true" />
-              Routes from RIPE RIS route collectors, via RIPEstat and RIS Live: how other networks reach your prefixes
+              How the rest of the internet reaches your prefixes, live from RIPE RIS route collectors
             </p>
           </Tooltip>
 

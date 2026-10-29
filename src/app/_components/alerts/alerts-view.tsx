@@ -62,7 +62,7 @@ function AlertState({ enabled, firing, watching }: { enabled: boolean; firing: n
   if (enabled) {
     return <Badge tone="success" icon={dot(false)}>On · watching {watching} target{watching === 1 ? '' : 's'}</Badge>
   }
-  return <Badge icon={<BellOff size={12} strokeWidth={2} aria-hidden />}>Muted: not judged or sent</Badge>
+  return <Badge icon={<BellOff size={12} strokeWidth={2} aria-hidden />}>Muted: not checked or sent</Badge>
 }
 
 /** An alert as the API sends it: its dates are still text. */
@@ -301,8 +301,8 @@ function AlertForm({
                 onValueChange={setTraceCooldownMinutes}
               />
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Before tracing the same target again on an alert. A link that keeps dropping out fires again and again, and
-                one trace each spell of trouble is what shows where; more only adds load to a path that is already struggling.
+                Before the same target is traced again. A link that keeps dropping out fires again and again, and one trace
+                per spell of trouble is enough to show where; more only adds load to a path that is already struggling.
               </p>
             </div>
           )}
@@ -329,7 +329,7 @@ function AlertForm({
         />
         <p className="text-xs leading-relaxed text-muted-foreground">
           {urls?.length === 0 ? (
-            <>Left empty, nothing is sent: a firing alert is shown on this screen and counted beside the Alerts button. </>
+            <>Leave it empty to send nothing: a firing alert still shows here and is counted on the Alerts button. </>
           ) : (
             <>Each one is sent a message when the alert fires and when it clears. </>
           )}
@@ -566,7 +566,7 @@ export function AlertsView({
         <EmptyState
           icon={<Bell size={24} strokeWidth={1.75} />}
           title="No alerts yet"
-          description="An alert is a condition, such as a target not responding, and the targets to watch for it on. Make one, tick the targets it applies to, and choose where it is sent."
+          description="An alert watches the targets you tick for one condition, such as not answering, and tells you wherever you choose when it fires and when it clears."
           action={
             readOnly ? undefined : (
               <Button onClick={() => onOpenEditor('new')}>

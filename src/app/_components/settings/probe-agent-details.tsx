@@ -363,7 +363,7 @@ export function ProbeAgentDetails({
           )}
 
           <Facts title="Targets">
-            <Fact label="Probed from it">
+            <Fact label="Targets probed from it">
               {agent.targetCount > 0 && onShowTargets ? (
                 <button type="button" className="text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={onShowTargets}>
                   {agent.targetCount} {agent.targetCount === 1 ? 'target' : 'targets'}
@@ -407,7 +407,7 @@ export function ProbeAgentDetails({
             <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0 max-w-60">
                 <p className="text-sm font-medium">New token</p>
-                <p className={HINT}>For a lost one. The old one stops working at once.</p>
+                <p className={HINT}>If the token is lost. The old one stops working straight away.</p>
               </div>
               <ConfirmMorph
                 label="New token"

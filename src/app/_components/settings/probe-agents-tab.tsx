@@ -284,8 +284,8 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
         <div className="min-w-0 max-w-2xl space-y-1">
           <p className={SECTION_TITLE}>Probe agents</p>
           <p className={HINT}>
-            Small ClearPing programs on other machines, such as a VPS in another country, that take readings from there
-            for this dashboard. Nothing to do with AI agents or the assistant.
+            A probe agent is a small ClearPing program on another machine, such as a VPS abroad. Point a target at one and
+            its readings are taken from there instead of from this server. Nothing to do with AI agents.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -520,7 +520,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
       <Dialog open={adding} onOpenChange={open => { if (!open) closeAdding() }}>
         <DialogContent
           title="Add a probe agent"
-          description="Where this dashboard will find it. Over a tailnet, use the machine's tailnet address or name, and no port has to be opened anywhere."
+          description="The address this dashboard connects to. On a tailnet, use the machine's tailnet address or name, and no ports need opening."
         >
           <form noValidate onSubmit={add} className="space-y-3 text-foreground">
             <Input label="Name" placeholder="Germany VPS" required value={name} maxLength={60} onChange={event => setName(event.target.value)} />

@@ -135,7 +135,7 @@ function SpreadBar({ spread, color, describe, what }: {
       {spread.middle !== null && <TipRow label="Median" value={describe(spread.middle)} />}
       <TipRow label="Highest" value={describe(max)} />
       {spread.now !== null && <TipRow label="Latest" value={describe(spread.now)} />}
-      {range && <span className="block pt-1 text-xs opacity-70">Usually: where 8 in 10 readings fell</span>}
+      {range && <span className="block pt-1 text-xs opacity-70">Typical range: where 8 in 10 readings fell</span>}
     </span>
   )
 

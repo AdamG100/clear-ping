@@ -110,7 +110,7 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
           <CopyField id="share-link" label={`Share link for ${plural(selected.size)}`} value={link} />
           <p className={HINT}>
             Send it to someone who runs ClearPing. They open this dialog on theirs, choose Import and paste it in.
-            Opened in a browser as it is, it brings the import up on this ClearPing.
+            Opened in a browser, the link brings up the import on this ClearPing.
           </p>
         </div>
       ) : (

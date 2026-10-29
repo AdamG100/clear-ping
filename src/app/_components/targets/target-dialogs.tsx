@@ -904,7 +904,7 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
           {addressField}
         </FormSection>
 
-        <FormSection number={2} tone="series-4" title="Name" hint="Optional. Left blank, the name is the address.">
+        <FormSection number={2} tone="series-4" title="Name" hint="Optional. Leave it blank to use the address.">
           <div className="grid items-start gap-4 sm:grid-cols-2">
             <Input
               id={`${idPrefix}-name`}
@@ -951,7 +951,7 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
           </div>
         </FormSection>
 
-        <FormSection number={3} tone="series-1" title="Check" hint="Picked from the address where it can tell, and how often it runs.">
+        <FormSection number={3} tone="series-1" title="Check" hint="How it is checked, picked from the address where possible, and how often.">
           {methodSection}
           <div className="grid items-start gap-4 sm:grid-cols-2">
             <IntervalSelect id={`${idPrefix}-interval`} value={interval} onChange={setInterval} />
@@ -961,7 +961,7 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
 
         {/* From where: asked only once there is somewhere besides here. */}
         {probeAgents.length > 0 && (
-          <FormSection number={4} tone="series-2" title="Probe from" hint="Readings show the network as seen from the chosen machine.">
+          <FormSection number={4} tone="series-2" title="Probe from" hint="Readings show the network as the chosen machine sees it.">
             <ProbeFromPicker idPrefix={idPrefix} probeAgents={probeAgents} value={probeAgentId} onChange={setProbeAgentId} />
             {initial.host !== '' && probeAgentId !== initial.probeAgentId && (
               <FieldHint>

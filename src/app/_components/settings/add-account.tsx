@@ -113,7 +113,7 @@ export function AddAccount({ onAdded }: { onAdded: () => void }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <p className="text-sm font-medium text-card-foreground">Accounts</p>
-          <p className={HINT}>Who can sign in, and what each may do.</p>
+          <p className={HINT}>Who can sign in, and what each person can do.</p>
         </div>
         <Button
           type="button"

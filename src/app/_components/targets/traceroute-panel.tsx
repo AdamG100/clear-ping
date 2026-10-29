@@ -558,7 +558,7 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
             </TextShimmer>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Where the path goes, hop by hop. Traced automatically when an alert set to trace fires.
+              Every router between here and the target. Also traced automatically when an alert set to trace fires.
             </p>
           )}
         </div>

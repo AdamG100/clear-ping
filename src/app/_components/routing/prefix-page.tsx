@@ -93,7 +93,7 @@ function ScopeBar({ scope, names, onScope }: { scope: Scope; names: Record<numbe
     <div className="flex min-h-11 flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground" role="status">
       {chips.length === 0 ? (
         <span className="text-muted-foreground">
-          Choose a region or an upstream below, and everything under here narrows to it.
+          Pick a region or an upstream below to narrow everything on this page to it.
         </span>
       ) : (
         <>
@@ -219,13 +219,13 @@ export function PrefixPage({
         body: JSON.stringify({ acceptNormal: true }),
       })
       const body = await response.json().catch(() => null)
-      if (!response.ok) reportError('Could not take it as normal', body?.error ?? `Server responded ${response.status}`)
+      if (!response.ok) reportError('Could not accept it as normal', body?.error ?? `Server responded ${response.status}`)
       else {
         notify({ tone: 'success', title: 'Taken as normal', detail: 'The networks announcing it now are its own from here on.' })
         await reload()
       }
     } catch (error) {
-      reportError('Could not take it as normal', error)
+      reportError('Could not accept it as normal', error)
     } finally {
       setAccepting(false)
     }
@@ -406,7 +406,7 @@ export function PrefixPage({
             <div className="mt-3">
               <Button variant="secondary" size="sm" onClick={() => void acceptNormal()} loading={accepting}>
                 <ShieldCheck {...ICON} />
-                It is ours: take it as normal
+                This is ours: accept it as normal
               </Button>
             </div>
           )}

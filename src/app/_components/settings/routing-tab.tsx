@@ -73,13 +73,13 @@ export function RoutingTab({ onOpenRouting }: { onOpenRouting: () => void }) {
           <p id={`${id}-title`} className="text-sm font-medium text-card-foreground">Routing (BGP monitoring)</p>
           <div id={`${id}-detail`} className={`${HINT} max-w-2xl space-y-2`}>
             <p>
-              Watches the prefixes you choose in BGP, as RIPE RIS&apos;s route collectors see them at exchanges around the
-              world, and how your own network reaches them. It tells you when a prefix is withdrawn, taken off the
-              exchanges onto transit, reached through a different upstream, or announced by another network.
+              Follows the prefixes you pick in BGP, as RIPE RIS route collectors at exchanges around the world see them,
+              and how your own network reaches them. You are told when a prefix is withdrawn, moved off the exchanges onto
+              transit, reached through a different upstream, or announced by another network.
             </p>
             <p>
               While it is on, ClearPing keeps one connection open to RIS Live (ris-live.ripe.net), and asks RIPEstat
-              (stat.ripe.net) and PeeringDB (peeringdb.com) about the prefixes watched. Off, the Routing page is greyed
+              (stat.ripe.net) and PeeringDB (peeringdb.com) about the prefixes you watch. When it is off, Routing is greyed
               out in the sidebar and nothing is asked.
             </p>
           </div>

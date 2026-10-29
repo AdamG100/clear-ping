@@ -188,14 +188,14 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
                   />
                   {isCustom && (
                     <Input
-                      label="Its name (optional)"
+                      label="Name (optional)"
                       value={row.name ?? ''}
                       maxLength={MAX_RESOLVER_NAME_LENGTH}
                       onChange={event => setRow(index, { ...row, name: event.target.value })}
                     />
                   )}
                   <Input
-                    label={`Where it is (${DNS_PROTOCOL_NAME[row.protocol]})`}
+                    label={`Address (${DNS_PROTOCOL_NAME[row.protocol]})`}
                     required
                     placeholder={PLACEHOLDER[row.protocol]}
                     value={row.server ?? ''}

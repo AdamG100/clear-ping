@@ -135,7 +135,7 @@ function UpdateDetail({
         <span className="font-mono">{update.prefix}</span>
         {update.prefix === prefix ? ', the prefix watched' : `, a more-specific of ${prefix}`}
       </Fact>
-      <Fact label="Who, and where">
+      <Fact label="Seen by">
         <span className="block">
           {update.peerAsn > 0 ? asLabel(update.peerAsn, names) : 'A peer whose network is not known'}, from{' '}
           <span className="font-mono">{update.peer}</span>
@@ -147,9 +147,9 @@ function UpdateDetail({
       </Fact>
       <Fact label={withdrawn ? 'The route it withdrew' : 'The route before'}>
         {update.previousPath === undefined ? (
-          <span className="text-muted-foreground">Not known: recorded before ClearPing kept the route before</span>
+          <span className="text-muted-foreground">Unknown: recorded before ClearPing kept earlier routes</span>
         ) : update.previousPath === null || update.previousPath.length === 0 ? (
-          <span className="text-muted-foreground">It had none: this is a new route</span>
+          <span className="text-muted-foreground">None: this is a new route</span>
         ) : (
           <PathSteps path={update.previousPath} names={names} />
         )}
@@ -167,7 +167,7 @@ function UpdateDetail({
               taken {ago(current.since, now)}
             </span>
             {withdrawn && current.prefix !== update.prefix && (
-              <span className="block text-muted-foreground">So it still reaches those addresses, by that route.</span>
+              <span className="block text-muted-foreground">So it can still reach those addresses that way.</span>
             )}
           </>
         ) : (

@@ -106,8 +106,8 @@ accept after a planned change:
   upstream dropped, a collector's session closed. Until then its return is no
   news.
 - **The networks announcing it** are never learned, as a new one is what a
-  hijack looks like. When one is yours, or one you moved the prefix to, **It
-  is ours: take it as normal** in the warning takes how it is carried now as
+  hijack looks like. When one is yours, or one you moved the prefix to, **This
+  is ours: accept it as normal** in the warning takes how it is carried now as
   normal at once.
 - Nothing is learned while it looks hijacked or withdrawn.
 

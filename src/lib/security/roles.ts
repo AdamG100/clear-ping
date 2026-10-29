@@ -22,9 +22,9 @@ export type Role = (typeof ROLES)[number]
 export const ROLE_LABEL: Record<Role, string> = { admin: 'Admin', editor: 'Editor', viewer: 'Viewer' }
 
 export const ROLE_DETAIL: Record<Role, string> = {
-  admin: 'Everything, Settings included: sign-in, keys, single sign-on, accounts and the activity record.',
-  editor: 'Adds, changes and deletes targets, groups and alerts. Creates keys of its own. No other settings.',
-  viewer: 'Sees everything monitored and changes nothing. Creates read-only keys of its own.',
+  admin: 'Everything, Settings included: sign-in, keys, single sign-on, accounts, probe agents, Routing and Activity.',
+  editor: 'Adds, changes and deletes targets, groups and alerts, and makes their own keys. No other settings.',
+  viewer: 'Sees everything and changes nothing. Can make their own read-only keys.',
 }
 
 /** The role an account added by an admin starts with, unless they choose another: the least. */
