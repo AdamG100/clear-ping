@@ -942,8 +942,8 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
                 <div className="sm:col-span-2">
                   <FieldHint>
                     {newGroupPath
-                      ? <>The target goes in <span className="font-medium text-foreground">{groupLabel(newGroupPath)}</span>, which is made along with it.</>
-                      : 'Name the group and it is made along with the target.'}
+                      ? <>The target goes in <span className="font-medium text-foreground">{groupLabel(newGroupPath)}</span>, a new group made when you save.</>
+                      : 'Name the group, and it is made when you save the target.'}
                   </FieldHint>
                 </div>
               </div>

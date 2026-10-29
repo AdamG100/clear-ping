@@ -26,7 +26,7 @@ pip install "apprise[all-plugins]"
 
 If that leaves `apprise` somewhere that is not on the `PATH`, point
 `CLEARPING_APPRISE_BIN` at it. Everything else works without it, and the Docker
-image comes with it. See [alerting.md](alerting.md).
+image already includes it. See [alerting.md](alerting.md).
 
 ## Separate prober (recommended for anything you rely on)
 

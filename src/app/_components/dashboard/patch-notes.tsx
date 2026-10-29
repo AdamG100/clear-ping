@@ -21,7 +21,7 @@ import { PANE, PANE_HEADER, PANE_TITLE } from './pane-layout'
  * in each version, newest first, from the same Markdown as the GitHub release.
  * The notes are the ones this build was made with (src/lib/release-notes.ts),
  * so they run up to the version it is on; a newer one is only named, since its
- * notes come with it.
+ * notes are in the newer build.
  *
  * Read as a timeline: where this server stands at the top, then each release
  * with what it changed sorted by kind, the newest few open and the rest a
@@ -248,7 +248,7 @@ function Standing({ status, releases }: { status: VersionStatus | null; releases
           <div className="min-w-0">
             <h2 className="font-medium text-foreground">v{newer} is available</h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              This server runs v{current}. Its notes come with it: pull the new image and recreate the container, and they are here.
+              This server runs v{current}. Update it to read what changed: pull the new image and recreate the container.
             </p>
           </div>
         </div>

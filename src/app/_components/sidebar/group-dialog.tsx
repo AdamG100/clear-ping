@@ -65,7 +65,7 @@ export function GroupDialog({ task, ...form }: GroupDialogProps) {
         description={
           creating
             ? 'Somewhere to keep targets that belong together. It can sit inside another group, and start out empty.'
-            : 'Rename the group or move it inside another. Its targets, and any groups inside it, go with it.'
+            : 'Rename the group or move it inside another. Its targets and any groups inside it move too.'
         }
       >
         {/* Keyed so a different group opens with its own values. */}

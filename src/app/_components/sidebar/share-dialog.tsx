@@ -132,7 +132,7 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
           ) : (
             <p className={HINT}>
               The link, or the file, is the list itself: each target&apos;s name, address, probe settings, interval and
-              group. Nothing recorded for them goes with it, and no alerts. Neither needs the two ClearPings to reach
+              group. Their history and alerts are not included. Neither needs the two ClearPings to reach
               each other: a link is pasted into the other one, a file chosen there under Import.
             </p>
           )}

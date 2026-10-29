@@ -441,7 +441,7 @@ export function ProbeAgentDetails({
             <CodeBlock code={uninstallCommands(install).docker} filename="Run with Docker" language="bash" />
             <CodeBlock code={uninstallCommands(install).linux} filename="Installed with the Linux command" language="bash" />
             <p className={HINT}>
-              Either takes its certificate with it: installed again, it is trusted afresh, so remove it here too.
+              Both also delete its certificate, so a fresh install is trusted as a new probe agent. Remove it here too.
             </p>
           </section>
         </div>
