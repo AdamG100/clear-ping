@@ -13,9 +13,12 @@ import { ToastStack, ToastStackProvider, useToastStack } from '@/components/arc/
  * themselves.
  */
 
-type Tone = 'error' | 'success' | 'info'
+/** `loading` spins until the same `id` is notified again with how it ended. */
+type Tone = 'error' | 'success' | 'warning' | 'info' | 'loading'
 
 interface Notification {
+  /** Given, a later notification with the same id replaces this one in place. */
+  id?: string
   tone: Tone
   title: string
   detail?: string
@@ -40,8 +43,8 @@ export function useToast(): Notifier {
   const { toast } = useToastStack()
 
   const notify = useCallback(
-    ({ tone, title, detail }: Notification) => {
-      toast({ type: tone, title, description: detail, duration: tone === 'error' ? Infinity : undefined })
+    ({ id, tone, title, detail }: Notification) => {
+      toast({ id, type: tone, title, description: detail, duration: tone === 'error' ? Infinity : undefined })
     },
     [toast]
   )

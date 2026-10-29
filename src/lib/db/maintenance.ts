@@ -33,6 +33,8 @@ export interface MaintenanceSettings {
   frequency: MaintenanceFrequency;
   /** The hour of the day it starts, 0 to 23, by the clock of the machine ClearPing runs on. */
   hour: number;
+  /** The day a weekly run starts on, 0 (Sunday) to 6; a monthly one starts on the first such day of the month. */
+  weekday: number;
   /** The alert whose notification destinations are sent the report. Null: shown here only. */
   alertId: string | null;
   notify: MaintenanceNotify;
@@ -46,10 +48,12 @@ export interface MaintenanceSettings {
   updatedAt: number;
 }
 
+/** On unless turned off: every Sunday at 03:00, when hardly anyone is looking. */
 export const DEFAULT_MAINTENANCE: MaintenanceSettings = {
-  enabled: false,
+  enabled: true,
   frequency: 'weekly',
   hour: 3,
+  weekday: 0,
   alertId: null,
   notify: 'problems',
   reclaimSpace: false,
@@ -103,6 +107,11 @@ export function parseMaintenanceSettings(input: unknown): { ok: true; settings: 
   if (!Number.isInteger(body.hour) || (body.hour as number) < 0 || (body.hour as number) > 23) {
     return { ok: false, error: 'The hour is a whole number from 0 to 23' };
   }
+  // Settings saved before there was a day to choose run on Sundays.
+  const weekday = body.weekday ?? 0;
+  if (!Number.isInteger(weekday) || (weekday as number) < 0 || (weekday as number) > 6) {
+    return { ok: false, error: 'The day is a whole number from 0 (Sunday) to 6' };
+  }
   if (body.alertId !== null && (typeof body.alertId !== 'string' || !body.alertId)) {
     return { ok: false, error: 'Choose an alert, or none' };
   }
@@ -115,6 +124,7 @@ export function parseMaintenanceSettings(input: unknown): { ok: true; settings: 
       enabled: body.enabled,
       frequency: body.frequency,
       hour: body.hour as number,
+      weekday: weekday as number,
       alertId: body.alertId as string | null,
       notify: body.notify,
       reclaimSpace: body.reclaimSpace,
@@ -135,19 +145,18 @@ export async function getMaintenanceHistory(): Promise<MaintenanceReport[]> {
 
 // ─── When it is due ─────────────────────────────────────────────────────────
 
-const PERIOD_DAYS: Record<MaintenanceFrequency, number> = { daily: 1, weekly: 7, monthly: 30 };
-
 /**
- * The next time the schedule starts a run, counting from `from`: a run, or
- * the moment the schedule was saved. Always on the hour chosen. A schedule
- * that has not run yet starts at the next such hour, whatever its period, so
- * that turning on a weekly one is not followed by a week of nothing.
+ * The next time the schedule starts a run after `from`: the last run, or the
+ * moment the schedule began counting. Always on the hour chosen: every day,
+ * every week on the day chosen, or the first such day of each month.
  */
-export function nextRunAfter(from: number, settings: Pick<MaintenanceSettings, 'frequency' | 'hour'>, firstRun = false): number {
-  const days = firstRun ? 1 : PERIOD_DAYS[settings.frequency];
+export function nextRunAfter(from: number, settings: Pick<MaintenanceSettings, 'frequency' | 'hour' | 'weekday'>): number {
   const at = new Date(from);
   at.setHours(settings.hour, 0, 0, 0);
-  while (at.getTime() <= from) at.setDate(at.getDate() + days);
+  const fits = () =>
+    settings.frequency === 'daily' ||
+    (at.getDay() === settings.weekday && (settings.frequency === 'weekly' || at.getDate() <= 7));
+  while (at.getTime() <= from || !fits()) at.setDate(at.getDate() + 1);
   return at.getTime();
 }
 
@@ -156,7 +165,9 @@ export async function nextScheduledRun(): Promise<number | null> {
   const settings = await getMaintenanceSettings();
   if (!settings.enabled) return null;
   const last = (await getMaintenanceHistory())[0];
-  return last ? nextRunAfter(last.startedAt, settings) : nextRunAfter(settings.updatedAt || Date.now(), settings, true);
+  // Never run: from when the schedule was turned on, or, left at the default,
+  // from when this server started checking it.
+  return nextRunAfter(last?.startedAt ?? (settings.updatedAt || (state().since ??= Date.now())), settings);
 }
 
 // ─── The steps ──────────────────────────────────────────────────────────────
@@ -407,22 +418,28 @@ const STEPS: Step[] = [
 
 // ─── Running it ─────────────────────────────────────────────────────────────
 
-interface Progress {
+export interface MaintenanceProgress {
+  startedAt: number;
+  /** The id of the step under way. */
   step: string;
-  done: number;
+  /** The steps finished so far, in order, with how each went. */
+  finished: MaintenanceStep[];
   total: number;
 }
 
+/** Every step a run goes through, in order: what the page lists before they have run. */
+export const MAINTENANCE_STEPS = STEPS.map(({ id, label }) => ({ id, label }));
+
 /** Held on globalThis: route handlers are bundled apart, and a module-local flag would not be shared. */
 const STATE_KEY = Symbol.for('clearping.maintenance');
-type State = { running: Progress | null; timer?: NodeJS.Timeout };
+type State = { running: MaintenanceProgress | null; timer?: NodeJS.Timeout; since?: number };
 const state = (): State => {
   const store = globalThis as typeof globalThis & { [STATE_KEY]?: State };
   return (store[STATE_KEY] ??= { running: null });
 };
 
 /** What a run in progress has got to, or null when none is. */
-export function maintenanceProgress(): Progress | null {
+export function maintenanceProgress(): MaintenanceProgress | null {
   return state().running;
 }
 
@@ -462,18 +479,17 @@ async function notify(settings: MaintenanceSettings, report: MaintenanceReport):
 export async function runMaintenance(trigger: MaintenanceReport['trigger']): Promise<MaintenanceReport | null> {
   const current = state();
   if (current.running) return null;
-  current.running = { step: STEPS[0].label, done: 0, total: STEPS.length };
-
   const startedAt = Date.now();
   const steps: MaintenanceStep[] = [];
+  current.running = { startedAt, step: STEPS[0].id, finished: [], total: STEPS.length };
 
   try {
     const db = await getDatabase();
     await ensureTracerouteSchema();
     const settings = await getMaintenanceSettings();
 
-    for (const [index, step] of STEPS.entries()) {
-      current.running = { step: step.label, done: index, total: STEPS.length };
+    for (const step of STEPS) {
+      current.running = { startedAt, step: step.id, finished: [...steps], total: STEPS.length };
       try {
         steps.push({ id: step.id, label: step.label, ...(await step.work({ db, settings })) });
       } catch (error) {

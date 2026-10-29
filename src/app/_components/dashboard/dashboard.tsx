@@ -39,6 +39,7 @@ import { useToast } from '@/components/notifications'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { AlertsView, type AlertResponse } from '../alerts/alerts-view'
 import { SettingsPage } from '../settings/settings-page'
+import { MaintenanceToast } from '../settings/maintenance-toast'
 import { AddTargetPage, EditTargetPage } from '../targets/target-page'
 import { useDashboardPage } from './use-dashboard-page'
 import { useSignedIn } from './use-signed-in'
@@ -1103,6 +1104,7 @@ export function Dashboard() {
     // tucked away, so the bottom of the page sat underneath them.
     <div className="flex h-dvh bg-background">
       {deleteJob && <DeleteProgress title={deleteJob.title} done={deleteJob.done} total={deleteJob.total} />}
+      <MaintenanceToast />
       <Sidebar
         open={sidebarOpen}
         onClose={hideSidebar}

@@ -148,11 +148,11 @@ describe('a run', () => {
 })
 
 describe('the settings', () => {
-  const valid = { enabled: true, frequency: 'weekly', hour: 4, alertId: null, notify: 'problems', reclaimSpace: false }
+  const valid = { enabled: true, frequency: 'weekly', hour: 4, weekday: 2, alertId: null, notify: 'problems', reclaimSpace: false }
 
-  it('start with the schedule off', async () => {
-    expect((await getMaintenanceSettings()).enabled).toBe(false)
-    expect(await nextScheduledRun()).toBeNull()
+  it('start with a run every Sunday at three', async () => {
+    expect(await getMaintenanceSettings()).toMatchObject({ enabled: true, frequency: 'weekly', weekday: 0, hour: 3 })
+    expect(await nextScheduledRun()).not.toBeNull()
   })
 
   it('are saved and read back', async () => {
@@ -168,6 +168,7 @@ describe('the settings', () => {
     [{ ...valid, frequency: 'hourly' }],
     [{ ...valid, hour: 24 }],
     [{ ...valid, hour: 1.5 }],
+    [{ ...valid, weekday: 7 }],
     [{ ...valid, alertId: 5 }],
     [{ ...valid, notify: 'sometimes' }],
     [{ ...valid, reclaimSpace: 1 }],
@@ -180,20 +181,26 @@ describe('the settings', () => {
 describe('when it is next due', () => {
   const at = (iso: string) => new Date(iso).getTime()
 
+  // 10 March 2026 is a Tuesday.
   it('is the same hour the next day for a daily run', () => {
-    const next = nextRunAfter(at('2026-03-10T03:00:30'), { frequency: 'daily', hour: 3 })
+    const next = nextRunAfter(at('2026-03-10T03:00:30'), { frequency: 'daily', hour: 3, weekday: 0 })
     expect(new Date(next).getDate()).toBe(11)
     expect(new Date(next).getHours()).toBe(3)
   })
 
-  it('is a week on for a weekly one', () => {
-    const next = nextRunAfter(at('2026-03-10T09:00:00'), { frequency: 'weekly', hour: 3 })
-    expect(new Date(next).getDate()).toBe(17)
+  it('is the next of the day chosen for a weekly one', () => {
+    const next = nextRunAfter(at('2026-03-10T09:00:00'), { frequency: 'weekly', hour: 3, weekday: 0 })
+    expect(new Date(next).getDate()).toBe(15)
+    expect(new Date(next).getHours()).toBe(3)
   })
 
-  it('is the next occurrence of the hour for a schedule that has not run yet, whatever its period', () => {
-    const next = nextRunAfter(at('2026-03-10T01:00:00'), { frequency: 'monthly', hour: 3 }, true)
+  it('is later the same day when the hour has not come yet', () => {
+    const next = nextRunAfter(at('2026-03-10T01:00:00'), { frequency: 'weekly', hour: 3, weekday: 2 })
     expect(new Date(next).getDate()).toBe(10)
-    expect(new Date(next).getHours()).toBe(3)
+  })
+
+  it('is the first of the day chosen in the next month for a monthly one', () => {
+    const next = new Date(nextRunAfter(at('2026-03-10T09:00:00'), { frequency: 'monthly', hour: 3, weekday: 0 }))
+    expect([next.getMonth(), next.getDate()]).toEqual([3, 5])
   })
 })

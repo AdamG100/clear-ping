@@ -4,6 +4,7 @@ import { initializeServer } from '@/lib/init';
 import {
   getMaintenanceHistory,
   getMaintenanceSettings,
+  MAINTENANCE_STEPS,
   maintenanceProgress,
   nextScheduledRun,
   parseMaintenanceSettings,
@@ -33,6 +34,7 @@ async function overview() {
     history,
     nextRunAt: next,
     running: maintenanceProgress(),
+    steps: MAINTENANCE_STEPS,
     // Only what is needed to choose one. Where it sends to stays with the alert.
     alerts: alerts.map(alert => ({
       id: alert.id,
@@ -109,7 +111,8 @@ export async function POST(request: NextRequest) {
     const { actor, via } = await actorFor(request);
     await recordActivity(actor, via, 'maintenance.run');
     void runMaintenance('manual').catch(error => console.error('[Maintenance] Manual run failed:', error));
-    return NextResponse.json({ started: true }, { status: 202 });
+    const startedAt = maintenanceProgress()?.startedAt ?? Date.now();
+    return NextResponse.json({ started: true, startedAt }, { status: 202 });
   } catch (error) {
     console.error('Error starting maintenance:', error);
     return NextResponse.json({ error: 'Failed to start maintenance' }, { status: 500 });
