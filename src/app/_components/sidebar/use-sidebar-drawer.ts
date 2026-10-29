@@ -36,6 +36,8 @@ function isCollapsed() {
 }
 
 function setCollapsed(collapsed: boolean) {
+  // Asked for what it already is: nothing changes, and nothing is told.
+  if (isCollapsed() === collapsed && document.documentElement.dataset.sidebar === undefined) return
   collapsedNow = collapsed
   try {
     if (collapsed) localStorage.setItem(COLLAPSED_KEY, '1')
@@ -53,10 +55,15 @@ function setCollapsed(collapsed: boolean) {
   window.dispatchEvent(new Event(COLLAPSED_CHANGE))
 
   // The button that was pressed is on the side that has just been put away.
-  // Focus goes to its opposite number, once that has been drawn.
-  requestAnimationFrame(() => {
-    document.getElementById(collapsed ? SIDEBAR_EXPAND_BUTTON_ID : SIDEBAR_COLLAPSE_BUTTON_ID)?.focus()
-  })
+  // From the keyboard, focus goes to its opposite number once that has been
+  // drawn, so it is not lost. Not after a click: there, focusing it only
+  // opened its tooltip, unasked, and doing that held up the fold's first frame.
+  const pressed = document.getElementById(collapsed ? SIDEBAR_COLLAPSE_BUTTON_ID : SIDEBAR_EXPAND_BUTTON_ID)
+  if (pressed?.matches(':focus-visible')) {
+    requestAnimationFrame(() => {
+      document.getElementById(collapsed ? SIDEBAR_EXPAND_BUTTON_ID : SIDEBAR_COLLAPSE_BUTTON_ID)?.focus()
+    })
+  }
 }
 
 function subscribeToCollapsed(onChange: () => void) {
@@ -75,6 +82,26 @@ const collapse = () => setCollapsed(true)
 const expand = () => setCollapsed(false)
 
 /**
+ * Whether the sidebar is folded to its rail: only ever on a wide screen.
+ *
+ * Read where it is drawn, by the sidebar itself, and not passed down from the
+ * dashboard: held there, folding the sidebar redrew the whole page beside it
+ * too, and the fold sat still for that long before it moved.
+ */
+export function useSidebarCollapsed(): boolean {
+  // Neither is known on the server. Both start as false there and in the
+  // first render in the browser, and are corrected straight after it.
+  const storedCollapsed = useSyncExternalStore(subscribeToCollapsed, isCollapsed, () => false)
+  const beside = useSyncExternalStore(subscribeToWidth, isBesideThePage, () => false)
+  return storedCollapsed && beside
+}
+
+/** Told each time the sidebar is folded or unfolded, with which, without redrawing anything. */
+export function onSidebarFold(listener: (collapsed: boolean) => void): () => void {
+  return subscribeToCollapsed(() => listener(isCollapsed()))
+}
+
+/**
  * Showing and hiding the sidebar, which means two different things.
  *
  * On a narrow screen it is a drawer, and `open` is whether it is out. Open, it
@@ -83,17 +110,12 @@ const expand = () => setCollapsed(false)
  * on its side, or a window dragged wider, would leave a page that ignores
  * every click with nothing on screen to explain why.
  *
- * On a wide screen it sits beside the page, and `collapsed` is whether it has
- * been folded down to a rail of icons. That is remembered between visits, and
- * means nothing on a narrow screen, where it is always reported as false.
+ * On a wide screen it sits beside the page, and can be folded down to a rail
+ * of icons (`collapse`, `expand`; whether it is, is `useSidebarCollapsed`).
+ * That is remembered between visits, and means nothing on a narrow screen.
  */
 export function useSidebarDrawer() {
   const [open, setOpen] = useState(false)
-
-  // Neither is known on the server. Both start as false there and in the
-  // first render in the browser, and are corrected straight after it.
-  const storedCollapsed = useSyncExternalStore(subscribeToCollapsed, isCollapsed, () => false)
-  const beside = useSyncExternalStore(subscribeToWidth, isBesideThePage, () => false)
 
   // Only where it is a drawer. Opened beside the page, nothing showed, and
   // the page was made inert all the same: a button that brought up the
@@ -128,7 +150,6 @@ export function useSidebarDrawer() {
     open,
     show,
     hide,
-    collapsed: storedCollapsed && beside,
     collapse,
     expand,
   }

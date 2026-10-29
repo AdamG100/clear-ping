@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import type { Target, TargetDefinition, GroupOrder, SparklinePoint } from '@/types/probe'
 import { BrandMark } from '../shell/brand-mark'
+import { SearchResults } from '@/components/search-results'
 import { UpdateNotice, useVersionStatus, VersionBadge } from './version-badge'
 import { Sparkline } from './sparkline'
 import { SidebarSkeleton } from '../dashboard/skeleton'
@@ -15,7 +16,7 @@ import { ShareDialog } from './share-dialog'
 import { DeleteTargetsDialog } from './delete-targets-dialog'
 import { useIncomingShareCode } from './use-incoming-share-code'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from '../targets/target-badges'
-import { Badge } from '@/components/arc/badge/badge'
+import { Badge, type BadgeTone } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/arc/popover/popover'
 import { ScrollArea } from '@/components/arc/scroll-area/scroll-area'
@@ -77,12 +78,19 @@ import {
   X,
 } from 'lucide-react'
 import { SidebarRail } from './sidebar-rail'
-import { SIDEBAR_COLLAPSE_BUTTON_ID } from './use-sidebar-drawer'
+import { SIDEBAR_COLLAPSE_BUTTON_ID, useSidebarCollapsed } from './use-sidebar-drawer'
 
 /** What a grey dot says for a closed-port check that has never had an answer. */
 const NEVER_ANSWERED = 'No answer yet: this server does not answer the closed-port check, so it cannot be measured this way'
 
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
+
+/**
+ * The buttons beside the theme switch, shaped like it: a 38px square with
+ * rounded corners, rather than the wider pill a button is by default. Set as a
+ * style because Arc's module outranks a class.
+ */
+const HEADER_BUTTON = { width: 38, minWidth: 38, height: 38, minHeight: 38, padding: 0, borderRadius: 12 } as const
 
 /**
  * A group's panel, by how deep it sits: a group at the top is a step off the
@@ -165,6 +173,19 @@ function PageTile({
   )
 }
 
+/**
+ * One count of how the targets stand, as a badge with a dot of its colour.
+ * Where the word alone does not say why, the tooltip does.
+ */
+function StatusCount({ count, label, tone = 'neutral', why }: { count: number; label: string; tone?: BadgeTone; why?: string }) {
+  const badge = (
+    <Badge size="sm" tone={tone} icon={<span className="size-1.5 rounded-full bg-current" />}>
+      {`${count} ${label}`}
+    </Badge>
+  )
+  return why ? <Tooltip content={why}><span className="flex">{badge}</span></Tooltip> : badge
+}
+
 // ─── Collapsing ─────────────────────────────────────────────────────────────
 
 /** The sidebar's two widths on a wide screen: `w-80`, and `w-14` as a rail. */
@@ -182,12 +203,76 @@ const RAIL_WIDTH = '56px'
  * the contents follow the edge out.
  */
 const COLLAPSE_TRANSITION = { duration: 0.34, ease: [0.32, 0.72, 0, 1] } as const
+
+/** How far the sidebar's edge moves, and for how long: the page beside it is held still for that long. */
+export const SIDEBAR_FOLD_PX = parseInt(FULL_WIDTH) - parseInt(RAIL_WIDTH)
+export const SIDEBAR_FOLD_MS = COLLAPSE_TRANSITION.duration * 1000 + 40
 const CONTENT_OUT = { duration: 0.16, ease: 'easeIn' } as const
 const CONTENT_IN = { duration: 0.26, delay: 0.08, ease: [0.2, 0, 0, 1] } as const
 const RAIL_IN = { duration: 0.2, delay: 0.14, ease: 'easeOut' } as const
 const RAIL_OUT = { duration: 0.1, ease: 'easeIn' } as const
 /** For anyone whose system asks for less motion: the same change, without the travel. */
 const INSTANT = { duration: 0 } as const
+
+/**
+ * The sidebar's frame, and its folding down to a rail and back.
+ *
+ * The only part that knows whether it is folded: the full contents and the
+ * rail are handed in already made, so folding redraws this frame and not the
+ * list inside it, which took long enough to redraw that the fold sat still
+ * for a moment before it moved.
+ */
+function SidebarFold({ className, full, rail, children }: { className: string; full: ReactNode; rail: ReactNode; children: ReactNode }) {
+  const collapsed = useSidebarCollapsed()
+  const reduceMotion = useReducedMotion()
+  return (
+    <motion.aside
+      id="sidebar"
+      // Beside the page it can be collapsed to a rail of icons, which gives
+      // the page its width. What is animated is the width itself, as a
+      // variable that only the wide layout reads: under `lg` the same element
+      // is the drawer, whose width is not this one's to set.
+      initial={false}
+      animate={{ '--sidebar-width': collapsed ? RAIL_WIDTH : FULL_WIDTH } as TargetAndTransition}
+      transition={reduceMotion ? INSTANT : COLLAPSE_TRANSITION}
+      className={className}
+    >
+      {/* Everything the sidebar shows at full width. Collapsing fades it out
+          where it stands, at the width it was: it is kept, not taken away, so
+          the list comes back scrolled to where it was left. Inert while it is
+          faded, so nothing in it can be pressed, tabbed to or read out from
+          under the rail that has taken its place. */}
+      <motion.div
+        initial={false}
+        animate={collapsed ? { opacity: 0, x: -16 } : { opacity: 1, x: 0 }}
+        transition={reduceMotion ? INSTANT : collapsed ? CONTENT_OUT : CONTENT_IN}
+        inert={collapsed}
+        className="flex min-h-0 flex-1 flex-col lg:min-w-[calc(20rem-1px)] lg:sidebar-collapsed:hidden"
+      >
+        {full}
+      </motion.div>
+
+      {/* The rail comes in over the left edge as the full width fades, and
+          goes as it returns. Always there, only hidden while the sidebar is
+          open: made afresh at each fold, it held the fold's first frame back
+          for as long as that took. */}
+      <motion.div
+        initial={false}
+        animate={
+          collapsed
+            ? { opacity: 1, x: 0, visibility: 'visible', transition: reduceMotion ? INSTANT : RAIL_IN }
+            : { opacity: 0, x: -8, transition: reduceMotion ? INSTANT : RAIL_OUT, transitionEnd: { visibility: 'hidden' } }
+        }
+        inert={!collapsed}
+        aria-hidden={!collapsed || undefined}
+        className="absolute inset-y-0 left-0 flex w-14 flex-col pt-(--safe-top) max-lg:hidden"
+      >
+        {rail}
+      </motion.div>
+      {children}
+    </motion.aside>
+  )
+}
 
 // ─── Folded groups ──────────────────────────────────────────────────────────
 
@@ -224,10 +309,10 @@ interface SidebarProps {
   open?: boolean
   onClose?: () => void
   /**
-   * On a wide screen, where the sidebar sits beside the page: whether it is
-   * folded down to a rail of icons, and the two ways of changing that.
+   * On a wide screen, where the sidebar sits beside the page: the two ways of
+   * folding it down to a rail of icons and back. Whether it is folded, it
+   * reads for itself (useSidebarCollapsed).
    */
-  collapsed?: boolean
   onCollapse?: () => void
   onExpand?: () => void
   targets: Target[]
@@ -984,7 +1069,6 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
 export function Sidebar({
   open = false,
   onClose,
-  collapsed = false,
   onCollapse,
   onExpand,
   targets,
@@ -1039,7 +1123,6 @@ export function Sidebar({
   const [isGroupDragging, setIsGroupDragging] = useState(false)
   const listRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
-  const reduceMotion = useReducedMotion()
   const [theme, setTheme] = useTheme()
 
   // Opened as a drawer, the keyboard goes with it: focus left on the button
@@ -1223,15 +1306,7 @@ export function Sidebar({
         open ? 'opacity-100' : 'pointer-events-none opacity-0'
       )}
     />
-    <motion.aside
-      id="sidebar"
-      // Beside the page it can be collapsed to a rail of icons, which gives
-      // the page its width. What is animated is the width itself, as a
-      // variable that only the wide layout reads: under `lg` the same element
-      // is the drawer, whose width is not this one's to set.
-      initial={false}
-      animate={{ '--sidebar-width': collapsed ? RAIL_WIDTH : FULL_WIDTH } as TargetAndTransition}
-      transition={reduceMotion ? INSTANT : COLLAPSE_TRANSITION}
+    <SidebarFold
       className={cn(
         'flex h-full w-80 shrink-0 flex-col border-r border-sidebar-border bg-sidebar pt-(--safe-top) pl-(--safe-left)',
         // Clipped while it is wide, so that as it narrows its contents are
@@ -1252,19 +1327,32 @@ export function Sidebar({
           ? 'max-lg:transition-[translate]'
           : 'max-lg:invisible max-lg:-translate-x-full max-lg:transition-[translate,visibility]'
       )}
-    >
-      {/* Everything the sidebar shows at full width. Collapsing fades it out
-          where it stands, at the width it was: it is kept, not taken away, so
-          the list comes back scrolled to where it was left. Inert while it is
-          faded, so nothing in it can be pressed, tabbed to or read out from
-          under the rail that has taken its place. */}
-      <motion.div
-        initial={false}
-        animate={collapsed ? { opacity: 0, x: -16 } : { opacity: 1, x: 0 }}
-        transition={reduceMotion ? INSTANT : collapsed ? CONTENT_OUT : CONTENT_IN}
-        inert={collapsed}
-        className="flex min-h-0 flex-1 flex-col lg:min-w-[calc(20rem-1px)] lg:sidebar-collapsed:hidden"
-      >
+      rail={
+        <SidebarRail
+          layout={savedLayout}
+          targetsById={targetsById}
+          selectedTargetId={selectedTargetId}
+          selectedGroup={selectedGroup}
+          onSelectTarget={onSelectTarget}
+          onSelectGroup={onSelectGroup}
+          onExpand={onExpand}
+          overviewOpen={overviewOpen}
+          onOpenOverview={onOpenOverview}
+          routingOpen={routingOpen}
+          onOpenRouting={onOpenRouting}
+          routingEnabled={routingEnabled}
+          onTurnOnRouting={onTurnOnRouting}
+          alertsOpen={alertsOpen}
+          onOpenAlerts={onOpenAlerts}
+          firingAlerts={firingAlerts}
+          onShare={() => setIsShareOpen(true)}
+          settingsOpen={settingsOpen}
+          onOpenSettings={() => onOpenSettings?.()}
+          onAddTarget={readOnly ? undefined : () => onOpenAddTarget()}
+        />
+      }
+      full={
+      <>
       {/* Header: who this is and what version, the pages, then finding a
           target and how the targets stand. */}
       <div className="space-y-3 border-b border-sidebar-border p-4">
@@ -1284,14 +1372,14 @@ export function Sidebar({
           <div className="ml-auto flex shrink-0 items-center gap-0.5">
             <ThemeSwitch theme={theme} variant="rise" iconOnly onThemeChange={next => setTheme(next)} />
             <span className="lg:hidden">
-              <Button ref={closeRef} type="button" variant="ghost" size="sm" onClick={onClose} aria-label="Close targets">
+              <Button ref={closeRef} type="button" variant="secondary" size="sm" style={HEADER_BUTTON} onClick={onClose} aria-label="Close targets">
                 <X {...ICON} />
               </Button>
             </span>
             {onCollapse && (
               <span className="hidden lg:block">
                 <Tooltip content="Collapse sidebar">
-                  <Button id={SIDEBAR_COLLAPSE_BUTTON_ID} type="button" variant="ghost" size="sm" onClick={onCollapse} aria-label="Collapse sidebar">
+                  <Button id={SIDEBAR_COLLAPSE_BUTTON_ID} type="button" variant="secondary" size="sm" style={HEADER_BUTTON} onClick={onCollapse} aria-label="Collapse sidebar">
                     <PanelLeftClose {...ICON} />
                   </Button>
                 </Tooltip>
@@ -1332,21 +1420,11 @@ export function Sidebar({
         )}
         {/* Always there once there is something to find: behind a button it
             went unnoticed. Its placeholder says what it is, so its label is
-            said, not shown. Clearing out several targets sits beside it. */}
-        {targets.length > 0 && (
-          <div className="flex items-center gap-1">
-            <div className="min-w-0 flex-1 [&_label]:sr-only">
-              <SearchField label="Search targets" placeholder="Search name or address" value={searchQuery} onValueChange={setSearchQuery} />
-            </div>
-            {/* One target is deleted from its own row. This is for clearing
-                out several, so it is not there until there are several. */}
-            {targets.length > 1 && (
-              <Tooltip content="Delete several targets">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setIsBulkDeleteOpen(true)} aria-label="Delete several targets">
-                  <ListX {...ICON} />
-                </Button>
-              </Tooltip>
-            )}
+            said, not shown. There while the list loads too, or everything under
+            it dropped down the moment the targets arrived. */}
+        {(loading || targets.length > 0) && (
+          <div className="[&_label]:sr-only">
+            <SearchField label="Search targets" placeholder="Search name or address" value={searchQuery} onValueChange={setSearchQuery} />
           </div>
         )}
         {/* Each choice says the whole of what it means, so the label, like the
@@ -1369,47 +1447,24 @@ export function Sidebar({
 
         {/* How the targets stand, just over their list. As tall while loading
             as after, so the list does not jump when the counts arrive. */}
-        <div className="flex min-h-4 flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs">
+        <div className="flex min-h-[22px] flex-wrap items-center gap-1.5">
           {/* Not "0 online, 0 offline" while the list is on its way: that
               is a count of nothing, and it reads as everything being gone. */}
           {loading ? (
-            <span className="h-3 w-36 animate-pulse rounded bg-muted/50" aria-hidden="true" />
+            <>
+              <span className="h-[22px] w-20 animate-pulse rounded-full bg-muted motion-reduce:animate-none" aria-hidden="true" />
+              <span className="h-[22px] w-16 animate-pulse rounded-full bg-muted motion-reduce:animate-none" aria-hidden="true" />
+            </>
           ) : (
             <>
-              <div className="flex items-center gap-1.5">
-                <StatusIndicator isOnline={true} packetLoss={0} />
-                <span className="text-muted-foreground">{onlineCount} online</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <StatusIndicator isOnline={false} />
-                <span className="text-muted-foreground">{offlineCount} offline</span>
-              </div>
+              <StatusCount tone={onlineCount > 0 ? 'success' : 'neutral'} count={onlineCount} label="online" />
+              <StatusCount tone={offlineCount > 0 ? 'danger' : 'neutral'} count={offlineCount} label="offline" />
             </>
           )}
-          {pendingCount > 0 && (
-            <div className="flex items-center gap-1.5">
-              <StatusIndicator />
-              <span className="text-muted-foreground">{pendingCount} pending</span>
-            </div>
-          )}
-          {silentCount > 0 && (
-            <div className="flex items-center gap-1.5">
-              <StatusIndicator onHold={NEVER_ANSWERED} />
-              <span className="text-muted-foreground">{silentCount} no answer</span>
-            </div>
-          )}
-          {heldCount > 0 && (
-            <div className="flex items-center gap-1.5">
-              <StatusIndicator onHold="No readings: their probe agent is down" />
-              <span className="text-muted-foreground">{heldCount} on hold</span>
-            </div>
-          )}
-          {pausedCount > 0 && (
-            <div className="flex items-center gap-1.5">
-              <StatusIndicator paused />
-              <span className="text-muted-foreground">{pausedCount} paused</span>
-            </div>
-          )}
+          {pendingCount > 0 && <StatusCount count={pendingCount} label="pending" why="Waiting for their first reading" />}
+          {silentCount > 0 && <StatusCount count={silentCount} label="no answer" why={NEVER_ANSWERED} />}
+          {heldCount > 0 && <StatusCount tone="warning" count={heldCount} label="on hold" why="No readings: their probe agent is down" />}
+          {pausedCount > 0 && <StatusCount count={pausedCount} label="paused" />}
         </div>
       </div>
 
@@ -1435,6 +1490,7 @@ export function Sidebar({
             className={cn('p-2', drag.active && 'pointer-events-none')}
             aria-label="Targets"
           >
+            <SearchResults query={searchQuery.trim().toLowerCase()}>
             {loading ? (
               <SidebarSkeleton />
             ) : searchResults ? (
@@ -1550,6 +1606,7 @@ export function Sidebar({
               )}
               </>
             )}
+            </SearchResults>
           </nav>
         </ScrollArea>
 
@@ -1596,6 +1653,24 @@ export function Sidebar({
               {firingAlerts > 0 && <Badge tone="danger" size="sm">{firingAlerts}</Badge>}
             </Button>
           )}
+          {/* One target is deleted from its own row. This is for clearing out
+              several. It is always there, only greyed out until there are
+              several: arriving with the targets, it squeezed the buttons
+              beside it a moment after the page was drawn. */}
+          {!readOnly && (
+            <Tooltip content={targets.length > 1 ? 'Delete several targets' : 'Delete several targets, once there are several'}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsBulkDeleteOpen(true)}
+                disabled={targets.length < 2}
+                aria-label="Delete several targets"
+                suppressHydrationWarning
+              >
+                <ListX {...ICON} />
+              </Button>
+            </Tooltip>
+          )}
           <Tooltip content="Share or import targets">
             <Button variant="secondary" size="sm" onClick={() => setIsShareOpen(true)} aria-label="Share or import targets" suppressHydrationWarning>
               <Share2 {...ICON} />
@@ -1618,44 +1693,9 @@ export function Sidebar({
           </Tooltip>
         </div>
       </div>
-      </motion.div>
-
-      {/* The rail comes in over the left edge as the full width fades, and
-          goes as it returns. */}
-      <AnimatePresence initial={false}>
-        {collapsed && (
-          <motion.div
-            key="rail"
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0, transition: reduceMotion ? INSTANT : RAIL_IN }}
-            exit={{ opacity: 0, transition: reduceMotion ? INSTANT : RAIL_OUT }}
-            className="absolute inset-y-0 left-0 flex w-14 flex-col pt-(--safe-top)"
-          >
-            <SidebarRail
-              layout={savedLayout}
-              targetsById={targetsById}
-              selectedTargetId={selectedTargetId}
-              selectedGroup={selectedGroup}
-              onSelectTarget={onSelectTarget}
-              onSelectGroup={onSelectGroup}
-              onExpand={onExpand}
-              overviewOpen={overviewOpen}
-              onOpenOverview={onOpenOverview}
-              routingOpen={routingOpen}
-              onOpenRouting={onOpenRouting}
-              routingEnabled={routingEnabled}
-              onTurnOnRouting={onTurnOnRouting}
-              alertsOpen={alertsOpen}
-              onOpenAlerts={onOpenAlerts}
-              firingAlerts={firingAlerts}
-              onShare={() => setIsShareOpen(true)}
-              settingsOpen={settingsOpen}
-              onOpenSettings={() => onOpenSettings?.()}
-              onAddTarget={readOnly ? undefined : () => onOpenAddTarget()}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      </>
+      }
+    >
 
       <GroupDialog
         task={groupTask}
@@ -1699,7 +1739,7 @@ export function Sidebar({
         onConfirm={id => { setDeletingId(null); onDeleteTarget(id) }}
         onPause={onTogglePaused}
       />
-    </motion.aside>
+    </SidebarFold>
     </>
   )
 }

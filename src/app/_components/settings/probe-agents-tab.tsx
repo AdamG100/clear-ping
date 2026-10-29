@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { Input } from '@/components/arc/input/input'
 import { NumberField } from '@/components/arc/number-field/number-field'
 import { SearchField } from '@/components/arc/search-field/search-field'
+import { SearchResults } from '@/components/search-results'
 import { Select } from '@/components/arc/select/select'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
@@ -422,85 +423,87 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
               />
             </div>
 
-            <SortableDataTable
-              caption="Probe agents"
-              emptyMessage="No probe agent matches"
-              itemName={{ one: 'probe agent', other: 'probe agents' }}
-              rows={rows}
-              rowKey="id"
-              defaultSort={{ key: 'name', direction: 'asc' }}
-              columns={[
-                {
-                  key: 'name',
-                  label: 'Probe agent',
-                  render: (_, { agent }) => (
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="font-medium wrap-break-word">{agent.name}</span>
-                      <span className="break-all font-mono text-xs text-muted-foreground">{addressOf(agent)}</span>
-                    </span>
-                  ),
-                },
-                {
-                  key: 'exposure',
-                  label: 'Reached over',
-                  render: (_, { agent }) => (
-                    <Badge size="sm" tone={PROBE_AGENT_EXPOSURE[agent.exposure].tone}>{PROBE_AGENT_EXPOSURE[agent.exposure].label}</Badge>
-                  ),
-                },
-                {
-                  key: 'version',
-                  label: 'Version',
-                  render: (_, { agent }) => (
-                    <span className="inline-flex items-center gap-2">
-                      <span className={cn('font-mono text-xs', agent.version ? 'text-foreground' : 'text-muted-foreground')}>
-                        {agent.version ?? '—'}
+            <SearchResults query={`${statusFilter}|${query}`}>
+              <SortableDataTable
+                caption="Probe agents"
+                emptyMessage="No probe agent matches"
+                itemName={{ one: 'probe agent', other: 'probe agents' }}
+                rows={rows}
+                rowKey="id"
+                defaultSort={{ key: 'name', direction: 'asc' }}
+                columns={[
+                  {
+                    key: 'name',
+                    label: 'Probe agent',
+                    render: (_, { agent }) => (
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className="font-medium wrap-break-word">{agent.name}</span>
+                        <span className="break-all font-mono text-xs text-muted-foreground">{addressOf(agent)}</span>
                       </span>
-                      {isOutdated(agent, loaded.dashboardVersion) && <OutdatedBadge />}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'state',
-                  label: 'Status',
-                  render: (_, { agent }) => (
-                    <Badge size="sm" tone={PROBE_AGENT_STATE[agent.state].tone}>{PROBE_AGENT_STATE[agent.state].label}</Badge>
-                  ),
-                },
-                {
-                  key: 'lastSeenAt',
-                  label: 'Last seen',
-                  render: (_, { agent }) => (
-                    <span className="text-xs text-muted-foreground" title={agent.lastSeenAt ? when(agent.lastSeenAt) : undefined}>
-                      {ago(agent.lastSeenAt, now)}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'targetCount',
-                  label: 'Targets',
-                  numeric: true,
-                  render: (_, { agent }) =>
-                    agent.targetCount > 0 && onShowTargets ? (
-                      <Button type="button" size="sm" variant="ghost" onClick={() => onShowTargets(agent.id)}>
-                        {agent.targetCount}
-                      </Button>
-                    ) : (
-                      <span className="text-muted-foreground">{agent.targetCount}</span>
                     ),
-                },
-                {
-                  key: 'actions',
-                  label: 'Actions',
-                  sortable: false,
-                  render: (_, { agent }) => (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setDetailsId(agent.id)} aria-label={`Details of ${agent.name}`}>
-                      Details
-                      <ChevronRight {...ICON} />
-                    </Button>
-                  ),
-                },
-              ]}
-            />
+                  },
+                  {
+                    key: 'exposure',
+                    label: 'Reached over',
+                    render: (_, { agent }) => (
+                      <Badge size="sm" tone={PROBE_AGENT_EXPOSURE[agent.exposure].tone}>{PROBE_AGENT_EXPOSURE[agent.exposure].label}</Badge>
+                    ),
+                  },
+                  {
+                    key: 'version',
+                    label: 'Version',
+                    render: (_, { agent }) => (
+                      <span className="inline-flex items-center gap-2">
+                        <span className={cn('font-mono text-xs', agent.version ? 'text-foreground' : 'text-muted-foreground')}>
+                          {agent.version ?? '—'}
+                        </span>
+                        {isOutdated(agent, loaded.dashboardVersion) && <OutdatedBadge />}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'state',
+                    label: 'Status',
+                    render: (_, { agent }) => (
+                      <Badge size="sm" tone={PROBE_AGENT_STATE[agent.state].tone}>{PROBE_AGENT_STATE[agent.state].label}</Badge>
+                    ),
+                  },
+                  {
+                    key: 'lastSeenAt',
+                    label: 'Last seen',
+                    render: (_, { agent }) => (
+                      <span className="text-xs text-muted-foreground" title={agent.lastSeenAt ? when(agent.lastSeenAt) : undefined}>
+                        {ago(agent.lastSeenAt, now)}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'targetCount',
+                    label: 'Targets',
+                    numeric: true,
+                    render: (_, { agent }) =>
+                      agent.targetCount > 0 && onShowTargets ? (
+                        <Button type="button" size="sm" variant="ghost" onClick={() => onShowTargets(agent.id)}>
+                          {agent.targetCount}
+                        </Button>
+                      ) : (
+                        <span className="text-muted-foreground">{agent.targetCount}</span>
+                      ),
+                  },
+                  {
+                    key: 'actions',
+                    label: 'Actions',
+                    sortable: false,
+                    render: (_, { agent }) => (
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setDetailsId(agent.id)} aria-label={`Details of ${agent.name}`}>
+                        Details
+                        <ChevronRight {...ICON} />
+                      </Button>
+                    ),
+                  },
+                ]}
+              />
+            </SearchResults>
           </>
         )}
       </section>

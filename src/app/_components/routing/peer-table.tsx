@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState } from 'react'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { SearchField } from '@/components/arc/search-field/search-field'
+import { SearchResults } from '@/components/search-results'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { hops } from '@/lib/bgp/path'
@@ -269,6 +270,7 @@ export function PeerTable({
         />
       </div>
 
+      <SearchResults query={`${show}|${words.join(' ')}`}>
       {listed.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
           {peers.length === 0 ? 'No collector peer here.' : 'No peer matches.'}
@@ -309,6 +311,7 @@ export function PeerTable({
           })}
         </div>
       )}
+      </SearchResults>
 
       {listed.length > PAGE && (
         <div className="flex flex-wrap items-center gap-3">

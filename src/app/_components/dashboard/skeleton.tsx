@@ -1,6 +1,5 @@
 'use client'
 
-import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { cn } from '@/lib/utils'
 import { PANE, PANE_HEADER } from './pane-layout'
 import { STAT_GRID, STAT_GRID_LEAD } from '../targets/stats-cards'
@@ -223,12 +222,36 @@ export function OverviewSkeleton() {
   )
 }
 
-/** The sidebar's list, before the targets have arrived: a few rows of a name and an address each. */
+/**
+ * The sidebar's list, before the targets have arrived: groups as they are
+ * drawn, a header with the group's name and count over rows of a status dot,
+ * a name, an address and a trace, so the list fills in where it stood.
+ */
 export function SidebarSkeleton() {
   return (
-    <div className="space-y-4 px-2 py-1">
-      {[0, 1, 2, 3, 4].map(row => (
-        <Skeleton key={row} label="Loading the targets" lines={2} />
+    <div className="space-y-2" role="status" aria-busy="true">
+      <span className="sr-only">Loading the targets</span>
+      {[5, 3].map((rows, group) => (
+        <div key={group} className="rounded-xl border border-sidebar-group-border bg-sidebar-group" aria-hidden="true">
+          <div className="flex h-12 items-center gap-2 px-3">
+            <Block className="size-3.5 shrink-0 rounded" />
+            <Block className="h-3.5 w-24" />
+            <Block className="ml-auto h-3 w-4" />
+            <Block className="size-6 rounded-md" />
+          </div>
+          <div className="space-y-0.5 px-1 pb-1">
+            {Array.from({ length: rows }, (_, row) => (
+              <div key={row} className="flex h-[58px] items-center gap-3 px-3">
+                <Block className="size-2.5 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Block className="h-3.5" style={{ width: `${55 + ((row * 17) % 30)}%` }} />
+                  <Block className="h-3 w-24" />
+                </div>
+                <Block className="h-4 w-12 shrink-0" />
+              </div>
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   )

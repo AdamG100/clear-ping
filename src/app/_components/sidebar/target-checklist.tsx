@@ -6,6 +6,7 @@ import { Button } from '@/components/arc/button/button'
 import { Checkbox } from '@/components/arc/checkbox/checkbox'
 import { ScrollArea } from '@/components/arc/scroll-area/scroll-area'
 import { SearchField } from '@/components/arc/search-field/search-field'
+import { SearchResults } from '@/components/search-results'
 import { groupDepth, groupName, isWithinGroup } from '@/lib/targets/group-path'
 import { buildSidebarLayout, groupsInOrder, targetsWithin, wholeGroups } from '@/lib/targets/sidebar-layout'
 import type { GroupOrder, Target } from '@/types/probe'
@@ -157,7 +158,7 @@ export function TargetChecklist({
 
       <div className="rounded-2xl border border-border bg-background">
         <ScrollArea maxHeight={maxHeight} label="Targets to tick">
-          <div className="p-1">
+          <SearchResults query={query} className="p-1">
             {visibleGroups.length === 0 && (
               <p className="px-3 py-6 text-center text-sm text-muted-foreground">Nothing matches &ldquo;{search.trim()}&rdquo;.</p>
             )}
@@ -225,7 +226,7 @@ export function TargetChecklist({
                 </div>
               )
             })}
-          </div>
+          </SearchResults>
         </ScrollArea>
       </div>
     </div>

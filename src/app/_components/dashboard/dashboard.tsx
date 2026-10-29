@@ -17,10 +17,10 @@ import type {
 } from '@/types/probe'
 import type { ProbeAgentOutage, ProbeAgentSummary } from '@/types/probe-agent'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
-import { Sidebar } from '../sidebar/sidebar'
+import { Sidebar, SIDEBAR_FOLD_MS, SIDEBAR_FOLD_PX } from '../sidebar/sidebar'
 import { DeleteProgress } from './delete-progress'
 import { MobileTopBar } from './mobile-top-bar'
-import { useSidebarDrawer } from '../sidebar/use-sidebar-drawer'
+import { onSidebarFold, useSidebarDrawer } from '../sidebar/use-sidebar-drawer'
 import { PANE, PANE_ACTION, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from './pane-layout'
 import StatsCards from '../targets/stats-cards'
 import { LossBreakdown } from '../targets/loss-breakdown'
@@ -619,10 +619,36 @@ export function Dashboard() {
     open: sidebarOpen,
     show: showSidebar,
     hide: hideSidebar,
-    collapsed: sidebarCollapsed,
     collapse: collapseSidebar,
     expand: expandSidebar,
   } = useSidebarDrawer()
+  // While the sidebar folds or unfolds, the page beside it is held at the
+  // width it is going to have and slides with the sidebar's edge. Left to
+  // follow the edge, it was laid out afresh on every frame, every chart on it
+  // redrawn at each new width, and the fold stuttered.
+  // Done as the fold is asked for, before anything is drawn, and without
+  // redrawing the page.
+  const paneRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const stop = onSidebarFold(collapsed => {
+      const pane = paneRef.current
+      if (!pane) return
+      clearTimeout(timer)
+      pane.style.width = ''
+      if (!window.matchMedia('(min-width: 64rem)').matches) return
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+      const now = pane.getBoundingClientRect().width
+      pane.style.width = `${now + (collapsed ? 1 : -1) * SIDEBAR_FOLD_PX}px`
+      timer = setTimeout(() => {
+        pane.style.width = ''
+      }, SIDEBAR_FOLD_MS)
+    })
+    return () => {
+      stop()
+      clearTimeout(timer)
+    }
+  }, [])
   const [timeRange, setTimeRange] = useState<TimeRange>('1h')
   // A period picked out by dragging across the chart. It narrows the range
   // rather than replacing it, and is dropped whenever the range or the target
@@ -1080,7 +1106,6 @@ export function Dashboard() {
       <Sidebar
         open={sidebarOpen}
         onClose={hideSidebar}
-        collapsed={sidebarCollapsed}
         onCollapse={collapseSidebar}
         onExpand={expandSidebar}
         targets={transformedTargets}
@@ -1139,7 +1164,8 @@ export function Dashboard() {
           pane, and everything in it, charts included, shifts sideways.
           The pane is a container: what is inside is laid out from the pane's
           own width, not the screen's (see pane-layout.ts). */}
-      <main className="@container/main flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable pb-(--safe-bottom) pr-(--safe-right) max-lg:pl-(--safe-left) lg:pt-(--safe-top)">
+      <main className="flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable pb-(--safe-bottom) pr-(--safe-right) max-lg:pl-(--safe-left) lg:pt-(--safe-top)">
+        <div ref={paneRef} className="@container/main">
         {(showLoadingState || showEmptyState) && !showingOverview ? (
           <PaneSkeleton />
         ) : (
@@ -1730,6 +1756,7 @@ export function Dashboard() {
           </AnimatePresence>
           </MotionConfig>
         )}
+        </div>
       </main>
       </div>
     </div>

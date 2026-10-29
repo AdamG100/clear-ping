@@ -5,6 +5,7 @@ import { ChevronDown, Route } from 'lucide-react'
 import { Badge, type BadgeTone } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { SearchField } from '@/components/arc/search-field/search-field'
+import { SearchResults } from '@/components/search-results'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
@@ -351,15 +352,17 @@ function ExchangeDetail({
               ]}
             />
           </div>
-          {listed.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">No member matches.</p>
-          ) : (
-            <ul className="divide-y divide-border/60 overflow-hidden rounded-2xl border border-border">
-              {shown.map(member => (
-                <MemberRow key={member.asn} member={member} names={names} origins={origins} mine={mine} entered={enteredBy(member.asn)} now={now} />
-              ))}
-            </ul>
-          )}
+          <SearchResults query={`${view.exchange}|${show}|${words.join(' ')}`}>
+            {listed.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">No member matches.</p>
+            ) : (
+              <ul className="divide-y divide-border/60 overflow-hidden rounded-2xl border border-border">
+                {shown.map(member => (
+                  <MemberRow key={member.asn} member={member} names={names} origins={origins} mine={mine} entered={enteredBy(member.asn)} now={now} />
+                ))}
+              </ul>
+            )}
+          </SearchResults>
           {listed.length > PAGE && (
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-xs text-muted-foreground">
