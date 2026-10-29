@@ -21,7 +21,7 @@ import { BGP_DIRECT, BGP_REGION_LABEL, type BgpPrefixDetail, type BgpState } fro
 import { PANE, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
 import { StatusIndicator } from '../sidebar/status-indicator'
 import { ActivityStrip, clock } from './activity-strip'
-import { ExchangePanel, ExchangesOnTheWay, sameExchange, type ExchangeCrossing } from './exchange-panel'
+import { ExchangesOnTheWay, type ExchangeCrossing } from './exchange-panel'
 import { HomePanel } from './home-panel'
 import { NetworkDialog } from './network-dialog'
 import { PathGraph } from './path-graph'
@@ -316,16 +316,6 @@ export function PrefixPage({
           : []
     )
   )
-  const wasAt = detail.baseline?.exchanges ?? []
-  const exchangeViews =
-    detail.exchanges?.views.filter(
-      view =>
-        view.routes.length > 0 ||
-        wasAt.includes(view.exchange) ||
-        crossings.some(crossing => crossing.sure && crossing.exchanges.some(name => sameExchange(view.exchange, name)))
-    ) ?? []
-  const exchangeLook = detail.exchanges ? { ...detail.exchanges, views: exchangeViews, error: exchangeViews.length > 0 ? detail.exchanges.error : null } : null
-  const exchangeSources = [...new Set(exchangeViews.map(view => view.source))]
   // The updates in the page's scope: from peers in the place chosen, about
   // routes through the upstream chosen (before or after), in the bar chosen.
   const peerAt = new Map(detail.peers.map(peer => [`${peer.collector}|${peer.peer}`, peer]))
@@ -376,7 +366,6 @@ export function PrefixPage({
             <p className="mt-1.5 inline-flex cursor-default items-center gap-1.5 text-xs text-muted-foreground">
               <Database size={12} strokeWidth={1.75} aria-hidden="true" />
               From RIPE RIS route collectors, via RIPEstat and RIS Live
-              {exchangeSources.length > 0 ? `, and ${exchangeSources.join(', ')}'s route collectors` : ''}
             </p>
           </Tooltip>
         </div>
@@ -446,35 +435,10 @@ export function PrefixPage({
         <NetworkDialog key={detail.home.asns.join()} open={settingNetwork} onOpenChange={setSettingNetwork} asns={detail.home.asns} agents={detail.home.agents} onSaved={() => void reload()} />
       )}
 
-      {(exchangeLook === null || exchangeViews.length > 0 || (detail.onTheWay?.length ?? 0) > 0 || crossings.some(crossing => crossing.sure)) && (
-      <Panel
-        title="At the exchanges"
-        note={
-          exchangeLook === null || exchangeViews.length === 0
-            ? undefined
-            : `${exchangeViews.map(view => view.exchange).join(', ')}, by their own route collectors`
-        }
-      >
-        <div className="space-y-5">
-          {(exchangeLook === null || exchangeViews.length > 0) && (
-            <ExchangePanel
-              look={exchangeLook}
-              origins={detail.baseline?.origins ?? status.origins}
-              was={detail.baseline?.exchanges}
-              crossings={crossings}
-              names={names}
-              mine={mine}
-              now={fetchedAt}
-            />
-          )}
-          <ExchangesOnTheWay
-            crossings={detail.onTheWay ?? []}
-            traced={crossings}
-            shownAbove={exchangeViews.map(view => view.exchange)}
-            names={names}
-          />
-        </div>
-      </Panel>
+      {((detail.onTheWay?.length ?? 0) > 0 || crossings.some(crossing => crossing.sure)) && (
+        <Panel title="At the exchanges" note="On the way from your ISP">
+          <ExchangesOnTheWay crossings={detail.onTheWay ?? []} traced={crossings} names={names} />
+        </Panel>
       )}
 
       <ScopeBar scope={scope} names={names} onScope={setScope} />

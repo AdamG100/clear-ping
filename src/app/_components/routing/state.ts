@@ -47,7 +47,7 @@ export const CONNECTION_TONE: Record<BgpConnectionState, BadgeTone> = {
 
 /** Where the routes come from, said plainly: not from the user's own network. */
 export const SOURCE_NOTE =
-  'The routes RIPE NCC’s RIS route collectors receive from their peers at internet exchanges around the world: read from RIPEstat (stat.ripe.net), and kept current from RIS Live (ris-live.ripe.net). Where RIS has no collector and the prefix is offered at an exchange, that exchange’s own route collector, read from its looking glass (INX-ZA’s, lg.inx.net.za, for South Africa’s exchanges). They show how other networks reach a prefix, not what your own routers see.'
+  'The routes RIPE NCC’s RIS route collectors receive from their peers at internet exchanges around the world: read from RIPEstat (stat.ripe.net), and kept current from RIS Live (ris-live.ripe.net). They show how other networks reach a prefix, not what your own routers see.'
 
 /** AS64501, with the network's name when it is known. */
 export function asLabel(asn: number, names: Record<number, string>): string {

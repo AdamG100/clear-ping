@@ -1,6 +1,5 @@
 import type {
   BgpConnection,
-  BgpExchangeLook,
   BgpHome,
   BgpOverview,
   BgpPathCrossing,
@@ -19,7 +18,6 @@ import { collectorInfo, collectorName, peerPlace, type Place } from './collector
 import { exchangeData, exchangesOnPaths } from './exchanges'
 import { agentChoices, homeCarriers, homeChanges, homeView, traceInto } from './home'
 import { learn } from './learn'
-import { LOOK_EVERY_MS, lookAtExchanges, offExchanges, originPresent } from './looking-glass'
 import { flattenPath } from './path'
 import { prefixWithin } from './prefix'
 import { asCountry, asName, currentRoutes, resolveResource } from './ripestat'
@@ -78,8 +76,6 @@ const ACTIVITY_SLICE_MS = 15 * 60 * 1000
  * the list shows, and narrow with it.
  */
 const UPDATES_LISTED = 2000
-/** The most of a prefix's announced prefixes asked about at the exchanges: Alice is asked once for each. */
-const MOST_ASKED_AT_EXCHANGES = 8
 
 interface Watched {
   prefix: BgpPrefix
@@ -96,13 +92,6 @@ interface Watched {
    * withdrawn: it is not judged, and is shown as having its routes read.
    */
   synced: boolean
-  /** What the exchanges' own route collectors last had for it (see looking-glass.ts); null until read. */
-  exchanges: BgpExchangeLook | null
-}
-
-/** Whether every exchange was read, and every collector had its routes in: only then is an absence news. */
-function readWell(look: BgpExchangeLook): boolean {
-  return !look.error && look.views.length > 0 && look.views.every(view => view.ready)
 }
 
 function routeKey(route: Pick<BgpRoute, 'collector' | 'peer' | 'prefix'>): string {
@@ -163,7 +152,6 @@ class BgpMonitor {
     this.stream.start([...this.watched.values()].map(each => each.prefix.prefix))
     this.timers.push(setInterval(() => void this.resyncAll(), RESYNC_EVERY_MS))
     this.timers.push(setInterval(() => void pruneBgp().catch(error => console.error('[BGP] Pruning failed:', error)), PRUNE_EVERY_MS))
-    this.timers.push(setInterval(() => void this.lookAll(), LOOK_EVERY_MS))
     void pruneBgp().catch(() => {})
     // Read now, not when someone first opens a prefix: it is a few seconds of
     // work, and the page would wait on it.
@@ -253,7 +241,6 @@ class BgpMonitor {
       recorded: null,
       home: null,
       synced: routes !== undefined,
-      exchanges: null,
     }
     this.watched.set(prefix.id, watched)
     return watched
@@ -271,7 +258,6 @@ class BgpMonitor {
       this.remember(routes)
       await this.takeFirstNormal(watched, routes)
       await this.recordDirectPeers(watched, routes)
-      if (!watched.exchanges) await this.look(watched).catch(() => {})
       await this.judge(watched)
       this.lookUp(routes)
       this.traceLater(watched, { staleOnly: true })
@@ -320,46 +306,6 @@ class BgpMonitor {
 
   private async resyncAll(): Promise<void> {
     for (const watched of [...this.watched.values()]) await this.resync(watched)
-  }
-
-  /**
-   * Read what the exchanges' own collectors have for it: the prefix and the
-   * more-specifics RIS has seen announced, as Alice matches each exactly. A
-   * normal taken before they were read gets the exchanges the origin offered
-   * it at from the first good read, as with the direct peers.
-   */
-  private async look(watched: Watched): Promise<void> {
-    const prefix = watched.prefix.prefix
-    const asked = [prefix, ...new Set([...watched.routes.values()].map(route => route.prefix))]
-      .filter((each, index, all) => all.indexOf(each) === index && prefixWithin(each, prefix))
-      .slice(0, MOST_ASKED_AT_EXCHANGES)
-    const look = await lookAtExchanges(asked)
-    if (this.watched.get(watched.prefix.id) !== watched) return
-    watched.exchanges = look
-    if (look.error) console.warn(`[BGP] ${prefix}: ${look.error}`)
-    const baseline = watched.prefix.baseline
-    if (baseline && !baseline.exchanges && readWell(look)) {
-      const completed = { ...baseline, exchanges: originPresent(look, baseline.origins) }
-      await updateBgpPrefix(watched.prefix.id, { baseline: completed }).catch(() => {})
-      watched.prefix = { ...watched.prefix, baseline: completed }
-    }
-    this.lookUp(look.views.flatMap(view => view.routes.map(route => ({ collector: '', path: route.path }))))
-  }
-
-  private async lookAll(): Promise<void> {
-    for (const watched of [...this.watched.values()]) {
-      if (!watched.synced) continue
-      await this.look(watched).catch(error => console.warn(`[BGP] Could not read the exchanges for ${watched.prefix.prefix}:`, error))
-      await this.judge(watched)
-    }
-  }
-
-  /** The exchanges it has gone off since normal was taken, by their own collectors. */
-  private offExchanges(watched: Watched): string[] {
-    const { baseline } = watched.prefix
-    const look = watched.exchanges
-    if (!baseline?.exchanges || !look) return []
-    return offExchanges(baseline.exchanges, look, baseline.origins)
   }
 
   private apply(message: RisMessage): void {
@@ -434,7 +380,7 @@ class BgpMonitor {
     if (!watched.synced) return
     const routes = [...watched.routes.values()]
     await this.learnNormal(watched, routes)
-    watched.status = assess(watched.prefix, routes, this.regionOf, this.offExchanges(watched))
+    watched.status = assess(watched.prefix, routes, this.regionOf)
     const prefix = watched.prefix.prefix
 
     const home = homeCarriers(effectiveRoutes(routes, prefix, watched.prefix.address).values(), this.mine)
@@ -476,8 +422,7 @@ class BgpMonitor {
     if (!baseline || routes.length === 0 || watched.status.state === 'hijack' || watched.status.state === 'withdrawn') return
     const at = Date.now()
     const now = takeBaseline(routes, watched.prefix.prefix, watched.prefix.address, at)
-    const look = watched.exchanges
-    const carried = { ...now, directPeers: now.directPeers ?? [], exchanges: look && readWell(look) ? originPresent(look, baseline.origins) : undefined }
+    const carried = { ...now, directPeers: now.directPeers ?? [] }
     const { baseline: next, changed, reasons } = learn(baseline, carried, at)
     if (!changed) return
     watched.prefix = { ...watched.prefix, baseline: next }
@@ -645,7 +590,6 @@ class BgpMonitor {
         ...Object.keys(home.mine).map(Number),
         ...traced,
         ...home.vantages.flatMap(vantage => vantage.tracedPath),
-        ...(watched.exchanges?.views.flatMap(view => view.routes.flatMap(route => route.path)) ?? []),
       ]),
     ]
     return {
@@ -658,7 +602,6 @@ class BgpMonitor {
       asNames: Object.fromEntries(await knownAsNames(asns)),
       connection: this.connection,
       home,
-      exchanges: watched.exchanges,
       onTheWay: await this.onTheWay(home),
     }
   }
@@ -729,10 +672,7 @@ class BgpMonitor {
     if (!watched) return null
     const routes = [...watched.routes.values()]
     if (routes.length === 0) throw new Error('No collector sees it now, so there is nothing to take as normal')
-    const look = watched.exchanges
-    const taken = takeBaseline(routes, watched.prefix.prefix, watched.prefix.address, Date.now())
-    // Where the origin offers it at the exchanges now is normal too, if they were read well; else from the next good read.
-    const baseline = look && readWell(look) ? { ...taken, exchanges: originPresent(look, taken.origins) } : taken
+    const baseline = takeBaseline(routes, watched.prefix.prefix, watched.prefix.address, Date.now())
     await updateBgpPrefix(id, { baseline })
     watched.prefix = { ...watched.prefix, baseline }
     await recordBgpEvent(id, Date.now(), watched.status.state, ['Taken as normal as it is carried now, including the networks announcing it'], 'learned').catch(() => {})

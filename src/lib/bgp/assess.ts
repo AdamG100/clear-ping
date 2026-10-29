@@ -86,15 +86,12 @@ function byCollector(key: string): BgpRegion {
 /**
  * How the prefix stands now, against what was normal. `regionOf` places a
  * peer, given as collector|peer; the monitor knows more about some than their
- * collector says (see collectors.ts). `offExchanges` are the exchanges'
- * own collectors' reasons it has gone off them (see looking-glass.ts), each a
- * diversion.
+ * collector says (see collectors.ts).
  */
 export function assess(
   prefix: Pick<BgpPrefix, 'prefix' | 'address' | 'baseline'>,
   routes: readonly BgpRoute[],
-  regionOf: (key: string) => BgpRegion = byCollector,
-  offExchanges: readonly string[] = []
+  regionOf: (key: string) => BgpRegion = byCollector
 ): BgpStatus {
   const baseline = prefix.baseline
   const within = routes.filter(route => prefixWithin(route.prefix, prefix.prefix))
@@ -175,7 +172,7 @@ export function assess(
     reasons.push(`${percent(unusualPeers / counted.size)} of peers now reach it through ${names}`)
     worse('diverted')
   }
-  for (const reason of [...offExchange(baseline, counted), ...offExchanges]) {
+  for (const reason of offExchange(baseline, counted)) {
     reasons.push(reason)
     worse('diverted')
   }

@@ -7,7 +7,7 @@ prefix taken off the exchanges onto transit during a DDoS mitigation.
 
 It is off until an admin turns it on in **Settings › Routing**. While it is off,
 Routing is greyed out in the sidebar (an admin's tile opens that setting), and
-ClearPing asks nothing of RIPE, PeeringDB or the exchanges' looking glasses.
+ClearPing asks nothing of RIPE or PeeringDB.
 
 ## Where the data comes from
 
@@ -16,11 +16,6 @@ ClearPing asks nothing of RIPE, PeeringDB or the exchanges' looking glasses.
   world, each taking a BGP feed from many networks (their "peers"). ClearPing
   reads every peer's route from RIPEstat (stat.ripe.net) and follows each
   change live from RIS Live (ris-live.ripe.net).
-- **The South African exchanges' own route collectors:** RIS has no collector
-  at JINX, CINX, DINX or NMBINX, but INX-ZA runs one at each, with a public
-  looking glass (lg.inx.net.za). ClearPing asks it every five minutes, which is
-  as often as it reads its collectors, what each exchange's members offer for
-  the prefix, and whether the origin offers it there itself.
 - **Your networks' routes:** many ISPs share their routes with RIS too. The
   routes of your networks (this server's, and each probe agent's) are picked
   out from the rest.
@@ -76,17 +71,17 @@ going through an upstream instead. That is so even when the upstream is one it
 already used for the rest of the world, which is why it is judged on its own
 (Off the exchange, below).
 
-BGP cannot say which exchange a direct route uses: the exchanges' route servers
-stay out of the path, and RIS has no collector at some exchanges (JINX, for
-one). Two things can: the exchanges' own route collectors, in **At the
-exchanges**, and a traceroute, in **From your networks**.
+BGP cannot say which exchange a route uses: the exchanges' route servers stay
+out of the path. **At the exchanges** says where the way from your networks
+probably crosses one, from PeeringDB's member lists, and a traceroute, in
+**From your networks**, says for sure.
 
 ## How a prefix stands
 
 | State | When |
 |---|---|
 | Normal | Carried as it usually is. |
-| Diverted | A fifth or more of the peers reach it through upstreams it was not reached through before; or, at one collector, half or more of the peers that reached it directly now go through an upstream ("Off the exchange at Johannesburg, NAPAfrica"); or the origin no longer offers it itself at an exchange whose route collector had it from the origin ("Off the exchange at JINX"); or a more-specific of it has appeared. |
+| Diverted | A fifth or more of the peers reach it through upstreams it was not reached through before; or, at one collector, half or more of the peers that reached it directly now go through an upstream ("Off the exchange at Johannesburg, NAPAfrica"); or a more-specific of it has appeared. |
 | Partly withdrawn | Fewer than 80% of the peers that saw it still do. The page says in which regions. |
 | Withdrawn | Fewer than 10% do. |
 | Suspected hijack | Two or more peers see another network announcing it. |
@@ -161,28 +156,16 @@ wait again.
     trace is over six hours old; unasked, not more than once in 15 minutes,
     however often the routes change. These traces are kept with the prefix, not in
     the targets' traceroute history. A probe agent that is offline is skipped.
-- **At the exchanges:** the exchanges that have something to do with the
-  prefix, from what their own route collectors hold (today those of INX-ZA's
-  looking glass, JINX, CINX, DINX and NMBINX): those where the prefix is
-  offered, where the origin usually offers it, and those your traffic
-  crosses. A prefix with nothing at any of them has no such section, so
-  nobody not watching South African prefixes sees one. It shows as a
-  placeholder until the collectors have been read.
-  - **A tile for each exchange** says whether the origin offers the prefix
-    there itself (and over how many sessions), only through other members,
-    or not at all, and how many members offer it. One the origin usually
-    offers it at and no longer does is "Origin gone from here". A tile is
-    marked where your traffic crosses that exchange, by your traces ("Your
-    ISP's traffic"), or probably does. Choose a tile to open that exchange;
-    the one your traffic crosses opens first.
-  - **The exchange opened** says where your traffic crosses it, and into
-    which member (by IXPDB), then lists the members that offer the prefix
-    there: the origin first, then the shortest way to it. Filter them to the
-    origin, the other members or yours (your networks, and the member your
-    traffic goes into), or search by network, AS number, address or prefix.
-    Open a member for each of its sessions: its address on the exchange, the
-    prefix, the path, whether it is the collector's best route, and since
-    when.
+- **At the exchanges:** the exchanges anywhere in the world on the way to the
+  prefix from your own networks: along your ISPs' routes (where they share
+  them with RIS) and the way your traceroutes went, from this server and each
+  probe agent. Where two networks next to each other on that way are both
+  members of an exchange, by PeeringDB, they probably meet there; where they
+  share two or three in one country, all are named ("NAPAfrica IX
+  Johannesburg or JINX"), and where they share more, none is guessed. Each
+  says whose way crosses it and between which networks, and a traceroute that
+  crosses its peering LAN is marked "Your traceroute crosses it". With none
+  on the way, there is no such section.
 - **Yours, across the page:** your networks' routes are marked by whose they
   are, "Your ISP" for this server's network and each probe agent by name (two
   on one network share a mark), in Where it is seen, Who carries it, the paths
@@ -267,10 +250,7 @@ Only a little, and briefly:
 - A network's own routes only show if it shares them with RIS. If it does not,
   the traceroutes still show the exchange its traffic crosses.
 - RIS has collectors at some exchanges and not others: in South Africa at
-  NAPAfrica Johannesburg, not at JINX, CINX or DINX. Those are covered by
-  INX-ZA's own route collectors, which see what the members offer at each
-  exchange, though not which route each member then uses. The exchange's
-  looking glass matches a prefix exactly, so ClearPing asks it for the watched
-  prefix and up to seven of the more-specifics announced in it.
+  NAPAfrica Johannesburg, not at JINX, CINX or DINX. Where it has none, At the
+  exchanges and your traceroutes are what place your traffic at one.
 - Alerts are not sent for BGP changes yet: the states show in Routing, with a
   count beside it in the sidebar.

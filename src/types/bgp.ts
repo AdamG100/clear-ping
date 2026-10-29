@@ -66,9 +66,9 @@ export interface BgpBaseline {
    */
   directPeers?: string[]
   /**
-   * The exchanges where the origin offered it itself, to the exchange's own
-   * route collector (see looking-glass.ts): JINX, CINX. Absent until the
-   * looking glasses were first read for it.
+   * The exchanges where the origin offered it itself, as an exchange's own
+   * looking glass had it. No longer read or judged: kept only in what is
+   * normal for prefixes from before, so it is not lost if they are read again.
    */
   exchanges?: string[]
   /**
@@ -319,8 +319,6 @@ export interface BgpPrefixDetail extends BgpPrefixSummary {
   asNames: Record<number, string>
   connection: BgpConnection
   home: BgpHome
-  /** What the exchanges' own route collectors have for it; null until first read. */
-  exchanges: BgpExchangeLook | null
   /**
    * The exchanges anywhere in the world the way to it from your own networks
    * probably passes through, by PeeringDB: from your ISP's routes and your
@@ -339,37 +337,4 @@ export interface BgpPathCrossing {
   from: string[]
   /** Where on the path: one network handing the prefix to the next, with how many routes do so there. */
   handoffs: { from: number; to: number; routes: number }[]
-}
-
-/** A member's route to the prefix at an exchange, as the exchange's route collector has it. */
-export interface BgpExchangeRoute {
-  /** The member that offers it there: the first network in the path. */
-  peerAsn: number
-  /** The member's address on the exchange. */
-  gateway: string
-  prefix: string
-  path: number[]
-  /** The collector's best route for the prefix there. */
-  best: boolean
-  since: number | null
-}
-
-/** One exchange's route collector, and what its members offer for the prefix. */
-export interface BgpExchangeView {
-  /** JINX, CINX. */
-  exchange: string
-  city: string | null
-  /** The looking glass it was read from: INX-ZA. */
-  source: string
-  /** Whether the collector had its routes in; when not, an absence says nothing. */
-  ready: boolean
-  routes: BgpExchangeRoute[]
-}
-
-/** The exchanges' route collectors, as last read for a prefix. */
-export interface BgpExchangeLook {
-  at: number
-  views: BgpExchangeView[]
-  /** Why a looking glass could not be read, if one could not. */
-  error: string | null
 }
