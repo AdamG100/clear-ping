@@ -434,13 +434,22 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
                 columns={[
                   {
                     key: 'name',
-                    label: 'Probe agent',
+                    label: 'Name',
                     render: (_, { agent }) => (
                       <span className="flex min-w-0 flex-col gap-0.5">
                         <span className="font-medium wrap-break-word">{agent.name}</span>
-                        <span className="break-all font-mono text-xs text-muted-foreground">{addressOf(agent)}</span>
+                        {agent.hostname && agent.hostname !== agent.name && (
+                          <span className="text-xs wrap-break-word text-muted-foreground" title="The name the machine gives itself">
+                            on {agent.hostname}
+                          </span>
+                        )}
                       </span>
                     ),
+                  },
+                  {
+                    key: 'address',
+                    label: 'IP and port',
+                    render: (_, { agent }) => <span className="break-all font-mono text-xs">{addressOf(agent)}</span>,
                   },
                   {
                     key: 'exposure',
