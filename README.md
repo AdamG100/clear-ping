@@ -285,7 +285,7 @@ Then ask it in your own words:
 
 As it comes it can only read: nothing an assistant does changes a target or
 sends anything, and alerts are never shown to it. Give an assistant a key of
-its own that may read and change (Settings → Keys) and it can also add
+its own that may read and write (Settings → Keys) and it can also add
 targets, change them, pause them and probe one now (*add my router and 1.1.1.1
 as ping targets, in a group called Network*), though never delete one; what it
 changes is recorded under its key's name. A key is only taken over HTTPS or

@@ -248,7 +248,7 @@ function McpSetup({ onMakeKey }: { onMakeKey?: () => void }) {
         <p className="text-sm leading-relaxed text-card-foreground">
           Give each assistant a key of its own, and put it where it says{' '}
           <span className="font-mono">{TOKEN_PLACEHOLDER}</span>. A <span className="font-medium">read-only</span> key
-          lets it read; a <span className="font-medium">read and change</span> key lets it add and change targets as
+          lets it read; a <span className="font-medium">read and write</span> key lets it add and change targets as
           well. Whatever it changes is recorded under the key&apos;s name, and revoking the key cuts that assistant off
           alone.
         </p>
@@ -275,7 +275,7 @@ function McpSetup({ onMakeKey }: { onMakeKey?: () => void }) {
           ))}
         </ul>
         <p className={HINT}>
-          The last of those needs a read and change key. With one, an assistant can add targets, change them, pause
+          The last of those needs a read and write key. With one, an assistant can add targets, change them, pause
           them, probe one now and trace a route; it cannot delete a target, and alerts are never shown to it. The report
           is only as good as what is monitored: with your router as a target as well as addresses beyond it, the data can
           show whether a fault was inside your network or outside it.

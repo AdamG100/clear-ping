@@ -35,7 +35,7 @@ import { displayLocale, displayTimeZone, inDisplayZone } from '@/lib/time-zone'
  * Who may use this ClearPing, and what they have done.
  *
  * Sign-in for the dashboard and its API, keys for scripts and AI assistants
- * (one each, able to read or to read and change), the accounts, and the
+ * (one each, able to read or to read and write), the accounts, and the
  * record of every change and whose it was. Everything here is changed signed
  * in, whether or not the dashboard asks for it.
  */
@@ -340,7 +340,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
             onValueChange={value => setAccess(value as Access)}
             options={[
               { value: 'read', label: 'Read only' },
-              { value: 'write', label: 'Read and change' },
+              { value: 'write', label: 'Read and write' },
             ]}
           />
         ) : (
@@ -382,7 +382,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
               return (
                 <span className="flex flex-col items-start gap-1">
                   <Badge tone={key.revokedAt ? 'danger' : key.access === 'write' ? 'warning' : 'neutral'} size="sm">
-                    {key.revokedAt ? 'Revoked' : key.access === 'write' ? 'Read and change' : 'Read only'}
+                    {key.revokedAt ? 'Revoked' : key.access === 'write' ? 'Read and write' : 'Read only'}
                   </Badge>
                   {capped && (
                     <span className="text-xs text-muted-foreground">

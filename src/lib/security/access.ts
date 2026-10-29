@@ -14,7 +14,7 @@ export { recoveryMode }
  * which is right behind a VPN or a sign-in proxy such as Authentik. Turned on
  * from the dashboard, the dashboard and its API need a signed-in user or a
  * key, and the MCP address needs a key. Keys are made per script or
- * assistant, each able to read or to read and change, so one can be cut off
+ * assistant, each able to read or to read and write, so one can be cut off
  * without the others and the record says which of them did what.
  *
  * CLEARPING_AUTH=off overrides the switch, for whoever has locked themselves

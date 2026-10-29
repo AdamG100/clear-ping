@@ -18,7 +18,7 @@ import { ANONYMOUS, recordActivity } from '@/lib/security/store';
  * no GET to listen on: the protocol lets a server say so, and this does.
  *
  * Each assistant is given a key of its own, made in the security settings,
- * that lets it read, or read and change targets. Without a key it may read,
+ * that lets it read, or read and write targets. Without a key it may read,
  * unless keys are switched on for this address (they are whenever sign-in is
  * on), and never change anything. A key has to arrive over HTTPS or from the
  * server's own network, so that it is never sent in the clear across the

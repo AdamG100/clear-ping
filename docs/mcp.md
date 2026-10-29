@@ -104,7 +104,7 @@ and the format wanted.
 
 ### Letting it change things
 
-Give an assistant a **read and change** key (Settings → Keys, see
+Give an assistant a **read and write** key (Settings → Keys, see
 [security.md](security.md)) and it gets five more tools:
 
 | Tool | What it does |
@@ -182,7 +182,7 @@ caveats in, and to say so if the period shows no real problem.
 ## Keys
 
 Each assistant gets a key of its own, made under Settings → Keys: **read only**,
-or **read and change**. Revoke one and that assistant alone is cut off; what
+or **read and write**. Revoke one and that assistant alone is cut off; what
 each one changes is recorded under its name. Send it with every request:
 
 ```bash
@@ -210,7 +210,7 @@ is refused either way. Settings → AI assistant writes the command with a
 place for the key; it is never shown a key.
 
 `CLEARPING_MCP_TOKEN`, the single token from before keys were made in the
-dashboard, still works as a read and change key, and while it is set a key is
+dashboard, still works as a read and write key, and while it is set a key is
 always asked for. Move to keys made in Settings and unset it.
 
 ### Keys are only taken encrypted

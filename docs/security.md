@@ -183,7 +183,7 @@ from ClearPing's routes like the rest of sign-in.
 
 ## Keys
 
-| | Read only | Read and change |
+| | Read only | Read and write |
 |---|---|---|
 | API: `GET` | yes | yes |
 | API: `POST`, `PATCH`, `PUT`, `DELETE` | no (`403`) | yes |
