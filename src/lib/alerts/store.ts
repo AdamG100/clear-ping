@@ -414,7 +414,11 @@ export async function evaluateAlerts(
     const breaching = isBreaching(rule, result);
     const next = nextRuleState(rule, breaching);
 
-    await persistRuleState(rule, next, next.transition, at);
+    // Most probes change nothing (a healthy target stays at ok with no
+    // streak), and are not written back.
+    if (next.transition || next.streak !== rule.streak || next.state !== rule.state) {
+      await persistRuleState(rule, next, next.transition, at);
+    }
 
     if (next.transition) {
       events.push({

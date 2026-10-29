@@ -45,9 +45,6 @@ export function initializeServer(): Promise<void> {
         await startScheduler();
       }
 
-      // Whichever process probes, this one holds the settings and the database.
-      startMaintenanceSchedule();
-
       // Whichever process does the probing, this one holds the settings and
       // the database the schedule is read from.
       startMaintenanceSchedule();

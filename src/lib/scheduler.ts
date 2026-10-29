@@ -6,7 +6,7 @@
  * are captured and stored for visualization on graphs.
  */
 
-import { getAllTargets, storeMeasurement, getDatabase, getNeverAnswered, saveDatabaseToDisk, cleanOldMeasurements } from './db/database';
+import { getAllTargets, storeMeasurements, getDatabase, getNeverAnswered, cleanOldMeasurements } from './db/database';
 import { isClosedPortCheck } from './probes/config';
 import { checkProbeAgent, ProbeAgentUnavailableError, runProbes } from './probe-agents/client';
 import { cleanOldProbeAgentOutages, getProbeAgentConnection, pairedProbeAgentConnections } from './probe-agents/store';
@@ -78,6 +78,12 @@ export function isDue(now: number, last: number, intervalMs: number, phase: numb
   return Math.floor((now - phase) / intervalMs) > Math.floor((last - phase) / intervalMs);
 }
 
+/** When a target last probed at `last` is next due: its moment in the interval after the one it was last probed in. */
+export function nextDueAt(last: number, intervalMs: number, phase: number): number {
+  if (intervalMs <= 0) return last;
+  return (Math.floor((last - phase) / intervalMs) + 1) * intervalMs + phase;
+}
+
 /**
  * Jobs run a few at a time, in the order they were given. Each kind of probe
  * has its own, and each probe agent, so a slow one holds up only its own
@@ -120,7 +126,16 @@ interface ScheduledTarget {
   /** Probed from this probe agent, or from here when null. */
   probeAgentId: string | null;
   interval: number; // seconds
+  /** The interval in milliseconds, and the target's moment in it: worked out once, not at every look. */
+  intervalMs: number;
+  phase: number;
   lastProbeTime: number; // timestamp
+  /**
+   * Whether it has ever answered, once that has been asked of the database:
+   * only a closed-port check needs to know, and once it has answered it always
+   * has. Asked again whenever the targets are reloaded.
+   */
+  hasAnswered?: boolean;
   /** Waiting in its lane or being probed: either way, not to be handed over again. */
   isProbing: boolean;
 }
@@ -217,24 +232,26 @@ class ProbeScheduler {
    */
   private async loadTargets(): Promise<void> {
     try {
-      const targets = await getAllTargets();
-      const activeTargets = targets.filter(t => t.status === 'active');
-
-      // Read every last_probe_at in one query rather than one per target.
+      // Every last_probe_at in one query rather than one per target, read
+      // alongside the targets.
       const db = await getDatabase();
-      const lastProbeTimes = await new Promise<Map<string, number>>((resolve, reject) => {
-        db.all('SELECT id, last_probe_at FROM targets', [], (err, rows) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-          const map = new Map<string, number>();
-          for (const row of (rows ?? []) as { id: string; last_probe_at: number | null }[]) {
-            map.set(row.id, row.last_probe_at ?? 0);
-          }
-          resolve(map);
-        });
-      });
+      const [targets, lastProbeTimes] = await Promise.all([
+        getAllTargets(),
+        new Promise<Map<string, number>>((resolve, reject) => {
+          db.all('SELECT id, last_probe_at FROM targets', [], (err, rows) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            const map = new Map<string, number>();
+            for (const row of (rows ?? []) as { id: string; last_probe_at: number | null }[]) {
+              map.set(row.id, row.last_probe_at ?? 0);
+            }
+            resolve(map);
+          });
+        }),
+      ]);
+      const activeTargets = targets.filter(t => t.status === 'active');
 
       for (const target of activeTargets) {
         const existing = this.scheduledTargets.get(target.id);
@@ -247,6 +264,9 @@ class ProbeScheduler {
           probeConfig: target.probeConfig,
           probeAgentId: target.probeAgentId ?? null,
           interval: target.interval,
+          intervalMs: target.interval * 1000,
+          phase: phaseOf(target.id, target.interval * 1000),
+          hasAnswered: undefined,
         };
 
         if (existing) {
@@ -297,8 +317,7 @@ class ProbeScheduler {
   queueDueTargets(now: number = Date.now()): void {
     for (const target of this.scheduledTargets.values()) {
       if (target.isProbing) continue;
-      const intervalMs = target.interval * 1000;
-      if (!isDue(now, target.lastProbeTime, intervalMs, phaseOf(target.id, intervalMs))) continue;
+      if (!isDue(now, target.lastProbeTime, target.intervalMs, target.phase)) continue;
 
       // Claimed now, so the next look does not hand it over a second time
       // while it waits.
@@ -347,9 +366,7 @@ class ProbeScheduler {
     const round = worstOf(results);
 
     try {
-      for (const result of results) {
-        await storeMeasurement(measurementFrom(randomUUID(), result));
-      }
+      await storeMeasurements(results.map(result => measurementFrom(randomUUID(), result)));
     } finally {
       await new Promise<void>((resolve, reject) => {
         db.run(
@@ -392,13 +409,21 @@ class ProbeScheduler {
       // A closed-port check whose server has never once answered it is a
       // server the check cannot measure, not one that is down: nothing to
       // alert on until it answers, after which silence is an outage again.
-      if (isClosedPortCheck(target) && !result.success && (await getNeverAnswered([target.id])).has(target.id)) return;
+      // Whether it has is kept, so the measurements are only searched again
+      // while it never has.
+      if (isClosedPortCheck(target)) {
+        if (result.success) target.hasAnswered = true;
+        else {
+          target.hasAnswered ??= !(await getNeverAnswered([target.id])).has(target.id);
+          if (!target.hasAnswered) return;
+        }
+      }
 
-      const probedFrom = target.probeAgentId ? (await getProbeAgentConnection(target.probeAgentId))?.name : undefined;
-      const events = await evaluateAlerts(
-        { id: target.id, name: target.name, host: target.host, group: target.group, probedFrom },
-        result
-      );
+      const found = await evaluateAlerts({ id: target.id, name: target.name, host: target.host, group: target.group }, result);
+      // Which probe agent it was probed from is only looked up for an alert to say so.
+      const probedFrom =
+        found.length > 0 && target.probeAgentId ? (await getProbeAgentConnection(target.probeAgentId))?.name : undefined;
+      const events = probedFrom ? found.map(event => ({ ...event, probedFrom })) : found;
 
       for (const event of events) {
         console.log(
@@ -439,15 +464,12 @@ class ProbeScheduler {
     target.lastProbeTime = Date.now();
 
     try {
-      console.log(`[Scheduler] Probing ${target.name} (${target.host}) via ${target.probeType.toUpperCase()}`);
-
       const results = await runProbes(target);
 
       // Deleted while it was being probed: nothing to record against.
       if (this.scheduledTargets.get(targetId) !== target) return;
 
       await this.recordResults(target, results);
-      saveDatabaseToDisk();
     } catch (error) {
       // The probe agent, not the target: no reading at all, rather than one
       // saying the target is down. The round is tried again at the target's
@@ -549,7 +571,7 @@ class ProbeScheduler {
       host: t.host,
       interval: t.interval,
       lastProbeTime: t.lastProbeTime,
-      nextProbeIn: Math.max(0, (t.interval * 1000) - (now - t.lastProbeTime)),
+      nextProbeIn: Math.max(0, nextDueAt(t.lastProbeTime, t.intervalMs, t.phase) - now),
       isProbing: t.isProbing,
     }));
 

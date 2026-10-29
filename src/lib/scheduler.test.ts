@@ -13,8 +13,7 @@ const target: Target = {
 
 vi.mock('./db/database', () => ({
   getAllTargets: vi.fn(async () => [target]),
-  storeMeasurement: vi.fn(async () => {}),
-  saveDatabaseToDisk: vi.fn(),
+  storeMeasurements: vi.fn(async () => {}),
   cleanOldMeasurements: vi.fn(async () => 0),
   getDatabase: vi.fn(async () => ({
     all: (_sql: string, _params: unknown[], callback: (err: null, rows: unknown[]) => void) =>
@@ -49,7 +48,7 @@ vi.mock('./probe-agents/store', () => ({
 vi.mock('./alerts/store', () => ({ evaluateAlerts: vi.fn(async () => []), dispatchAlert: vi.fn(), asksForTrace: vi.fn(() => false), shouldTraceOnAlert: vi.fn(() => false) }))
 vi.mock('./traceroute/store', () => ({ ensureTracerouteSchema: vi.fn(), cleanOldTraceroutes: vi.fn(), traceAndStore: vi.fn(), lastAlertTraceAt: vi.fn(async () => null) }))
 
-const { getScheduler, isDue, Lane, phaseOf } = await import('./scheduler')
+const { getScheduler, isDue, Lane, nextDueAt, phaseOf } = await import('./scheduler')
 
 describe('when a target is probed', () => {
   const MINUTE = 60_000
@@ -82,6 +81,15 @@ describe('when a target is probed', () => {
 
   it('probes a target never probed straight away', () => {
     expect(isDue(Date.now(), 0, MINUTE, phaseOf('new', MINUTE))).toBe(true)
+  })
+
+  it('says when it is next due: its moment in the next interval', () => {
+    const phase = 20_000
+    const last = 10 * MINUTE + phase + 5000
+    const next = nextDueAt(last, MINUTE, phase)
+    expect(next).toBe(11 * MINUTE + phase)
+    expect(isDue(next - 1, last, MINUTE, phase)).toBe(false)
+    expect(isDue(next, last, MINUTE, phase)).toBe(true)
   })
 })
 
@@ -160,9 +168,9 @@ describe('ProbeScheduler', () => {
   })
 
   it('records nothing for a target whose probe agent cannot be reached', async () => {
-    const { storeMeasurement } = await import('./db/database')
+    const { storeMeasurements } = await import('./db/database')
     const { evaluateAlerts } = await import('./alerts/store')
-    vi.mocked(storeMeasurement).mockClear()
+    vi.mocked(storeMeasurements).mockClear()
 
     const scheduler = getScheduler()
     target.probeAgentId = 'agent-1'
@@ -170,7 +178,7 @@ describe('ProbeScheduler', () => {
     await scheduler.forceProbe(target.id)
 
     // Not a failed reading, and so no alert: the agent was down, not the target.
-    expect(storeMeasurement).not.toHaveBeenCalled()
+    expect(storeMeasurements).not.toHaveBeenCalled()
     expect(evaluateAlerts).not.toHaveBeenCalled()
     expect(scheduler.getStatus().targets[0].isProbing).toBe(false)
     target.probeAgentId = null
