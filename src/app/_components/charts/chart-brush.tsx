@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from 'react'
+import { spikeCeiling } from '@/lib/charts/spikes'
 import { timeTicks } from '@/lib/charts/time-ticks'
 import { inDisplayZone } from '@/lib/time-zone'
 
@@ -271,6 +272,70 @@ export function latencyDomain(values: number[]): { min: number; max: number } {
   const pad = Math.max(span * 0.18, span === 0 ? Math.max(dataMax * 0.1, 0.5) : 0.2)
 
   return { min: Math.max(0, dataMin - pad), max: dataMax + pad }
+}
+
+/**
+ * The share of the plot's height given to spikes, at the top, when there are
+ * any: their own squeezed scale from where the usual readings end to the
+ * highest spike.
+ */
+const SPIKE_BAND = 0.2
+
+export interface LatencyScale {
+  /** Where a latency goes on the plot, top to bottom. */
+  y: (value: number) => number
+  /** Tick values on the usual scale. */
+  ticks: number[]
+  /** The squeezed band at the top, where there are spikes. */
+  spikes: { from: number; peak: number; edge: number } | null
+}
+
+/**
+ * A latency axis that never cuts anything off. Readings far above the rest
+ * (a 1000 ms spike among 20 ms ones) get a band of their own along the top,
+ * on a squeezed scale up to the highest of them, so they stay on the chart
+ * with their height labelled, and the usual readings keep most of the
+ * height instead of being pressed flat along the bottom.
+ */
+export function latencyScale(values: number[], top: number, height: number): LatencyScale {
+  const ceiling = spikeCeiling(values)
+  const usual = ceiling === null ? values : values.filter(value => value <= ceiling)
+  const { min: lo, max: hi } = latencyDomain(usual)
+  const peak = values.length > 0 ? Math.max(...values) : hi
+  const band = ceiling !== null && peak > hi ? Math.max(28, Math.round(height * SPIKE_BAND)) : 0
+  const usualH = height - band
+
+  const y = (value: number) => {
+    if (band > 0 && value > hi) return top + band - ((Math.min(value, peak) - hi) / (peak - hi)) * band
+    return top + band + (hi === lo ? usualH / 2 : (1 - (Math.max(value, lo) - lo) / (hi - lo)) * usualH)
+  }
+  return { y, ticks: niceTicks(lo, hi), spikes: band > 0 ? { from: hi, peak, edge: top + band } : null }
+}
+
+/** The spike band's marks: the highest spike labelled on the axis, and a dashed line where the scale changes. */
+export function SpikeBand({ spikes, left, width, top }: { spikes: NonNullable<LatencyScale['spikes']>; left: number; width: number; top: number }) {
+  return (
+    <g>
+      <line x1={left} x2={left + width} y1={top} y2={top} stroke="currentColor" className="text-border" strokeWidth={1} />
+      <text x={left - 8} y={top} textAnchor="end" dominantBaseline="middle" className="fill-signal-critical font-mono" fontSize={10}>
+        {Math.round(spikes.peak)}
+      </text>
+      <line
+        x1={left}
+        x2={left + width}
+        y1={spikes.edge}
+        y2={spikes.edge}
+        stroke="currentColor"
+        className="text-muted-foreground/50"
+        strokeWidth={1}
+        strokeDasharray="4 4"
+      />
+      <path d={`M ${left - 5} ${spikes.edge + 3} l 4 -3 l 2 3 l 4 -3`} fill="none" stroke="currentColor" className="text-muted-foreground" strokeWidth={1} />
+      <text x={left + width} y={top - 4} textAnchor="end" className="fill-muted-foreground font-mono" fontSize={9}>
+        scale squeezed above {Math.round(spikes.from)} ms
+      </text>
+    </g>
+  )
 }
 
 /** A drag shorter than this is a click that wobbled, not a selection. */

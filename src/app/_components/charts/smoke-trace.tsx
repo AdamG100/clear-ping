@@ -12,12 +12,12 @@ import { inDisplayZone } from '@/lib/time-zone'
 import {
   BrushBox,
   BrushLabel,
+  SpikeBand,
   TimeAxis,
   TimeGrid,
   chartHeightFor,
   readingsBoxStyle,
-  latencyDomain,
-  niceTicks,
+  latencyScale,
   useChartBrush,
   useChartWidth,
   useOutsidePress,
@@ -148,7 +148,7 @@ export const SmokeTrace = memo(function SmokeTrace({
   const lossTop = traceBottom + LANE_GAP
   const lossBottom = lossTop + LOSS_LANE
 
-  const { plotted, yTicks, yMin, yMax, xMin, xMax, worstLoss } = useMemo(() => {
+  const { plotted, yTicks, yFor, spikes, xMin, xMax, worstLoss } = useMemo(() => {
     const values: number[] = []
 
     for (const point of data) {
@@ -157,7 +157,9 @@ export const SmokeTrace = memo(function SmokeTrace({
       }
     }
 
-    const { min: lo, max: hi } = latencyDomain(values)
+    // A spike far above the rest gets a squeezed band at the top, so it
+    // neither runs off the chart nor presses everything else flat.
+    const scale = latencyScale(values, PAD.top, traceH)
 
     const times = data.map(d => d.timestamp.getTime())
     const shown = zoomWindow ?? span
@@ -170,8 +172,7 @@ export const SmokeTrace = memo(function SmokeTrace({
 
     const xFor = (t: number) =>
       PAD.left + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
-    const yFor = (v: number) =>
-      PAD.top + (hi === lo ? traceH / 2 : (1 - (v - lo) / (hi - lo)) * traceH)
+    const yFor = scale.y
 
     // Readings come one to an interval, evenly spaced, so the gap between two
     // neighbours is the width of a column.
@@ -214,9 +215,9 @@ export const SmokeTrace = memo(function SmokeTrace({
 
     return {
       plotted: rows,
-      yTicks: niceTicks(lo, hi),
-      yMin: lo,
-      yMax: hi,
+      yTicks: scale.ticks,
+      yFor,
+      spikes: scale.spikes,
       xMin: tMin,
       xMax: tMax,
       worstLoss: rows.reduce((max, r) => Math.max(max, r.loss), 0),
@@ -236,8 +237,7 @@ export const SmokeTrace = memo(function SmokeTrace({
       .filter(band => band !== null)
   }, [agentOutages, xMin, xMax, plotW])
 
-  const yPos = (v: number) =>
-    PAD.top + (yMax === yMin ? traceH / 2 : (1 - (v - yMin) / (yMax - yMin)) * traceH)
+  const yPos = yFor
 
   /** Contiguous runs of readings; a break is a period with no data. */
   const runs = useMemo(() => {
@@ -439,6 +439,7 @@ export const SmokeTrace = memo(function SmokeTrace({
         >
           ms
         </text>
+        {spikes && <SpikeBand spikes={spikes} left={PAD.left} width={plotW} top={PAD.top} />}
 
         <TimeGrid start={xMin} end={xMax} left={PAD.left} width={plotW} top={PAD.top} bottom={lossBottom} />
 
