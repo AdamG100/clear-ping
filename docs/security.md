@@ -343,10 +343,10 @@ button on the sign-in page, with no password to keep for ClearPing.
 ### In ClearPing
 
 1. Settings → **Single sign-on**: paste the issuer, client ID and client secret.
-   **Test the issuer** checks that Authentik can be reached there.
+   **Check the issuer** confirms Authentik can be reached there.
 2. Optionally, **Only members of this group**: an Authentik group name. Only
    its members can sign in through Authentik at all.
-3. **Save**, then turn on **Sign in with Authentik**.
+3. **Save**, then turn on **Show "Sign in with Authentik"**.
 4. **Link my account**: signs in through Authentik once and ties your existing
    account to that identity, so it is you who signs in rather than a new
    account.
@@ -355,7 +355,7 @@ button on the sign-in page, with no password to keep for ClearPing.
    linked, and `CLEARPING_AUTH=off` turns passwords back on if Authentik is
    ever unreachable.
 
-With **Make an account on first sign-in** on (the default), someone signing in
+With **Create an account at first sign-in** on (the default), someone signing in
 through Authentik for the first time gets an account under their Authentik
 username. If that name is already taken here, a number is added; an existing
 account is never taken over because a name matches. Off, only accounts that
@@ -363,7 +363,7 @@ have been linked can sign in this way.
 
 ### Roles from Authentik groups
 
-Under **Roles from groups**, name a group for admins and one for editors:
+Under **Roles from groups (optional)**, name a group for admins and one for editors:
 
 - At every sign-in through Authentik, the account's role is set from the
   person's groups: in the admin group, an admin; in the editor group, an
@@ -395,8 +395,8 @@ are ended; a session signed in with a password is not Authentik's to end.
 Authentik has to be able to reach that address. On a home network it usually
 can.
 
-**Signing out of ClearPing signs you out at Authentik.** With **Signing out
-here signs out of Authentik too** on (the default), signing out of a session
+**Signing out of ClearPing signs you out at Authentik.** With **Signing out of
+ClearPing signs out of Authentik too** on (the default), signing out of a session
 made through Authentik goes on to Authentik's end-session page. What that ends
 is the provider's **invalidation flow** (Advanced flow settings):
 

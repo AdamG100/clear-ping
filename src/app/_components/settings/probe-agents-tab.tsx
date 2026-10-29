@@ -281,13 +281,10 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
   return (
     <div className="space-y-5 text-foreground">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 max-w-2xl space-y-1">
-          <p className={SECTION_TITLE}>Probe agents</p>
-          <p className={HINT}>
-            A probe agent is a small ClearPing program on another machine, such as a VPS abroad. Point a target at one and
-            its readings are taken from there instead of from this server. Nothing to do with AI agents.
-          </p>
-        </div>
+        <p className={`${HINT} min-w-0 max-w-xl pt-1`}>
+          Install one on another machine, add it here, then choose it under Probe from in a target&apos;s settings. Its
+          readings are then taken from there.
+        </p>
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="secondary" loading={refreshing} onClick={() => void refresh()}>
             <RefreshCw {...ICON} />

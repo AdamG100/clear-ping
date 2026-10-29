@@ -70,7 +70,7 @@ export function RoutingTab({ onOpenRouting }: { onOpenRouting: () => void }) {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 space-y-0.5 pt-2.5">
-          <p id={`${id}-title`} className="text-sm font-medium text-card-foreground">Routing (BGP monitoring)</p>
+          <p id={`${id}-title`} className="text-sm font-medium text-card-foreground">Turn on BGP monitoring</p>
           <div id={`${id}-detail`} className={`${HINT} max-w-2xl space-y-2`}>
             <p>
               Follows the prefixes you pick in BGP, as RIPE RIS route collectors at exchanges around the world see them,

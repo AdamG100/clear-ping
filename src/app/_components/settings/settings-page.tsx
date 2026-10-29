@@ -375,7 +375,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
           },
           {
             key: 'access',
-            label: 'May',
+            label: 'Access',
             render: (_, { key }) => {
               const makerRole = roleOf(key.ownerId)
               const capped = key.access === 'write' && !key.revokedAt && makerRole && maxKeyAccess(makerRole) === 'read'
@@ -395,7 +395,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
           },
           {
             key: 'createdAt',
-            label: 'Made',
+            label: 'Created',
             numeric: false,
             render: (_, { key }) => (
               <span className="text-muted-foreground">
@@ -520,7 +520,7 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
                   )}
                 </span>
               ) : (
-                <span className="text-muted-foreground">{account.hasPassword ? 'None' : 'Through the provider'}</span>
+                <span className="text-muted-foreground">{account.hasPassword ? 'None' : `Through ${data.sso.label}`}</span>
               ),
           },
           {
@@ -571,11 +571,10 @@ function AccountsTab({ data, reload }: { data: Security; reload: () => void }) {
         ]}
       />
       <p className={HINT}>
-        The primary account is the first one made. It is always an admin, cannot be removed, and only it sets its own
-        password: if that is lost, the sign-in page resets it with a code from the server log. Every other account&apos;s
-        forgotten password is set here by an admin, or chosen by its owner with a password link an admin makes. There is
-        always at least one admin. Roles matter once sign-in is on
-        (Access): with it off, anyone who can reach ClearPing can change anything without signing in.
+        <span className="font-medium text-card-foreground">Primary</span> is the first account made: always an admin,
+        never removed, and only its owner changes its password (if lost, the sign-in page resets it with a code from the
+        server log). For anyone else, use Password to set a new one or send them a link to choose their own. Roles only
+        apply while sign-in is on under Access.
       </p>
       <PasswordDialog account={passwordFor} onClose={() => setPasswordFor(null)} onDone={reload} />
 
@@ -717,152 +716,245 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
 
   const passwordLocked = data.settings.passwordLogin && !(usable && data.me.sso)
 
-  return (
-    <div className="space-y-8">
-      <div className="space-y-3">
-        <p className="text-sm leading-relaxed text-card-foreground">
-          Sign in with Authentik, or any OpenID Connect provider. In Authentik:{' '}
-          <span className="font-medium">Applications → Providers → Create → OAuth2/OpenID Provider</span>, client type{' '}
-          <span className="font-medium">Confidential</span>, with this redirect URI and a{' '}
-          <span className="font-medium">Signing Key</span> (the self-signed certificate will do: sign-in checks
-          Authentik&apos;s signature with it); then an application for it. The issuer is on the provider&apos;s page:{' '}
-          <span className="font-mono">https://&lt;authentik&gt;/application/o/&lt;slug&gt;/</span>.
-        </p>
-        <CopyField id="sso-redirect" label="Redirect URI" value={redirectUri} />
-        {savedElsewhere && (
-          <p className={HINT}>
-            Saved from another address ({saved.redirectUri}). Saving here changes it to the one above, which then has to
-            be the one in Authentik.
-          </p>
-        )}
-        <p className="text-sm leading-relaxed text-card-foreground">
-          To be signed out here when you sign out of Authentik, set the provider&apos;s{' '}
-          <span className="font-medium">Logout URI</span> to this, with the logout method{' '}
-          <span className="font-medium">Back-channel</span> (Authentik 2025.8 or later):
-        </p>
-        <CopyField id="sso-logout" label="Logout URI" value={logoutUri} />
-        <p className="text-sm leading-relaxed text-card-foreground">
-          And to come back to the sign-in page after signing out, add this to its{' '}
-          <span className="font-medium">Post logout redirect URIs</span>:
-        </p>
-        <CopyField id="sso-after-logout" label="Post logout redirect URI" value={afterLogoutUri} />
-      </div>
+  const label = form.label || 'Authentik'
 
-      <form noValidate
+  return (
+    <div className="space-y-6">
+      <p className={HINT}>
+        The steps are for Authentik. Keycloak, Entra ID, Google and other OpenID Connect providers work the same way: a
+        confidential client with the redirect URI below, ID tokens signed with a key (RS256 or ES256) rather than the
+        client secret, the <Scope>openid</Scope> <Scope>email</Scope> <Scope>profile</Scope> scopes, and a{' '}
+        <Scope>groups</Scope> claim if roles come from groups.
+      </p>
+
+      <form
+        noValidate
         onSubmit={event => {
           event.preventDefault()
           void save(form, 'save')
         }}
-        className="space-y-6"
       >
-        <div className="grid items-start gap-4 sm:grid-cols-2">
-          <Input
-            label="Issuer"
-            required
-            placeholder="https://auth.example.com/application/o/clearping/"
-            value={form.issuer}
-            onChange={event => set('issuer')(event.target.value)}
-          />
-          <Input label="Name on the button" placeholder="Authentik" value={form.label} maxLength={40} onChange={event => set('label')(event.target.value)} />
-          <Input label="Client ID" required autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
-          <PasswordField
-            label="Client secret"
-            required={!saved.clientSecretSet}
-            autoComplete="new-password"
-            description={saved.clientSecretSet ? 'Saved. Leave it empty to keep it.' : undefined}
-            value={form.clientSecret}
-            onChange={event => set('clientSecret')(event.target.value)}
-          />
-          <div className="sm:col-span-2">
+        <ol className="space-y-8">
+          <Step number={1} title="Create a provider in Authentik">
+            <p className={STEP_TEXT}>
+              In Authentik&apos;s admin interface, go to <Path>Applications → Providers → Create</Path> and choose{' '}
+              <Path>OAuth2/OpenID Provider</Path>. Name it, pick an authorization flow (either default flow is fine), and set:
+            </p>
+            <dl className="divide-y divide-border rounded-2xl border border-border">
+              <ProviderSetting name="Client type">
+                <span className="font-medium">Confidential</span>
+              </ProviderSetting>
+              <ProviderSetting name="Redirect URIs">
+                <CopyField id="sso-redirect" label="Redirect URI, matching Strict" value={redirectUri} />
+                <p className={HINT}>
+                  Taken from the address this page is open at, so open Settings at the address people use for ClearPing.
+                </p>
+                {savedElsewhere && (
+                  <p className="text-xs text-warning">
+                    Saved from another address ({saved.redirectUri}). Saving here switches to the one above, so Authentik
+                    needs that one.
+                  </p>
+                )}
+              </ProviderSetting>
+              <ProviderSetting name="Signing Key">
+                <p className="text-sm">Any key, such as <span className="font-medium">authentik Self-signed Certificate</span>.</p>
+                <p className={HINT}>Required. Without one, Authentik signs with the client secret, and ClearPing refuses the sign-in.</p>
+              </ProviderSetting>
+              <ProviderSetting name="Scopes">
+                <p className="flex flex-wrap gap-1.5">
+                  <Scope>openid</Scope>
+                  <Scope>email</Scope>
+                  <Scope>profile</Scope>
+                </p>
+                <p className={HINT}>
+                  Under Advanced protocol settings. These are Authentik&apos;s defaults, so leave them as they are:{' '}
+                  <Scope>profile</Scope> carries the username and the groups ClearPing reads.
+                </p>
+              </ProviderSetting>
+            </dl>
+          </Step>
+
+          <Step number={2} title="Create an application for it">
+            <p className={STEP_TEXT}>
+              Go to <Path>Applications → Applications → Create</Path>, name it ClearPing, and choose the provider from step 1.
+              To keep some people out entirely, bind a group or policy to the application there.
+            </p>
+          </Step>
+
+          <Step number={3} title="Paste its details here">
+            <p className={STEP_TEXT}>
+              All three are on the provider&apos;s page in Authentik. The issuer is the{' '}
+              <Path>OpenID Configuration Issuer</Path>, ending in <span className="font-mono">/application/o/&lt;slug&gt;/</span>.
+            </p>
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Input
+                  label="Issuer"
+                  required
+                  placeholder="https://auth.example.com/application/o/clearping/"
+                  value={form.issuer}
+                  onChange={event => set('issuer')(event.target.value)}
+                />
+              </div>
+              <Input label="Client ID" required autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
+              <PasswordField
+                label="Client secret"
+                required={!saved.clientSecretSet}
+                autoComplete="new-password"
+                description={saved.clientSecretSet ? 'Saved. Leave it empty to keep it.' : undefined}
+                value={form.clientSecret}
+                onChange={event => set('clientSecret')(event.target.value)}
+              />
+              <Input
+                label="Button name"
+                placeholder="Authentik"
+                description={`The sign-in page shows "Sign in with ${label}".`}
+                value={form.label}
+                maxLength={40}
+                onChange={event => set('label')(event.target.value)}
+              />
+            </div>
+            {tested && <Alert tone={tested.ok ? 'success' : 'danger'} title={tested.ok ? 'The issuer answered' : 'The issuer did not answer'}>{tested.text}</Alert>}
+            <div>
+              <Button type="button" variant="secondary" size="sm" loading={busy === 'test'} disabled={(busy !== null && busy !== 'test') || !form.issuer} onClick={test}>
+                Check the issuer
+              </Button>
+            </div>
+          </Step>
+
+          <Step number={4} title="Choose who can sign in, and as what">
             <Input
               label="Only members of this group (optional)"
               placeholder="clearping-users"
-              description="Left empty, anyone the provider lets through to this application can sign in."
+              description={`An Authentik group name. Left empty, anyone ${label} lets into the application can sign in.`}
               value={form.allowedGroup}
               onChange={event => set('allowedGroup')(event.target.value)}
             />
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <p className={SECTION_TITLE}>Roles from groups</p>
-            <p className={HINT}>
-              Name a group at {form.label || 'the provider'} for each role, and every sign-in through it sets the
-              account&apos;s role from the person&apos;s groups: in the admin group, an admin; in the editor group, an
-              editor; in neither, a viewer. Left empty, roles are set here, in Accounts. The last admin is never made
-              anything else this way.
-            </p>
-          </div>
-          <div className="grid items-start gap-4 sm:grid-cols-2">
-            <Input label="Admins: members of" placeholder="clearping-admins" value={form.adminGroup} onChange={event => set('adminGroup')(event.target.value)} />
-            <Input label="Editors: members of" placeholder="clearping-editors" value={form.editorGroup} onChange={event => set('editorGroup')(event.target.value)} />
-          </div>
-          <div className="max-w-sm">
-            <Select
-              label="An account made at its first sign-in starts as"
-              description={groupsDecide ? 'Its groups decide.' : undefined}
-              value={form.newAccountRole}
-              disabled={groupsDecide}
-              onValueChange={value => setForm(previous => ({ ...previous, newAccountRole: value as Role }))}
-              options={ROLE_OPTIONS}
+            <SettingSwitch
+              checked={form.autoCreate}
+              onChange={on => set('autoCreate')(on)}
+              label="Create an account at first sign-in"
+              detail="Someone new gets an account under their Authentik username. Off: only accounts already linked can sign in this way."
             />
-          </div>
-        </div>
+            <div className="space-y-1">
+              <p className={SECTION_TITLE}>Roles from groups (optional)</p>
+              <p className={HINT}>
+                Name an Authentik group for each role. Every sign-in then sets the role from the person&apos;s groups: admin
+                group, admin; editor group, editor; neither, viewer. Left empty, you set roles in Accounts. The last admin is
+                never demoted this way.
+              </p>
+            </div>
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <Input label="Admin group" placeholder="clearping-admins" value={form.adminGroup} onChange={event => set('adminGroup')(event.target.value)} />
+              <Input label="Editor group" placeholder="clearping-editors" value={form.editorGroup} onChange={event => set('editorGroup')(event.target.value)} />
+            </div>
+            <div className="max-w-sm">
+              <Select
+                label="New accounts start as"
+                description={groupsDecide ? 'Set by their groups instead.' : undefined}
+                value={form.newAccountRole}
+                disabled={groupsDecide}
+                onValueChange={value => setForm(previous => ({ ...previous, newAccountRole: value as Role }))}
+                options={ROLE_OPTIONS}
+              />
+            </div>
+          </Step>
 
-        <SettingSwitch
-          checked={form.autoCreate}
-          onChange={on => set('autoCreate')(on)}
-          label="Make an account on first sign-in"
-          detail="Off: only accounts already linked can sign in this way."
-        />
+          <Step number={5} title="Signing out (optional)">
+            <SettingSwitch
+              checked={form.signOutAtProvider}
+              onChange={on => set('signOutAtProvider')(on)}
+              label={`Signing out of ClearPing signs out of ${label} too`}
+              detail={
+                <>
+                  With the provider&apos;s default invalidation flow this ends only ClearPing&apos;s session at Authentik. Set
+                  the provider&apos;s <Path>Invalidation flow</Path> to <span className="font-mono">default-invalidation-flow</span>{' '}
+                  to log out of Authentik completely.
+                </>
+              }
+            />
+            <p className={STEP_TEXT}>
+              To be signed out of ClearPing when you sign out of Authentik (2025.8 or later), set these on the provider,
+              with <Path>Logout Method</Path> set to <span className="font-medium">Back-channel</span>:
+            </p>
+            <CopyField id="sso-logout" label="Logout URI" value={logoutUri} />
+            <CopyField id="sso-after-logout" label="Post logout redirect URI, to come back to ClearPing's sign-in page" value={afterLogoutUri} />
+            <div className="pt-2">
+              <Button type="submit" loading={busy === 'save'} disabled={busy !== null && busy !== 'save'}>
+                Save single sign-on
+              </Button>
+            </div>
+          </Step>
 
-        <SettingSwitch
-          checked={form.signOutAtProvider}
-          onChange={on => set('signOutAtProvider')(on)}
-          label={`Signing out here signs out of ${form.label || 'the provider'} too`}
-          detail="For sessions signed in through it. Whether that ends only this application's session there or the whole Authentik session is the provider's invalidation flow: default-invalidation-flow logs out of Authentik."
-        />
-
-        {tested && <Alert tone={tested.ok ? 'success' : 'danger'} title={tested.ok ? 'The issuer answered' : 'The issuer did not answer'}>{tested.text}</Alert>}
-
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" loading={busy === 'save'} disabled={busy !== null && busy !== 'save'}>
-            Save single sign-on
-          </Button>
-          <Button type="button" variant="secondary" loading={busy === 'test'} disabled={(busy !== null && busy !== 'test') || !form.issuer} onClick={test}>
-            Test the issuer
-          </Button>
-        </div>
+          <Step number={6} title="Turn it on">
+            <SettingSwitch
+              checked={saved.enabled}
+              disabled={busy !== null || (!saved.enabled && !configured)}
+              onChange={on => save({ enabled: on }, 'toggle')}
+              label={`Show "Sign in with ${saved.label}"`}
+              detail={configured ? 'Adds the button to the sign-in page.' : 'Save the issuer, client ID and client secret first.'}
+            />
+            <SsoLink data={{ ...data, sso: { ...data.sso, enabled: usable } }} reload={reload} />
+            <SettingSwitch
+              checked={data.settings.passwordLogin}
+              disabled={passwordLocked}
+              onChange={changePasswordLogin}
+              label="Allow signing in with a password"
+              detail={
+                passwordLocked
+                  ? `Can be turned off once ${saved.label} sign-in is on and your own account is linked to it.`
+                  : `Off: ${saved.label} is the only way in. If it ever fails, start ClearPing with CLEARPING_AUTH=off to get back in.`
+              }
+            />
+          </Step>
+        </ol>
       </form>
-
-      <div className="space-y-5 border-t border-border pt-6">
-        <SettingSwitch
-          checked={saved.enabled}
-          disabled={busy !== null || (!saved.enabled && !configured)}
-          onChange={on => save({ enabled: on }, 'toggle')}
-          label={`Sign in with ${saved.label}`}
-          detail={configured ? 'Shows the button on the sign-in page.' : 'Save an issuer, client ID and client secret first.'}
-        />
-
-        <SsoLink data={{ ...data, sso: { ...data.sso, enabled: usable } }} reload={reload} />
-
-        <SettingSwitch
-          checked={data.settings.passwordLogin}
-          disabled={passwordLocked}
-          onChange={changePasswordLogin}
-          label="Allow signing in with a password"
-          detail={
-            passwordLocked
-              ? `Can be turned off once ${saved.label} sign-in is on and your own account is linked to it.`
-              : `Off: ${saved.label} is the only way in. CLEARPING_AUTH=off turns passwords back on if it ever fails.`
-          }
-        />
-      </div>
     </div>
   )
 }
 
+/** One numbered step of a setup, its number in a circle beside it. */
+function Step({ number, title, children }: { number: number; title: string; children: ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <span
+        className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-medium text-primary"
+        aria-hidden="true"
+      >
+        {number}
+      </span>
+      <div className="min-w-0 flex-1 space-y-3">
+        <h3 className="pt-0.5 text-sm font-medium text-card-foreground">
+          <span className="sr-only">Step {number}: </span>
+          {title}
+        </h3>
+        {children}
+      </div>
+    </li>
+  )
+}
+
+/** A setting on the provider's page in Authentik, and what to set it to. */
+function ProviderSetting({ name, children }: { name: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-2 px-4 py-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-4">
+      <dt className="pt-0.5 text-xs font-medium text-muted-foreground">{name}</dt>
+      <dd className="min-w-0 space-y-2">{children}</dd>
+    </div>
+  )
+}
+
+/** A menu path or field name in the provider's interface. */
+function Path({ children }: { children: ReactNode }) {
+  return <span className="font-medium text-card-foreground">{children}</span>
+}
+
+/** An OpenID Connect scope or claim, as it is written. */
+function Scope({ children }: { children: ReactNode }) {
+  return <code className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-card-foreground">{children}</code>
+}
+
+const STEP_TEXT = 'text-sm leading-relaxed text-muted-foreground'
 
 const ACTIONS: Record<string, string> = {
   'target.add': 'added a target',
@@ -991,17 +1083,27 @@ function ActivityTab() {
 /** The groups the sections are listed under, in order. */
 const GROUPS = ['Security', 'Monitoring', 'More'] as const
 
-const SECTIONS: { value: SettingsSection; label: string; icon: LucideIcon; group: (typeof GROUPS)[number]; adminOnly?: boolean }[] = [
-  { value: 'access', label: 'Access', icon: ShieldCheck, group: 'Security', adminOnly: true },
-  { value: 'sign-in', label: 'Sign-in', icon: Fingerprint, group: 'Security' },
-  { value: 'keys', label: 'Keys', icon: KeyRound, group: 'Security' },
-  { value: 'sso', label: 'Single sign-on', icon: LogIn, group: 'Security' },
-  { value: 'accounts', label: 'Accounts', icon: Users, group: 'Security' },
-  { value: 'probe-agents', label: 'Probe agents', icon: RadioTower, group: 'Monitoring', adminOnly: true },
-  { value: 'routing', label: 'Routing', icon: Network, group: 'Monitoring', adminOnly: true },
-  { value: 'maintenance', label: 'Maintenance', icon: Wrench, group: 'Monitoring', adminOnly: true },
-  { value: 'activity', label: 'Activity', icon: History, group: 'More', adminOnly: true },
-  { value: 'assistant', label: 'AI assistant', icon: Bot, group: 'More' },
+interface Section {
+  value: SettingsSection
+  label: string
+  /** One line under the section's title: what it is for. */
+  intro: string
+  icon: LucideIcon
+  group: (typeof GROUPS)[number]
+  adminOnly?: boolean
+}
+
+const SECTIONS: Section[] = [
+  { value: 'access', label: 'Access', intro: 'Whether people have to sign in to use ClearPing, and whether AI assistants need a key.', icon: ShieldCheck, group: 'Security', adminOnly: true },
+  { value: 'sign-in', label: 'Sign-in', intro: 'Add a second step to signing in, with an authenticator app or a passkey.', icon: Fingerprint, group: 'Security' },
+  { value: 'keys', label: 'Keys', intro: "Let scripts and AI assistants use ClearPing's API and MCP server without signing in.", icon: KeyRound, group: 'Security' },
+  { value: 'sso', label: 'Single sign-on', intro: 'Let people sign in with Authentik or another OpenID Connect provider instead of a ClearPing password.', icon: LogIn, group: 'Security' },
+  { value: 'accounts', label: 'Accounts', intro: 'Who can sign in, and what each person can do.', icon: Users, group: 'Security' },
+  { value: 'probe-agents', label: 'Probe agents', intro: 'Take readings from other machines, such as a VPS abroad, as well as from this server. Nothing to do with AI agents.', icon: RadioTower, group: 'Monitoring', adminOnly: true },
+  { value: 'routing', label: 'Routing', intro: 'Watch how the rest of the internet reaches your own IP prefixes in BGP.', icon: Network, group: 'Monitoring', adminOnly: true },
+  { value: 'maintenance', label: 'Maintenance', intro: 'Check the database for damage, clear out leftovers and old data, and keep the file tidy.', icon: Wrench, group: 'Monitoring', adminOnly: true },
+  { value: 'activity', label: 'Activity', intro: 'Every change, sign-in and failed sign-in, with who did it and how. Kept for a year.', icon: History, group: 'More', adminOnly: true },
+  { value: 'assistant', label: 'AI assistant', intro: 'Connect an assistant such as Claude over MCP, then ask it about your network in plain words.', icon: Bot, group: 'More' },
 ]
 
 interface SettingsPageProps {
@@ -1063,7 +1165,13 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
       !me ||
       canAdminister(me.role) ||
       (!item.adminOnly && (item.value !== 'sso' || (loaded.state === 'ready' && loaded.data.sso.enabled)))
-  ).map(item => (item.value === 'accounts' && me && !canAdminister(me.role) ? { ...item, label: 'Your account' } : item))
+  ).map(item =>
+    item.value === 'accounts' && me && !canAdminister(me.role)
+      ? { ...item, label: 'Your account', intro: 'Your role, and your password.' }
+      : item.value === 'sign-in' && me && canAdminister(me.role)
+        ? { ...item, intro: 'Add a second step to your own sign-in, and choose what every account must have.' }
+        : item
+  )
   const current = sections.find(item => item.value === section) ?? sections[0]
 
   return (
@@ -1140,7 +1248,11 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
           })}
         </nav>
 
-        <section aria-label={current.label} className="min-w-0 text-foreground">
+        <section aria-labelledby="settings-section-title" className="min-w-0 space-y-4 text-foreground">
+        <header>
+          <h2 id="settings-section-title" className="text-lg font-medium text-foreground">{current.label}</h2>
+          <p className="mt-0.5 max-w-3xl text-sm text-muted-foreground">{current.intro}</p>
+        </header>
         {current.value === 'assistant' ? (
           <AssistantSettings onMakeKey={() => onSection('keys')} />
         ) : (

@@ -296,10 +296,6 @@ export function AssistantSettings({ onMakeKey }: { onMakeKey?: () => void }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm leading-relaxed text-muted-foreground">
-        AI assistants such as Claude can read this ClearPing over MCP: your targets, every outage and when it happened,
-        and the traceroutes. Add the address below to your assistant, then ask in plain words.
-      </p>
       {inBrowser ? <McpSetup onMakeKey={onMakeKey} /> : <Skeleton label="Loading the setup" lines={4} />}
     </div>
   )

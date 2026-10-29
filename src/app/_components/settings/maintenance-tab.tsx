@@ -227,11 +227,8 @@ export function MaintenanceTab() {
       <section className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
-            <h2 className={SECTION_TITLE}>Maintenance</h2>
-            <p className={HINT}>
-              Checks the database for damage, clears out history left behind by deleted targets and alerts, trims data past its
-              retention and tidies the database file. Safe at any time: probing carries on while it runs, and you can leave this page.
-            </p>
+            <h3 className={SECTION_TITLE}>Run it now</h3>
+            <p className={HINT}>Safe at any time: probing carries on while it runs, and you can leave this page.</p>
           </div>
           <Button type="button" onClick={runNow} disabled={running || starting}>
             <Play size={16} strokeWidth={1.75} aria-hidden="true" />

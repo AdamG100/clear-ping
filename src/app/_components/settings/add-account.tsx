@@ -109,12 +109,11 @@ export function AddAccount({ onAdded }: { onAdded: () => void }) {
 
   return (
     <div className="space-y-4">
-      {/* The page's own heading, with the way to add one where the eye starts. */}
+      {/* The way to add one where the eye starts. */}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="text-sm font-medium text-card-foreground">Accounts</p>
-          <p className={HINT}>Who can sign in, and what each person can do.</p>
-        </div>
+        <p className={`${HINT} min-w-0 max-w-xl pt-1`}>
+          Add someone, choose their role, and send them a link to set their own password.
+        </p>
         <Button
           type="button"
           variant={open ? 'secondary' : 'primary'}
