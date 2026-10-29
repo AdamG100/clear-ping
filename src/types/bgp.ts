@@ -321,6 +321,24 @@ export interface BgpPrefixDetail extends BgpPrefixSummary {
   home: BgpHome
   /** What the exchanges' own route collectors have for it; null until first read. */
   exchanges: BgpExchangeLook | null
+  /**
+   * The exchanges anywhere in the world the way to it from your own networks
+   * probably passes through, by PeeringDB: from your ISP's routes and your
+   * traceroutes. Empty without PeeringDB, or with no way from yours known.
+   */
+  onTheWay: BgpPathCrossing[]
+}
+
+/** An exchange the way to a prefix passes through, or one of a few, where which cannot be told apart. */
+export interface BgpPathCrossing {
+  /** One exchange, or the two or three in one country it is one of. */
+  exchanges: BgpExchange[]
+  /** Paths that cross it. */
+  routes: number
+  /** Whose ways cross it: "This server", or a probe agent's name. */
+  from: string[]
+  /** Where on the path: one network handing the prefix to the next, with how many routes do so there. */
+  handoffs: { from: number; to: number; routes: number }[]
 }
 
 /** A member's route to the prefix at an exchange, as the exchange's route collector has it. */

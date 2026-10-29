@@ -1,7 +1,9 @@
 import type {
   BgpConnection,
   BgpExchangeLook,
+  BgpHome,
   BgpOverview,
+  BgpPathCrossing,
   BgpPeerRoute,
   BgpPrefix,
   BgpPrefixDetail,
@@ -14,7 +16,7 @@ import type {
 } from '@/types/bgp'
 import { assess, effectiveRoutes, peerKey, takeBaseline } from './assess'
 import { collectorInfo, collectorName, peerPlace, type Place } from './collectors'
-import { exchangeData } from './exchanges'
+import { exchangeData, exchangesOnPaths } from './exchanges'
 import { agentChoices, homeCarriers, homeChanges, homeView, traceInto } from './home'
 import { learn } from './learn'
 import { LOOK_EVERY_MS, lookAtExchanges, offExchanges, originPresent } from './looking-glass'
@@ -657,7 +659,24 @@ class BgpMonitor {
       connection: this.connection,
       home,
       exchanges: watched.exchanges,
+      onTheWay: await this.onTheWay(home),
     }
+  }
+
+  /**
+   * The exchanges on the way to it from your own networks, wherever they
+   * are: along the routes your ISPs hand RIS's collectors, and the way your
+   * traceroutes went, from this server and each probe agent. Others' routes
+   * say nothing of the way your traffic goes.
+   */
+  private async onTheWay(home: BgpHome): Promise<BgpPathCrossing[]> {
+    const data = await exchangeData().catch(() => null)
+    if (!data) return []
+    const paths = home.vantages.flatMap(vantage => [
+      ...vantage.routes.flatMap(peer => (peer.route ? [{ path: peer.route.path, from: vantage.name }] : [])),
+      ...(vantage.tracedPath.length > 1 ? [{ path: vantage.tracedPath, from: vantage.name }] : []),
+    ])
+    return exchangesOnPaths(paths, data, asn => this.countries.get(asn))
   }
 
   // ─── Changes ────────────────────────────────────────────────────────────

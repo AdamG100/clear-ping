@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { crossingOf, exchangeOf, joinExchanges, likelyCrossing, sharedExchanges, type ExchangeLan } from './exchanges'
+import { crossingOf, exchangeOf, joinExchanges, likelyCrossing, exchangesOnPaths, sharedExchanges, type ExchangeLan } from './exchanges'
 import { readIxpdb } from './ixpdb'
 import { addressKey } from './prefix'
 
@@ -83,5 +83,49 @@ describe('exchanges', () => {
     expect(joinExchanges(null, ixpdb)).toEqual({ lans: [], exchanges: [], members: {}, ports: ixpdb.ports })
     expect(joinExchanges({ lans, ...members }, null)?.ports).toEqual({})
     expect(joinExchanges(null, null)).toBeNull()
+  })
+})
+
+describe('the exchanges routes pass through', () => {
+  const NAPAFRICA = { name: 'NAPAfrica Johannesburg', city: 'Johannesburg', country: 'ZA' }
+  const LINX = { name: 'LINX LON1', city: 'London', country: 'GB' }
+  const DECIX = { name: 'DE-CIX Frankfurt', city: 'Frankfurt', country: 'DE' }
+  const AMSIX = { name: 'AMS-IX', city: 'Amsterdam', country: 'NL' }
+  const data = {
+    exchanges: [NAPAFRICA, LINX, DECIX, AMSIX],
+    members: {
+      // The origin, at NAPAfrica only.
+      64500: [0],
+      // A local carrier, at NAPAfrica and LINX.
+      64501: [0, 1],
+      // Two large carriers, meeting at three exchanges.
+      64510: [1, 2, 3],
+      64511: [1, 2, 3],
+    } as Record<string, number[]>,
+  }
+  const country: Record<number, string> = { 64500: 'ZA', 64501: 'ZA', 64510: 'GB', 64511: 'US' }
+
+  it('places a hand-off at the one exchange the two networks share, anywhere in the world', () => {
+    const found = exchangesOnPaths(
+      [
+        { path: [64510, 64501, 64500], from: 'Berlin VPS' },
+        { path: [64501, 64500], from: 'This server' },
+        { path: [64501, 64501, 64500], from: 'This server' },
+      ],
+      data,
+      asn => country[asn]
+    )
+    expect(found).toEqual([
+      { exchanges: [NAPAFRICA], routes: 3, from: ['Berlin VPS', 'This server'], handoffs: [{ from: 64501, to: 64500, routes: 3 }] },
+      // Further along the first path, in London.
+      { exchanges: [LINX], routes: 1, from: ['Berlin VPS'], handoffs: [{ from: 64510, to: 64501, routes: 1 }] },
+    ])
+  })
+
+  it('places networks that share several exchanges by their countries, or not at all', () => {
+    const found = exchangesOnPaths([{ path: [64511, 64510, 64501, 64500], from: 'This server' }], data, asn => country[asn])
+    // 64511 and 64510 meet at three exchanges, one in 64510's country: London.
+    expect(found.map(each => each.exchanges.map(exchange => exchange.name))).toEqual([['LINX LON1'], ['NAPAfrica Johannesburg']])
+    expect(exchangesOnPaths([{ path: [64511, 64510], from: 'This server' }], data)).toEqual([])
   })
 })

@@ -1,4 +1,4 @@
-import type { BgpCrossing, BgpExchange } from '@/types/bgp'
+import type { BgpCrossing, BgpExchange, BgpPathCrossing } from '@/types/bgp'
 import { ixpdbData, type IxpdbData } from './ixpdb'
 import { addressKey, blockKey, prefixHolder, prefixLength } from './prefix'
 import { readExchangeCopy, saveExchangeCopy } from './store'
@@ -274,4 +274,67 @@ export function likelyCrossing(
     previous = each.asn
   }
   return null
+}
+
+/** Two or three exchanges in one country are still worth naming; more says nothing. */
+const MOST_CANDIDATES = 3
+
+/**
+ * Where paths to a prefix probably pass through exchanges, anywhere in the
+ * world: each hand-off on a path from one network to the next where the two
+ * are members of an exchange together, by PeeringDB. Probably, as two members
+ * may also be joined privately. Each path says whose it is.
+ *
+ * Two networks that share many exchanges (large carriers meet at dozens) are
+ * placed by the countries they are registered in: the shared exchanges in
+ * either's country, when there are at most three. Otherwise where they meet
+ * cannot be said, and the hand-off is left out rather than guessed.
+ */
+export function exchangesOnPaths(
+  paths: readonly { path: readonly number[]; from: string }[],
+  data: Pick<ExchangeData, 'exchanges' | 'members'>,
+  countryOf: (asn: number) => string | undefined = () => undefined
+): BgpPathCrossing[] {
+  const placed = new Map<string, BgpExchange[] | null>()
+  const where = (from: number, to: number): BgpExchange[] | null => {
+    const key = `${from}>${to}`
+    if (placed.has(key)) return placed.get(key)!
+    const shared = sharedExchanges(from, to, data)
+    const home = new Set([countryOf(from), countryOf(to)].filter(Boolean))
+    const near = shared.length <= 1 ? shared : shared.filter(exchange => home.has(exchange.country))
+    const found = near.length > 0 && near.length <= MOST_CANDIDATES ? near : null
+    placed.set(key, found)
+    return found
+  }
+
+  const byPlace = new Map<
+    string,
+    { exchanges: BgpExchange[]; routes: number; from: Set<string>; handoffs: Map<string, { from: number; to: number; routes: number }> }
+  >()
+  for (const { path, from: whose } of paths) {
+    const steps = path.filter((asn, index) => index === 0 || asn !== path[index - 1])
+    const crossed = new Set<string>()
+    for (let i = 1; i < steps.length; i++) {
+      const [from, to] = [steps[i - 1], steps[i]]
+      const exchanges = where(from, to)
+      if (!exchanges) continue
+      const key = exchanges.map(exchange => exchange.name).sort().join('|')
+      const row = byPlace.get(key) ?? { exchanges, routes: 0, from: new Set<string>(), handoffs: new Map() }
+      if (!crossed.has(key)) row.routes++
+      row.from.add(whose)
+      crossed.add(key)
+      const handoff = row.handoffs.get(`${from}>${to}`) ?? { from, to, routes: 0 }
+      handoff.routes++
+      row.handoffs.set(`${from}>${to}`, handoff)
+      byPlace.set(key, row)
+    }
+  }
+  return [...byPlace.values()]
+    .map(row => ({
+      exchanges: row.exchanges,
+      routes: row.routes,
+      from: [...row.from],
+      handoffs: [...row.handoffs.values()].sort((a, b) => b.routes - a.routes),
+    }))
+    .sort((a, b) => b.routes - a.routes)
 }

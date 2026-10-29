@@ -9,8 +9,8 @@ import { SearchResults } from '@/components/search-results'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
-import type { BgpExchangeLook, BgpExchangeRoute, BgpExchangeView, BgpPeerRoute } from '@/types/bgp'
-import { isDirect } from '@/lib/bgp/path'
+import type { BgpExchangeLook, BgpExchangeRoute, BgpExchangeView, BgpPathCrossing } from '@/types/bgp'
+import { countryName } from '@/lib/bgp/countries'
 import { cn } from '@/lib/utils'
 import { ago, asLabel } from './state'
 
@@ -475,56 +475,80 @@ export function ExchangePanel({
   )
 }
 
-/** RIPE RIS collectors shown before the rest are only counted. */
-const RIS_SHOWN = 8
+/** Exchanges listed before the rest wait behind "Show all". */
+const ON_THE_WAY_SHOWN = 10
 
 /**
- * The exchanges RIPE RIS has a collector at (NAPAfrica, LINX, DE-CIX and the
- * rest), and how the prefix looks there: how many of the collector's peers
- * carry it, and how many reach the origin with nothing in between. These
- * exchanges publish no looking glass ClearPing reads, so this is what is known
- * of them, from RIS's own sessions there.
+ * The exchanges anywhere in the world on the way to the prefix from your own
+ * networks: where two networks next to each other on your ISP's route, or on
+ * the way your traceroute went, are members of the same exchange (by
+ * PeeringDB), and where a traceroute crossed one for sure. Those shown above
+ * from their own route collectors are not listed again.
  */
-export function RisExchanges({ peers }: { peers: readonly BgpPeerRoute[] }) {
+export function ExchangesOnTheWay({
+  crossings,
+  traced,
+  shownAbove,
+  names,
+}: {
+  crossings: readonly BgpPathCrossing[]
+  /** Your traceroutes' crossings: a sure one marks its exchange, or adds it. */
+  traced: readonly ExchangeCrossing[]
+  /** The exchanges already shown from their own route collectors. */
+  shownAbove: readonly string[]
+  names: Record<number, string>
+}) {
   const [all, setAll] = useState(false)
-  const byCollector = new Map<string, { exchange: string; city: string; collector: string; total: number; carrying: number; direct: number }>()
-  for (const peer of peers) {
-    const [city, exchange] = peer.location.split(', ')
-    // A multihop collector is at no exchange: its peers are anywhere.
-    if (!exchange) continue
-    const row = byCollector.get(peer.collector) ?? { exchange, city, collector: peer.collector, total: 0, carrying: 0, direct: 0 }
-    row.total++
-    if (peer.route) {
-      row.carrying++
-      if (isDirect(peer.route.path)) row.direct++
-    }
-    byCollector.set(peer.collector, row)
-  }
-  const rows = [...byCollector.values()].sort((a, b) => b.direct - a.direct || b.carrying - a.carrying || a.exchange.localeCompare(b.exchange))
-  if (rows.length === 0) return null
-  const shown = all ? rows : rows.slice(0, RIS_SHOWN)
+  const above = (name: string) => shownAbove.some(view => sameExchange(view, name))
+  const tracedAt = (name: string) => traced.some(crossing => crossing.sure && crossing.exchanges.some(each => each === name || sameExchange(name, each)))
+
+  // Left out only when every exchange it may be is shown above: "NAPAfrica or JINX" still says something JINX alone does not.
+  const rows = crossings.filter(row => !row.exchanges.every(exchange => above(exchange.name)))
+  // Crossed by a traceroute and on no path: still on the way, for your traffic.
+  const onlyTraced = [...new Set(traced.filter(crossing => crossing.sure).flatMap(crossing => crossing.exchanges))].filter(
+    name => !above(name) && !rows.some(row => row.exchanges.some(exchange => exchange.name === name || sameExchange(exchange.name, name)))
+  )
+  if (rows.length === 0 && onlyTraced.length === 0) return null
+  const shown = all ? rows : rows.slice(0, ON_THE_WAY_SHOWN)
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">
-        Also seen at these exchanges by RIPE RIS, which has a route collector at each. Directly: the peer reaches the origin with no
-        network in between.
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Exchanges anywhere in the world on the way here from your ISP: on the routes your own networks have, and the way your
+        traceroutes went. Where two networks next to each other are members of the same exchange (PeeringDB), they probably meet
+        there, as they may also be linked privately; a traceroute that crosses one is sure.
       </p>
-      <ul className="grid gap-2 @2xl/main:grid-cols-2">
-        {shown.map(row => (
-          <li key={row.collector} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
-            <span className="min-w-0">
-              <span className="block truncate text-sm">{row.exchange}</span>
-              <span className="block truncate text-[11px] text-muted-foreground">
-                {row.city} · {row.collector}
-              </span>
-            </span>
-            <span className="shrink-0 text-right text-xs">
-              <span className={cn('block', row.carrying === 0 ? 'text-signal-critical' : 'text-foreground')}>
-                {row.carrying} of {row.total} peer{row.total === 1 ? '' : 's'}
-              </span>
-              <span className="block text-muted-foreground">{row.direct > 0 ? `${row.direct} directly` : 'none directly'}</span>
-            </span>
+      <ul className="grid gap-2 @3xl/main:grid-cols-2">
+        {shown.map(row => {
+          const title = row.exchanges.map(exchange => exchange.name).join(' or ')
+          const place = [...new Set(row.exchanges.map(exchange => [exchange.city, countryName(exchange.country)].filter(Boolean).join(', ')))].join(' or ')
+          const sure = row.exchanges.some(exchange => tracedAt(exchange.name))
+          return (
+            <li key={title} className="space-y-1.5 rounded-xl border border-border px-3 py-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block text-sm">{title}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">{place}</span>
+                </span>
+                <span className="shrink-0 text-right text-xs text-muted-foreground">From {row.from.join(', ')}</span>
+              </div>
+              <ul className="space-y-0.5 text-[11px] text-muted-foreground">
+                {row.handoffs.slice(0, 2).map(handoff => (
+                  <li key={`${handoff.from}>${handoff.to}`} className="truncate">
+                    {asLabel(handoff.from, names)} → {asLabel(handoff.to, names)}
+                  </li>
+                ))}
+                {row.handoffs.length > 2 && <li>and {row.handoffs.length - 2} more hand-offs</li>}
+              </ul>
+              {sure && <Badge size="sm" tone="success">Your traceroute crosses it</Badge>}
+            </li>
+          )
+        })}
+        {onlyTraced.map(name => (
+          <li key={`traced:${name}`} className="space-y-1.5 rounded-xl border border-border px-3 py-2.5">
+            <span className="block text-sm">{name}</span>
+            <span className="block text-[11px] text-muted-foreground">On no route the collectors see, but your traffic crosses it.</span>
+            <Badge size="sm" tone="success">Your traceroute crosses it</Badge>
           </li>
         ))}
       </ul>

@@ -21,7 +21,7 @@ import { BGP_DIRECT, BGP_REGION_LABEL, type BgpPrefixDetail, type BgpState } fro
 import { PANE, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
 import { StatusIndicator } from '../sidebar/status-indicator'
 import { ActivityStrip, clock } from './activity-strip'
-import { ExchangePanel, RisExchanges, sameExchange, type ExchangeCrossing } from './exchange-panel'
+import { ExchangePanel, ExchangesOnTheWay, sameExchange, type ExchangeCrossing } from './exchange-panel'
 import { HomePanel } from './home-panel'
 import { NetworkDialog } from './network-dialog'
 import { PathGraph } from './path-graph'
@@ -446,6 +446,7 @@ export function PrefixPage({
         <NetworkDialog key={detail.home.asns.join()} open={settingNetwork} onOpenChange={setSettingNetwork} asns={detail.home.asns} agents={detail.home.agents} onSaved={() => void reload()} />
       )}
 
+      {(exchangeLook === null || exchangeViews.length > 0 || (detail.onTheWay?.length ?? 0) > 0 || crossings.some(crossing => crossing.sure)) && (
       <Panel
         title="At the exchanges"
         note={
@@ -466,9 +467,15 @@ export function PrefixPage({
               now={fetchedAt}
             />
           )}
-          <RisExchanges peers={detail.peers} />
+          <ExchangesOnTheWay
+            crossings={detail.onTheWay ?? []}
+            traced={crossings}
+            shownAbove={exchangeViews.map(view => view.exchange)}
+            names={names}
+          />
         </div>
       </Panel>
+      )}
 
       <ScopeBar scope={scope} names={names} onScope={setScope} />
 
