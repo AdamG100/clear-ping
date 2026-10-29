@@ -146,21 +146,6 @@ export function OverviewDaySkeleton() {
           </div>
         </div>
       </section>
-      <section className={PANEL} aria-hidden="true">
-        <PanelTitle />
-        <div className="mt-3 space-y-4">
-          {[0, 1, 2].map(row => (
-            <div key={row} className="flex gap-3">
-              <Block className="size-6 shrink-0 rounded-full" />
-              <div className="min-w-0 flex-1">
-                <Block className="h-3.5 w-2/3" />
-                <Block className="mt-1.5 h-3 w-5/6" />
-              </div>
-              <Block className="h-3 w-10 shrink-0" />
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   )
 }

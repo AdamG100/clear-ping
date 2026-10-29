@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, type ReactNode } from 'react'
-import { Activity, ChartLine, ChevronRight, CircleX, MapPin, Plus, RadioTower, Server, X } from 'lucide-react'
+import { ChartLine, ChevronRight, MapPin, Plus, Server, X } from 'lucide-react'
 import type { GroupOrder, LatestMeasurement, Target } from '@/types/probe'
 import type { ProbeAgentSummary } from '@/types/probe-agent'
 import type { IncidentKind, OverviewEvent, OverviewReport, OverviewSlice } from '@/types/overview'
@@ -11,7 +11,6 @@ import { Button } from '@/components/arc/button/button'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { MetricCard } from '@/components/arc/metric-card/metric-card'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
-import { Timeline, type TimelineEvent } from '@/components/arc/timeline/timeline'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { alertTitle } from '@/lib/alerts/delivery'
 import { NO_DATA_COLOR, NO_REPLY_COLOR, SIGNAL_VARS } from '@/lib/charts/packet-loss-colors'
@@ -20,7 +19,7 @@ import { humanDuration } from '@/lib/reports/evidence'
 import { describeGroupHealth, groupIsOnline, groupIsPaused, summarizeGroupHealth } from '@/lib/targets/group-health'
 import { groupLabel, groupName } from '@/lib/targets/group-path'
 import { buildSidebarLayout, subgroups, targetsWithin } from '@/lib/targets/sidebar-layout'
-import { displayLocale, displayTimeZone, inDisplayZone, wallClock } from '@/lib/time-zone'
+import { displayTimeZone, inDisplayZone, wallClock } from '@/lib/time-zone'
 import { cn } from '@/lib/utils'
 import type { AlertResponse } from '../alerts/alerts-view'
 import { PROBE_AGENT_STATE } from '../settings/probe-agent-labels'
@@ -113,7 +112,7 @@ function Headline({ now, agentsDown }: { now: ReturnType<typeof standing>; agent
   if (now.down.length > 0) {
     return (
       <Alert tone="danger" title={`${plural(now.down.length, 'target')} not answering`}>
-        {nameList(now.down.map(target => target.name))} {now.down.length === 1 ? 'is' : 'are'} getting no reply.
+        Every probe to {now.down.length === 1 ? 'it' : 'them'} is going unanswered. Click one below to see why.
       </Alert>
     )
   }
@@ -127,17 +126,17 @@ function Headline({ now, agentsDown }: { now: ReturnType<typeof standing>; agent
   }
   if (now.lossy.length > 0) {
     return (
-      <Alert tone="warning" title={`Everything is answering, ${now.lossy.length} with loss`}>
-        {nameList(now.lossy.map(target => target.name))} lost {ATTENTION_LOSS}% or more of the packets, queries or requests in the latest probe.
+      <Alert tone="warning" title={`All answering, ${now.lossy.length} losing packets`}>
+        {now.lossy.length === 1 ? 'It' : 'They'} lost {ATTENTION_LOSS}% or more of the packets, queries or requests in the latest probe.
       </Alert>
     )
   }
   if (now.answering.length === 0) {
-    return <Alert tone="info" title="Waiting for the first readings">Targets are probed as soon as they are added.</Alert>
+    return <Alert tone="info" title="Waiting for the first readings">New targets are probed straight away, so this fills in within a minute.</Alert>
   }
   return (
     <Alert tone="success" title="Everything is answering">
-      All {plural(now.answering.length, 'target')} answered in full the last time {now.answering.length === 1 ? 'it was' : 'they were'} probed.
+      All {plural(now.answering.length, 'target')} answered every probe last time round.
     </Alert>
   )
 }
@@ -166,7 +165,7 @@ function Attention({
   return (
     <section className={PANEL} aria-labelledby="overview-attention">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="overview-attention" className="text-sm font-medium">Needs attention</h2>
+        <h2 id="overview-attention" className="text-sm font-medium">Right now</h2>
         {all.length > rows.length && (
           <p className="text-xs text-muted-foreground">{all.length - rows.length} more in the sidebar</p>
         )}
@@ -234,6 +233,8 @@ interface Problem {
   /** When its latest spell began. */
   latest: number
   reasons: string[]
+  /** Its latest spell, for where the fault lay and who went with it. */
+  event: OverviewEvent
 }
 
 /** Every target that went wrong between `from` and `to`, the ones still wrong first, then the longest. */
@@ -244,11 +245,15 @@ function problemsBetween(report: OverviewReport, from: number, to: number, targe
     for (const each of event.targets) {
       if (!targetsById.has(each.targetId)) continue
       const was = byTarget.get(each.targetId)
-      const problem: Problem = was ?? { targetId: each.targetId, label: each.label, kind: each.kind, spells: 0, totalMs: 0, ongoing: false, latest: 0, reasons: [] }
+      const problem: Problem =
+        was ?? { targetId: each.targetId, label: each.label, kind: each.kind, spells: 0, totalMs: 0, ongoing: false, latest: 0, reasons: [], event }
       problem.spells++
       problem.totalMs += event.durationMs
       problem.ongoing ||= event.ongoing
-      problem.latest = Math.max(problem.latest, event.start)
+      if (event.start >= problem.latest) {
+        problem.latest = event.start
+        problem.event = event
+      }
       if (each.kind === 'outage') problem.kind = 'outage'
       for (const reason of each.reasons) if (!problem.reasons.includes(reason)) problem.reasons.push(reason)
       byTarget.set(each.targetId, problem)
@@ -272,11 +277,15 @@ const PROBLEM_ROWS = 8
 function Day({
   report,
   targetsById,
+  probeAgents,
   onSelectTarget,
+  onShowTargetsFrom,
 }: {
   report: OverviewReport
   targetsById: Map<string, Target>
+  probeAgents: ProbeAgentSummary[]
   onSelectTarget: (id: string) => void
+  onShowTargetsFrom: (from: string) => void
 }) {
   const { slices, sliceMs } = report
   const [picked, setPicked] = useState<number | null>(null)
@@ -286,7 +295,7 @@ function Day({
   const troubled = slices.filter(slice => slice.down > 0).length
   // "All day" only of a day that was watched all through.
   const watched = slices.filter(slice => slice.watched > 0).length
-  const quiet = watched === slices.length ? 'Every target answered all day' : `Every target answered in the ${humanDuration(watched * sliceMs)} probed`
+  const quiet = watched === slices.length ? 'Every target answered all day' : 'Every target answered whenever it was probed'
   // A label every six hours, on the hour, on the clock times are shown by.
   const zone = displayTimeZone()
   const ticks = slices
@@ -300,13 +309,29 @@ function Day({
   const from = slice ? slice.start : report.start
   const to = slice ? slice.start + sliceMs : report.end + 1
   const problems = problemsBetween(report, from, to, targetsById)
+  const agentName = (id: string | null) => (id ? probeAgents.find(agent => agent.id === id)?.name ?? 'a removed probe agent' : undefined)
+  // A probe agent that could not be reached took no readings: its own row, as nothing else says so.
+  const agentsOut = Object.entries(report.probeAgentOutages)
+    .map(([id, outages]) => {
+      const within = outages.filter(outage => (outage.end ?? report.end) > from && outage.start < to)
+      return {
+        id,
+        name: agentName(id) ?? '',
+        spells: within.length,
+        totalMs: within.reduce((sum, outage) => sum + (outage.end ?? report.end) - Math.max(outage.start, report.start), 0),
+        ongoing: within.some(outage => outage.end === null),
+        latest: Math.max(...within.map(outage => outage.start), 0),
+      }
+    })
+    .filter(agent => agent.spells > 0)
   const counts = {
-    all: problems.length,
-    outage: problems.filter(problem => problem.kind === 'outage').length,
+    all: problems.length + agentsOut.length,
+    outage: problems.filter(problem => problem.kind === 'outage').length + agentsOut.length,
     loss: problems.filter(problem => problem.kind === 'loss').length,
   }
   const shown = show === 'all' ? problems : problems.filter(problem => problem.kind === show)
   const rows = everything ? shown : shown.slice(0, PROBLEM_ROWS)
+  const agentRows = show === 'loss' ? [] : agentsOut
   const pick = (start: number) => {
     setPicked(was => (was === start ? null : start))
     setEverything(false)
@@ -317,7 +342,7 @@ function Day({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="overview-day" className="text-sm font-medium">Last 24 hours</h2>
         <p className="text-xs text-muted-foreground">
-          {troubled === 0 ? quiet : `Something was not answering in ${humanDuration(troubled * sliceMs)} of it. Pick a red or amber stretch to see who.`}
+          {troubled === 0 ? quiet : `Something stopped answering for ${humanDuration(troubled * sliceMs)} in all. Click a red or amber stretch to see what.`}
         </p>
       </div>
       <div className="mt-4 flex h-8 @xl/main:h-10 @xl/main:gap-px" role="group" aria-label={`The last 24 hours in quarters of an hour. ${troubled} had a target not answering.`}>
@@ -358,8 +383,8 @@ function Day({
       <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         {[
           { colour: SIGNAL_VARS.perfect, label: 'All answering' },
-          { colour: SIGNAL_VARS.minor, label: 'Some losing packets' },
-          { colour: NO_REPLY_COLOR, label: 'Something not answering' },
+          { colour: SIGNAL_VARS.minor, label: 'Packet loss' },
+          { colour: NO_REPLY_COLOR, label: 'Not answering' },
           { colour: NO_DATA_COLOR, label: 'Nothing probed' },
         ].map(({ colour, label }) => (
           <li key={label} className="flex items-center gap-1.5">
@@ -372,7 +397,7 @@ function Day({
       <div className="mt-5 border-t border-border pt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="text-sm font-medium">{slice ? 'Trouble at that time' : 'Trouble today'}</h3>
+            <h3 className="text-sm font-medium">{slice ? 'Problems at that time' : 'Problems in the last 24 hours'}</h3>
             {slice && (
               <button
                 type="button"
@@ -387,7 +412,7 @@ function Day({
           </div>
           {counts.outage > 0 && counts.loss > 0 && (
             <SegmentedControl
-              label="Which trouble"
+              label="Which problems"
               value={show}
               onValueChange={value => {
                 setShow(value as Show)
@@ -402,18 +427,46 @@ function Day({
           )}
         </div>
 
-        {shown.length === 0 ? (
+        {shown.length === 0 && agentRows.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
             {slice && slice.lossy > 0
-              ? 'Only brief packet loss then, too short to list. A target\'s chart shows it.'
+              ? 'Only brief packet loss then, too short to list. The target charts show it.'
               : slice
                 ? 'Every target answered then.'
                 : report.briefLossSpells > 0
-                  ? `No outages and no lasting loss, only ${plural(report.briefLossSpells, 'brief spell')} of packet loss.`
-                  : 'No outages and no lasting loss today.'}
+                  ? `No outages and no lasting loss. Just ${plural(report.briefLossSpells, 'brief blip')} of packet loss.`
+                  : 'No outages and no lasting loss.'}
           </p>
         ) : (
           <ul className="mt-2 divide-y divide-border">
+            {agentRows.map(agent => (
+              <li key={`agent:${agent.id}`}>
+                <button
+                  type="button"
+                  onClick={() => onShowTargetsFrom(agent.id)}
+                  className="group flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-muted/40"
+                >
+                  <MapPin size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-destructive" />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm">Probe agent {agent.name}</span>
+                      {agent.ongoing && <Badge size="sm" tone="danger">Now</Badge>}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      Could not be reached, so its targets took no readings. Click to list them.
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right font-mono text-xs text-muted-foreground">
+                    <span className="block">
+                      {humanDuration(agent.totalMs)}
+                      {agent.spells > 1 ? `, ${agent.spells} times` : ''}
+                    </span>
+                    <span className="block">{agent.ongoing ? `since ${clock(agent.latest)}` : `last at ${clock(agent.latest)}`}</span>
+                  </span>
+                  <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                </button>
+              </li>
+            ))}
             {rows.map(problem => (
               <li key={problem.targetId}>
                 <button
@@ -435,6 +488,11 @@ function Day({
                       {problem.kind === 'outage' ? 'Not answering' : 'Losing packets'}
                       {problem.reasons.length > 0 ? `: ${problem.reasons.slice(0, 2).join('; ')}` : ''}
                     </span>
+                    {scopeNote(problem.event, agentName(problem.event.probeAgentId)) && (
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {scopeNote(problem.event, agentName(problem.event.probeAgentId))}
+                      </span>
+                    )}
                   </span>
                   <span className="shrink-0 text-right font-mono text-xs text-muted-foreground">
                     <span className="block">
@@ -459,116 +517,20 @@ function Day({
   )
 }
 
-/** Where an event's fault lay, as a reader would want it said. */
+/** Where a spell's fault lay, from what else was probed from the same place at the time. */
 function scopeNote(event: OverviewEvent, fromAgent: string | undefined): string | null {
-  const affected = event.targets.length
+  const others = event.targets.length - 1
+  const from = fromAgent ?? 'this server'
   switch (event.scope) {
     case 'local':
-      return fromAgent
-        ? `Something inside ${fromAgent}'s own network stopped answering too`
-        : 'Something inside your own network stopped answering too'
+      return `Likely ${fromAgent ? `${fromAgent}'s` : 'your'} own network: something inside it went down too`
     case 'single':
-      return `Only this target: the other ${plural(event.watched - 1, 'target')} probed from ${fromAgent ?? 'here'} kept answering`
+      return `Only this target: everything else probed from ${from} kept answering`
     case 'beyond':
-      return `Beyond the local network: ${plural(affected, 'target')} of ${event.watched}, while everything inside it kept answering`
+      return `Out on the internet: ${others > 0 ? `${plural(others, 'other target')} went too, ` : ''}while your own network kept answering`
     case 'unclear':
-      return affected > 1 ? `${affected} of the ${event.watched} targets probed from ${fromAgent ?? 'here'}` : null
+      return others > 0 ? `Along with ${plural(others, 'other target')} probed from ${from}` : null
   }
-}
-
-function eventTitle(event: OverviewEvent, nameOf: (id: string) => string): string {
-  const who = event.targets.length === 1 ? nameOf(event.targets[0].targetId) : `${event.targets.length} targets`
-  const what = event.kind === 'outage' ? 'stopped answering' : 'lost packets'
-  return event.ongoing ? `${who} ${event.kind === 'outage' ? 'not answering' : 'losing packets'}` : `${who} ${what}`
-}
-
-/** The events of the day, and the probe agents' outages among them, newest first. */
-function Events({
-  report,
-  targetsById,
-  probeAgents,
-  onSelectTarget,
-}: {
-  report: OverviewReport
-  targetsById: Map<string, Target>
-  probeAgents: ProbeAgentSummary[]
-  onSelectTarget: (id: string) => void
-}) {
-  const agentName = (id: string | null) => (id ? probeAgents.find(agent => agent.id === id)?.name ?? 'a removed probe agent' : undefined)
-  const nameOf = (id: string) => targetsById.get(id)?.name ?? 'A deleted target'
-
-  const events: TimelineEvent[] = [
-    ...report.events.map((event): TimelineEvent => {
-      const fromAgent = agentName(event.probeAgentId)
-      const duration = `${humanDuration(event.durationMs)}${event.ongoing ? ' so far' : event.end === null ? ', end not seen' : ''}`
-      return {
-        id: event.id,
-        at: event.start,
-        title: eventTitle(event, nameOf),
-        meta: [duration, scopeNote(event, fromAgent)].filter(Boolean).join(' · '),
-        tone: event.ongoing ? 'danger' : 'neutral',
-        icon: event.kind === 'outage' ? <CircleX {...ICON} /> : <Activity {...ICON} />,
-        detail: (
-          <ul className="space-y-1.5">
-            {event.targets.map(each => (
-              <li key={each.targetId} className="text-xs">
-                <button
-                  type="button"
-                  className="cursor-pointer font-medium text-foreground underline-offset-2 hover:underline"
-                  onClick={() => onSelectTarget(each.targetId)}
-                >
-                  {targetsById.has(each.targetId) ? each.label : nameOf(each.targetId)}
-                </button>
-                {each.reasons.length > 0 && <span className="text-muted-foreground">: {each.reasons.join('; ')}</span>}
-              </li>
-            ))}
-          </ul>
-        ),
-      }
-    }),
-    ...Object.entries(report.probeAgentOutages).flatMap(([id, outages]) =>
-      outages.map((outage): TimelineEvent => {
-        const end = outage.end ?? report.end
-        return {
-          id: `probe-agent:${id}:${outage.start}`,
-          at: Math.max(outage.start, report.start),
-          title: `Probe agent ${agentName(id)} ${outage.end === null ? 'cannot be reached' : 'could not be reached'}`,
-          meta: `${humanDuration(end - outage.start)}${outage.end === null ? ' so far' : ''} · Its targets took no readings meanwhile`,
-          tone: outage.end === null ? 'danger' : 'neutral',
-          icon: <RadioTower {...ICON} />,
-        }
-      })
-    ),
-  ]
-
-  return (
-    <section className={PANEL} aria-labelledby="overview-events">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="overview-events" className="text-sm font-medium">What happened, and where the fault lay</h2>
-        {report.briefLossSpells > 0 && (
-          <p className="text-xs text-muted-foreground">
-            And {plural(report.briefLossSpells, 'brief spell')} of packet loss, too short to list
-          </p>
-        )}
-      </div>
-      {events.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">No outages and no lasting loss in the last 24 hours.</p>
-      ) : (
-        <div className="mt-3">
-          <Timeline
-            label="Outages and loss in the last 24 hours"
-            events={events}
-            now={report.end}
-            timeZone={displayTimeZone() ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
-            locale={displayLocale()}
-            maxHeight={560}
-            scrollToNew={false}
-            headingLevel={3}
-          />
-        </div>
-      )}
-    </section>
-  )
 }
 
 // ─── The network ────────────────────────────────────────────────────────────
@@ -622,7 +584,7 @@ function Network({
   return (
     <section className={PANEL} aria-labelledby="overview-network">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="overview-network" className="text-sm font-medium">Your network</h2>
+        <h2 id="overview-network" className="text-sm font-medium">Your groups</h2>
         <ul className="flex flex-wrap gap-1.5" aria-label="Targets by kind of probe">
           {kinds.map(([method, count]) => (
             <li key={method}>
@@ -706,7 +668,7 @@ function ProbeAgents({
 
   return (
     <section className={PANEL} aria-labelledby="overview-sources">
-      <h2 id="overview-sources" className="text-sm font-medium">Where readings come from</h2>
+      <h2 id="overview-sources" className="text-sm font-medium">Where readings are taken from</h2>
       <ul className="mt-3 grid gap-2 @xl/main:grid-cols-2 @5xl/main:grid-cols-3 @[100rem]/main:grid-cols-4">
         {tile('local', <Server {...ICON} />, 'This server', null, [], targets.filter(target => !target.probeAgentId))}
         {probeAgents.map(agent => {
@@ -841,9 +803,9 @@ export function OverviewPage({
           context={day?.meanUptime != null ? `Average uptime ${day.meanUptime.toFixed(2)}%` : 'Reading the last 24 hours'}
         />
         <MetricCard
-          label="Outages, 24h"
+          label="Outages, last 24h"
           value={day?.outages ?? 0}
-          context={day ? (day.longest !== null ? `Longest ${humanDuration(day.longest)}` : 'None in 24 hours') : 'Reading the last 24 hours'}
+          context={day ? (day.longest !== null ? `Longest ${humanDuration(day.longest)}` : 'None') : 'Reading the last 24 hours'}
         />
         <MetricCard
           label="Alerts firing"
@@ -852,20 +814,25 @@ export function OverviewPage({
             firing.length > 0
               ? nameList(firing.map(alertTitle), 2)
               : enabledAlerts.length > 0
-                ? `${plural(enabledAlerts.length, 'alert')} watching, all quiet`
+                ? `${plural(enabledAlerts.length, 'alert')} set up, all quiet`
                 : 'No alerts set up'
           }
         />
       </div>
 
-      {/* Most important first: what is wrong now, then the day and who had
-          trouble in it, then the network as a whole. */}
+      {/* Most important first: what is wrong now, then the day and what went
+          wrong in it, then the network as a whole. */}
       <Attention now={now} latest={latest} report={report} onSelectTarget={onSelectTarget} />
 
       {report ? (
         <>
-          <Day report={report} targetsById={targetsById} onSelectTarget={onSelectTarget} />
-          <Events report={report} targetsById={targetsById} probeAgents={probeAgents} onSelectTarget={onSelectTarget} />
+          <Day
+            report={report}
+            targetsById={targetsById}
+            probeAgents={probeAgents}
+            onSelectTarget={onSelectTarget}
+            onShowTargetsFrom={onShowTargetsFrom}
+          />
         </>
       ) : (
         <OverviewDaySkeleton />
