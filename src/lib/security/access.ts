@@ -31,6 +31,10 @@ export interface Policy {
   loginRequired: boolean
   /** The MCP address needs a key, even to read. */
   mcpKeyRequired: boolean
+  /** Looking is open to anyone, but changing anything needs a signed-in account or a key that may write. */
+  changesNeedSignIn: boolean
+  /** Websites whose pages may call the API from a browser, with a key (cors.ts). */
+  corsOrigins: string[]
   /** Accounts may sign in with a password, rather than only through single sign-on. */
   passwordLogin: boolean
   /** CLEARPING_AUTH=off is set. */
@@ -49,6 +53,9 @@ export async function securityPolicy(): Promise<Policy> {
     // A protected dashboard with an open MCP address would hand its data to
     // anyone who asked there instead.
     mcpKeyRequired: settings.mcpKeyRequired || loginRequired || legacyMcpToken !== null,
+    // Sign-in for everything covers changing things too.
+    changesNeedSignIn: loginRequired || (settings.changesNeedSignIn && !recovery),
+    corsOrigins: settings.corsOrigins,
     // A provider that is down, or set up wrong, must not lock everyone out.
     passwordLogin: settings.passwordLogin || recovery,
     recovery,
@@ -78,7 +85,16 @@ export function presentedKey(headers: Headers): string | null {
   return bearer || headers.get('x-api-key')?.trim() || null
 }
 
-export async function identify(request: Request, legacyMcpToken = process.env.CLEARPING_MCP_TOKEN?.trim() || null): Promise<Identity> {
+/**
+ * `useCookie` is false for a page of another website that an admin has
+ * listed: it sends a key or it is nobody, however the browser got hold of a
+ * session cookie.
+ */
+export async function identify(
+  request: Request,
+  legacyMcpToken = process.env.CLEARPING_MCP_TOKEN?.trim() || null,
+  useCookie = true
+): Promise<Identity> {
   const key = presentedKey(request.headers)
   if (key) {
     if (key.startsWith(KEY_PREFIX)) {
@@ -94,7 +110,7 @@ export async function identify(request: Request, legacyMcpToken = process.env.CL
   }
 
   // Better Auth reads its own cookie, checks its signature and the session behind it.
-  if (request.headers.get('cookie')) {
+  if (useCookie && request.headers.get('cookie')) {
     const found = await signedIn(request.headers)
     if (found) {
       // Not while CLEARPING_AUTH=off is set: that is for getting back in.
@@ -174,12 +190,14 @@ export type Decision =
 export function decide(input: {
   pathname: string
   method: string
-  policy: Pick<Policy, 'loginRequired'>
+  policy: Pick<Policy, 'loginRequired'> & Partial<Pick<Policy, 'changesNeedSignIn'>>
   identity: Identity
   origin: string | null
   host: string | null
   /** The `Sec-Fetch-Site` header. */
   fetchSite?: string | null
+  /** The request is from a website an admin listed (cors.ts), whose identity was taken without the cookie. */
+  trustedOrigin?: boolean
 }): Decision {
   const kind = routeKind(input.pathname)
   const reading = READING.has(input.method.toUpperCase())
@@ -208,7 +226,7 @@ export function decide(input: {
 
   // A key that was sent is checked even where none is needed: a script with a
   // wrong or revoked key should hear so, not carry on as nobody.
-  if (invalidKey) return { allow: false, status: 401, message: 'That API key is not valid, or has been revoked' }
+  if (invalidKey) return { allow: false, status: 401, message: 'That API key is not valid, or has been revoked or has expired' }
   if (actor?.kind === 'key' && actor.access === 'read' && !reading) {
     return { allow: false, status: 403, message: `The key "${actor.name}" may only read` }
   }
@@ -222,11 +240,17 @@ export function decide(input: {
   if (input.policy.loginRequired && !actor) {
     return { allow: false, status: 401, message: 'Sign in, or send an API key as "Authorization: Bearer <key>"' }
   }
+  // Looking is open, changing is not: an account that may change things, or a
+  // key that may write (a read-only key and a viewer were turned away above).
+  if (!reading && !actor && input.policy.changesNeedSignIn) {
+    return { allow: false, status: 401, message: 'Sign in, or send a key that may change things as "Authorization: Bearer <key>"' }
+  }
   // A browser sends its cookie with whatever page asks, so a change made with
   // one has to come from a page of this site. And with sign-in off there is no
   // cookie to wait for: any page the user visits could make the change. Keys
-  // are not sent by browsers on their own and need no such check.
-  if (actor?.kind !== 'key' && fromAnotherSite) {
+  // are not sent by browsers on their own and need no such check, nor does a
+  // page an admin listed, which was taken without its cookie.
+  if (actor?.kind !== 'key' && fromAnotherSite && !input.trustedOrigin) {
     return { allow: false, status: 403, message: 'That request came from another site' }
   }
   return { allow: true }

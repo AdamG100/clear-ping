@@ -5,6 +5,7 @@ import { clearPingMcp } from '@/lib/mcp/tools';
 import { withAddressesHidden } from '@/lib/privacy/assistant';
 import { privacyNow } from '@/lib/privacy/settings';
 import { identify, presentedKey, securityPolicy } from '@/lib/security/access';
+import { corsOrigin } from '@/lib/security/cors';
 import { canChange } from '@/lib/security/roles';
 import { ANONYMOUS, recordActivity } from '@/lib/security/store';
 
@@ -36,9 +37,13 @@ function refuse(status: number, code: number, message: string, headers?: Record<
 }
 
 export async function POST(request: NextRequest) {
-  if (!originAllowed(request.headers.get('origin'), request.headers.get('host'))) {
+  const policy = await securityPolicy();
+  const origin = request.headers.get('origin');
+  if (!originAllowed(origin, request.headers.get('host'), policy.corsOrigins)) {
     return refuse(403, JSON_RPC.invalidRequest, 'This page is not allowed to connect here');
   }
+  // A listed website's page is nobody until it sends a key, never the visitor's session.
+  const fromListedSite = corsOrigin(origin, request.headers.get('host'), policy.corsOrigins) !== null;
 
   // Before a key is so much as looked at: one that came in the clear across
   // the internet has been shown to everything on the way, right or wrong, and
@@ -56,9 +61,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const [policy, { actor, invalidKey }] = await Promise.all([securityPolicy(), identify(request)]);
+  const { actor, invalidKey } = await identify(request, undefined, !fromListedSite);
   if (invalidKey) {
-    return refuse(401, JSON_RPC.invalidRequest, 'That key is not valid, or has been revoked', { 'WWW-Authenticate': 'Bearer' });
+    return refuse(401, JSON_RPC.invalidRequest, 'That key is not valid, or has been revoked or has expired', { 'WWW-Authenticate': 'Bearer' });
   }
   if (!actor && policy.mcpKeyRequired) {
     return refuse(

@@ -229,10 +229,12 @@ export async function handleMessage(
  * browser sends no Origin and is let through. A page is let through only from
  * the address ClearPing itself was reached at: any other is a website making
  * the visitor's browser reach into their network, which is how a server on a
- * private address gets read by a stranger.
+ * private address gets read by a stranger. The websites an admin lists under
+ * Settings → Access (`allowed`) are let through as well.
  */
-export function originAllowed(origin: string | null, host: string | null): boolean {
+export function originAllowed(origin: string | null, host: string | null, allowed: readonly string[] = []): boolean {
   if (!origin) return true
+  if (allowed.includes(origin)) return true
   try {
     return !!host && new URL(origin).host.toLowerCase() === host.toLowerCase()
   } catch {

@@ -285,4 +285,10 @@ describe('originAllowed', () => {
     expect(originAllowed('null', 'clearping.lan:3000')).toBe(false)
     expect(originAllowed('http://clearping.lan:3000', null)).toBe(false)
   })
+
+  it('also lets through the websites an admin listed, and no others', () => {
+    const listed = ['https://home.example.com']
+    expect(originAllowed('https://home.example.com', 'clearping.lan:3000', listed)).toBe(true)
+    expect(originAllowed('https://evil.example', 'clearping.lan:3000', listed)).toBe(false)
+  })
 })

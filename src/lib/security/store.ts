@@ -18,10 +18,13 @@ import { getJsonSetting, recordSecurityActivity, setJsonSetting } from './settin
  */
 
 export {
+  dismissSetupAdvice,
   getFactorPolicy,
   getJsonSetting,
   getSecuritySettings,
+  isSetupAdviceDismissed,
   listActivity,
+  setCorsOrigins,
   setFactorPolicy,
   setJsonSetting,
   setSecuritySettings,
@@ -417,6 +420,10 @@ export interface ApiKey {
   ownerId: string | null
   lastUsedAt: number | null
   revokedAt: number | null
+  /** When it stops working by itself, or null for a key that does not. */
+  expiresAt: number | null
+  /** How many days it was made to last, which a re-roll repeats. */
+  expiresInDays: number | null
 }
 
 interface KeyRow {
@@ -447,7 +454,7 @@ function madeFor(permissions: unknown): KeyAccess {
 }
 
 const keyFrom = (row: KeyRow): ApiKey => {
-  const metadata = parse<{ createdBy?: string; revokedAt?: number }>(row.metadata)
+  const metadata = parse<{ createdBy?: string; revokedAt?: number; expiresAt?: number; expiresInDays?: number }>(row.metadata)
   return {
     id: row.id,
     name: row.name ?? '',
@@ -458,21 +465,54 @@ const keyFrom = (row: KeyRow): ApiKey => {
     ownerId: row.referenceId,
     lastUsedAt: ms(row.lastRequest),
     revokedAt: row.enabled ? null : (metadata?.revokedAt ?? ms(row.createdAt)),
+    expiresAt: typeof metadata?.expiresAt === 'number' ? metadata.expiresAt : null,
+    expiresInDays: typeof metadata?.expiresInDays === 'number' ? metadata.expiresInDays : null,
   }
 }
 
-/** The new key itself, which is shown this once and kept only as a hash. */
-export async function createApiKey(name: string, access: KeyAccess, owner: { id: string; name: string }): Promise<{ key: string; record: ApiKey }> {
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The new key itself, which is shown this once and kept only as a hash.
+ * `expiresInDays` is how long it works for, or null for a key that never
+ * stops. The expiry is kept here rather than in Better Auth's own, which
+ * deletes a key when it is first used after it: an expired key stays listed,
+ * marked, like a revoked one.
+ */
+export async function createApiKey(
+  name: string,
+  access: KeyAccess,
+  owner: { id: string; name: string },
+  expiresInDays: number | null = null,
+  rerolledFrom?: string
+): Promise<{ key: string; record: ApiKey }> {
   const auth = await getAuth()
   const made = await auth.api.createApiKey({
     body: {
       name,
       userId: owner.id,
       permissions: { clearping: access === 'write' ? ['read', 'write'] : ['read'] },
-      metadata: { createdBy: owner.name },
+      metadata: {
+        createdBy: owner.name,
+        ...(expiresInDays ? { expiresInDays, expiresAt: Date.now() + expiresInDays * DAY_MS } : {}),
+        ...(rerolledFrom ? { rerolledFrom } : {}),
+      },
     },
   })
   return { key: made.key, record: (await getApiKey(made.id))! }
+}
+
+/**
+ * A new key in place of one: the same name, level and maker, lasting the same
+ * number of days (or `expiresInDays` if given, null for no end), and the old
+ * one revoked at once. Null if there is no such key or it is already revoked.
+ */
+export async function rerollApiKey(id: string, expiresInDays?: number | null): Promise<{ key: string; record: ApiKey; replaced: ApiKey } | null> {
+  const old = await getApiKey(id)
+  if (!old || old.revokedAt) return null
+  const made = await createApiKey(old.name, old.access, { id: old.ownerId ?? '', name: old.createdBy ?? '' }, expiresInDays === undefined ? old.expiresInDays : expiresInDays, old.id)
+  const replaced = (await revokeApiKey(old.id)) ?? old
+  return { ...made, replaced }
 }
 
 /**
@@ -488,6 +528,8 @@ export async function apiKeyFor(key: string): Promise<ApiKey | null> {
   if (!owner) return null
   const record = await getApiKey(checked.key.id)
   if (!record) return null
+  // Past its end: refused like a revoked one.
+  if (record.expiresAt !== null && record.expiresAt <= Date.now()) return null
   return { ...record, access: effectiveKeyAccess(madeFor(checked.key.permissions), owner.role) }
 }
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { decide, FACTOR_SETUP_PAGE, hostAllowed, identify, routeKind, securityPolicy } from '@/lib/security/access'
+import { corsHeaders, corsOrigin, corsPath } from '@/lib/security/cors'
 import { devUserEnabled } from '@/lib/security/dev-user'
 
 /**
@@ -22,11 +23,25 @@ export async function proxy(request: NextRequest) {
   }
 
   const open = routeKind(pathname) === 'open'
+  const origin = request.headers.get('origin')
+  const wantsCors = !!origin && corsPath(pathname)
 
   // Open paths need no identity, only to not be a way in for another site.
-  const [policy, identity] = open
-    ? [{ loginRequired: false }, { actor: null, invalidKey: false }]
-    : await Promise.all([securityPolicy(), identify(request)])
+  const policy = open && !wantsCors ? { loginRequired: false, changesNeedSignIn: false, corsOrigins: [] } : await securityPolicy()
+
+  // A page of a website an admin listed (Settings → Access). Its preflight is
+  // answered before anything is checked, since a browser sends none of its
+  // credentials with one.
+  const cors = wantsCors ? corsOrigin(origin, request.headers.get('host'), policy.corsOrigins) : null
+  if (cors && request.method === 'OPTIONS') {
+    return new NextResponse(null, {
+      status: 204,
+      headers: corsHeaders(cors, { privateNetwork: request.headers.get('access-control-request-private-network') === 'true' }),
+    })
+  }
+
+  // Such a page is nobody until it sends a key: never the visitor's session.
+  const identity = open ? { actor: null, invalidKey: false } : await identify(request, undefined, !cors)
 
   // Under `next dev`, a page is always opened signed in (see dev-user.ts).
   if (devUserEnabled() && routeKind(pathname) === 'page' && request.method === 'GET' && !identity.actor) {
@@ -40,12 +55,17 @@ export async function proxy(request: NextRequest) {
     method: request.method,
     policy,
     identity,
-    origin: request.headers.get('origin'),
+    origin,
     host: request.headers.get('host'),
     fetchSite: request.headers.get('sec-fetch-site'),
+    trustedOrigin: cors !== null,
   })
 
-  if (decision.allow) return NextResponse.next()
+  if (decision.allow) {
+    const response = NextResponse.next()
+    if (cors) for (const [name, value] of Object.entries(corsHeaders(cors))) response.headers.set(name, value)
+    return response
+  }
   if ('setup' in decision) {
     const setup = new URL(FACTOR_SETUP_PAGE, request.url)
     if (pathname !== '/') setup.searchParams.set('next', pathname + search)
@@ -58,7 +78,11 @@ export async function proxy(request: NextRequest) {
   }
   return NextResponse.json(
     { error: decision.message },
-    { status: decision.status, headers: decision.status === 401 ? { 'WWW-Authenticate': 'Bearer' } : undefined }
+    {
+      status: decision.status,
+      // A listed page is shown why, too, rather than a bare network error.
+      headers: { ...(decision.status === 401 ? { 'WWW-Authenticate': 'Bearer' } : {}), ...(cors ? corsHeaders(cors) : {}) },
+    }
   )
 }
 

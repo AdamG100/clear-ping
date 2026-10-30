@@ -33,7 +33,7 @@
 .root[data-disabled][data-state="idle"] .surface { box-shadow: none; }
 .root[data-disabled][data-state="idle"] .surface::after { border-color: var(--border-subtle); }
 
-.face { display: flex; flex: none; height: 100%; align-items: center; gap: 2px; padding: 0 4px; white-space: nowrap; }
+.face { display: flex; flex: none; min-width: 0; max-width: 100%; height: 100%; align-items: center; gap: 2px; padding: 0 4px; white-space: nowrap; }
 .face[data-face="idle"] { padding: 0; }
 /* A leaving face steps out of the flow, exactly where it was, and fades while the pill springs to the next one. */
 .face[inert] { position: absolute; top: 0; inset-inline-start: 0; pointer-events: none; }
@@ -61,7 +61,8 @@
 .trigger:disabled .icon { color: inherit; }
 .icon > svg { width: 16px; height: 16px; }
 
-.prompt { max-width: 16rem; overflow: hidden; padding: 0 8px 0 12px; color: var(--foreground); font-weight: 500; font-variant-numeric: tabular-nums; }
+.part:has(.prompt) { min-width: 0; overflow: hidden; }
+.prompt { min-width: 0; max-width: 16rem; overflow: hidden; padding: 0 8px 0 12px; color: var(--foreground); font-weight: 500; font-variant-numeric: tabular-nums; }
 .prompt > span { overflow: hidden; text-overflow: ellipsis; }
 
 .secondary,

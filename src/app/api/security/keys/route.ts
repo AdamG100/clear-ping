@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/security/http';
+import { parseKeyDays } from '@/lib/security/key-lifetime';
 import { maxKeyAccess, ROLE_LABEL } from '@/lib/security/roles';
 import { createApiKey, recordActivity, type KeyAccess } from '@/lib/security/store';
 
 /**
  * POST /api/security/keys - Create a key for a script or an assistant
- * Body: { name: string, access: 'read' | 'write' }
+ * Body: { name: string, access: 'read' | 'write', expiresInDays?: number | null }
+ *
+ * `expiresInDays` is how many days the key works for (1 to 3650); left out or
+ * null, it never stops.
  *
  * Any account may make keys, as its own: a key can never do more than the
  * account that made it, so a viewer's keys only read. The key is in the
@@ -30,7 +34,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { key, record } = await createApiKey(name, access, { id: user.id, name: user.name });
-  await recordActivity(user, 'dashboard', 'key.create', `${name} (${access === 'write' ? 'read and write' : 'read only'})`);
+  const lifetime = parseKeyDays(body?.expiresInDays);
+  if ('error' in lifetime) return NextResponse.json({ error: lifetime.error }, { status: 400 });
+
+  const { key, record } = await createApiKey(name, access, { id: user.id, name: user.name }, lifetime.days);
+  await recordActivity(
+    user,
+    'dashboard',
+    'key.create',
+    `${name} (${access === 'write' ? 'read and write' : 'read only'}, ${lifetime.days ? `lasts ${lifetime.days} ${lifetime.days === 1 ? 'day' : 'days'}` : 'no expiry'})`
+  );
   return NextResponse.json({ key, record }, { status: 201 });
 }

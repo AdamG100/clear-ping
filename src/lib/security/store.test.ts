@@ -151,6 +151,41 @@ describe('keys', () => {
     expect((await store.listApiKeys()).find(each => each.id === record.id)?.revokedAt).not.toBeNull()
   })
 
+  it('keeps a key that expires listed, and stops honouring it once the time has passed', async () => {
+    const [adam] = await store.listUsers()
+    const { key, record } = await store.createApiKey('Week', 'read', { id: adam.id, name: adam.username }, 7)
+    expect(record).toMatchObject({ expiresInDays: 7, revokedAt: null })
+    expect(record.expiresAt).toBeGreaterThan(Date.now())
+    expect((await identify(request({ authorization: `Bearer ${key}` }))).actor).toMatchObject({ name: 'Week', access: 'read' })
+
+    const db = await authDatabase()
+    const row = db.prepare('SELECT metadata FROM apikey WHERE id = ?').get(record.id) as { metadata: string }
+    const metadata = JSON.parse(row.metadata) as { expiresAt: number }
+    metadata.expiresAt = Date.now() - 1000
+    db.prepare('UPDATE apikey SET metadata = ? WHERE id = ?').run(JSON.stringify(metadata), record.id)
+
+    expect(await identify(request({ authorization: `Bearer ${key}` }))).toEqual({ actor: null, invalidKey: true })
+    const listed = (await store.listApiKeys()).find(each => each.id === record.id)
+    expect(listed?.expiresAt).toBeLessThan(Date.now())
+    expect(listed?.revokedAt).toBeNull()
+  })
+
+  it('re-rolls a key into a new one and revokes the old, keeping the name, level and lifetime', async () => {
+    const [adam] = await store.listUsers()
+    const { key, record } = await store.createApiKey('Home', 'write', { id: adam.id, name: adam.username }, 30)
+    const rolled = await store.rerollApiKey(record.id)
+    expect(rolled).not.toBeNull()
+    expect(rolled!.key).not.toBe(key)
+    expect(rolled!.key.startsWith(rolled!.record.prefix)).toBe(true)
+    expect(rolled!.record).toMatchObject({ name: 'Home', access: 'write', expiresInDays: 30, revokedAt: null, ownerId: adam.id })
+    expect(rolled!.record.id).not.toBe(record.id)
+    expect(rolled!.replaced.revokedAt).not.toBeNull()
+
+    expect(await identify(request({ authorization: `Bearer ${key}` }))).toEqual({ actor: null, invalidKey: true })
+    expect((await identify(request({ authorization: `Bearer ${rolled!.key}` }))).actor).toMatchObject({ name: 'Home', access: 'write' })
+    expect(await store.rerollApiKey(record.id)).toBeNull()
+  })
+
   it('calls a made-up key invalid rather than treating it as nobody', async () => {
     expect(await identify(request({ authorization: 'Bearer cp_madeup' }))).toEqual({ actor: null, invalidKey: true })
   })
@@ -220,6 +255,35 @@ describe('the switches', () => {
     vi.stubEnv('CLEARPING_AUTH', 'off')
     expect(await securityPolicy()).toMatchObject({ loginRequired: false, recovery: true })
     await store.setSecuritySettings({ loginRequired: false })
+  })
+
+  it('can ask for sign-in only to change things, which sign-in for everything includes', async () => {
+    expect(await securityPolicy()).toMatchObject({ loginRequired: false, changesNeedSignIn: false })
+    await store.setSecuritySettings({ changesNeedSignIn: true })
+    expect(await securityPolicy()).toMatchObject({ loginRequired: false, changesNeedSignIn: true })
+    vi.stubEnv('CLEARPING_AUTH', 'off')
+    expect(await securityPolicy()).toMatchObject({ changesNeedSignIn: false })
+    vi.unstubAllEnvs()
+    await store.setSecuritySettings({ changesNeedSignIn: false, loginRequired: true })
+    expect(await securityPolicy()).toMatchObject({ changesNeedSignIn: true })
+    await store.setSecuritySettings({ loginRequired: false })
+  })
+
+  it('keep the websites that may call the API, and none until some are listed', async () => {
+    expect((await securityPolicy()).corsOrigins).toEqual([])
+    await store.setCorsOrigins(['https://home.example.com'])
+    expect((await securityPolicy()).corsOrigins).toEqual(['https://home.example.com'])
+    await store.setCorsOrigins([])
+    expect((await securityPolicy()).corsOrigins).toEqual([])
+  })
+
+  it('remembers that an admin left the first-run prompt, apart from the switches', async () => {
+    expect(await store.isSetupAdviceDismissed()).toBe(false)
+    await store.dismissSetupAdvice()
+    expect(await store.isSetupAdviceDismissed()).toBe(true)
+    expect(await securityPolicy()).toMatchObject({ loginRequired: false })
+    await store.dismissSetupAdvice()
+    expect(await store.isSetupAdviceDismissed()).toBe(true)
   })
 
   it('stop password sign-in when it is turned off, and CLEARPING_AUTH=off brings it back', async () => {

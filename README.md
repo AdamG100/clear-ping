@@ -68,7 +68,8 @@ slow looks different from one that is unstable.
   out, and an alert can watch for it.
 - **Accounts and roles.** Admins, editors and viewers; authenticator apps and
   passkeys; single sign-on with Authentik, set up step by step; and keys for
-  scripts. A new account can be given a one-time link to choose its own
+  scripts and assistants, read only or read and write, with the API's access
+  and CORS set from Settings. A new account can be given a one-time link to choose its own
   password, so no admin ever knows it.
 - **Privacy.** Hide IP addresses and host names on screen, from viewers or from
   everyone (or in your own browser, for screenshots), and from AI assistants.
@@ -160,10 +161,12 @@ volume the history goes when the container does.
 
 > **Turn sign-in on, or keep it private.** Sign-in is off until you turn it on
 > (Settings → Access), and while it is off anyone who can reach ClearPing can use
-> all of it, including the tokens in your alerts' notification URLs. Create the
+> all of it, including the tokens in your alerts' notification URLs. The
+> dashboard asks you to do this the first time you open it. Create the
 > first account straight away (the setup code is in `docker logs clear_ping`),
 > turn sign-in on, and set `CLEARPING_ALLOWED_HOSTS`. If you cannot, keep it
-> behind a VPN or a proxy that signs people in.
+> behind a VPN or a proxy that signs people in. Say it stays on your network
+> and the question goes away.
 
 For Compose, [compose.example.yaml](compose.example.yaml) runs the same image
 behind Traefik. Copy it to `compose.yaml` and change the hostname and network
@@ -364,7 +367,8 @@ The cog at the foot of the sidebar opens Settings, with a menu down the side
 (a dropdown on a phone), each section opening with its name and a line on
 what it is for:
 
-- **Security**: **Access** (whether sign-in is required, and whether assistants need a key), **Sign-in** (your own password
+- **Security**: **Access** (whether sign-in is required, whether changing things needs sign-in or a key, whether
+  assistants need a key, and which other websites may call the API), **Sign-in** (your own password
   and second factors), **Keys**, **Single sign-on**, **Accounts** and **Privacy**.
 - **Monitoring**: **Probe agents**, **Routing** and **Maintenance**.
 - **More**: **Activity** (a record of every change and who made it) and **AI
@@ -506,6 +510,17 @@ All optional. With Docker, pass them with `-e`.
 ## API
 
 Everything the interface does goes through these.
+
+Who may call it is set under Settings → Access. With sign-in on, every call
+needs a signed-in account or a key, sent as `Authorization: Bearer <key>` (or
+`X-API-Key`); a read-only key can only `GET`. To leave looking open and ask for
+an account or a write key only to change things (`POST`, `PUT`, `PATCH`,
+`DELETE`), turn on **Require sign-in or a key to change anything**. A web page
+on another site can call the API from a browser only if you list its address
+there (CORS), and then it must send a key. A key can expire after a chosen
+number of days, or not at all. Re-roll, under Settings → Keys, makes a new one
+in its place and stops the old one at once. See
+[docs/security.md](docs/security.md#the-api-and-who-may-call-it).
 
 | | |
 |---|---|

@@ -36,24 +36,40 @@ export interface SecuritySettings {
   mcpKeyRequired: boolean
   /** Accounts may sign in with a password. Off leaves single sign-on as the only way in. */
   passwordLogin: boolean
+  /** Anyone may look, but changing anything needs a signed-in account or a key that may write. Implied by `loginRequired`. */
+  changesNeedSignIn: boolean
+  /** Other websites (origins) whose pages may call the API from a browser, with a key. See cors.ts. */
+  corsOrigins: string[]
 }
 
-const DEFAULTS: SecuritySettings = { loginRequired: false, mcpKeyRequired: false, passwordLogin: true }
+type Switches = Omit<SecuritySettings, 'corsOrigins'>
+
+const DEFAULTS: Switches = { loginRequired: false, mcpKeyRequired: false, passwordLogin: true, changesNeedSignIn: false }
 
 export async function getSecuritySettings(): Promise<SecuritySettings> {
   const rows = await all<{ key: string; value: string }>(
     await getDatabase(),
-    `SELECT key, value FROM settings WHERE key IN ('security.loginRequired', 'security.mcpKeyRequired', 'security.passwordLogin')`
+    `SELECT key, value FROM settings WHERE key IN ('security.loginRequired', 'security.mcpKeyRequired', 'security.passwordLogin', 'security.changesNeedSignIn', 'security.corsOrigins')`
   )
-  const stored = new Map(rows.map(row => [row.key, row.value === 'true']))
+  const stored = new Map(rows.map(row => [row.key, row.value]))
+  const flag = (name: keyof Switches) => (stored.has(`security.${name}`) ? stored.get(`security.${name}`) === 'true' : DEFAULTS[name])
+  let corsOrigins: string[] = []
+  try {
+    const parsed: unknown = JSON.parse(stored.get('security.corsOrigins') ?? '[]')
+    if (Array.isArray(parsed)) corsOrigins = parsed.filter((entry): entry is string => typeof entry === 'string')
+  } catch {
+    // Unreadable is no one listed: the safe way round.
+  }
   return {
-    loginRequired: stored.get('security.loginRequired') ?? DEFAULTS.loginRequired,
-    mcpKeyRequired: stored.get('security.mcpKeyRequired') ?? DEFAULTS.mcpKeyRequired,
-    passwordLogin: stored.get('security.passwordLogin') ?? DEFAULTS.passwordLogin,
+    loginRequired: flag('loginRequired'),
+    mcpKeyRequired: flag('mcpKeyRequired'),
+    passwordLogin: flag('passwordLogin'),
+    changesNeedSignIn: flag('changesNeedSignIn'),
+    corsOrigins,
   }
 }
 
-export async function setSecuritySettings(changes: Partial<SecuritySettings>): Promise<SecuritySettings> {
+export async function setSecuritySettings(changes: Partial<Switches>): Promise<SecuritySettings> {
   const database = await getDatabase()
   for (const [name, value] of Object.entries(changes)) {
     if (typeof value !== 'boolean' || !(name in DEFAULTS)) continue
@@ -65,6 +81,11 @@ export async function setSecuritySettings(changes: Partial<SecuritySettings>): P
   return getSecuritySettings()
 }
 
+/** The websites whose pages may call the API (already checked by `parseCorsOrigins`). */
+export async function setCorsOrigins(origins: string[]): Promise<void> {
+  await setJsonSetting('security.corsOrigins', origins)
+}
+
 /** CLEARPING_AUTH=off: sign-in is not asked for, and passwords work, whatever the switches say. */
 export function recoveryMode(): boolean {
   return /^(off|0|false|no)$/i.test(process.env.CLEARPING_AUTH?.trim() ?? '')
@@ -73,7 +94,7 @@ export function recoveryMode(): boolean {
 /** The switches as they are in force: CLEARPING_AUTH=off turns password sign-in back on. */
 export async function securitySwitches(): Promise<SecuritySettings> {
   const settings = await getSecuritySettings()
-  return recoveryMode() ? { ...settings, loginRequired: false, passwordLogin: true } : settings
+  return recoveryMode() ? { ...settings, loginRequired: false, changesNeedSignIn: false, passwordLogin: true } : settings
 }
 
 /** A setting stored as JSON: the single sign-on configuration. */
@@ -92,6 +113,17 @@ export async function setJsonSetting(key: string, value: unknown): Promise<void>
     key,
     JSON.stringify(value),
   ])
+}
+
+const SETUP_ADVICE_DISMISSED = 'security.setupAdviceDismissed'
+
+/** An admin said this ClearPing stays on the network, so the first-run prompt stays away. */
+export async function isSetupAdviceDismissed(): Promise<boolean> {
+  return (await getJsonSetting<unknown>(SETUP_ADVICE_DISMISSED)) === true
+}
+
+export async function dismissSetupAdvice(): Promise<void> {
+  await setJsonSetting(SETUP_ADVICE_DISMISSED, true)
 }
 
 /** Which second factors an admin requires of the accounts that sign in to ClearPing itself. */

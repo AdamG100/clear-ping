@@ -31,6 +31,7 @@ import { BrandMark } from '../_components/shell/brand-mark'
 
 interface Status {
   loginRequired: boolean
+  changesNeedSignIn?: boolean
   accountExists: boolean
   registrationOpen: boolean
   setupCodeRequired: boolean
@@ -437,7 +438,9 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
                   ? 'CLEARPING_AUTH=off is set, so a new account can be made to get back in. Remove it once you are in.'
                   : 'The first account on this ClearPing. With it you can turn on sign-in and create keys for scripts and AI assistants.'
                 : status && !status.loginRequired
-                  ? 'Sign in to change security settings, create keys and see who changed what.'
+                  ? status.changesNeedSignIn
+                    ? 'Sign in to change what is monitored, as well as security settings and keys.'
+                    : 'Sign in to change security settings, create keys and see who changed what.'
                   : 'This ClearPing asks you to sign in.'}
             </p>
           </div>

@@ -23,6 +23,13 @@ network or behind a sign-in proxy such as Authentik. For anything else, the
 2. Under **Access**, turn on **Require sign-in for the dashboard and API**.
 3. Under **Keys**, create a key for each assistant or script that needs one.
 
+The first time the dashboard opens with sign-in still off, it asks you to turn
+sign-in on or set up single sign-on. An admin can instead say it stays on the
+network, and the question goes away for everyone. Turning sign-in on removes
+it too. Single sign-on on its own leaves the question up: the dashboard and
+the API stay open until sign-in is required. With `CLEARPING_AUTH=off` the
+question stays away, because that is how you get back in.
+
 Changing anything under Settings always takes being signed in, even while
 sign-in is off for the dashboard. Otherwise anyone who could open the page could
 make themselves a key. A key can never change these settings.
@@ -109,6 +116,56 @@ sign out. The cookie, `clearping.session_token`, is signed, `HttpOnly`,
 come from a page of this site; one sent from another site is refused. Sign-in
 failures are slowed down after five tries, per address and per username, up to
 a quarter of an hour.
+
+## The API and who may call it
+
+**Settings → Access** has three switches that decide who may call the API (and
+the dashboard, which is the same thing: it is the API's only client):
+
+| Setting | Looking (`GET`) | Changing (`POST`, `PUT`, `PATCH`, `DELETE`) |
+|---|---|---|
+| Both off (the default) | anyone | anyone |
+| **Require sign-in or a key to change anything** | anyone | a signed-in account that may change things, or a key that may write |
+| **Require sign-in for the dashboard and API** | a signed-in account or any key | as above |
+
+- With the middle row, the dashboard opens for anyone as a read-only view, as a
+  viewer sees it, and **Settings** is where they sign in to change things. A
+  wrong key is still refused, and a read-only key still cannot change anything.
+- The API's data cannot be hidden while the dashboard shows it: both are the
+  same calls. To hide reads, require sign-in. That is also why the switches
+  cannot tell a script from the dashboard when sign-in is off: a browser's headers
+  can be copied by anything.
+- **AI assistants (MCP)** have their own switch, **Require a key for AI
+  assistants**, which makes even reading need a key. Writing always needs a key
+  that may write; there is no writing without one. See [mcp.md](mcp.md).
+- Every key has one of two levels, **read only** or **read and write**, chosen
+  when it is made and never more than its maker may do.
+- `CLEARPING_AUTH=off` turns all of these off while it is set, as it does
+  sign-in.
+
+### Websites that may call the API (CORS)
+
+A browser stops a page from one site reading another's API unless that API
+allows it. **Websites that may call the API**, under Settings → Access, lists
+the addresses (`https://home.example.com`, the site alone, with no path) whose
+pages may. Nothing is allowed until listed, and there is no wildcard: it would
+let any page a visitor opens read a ClearPing on their private network.
+
+- A listed page may call the API, and the MCP address, from the browser, and
+  read the answers. It is **never taken for a signed-in account**: its requests
+  are read without the session cookie, so it has to send a key
+  (`Authorization: Bearer <key>`). The key's level (read only, or read and
+  write) decides what it can do.
+- Sign-in itself (`/api/auth/*`), the settings (`/api/security/*`, which no key
+  can change) and the health check stay closed to other sites.
+- No credentials are ever allowed across sites, so the answer to a page never
+  includes anything tied to the visitor's login.
+- Changes are recorded in Activity.
+- Scripts, `curl` and AI assistants are not browsers and need none of this.
+
+A page that is not listed, or is listed but sends no key where one is needed,
+is turned away as before, and a change from another site that is not listed is
+refused whether or not anyone is signed in.
 
 ### Better Auth
 
@@ -197,14 +254,19 @@ from ClearPing's routes like the rest of sign-in.
   what: *GPT added targets* rather than *someone did*.
 - A key is shown **once**, when it is made, and only a hash of it is kept.
   Lost, it is revoked and replaced.
+- When you make one, choose how long it lasts: 1 day, 7 days, 30 days, 90
+  days, 1 year, or no expiry. An expired key stays in the list, marked
+  expired, and stops working. It is refused the same way as a revoked one.
+- **Re-roll** makes a new key with the same name, level and lifetime, shows it
+  once, and revokes the old one at once. Update whatever was using it.
 - Revoking stops it at once. The key stays in the list, marked revoked, so the
   activity it was used for still says whose it was.
 - Over MCP, a key is only taken over HTTPS or from ClearPing's own network; see
   [mcp.md](mcp.md#keys-are-only-taken-encrypted).
 - **Keys are honoured whether or not sign-in is on.** With sign-in off, a key is
   what lets an assistant change things over MCP, and what puts a name to API
-  changes in the activity record. A wrong or revoked key is always refused,
-  never treated as nobody.
+  changes in the activity record. A wrong, revoked or expired key is always
+  refused, never treated as nobody.
 
 `CLEARPING_MCP_TOKEN`, from before keys were made in the dashboard, still
 works, as a key that can change things, and while it is set the MCP address
@@ -218,7 +280,7 @@ revocable without a restart, named in the record. Move to them and unset it.
 - targets added, imported, changed, paused, resumed and deleted;
 - groups made, renamed and deleted; alerts made, changed and deleted;
 - every change an assistant made over MCP, with what it was asked to do;
-- keys made and revoked, accounts added and removed, roles changed (and by
+- keys made, re-rolled and revoked, accounts added and removed, roles changed (and by
   whom: an admin, or the person's groups at Authentik), passwords changed,
   passwords an admin set for someone else, reset codes asked for and passwords
   reset with them, sign-in turned on and off;

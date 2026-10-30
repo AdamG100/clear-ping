@@ -1,12 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, EyeOff, Fingerprint, History, KeyRound, LogIn, LogOut, Network, RadioTower, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
+import { Bot, EyeOff, Fingerprint, History, KeyRound, LogIn, LogOut, Network, RadioTower, RefreshCw, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { CodeBlock } from '@/components/arc/code-block/code-block'
 import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
+import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
 import { Input } from '@/components/arc/input/input'
 import { PasswordField } from '@/components/arc/password-field/password-field'
@@ -15,9 +16,11 @@ import { Select } from '@/components/arc/select/select'
 import { Skeleton } from '@/components/arc/skeleton/skeleton'
 import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
 import { Switch } from '@/components/arc/switch/switch'
+import { TagInput } from '@/components/arc/tag-input/tag-input'
 import { Timeline } from '@/components/arc/timeline/timeline'
 import { useToast } from '@/components/notifications'
 import type { SettingsSection } from '@/lib/dashboard-pages'
+import { describeTimeLeft, KEY_LIFETIMES } from '@/lib/security/key-lifetime'
 import { canAdminister, maxKeyAccess, ROLE_DETAIL, ROLE_LABEL, ROLES, type Role } from '@/lib/security/roles'
 import type { FactorPolicy } from '@/lib/security/factors'
 import { cn } from '@/lib/utils'
@@ -29,6 +32,7 @@ import { RoutingTab } from './routing-tab'
 import { AddAccount } from './add-account'
 import { PasswordDialog } from './password-dialog'
 import { AssistantSettings, CopyField, PAGE_CARD } from './mcp-setup'
+import { notifySecurityChanged } from '../dashboard/security-changed'
 import { PANE, PANE_ACTIONS, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
 import { displayLocale, displayTimeZone, inDisplayZone } from '@/lib/time-zone'
 
@@ -53,6 +57,8 @@ interface ApiKey {
   ownerId: string | null
   lastUsedAt: number | null
   revokedAt: number | null
+  expiresAt: number | null
+  expiresInDays: number | null
 }
 
 interface Account {
@@ -86,10 +92,10 @@ interface SsoSettings {
 
 interface Security {
   me: Account
-  settings: { loginRequired: boolean; mcpKeyRequired: boolean; passwordLogin: boolean }
+  settings: { loginRequired: boolean; mcpKeyRequired: boolean; passwordLogin: boolean; changesNeedSignIn: boolean; corsOrigins: string[] }
   factorPolicy: FactorPolicy
   sso: SsoSettings
-  inForce: { loginRequired: boolean; mcpKeyRequired: boolean }
+  inForce: { loginRequired: boolean; mcpKeyRequired: boolean; changesNeedSignIn: boolean }
   environment: { recovery: boolean; legacyMcpToken: boolean }
   users: Account[]
   keys: ApiKey[]
@@ -119,6 +125,15 @@ const ROLE_OPTIONS = ROLES.map(role => ({ value: role, label: ROLE_LABEL[role] }
 
 function when(ms: number | null): string {
   return ms ? new Date(ms).toLocaleString(undefined, inDisplayZone({ dateStyle: 'medium', timeStyle: 'short' })) : 'never'
+}
+
+/** Past the time it was made to stop, and not already revoked. */
+function keyExpired(key: ApiKey): boolean {
+  return key.revokedAt === null && key.expiresAt !== null && key.expiresAt <= Date.now()
+}
+
+function keyQuiet(key: ApiKey): boolean {
+  return key.revokedAt !== null || keyExpired(key)
 }
 
 async function send(url: string, method: string, body?: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -175,7 +190,54 @@ function RowRoleSelect({ label, value, onChange, disabled }: { label: string; va
   )
 }
 
-function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Partial<Security['settings']>) => void }) {
+/**
+ * The websites whose pages may call the API from a browser. A list that is
+ * saved as a whole, since half an address is not one the server will take.
+ */
+function CorsOrigins({ saved, reload }: { saved: string[]; reload: () => void }) {
+  const { notify, reportError } = useToast()
+  const [origins, setOrigins] = useState(saved)
+  const [busy, setBusy] = useState(false)
+  const unchanged = origins.length === saved.length && origins.every((origin, index) => origin === saved[index])
+
+  const save = async () => {
+    setBusy(true)
+    const { ok, body } = await send('/api/security', 'PUT', { corsOrigins: origins })
+    setBusy(false)
+    if (!ok) return reportError('Could not save the websites', body.error)
+    setOrigins(Array.isArray(body.corsOrigins) ? (body.corsOrigins as string[]) : origins)
+    notify({ tone: 'success', title: 'Saved' })
+    reload()
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <p className={SECTION_TITLE}>Websites that may call the API</p>
+        <p className={HINT}>
+          A browser only lets a page read ClearPing&apos;s API if ClearPing says that page may. List the address of a web
+          page of your own (such as <span className="font-mono">https://home.example.com</span>) that should be able to,
+          and nothing else can. Such a page has to send a key: it is never taken for a signed-in account. Scripts and AI
+          assistants are not browsers and need nothing here.
+        </p>
+      </div>
+      <TagInput
+        label="Allowed websites"
+        value={origins}
+        onValueChange={setOrigins}
+        placeholder="https://home.example.com"
+        description="Press Enter after each address. The site alone, with no path. No wildcards."
+      />
+      <div>
+        <Button type="button" loading={busy} disabled={unchanged} onClick={save}>
+          Save websites
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function AccessTab({ data, onChange, reload }: { data: Security; onChange: (changes: Partial<Security['settings']>) => void; reload: () => void }) {
   const { settings, inForce, environment } = data
   return (
     <div className="space-y-5">
@@ -193,9 +255,28 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
         detail={
           <>
             Everyone has to sign in to see ClearPing, and the API only answers someone signed in or a script with a key
-            (<span className="font-mono">Authorization: Bearer &lt;key&gt;</span>). Leave it off if ClearPing is only
-            reachable on your own network, or already sits behind a sign-in such as Authentik.
+            (<span className="font-mono">Authorization: Bearer &lt;key&gt;</span>), even to read. Leave it off if
+            ClearPing is only reachable on your own network, or already sits behind a sign-in such as Authentik. The
+            dashboard and the API are one: there is no way to hide the API&apos;s data and show it on the dashboard.
           </>
+        }
+      />
+
+      <SettingSwitch
+        checked={inForce.changesNeedSignIn}
+        disabled={inForce.loginRequired}
+        onChange={on => onChange({ changesNeedSignIn: on })}
+        label="Require sign-in or a key to change anything"
+        detail={
+          inForce.loginRequired ? (
+            'On, because sign-in is on.'
+          ) : (
+            <>
+              Anyone can still look, but adding, editing, pausing, probing and deleting need an account that may change
+              things, or a key that can write (<span className="font-mono">Authorization: Bearer &lt;key&gt;</span>).
+              Off, anyone who can reach ClearPing can change it. Keys that only read never change anything either way.
+            </>
+          )
         }
       />
 
@@ -217,6 +298,8 @@ function AccessTab({ data, onChange }: { data: Security; onChange: (changes: Par
           )
         }
       />
+
+      <CorsOrigins key={settings.corsOrigins.join(' ')} saved={settings.corsOrigins} reload={reload} />
 
       <Alert tone="info" title="Changing these always needs a sign-in">
         These settings, keys and accounts can only be changed signed in, even while the dashboard itself is open to
@@ -263,6 +346,23 @@ function SignInTab({ data, reload }: { data: Security; reload: () => void }) {
   )
 }
 
+/** Re-roll and Revoke. The row only opens a dialog, so the question never has to fit in the cell. */
+function KeyActions({ apiKey, onAsk }: { apiKey: ApiKey; onAsk: (action: 'reroll' | 'revoke') => void }) {
+  if (apiKey.revokedAt) return <span className="text-xs text-muted-foreground">Revoked {when(apiKey.revokedAt)}</span>
+  return (
+    <span className="flex items-center justify-end gap-1">
+      <Button type="button" variant="ghost" size="sm" onClick={() => onAsk('reroll')}>
+        <RefreshCw {...ICON} />
+        Re-roll
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => onAsk('revoke')}>
+        <Trash2 {...ICON} />
+        Revoke
+      </Button>
+    </span>
+  )
+}
+
 function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
   const { reportError } = useToast()
   const admin = canAdminister(data.me.role)
@@ -271,16 +371,28 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
   const roleOf = (id: string | null) => (id === data.me.id ? data.me.role : data.users.find(user => user.id === id)?.role)
   const [name, setName] = useState('')
   const [access, setAccess] = useState<Access>('read')
+  // How long it lasts, as the days in the list or 'never'.
+  const [lasts, setLasts] = useState('never')
   const [busy, setBusy] = useState(false)
-  const [made, setMade] = useState<{ key: string; name: string; access: Access } | null>(null)
+  const [made, setMade] = useState<{ key: string; name: string; expiresAt: number | null; rerolled: boolean } | null>(null)
+  const [ask, setAsk] = useState<{ key: ApiKey; action: 'reroll' | 'revoke' } | null>(null)
+  // Kept after close so the dialog can finish leaving with the same question.
+  const [held, setHeld] = useState(ask)
+  if (ask && ask !== held) setHeld(ask)
+  const view = ask ?? held
+  const [acting, setActing] = useState(false)
 
   const make = async (event: FormEvent) => {
     event.preventDefault()
     setBusy(true)
-    const { ok, body } = await send('/api/security/keys', 'POST', { name: name.trim(), access })
+    const { ok, body } = await send('/api/security/keys', 'POST', {
+      name: name.trim(),
+      access,
+      expiresInDays: lasts === 'never' ? null : Number(lasts),
+    })
     setBusy(false)
     if (!ok) return reportError('Could not create the key', body.error)
-    setMade({ key: String(body.key), name: name.trim(), access })
+    setMade({ key: String(body.key), name: name.trim(), expiresAt: (body.record as ApiKey).expiresAt, rerolled: false })
     setName('')
     reload()
   }
@@ -294,6 +406,17 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
     reload()
   }
 
+  // A new key in place of this one, lasting as long as it was made to; this one stops at once.
+  const reroll = async (key: ApiKey) => {
+    const { ok, body } = await send(`/api/security/keys/${key.id}/reroll`, 'POST')
+    if (!ok) {
+      reportError('Could not re-roll the key', body.error)
+      throw new Error(String(body.error ?? 'Could not re-roll the key'))
+    }
+    setMade({ key: String(body.key), name: key.name, expiresAt: (body.record as ApiKey).expiresAt, rerolled: true })
+    reload()
+  }
+
   const origin = typeof window === 'undefined' ? '' : window.location.origin
 
   const rows = data.keys.map(key => ({ ...key, key }))
@@ -302,8 +425,10 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
     <div className="space-y-6">
       {made && (
         <div className="space-y-3">
-          <Alert tone="success" title={`The key for ${made.name}`}>
+          <Alert tone="success" title={`${made.rerolled ? 'The new key for' : 'The key for'} ${made.name}`}>
             Copy it now: it is not kept, and cannot be shown again.
+            {made.rerolled && ' The key it replaces has stopped working, so update whatever used it.'}
+            {made.expiresAt ? ` It works until ${when(made.expiresAt)}.` : ' It does not expire.'}
           </Alert>
           <CopyField id="new-key" label="Key" value={made.key} />
           <CodeBlock
@@ -322,8 +447,9 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
         <div className="space-y-1">
           <p className={SECTION_TITLE}>Create a key</p>
           <p className={HINT}>
-            Make one per script or assistant, so you can revoke each on its own and Activity shows which did what. A key
-            can never do more than your account can: if your role changes, so do your keys.
+            Make one per script or assistant, so you can revoke each on its own and Activity shows which did what. Choose
+            how long it lasts. Re-roll replaces one and shows the new key once; the old one stops at once. A key can
+            never do more than your account can: if your role changes, so do your keys.
           </p>
         </div>
         <Input
@@ -347,6 +473,14 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
         ) : (
           <p className={HINT}>Your account is a {ROLE_LABEL[data.me.role]}, so its keys can only read.</p>
         )}
+        <div className="relative max-w-xs">
+          <Select
+            label="Expires"
+            value={lasts}
+            onValueChange={setLasts}
+            options={KEY_LIFETIMES.map(each => ({ value: each.days === null ? 'never' : String(each.days), label: each.label }))}
+          />
+        </div>
         {/* On a line of its own: a button is inline, and sat beside the control above. */}
         <div>
           <Button type="submit" loading={busy} disabled={!name.trim()}>
@@ -368,7 +502,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
             key: 'name',
             label: 'Name',
             render: (_, { key }) => (
-              <span className={cn('flex flex-col gap-1', key.revokedAt && 'opacity-60')}>
+              <span className={cn('flex flex-col gap-1', keyQuiet(key) && 'opacity-60')}>
                 <span className="font-medium">{key.name}</span>
                 <span className="font-mono text-xs text-muted-foreground">{key.prefix}…</span>
               </span>
@@ -379,12 +513,16 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
             label: 'Access',
             render: (_, { key }) => {
               const makerRole = roleOf(key.ownerId)
-              const capped = key.access === 'write' && !key.revokedAt && makerRole && maxKeyAccess(makerRole) === 'read'
+              const expired = keyExpired(key)
+              const capped = key.access === 'write' && !key.revokedAt && !expired && makerRole && maxKeyAccess(makerRole) === 'read'
               return (
                 <span className="flex flex-col items-start gap-1">
-                  <Badge tone={key.revokedAt ? 'danger' : key.access === 'write' ? 'warning' : 'neutral'} size="sm">
-                    {key.revokedAt ? 'Revoked' : key.access === 'write' ? 'Read and write' : 'Read only'}
+                  <Badge tone={key.revokedAt || expired ? 'danger' : key.access === 'write' ? 'warning' : 'neutral'} size="sm">
+                    {key.revokedAt ? 'Revoked' : expired ? 'Expired' : key.access === 'write' ? 'Read and write' : 'Read only'}
                   </Badge>
+                  {expired && (
+                    <span className="text-xs text-muted-foreground">Was {key.access === 'write' ? 'read and write' : 'read only'}</span>
+                  )}
                   {capped && (
                     <span className="text-xs text-muted-foreground">
                       Only reads while {key.createdBy ?? 'its maker'} is a {ROLE_LABEL[makerRole]}
@@ -412,25 +550,69 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
             render: (_, { key }) => <span className="text-muted-foreground">{when(key.lastUsedAt)}</span>,
           },
           {
+            key: 'expiresAt',
+            label: 'Expires',
+            numeric: false,
+            render: (_, { key }) => {
+              if (!key.expiresAt) return <span className="text-muted-foreground">{key.revokedAt ? '—' : 'No expiry'}</span>
+              const over = key.expiresAt <= Date.now()
+              return (
+                <span className="flex flex-col gap-0.5">
+                  <span className={over && !key.revokedAt ? 'text-destructive' : 'text-muted-foreground'}>{when(key.expiresAt)}</span>
+                  {!key.revokedAt && <span className="text-xs text-muted-foreground">{describeTimeLeft(key.expiresAt)}</span>}
+                </span>
+              )
+            },
+          },
+          {
             key: 'actions',
             label: 'Actions',
             sortable: false,
-            render: (_, { key }) =>
-              key.revokedAt ? (
-                <span className="text-xs text-muted-foreground">Revoked {when(key.revokedAt)}</span>
-              ) : (
-                <ConfirmMorph
-                  label="Revoke"
-                  icon={<Trash2 {...ICON} />}
-                  prompt={`Revoke ${key.name}?`}
-                  confirmLabel="Revoke"
-                  doneLabel="Revoked"
-                  onConfirm={() => revoke(key)}
-                />
-              ),
+            render: (_, { key }) => <KeyActions apiKey={key} onAsk={action => setAsk({ key, action })} />,
           },
         ]}
       />
+      <Dialog open={ask !== null} onOpenChange={open => { if (!open && !acting) setAsk(null) }}>
+        {view && (
+          <DialogContent
+            title={view.action === 'reroll' ? `Re-roll ${view.key.name}?` : `Revoke ${view.key.name}?`}
+            description={
+              view.action === 'reroll'
+                ? 'A new key is shown once, with the same name, level and lifetime. This one stops working at once.'
+                : 'It stops working at once. It stays in the list, marked revoked, so past activity still names it.'
+            }
+          >
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button type="button" variant="secondary" disabled={acting} onClick={() => setAsk(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant={view.action === 'revoke' ? 'danger' : 'primary'}
+                loading={acting}
+                onClick={() => {
+                  const pending = view
+                  setActing(true)
+                  void (async () => {
+                    try {
+                      if (pending.action === 'reroll') await reroll(pending.key)
+                      else await revoke(pending.key)
+                      setAsk(null)
+                    } catch {
+                      // Already reported. The dialog stays open.
+                    } finally {
+                      setActing(false)
+                    }
+                  })()
+                }}
+              >
+                {view.action === 'reroll' ? <RefreshCw {...ICON} /> : <Trash2 {...ICON} />}
+                {view.action === 'reroll' ? 'Re-roll' : 'Revoke'}
+              </Button>
+            </div>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   )
 }
@@ -980,6 +1162,7 @@ const ACTIONS: Record<string, string> = {
   'bgp.network': 'set their own network for Routing',
   'key.create': 'created a key',
   'key.revoke': 'revoked a key',
+  'key.reroll': 're-rolled a key',
   'account.create': 'created the account',
   'account.add': 'added an account',
   'account.remove': 'removed an account',
@@ -996,6 +1179,7 @@ const ACTIONS: Record<string, string> = {
   'security.factors': 'changed the second factors required',
   'security.on': 'turned on',
   'security.off': 'turned off',
+  'security.setup': 'left the first-run prompt',
   'sso.change': 'changed single sign-on',
   'account.sso.link': 'linked their account',
   'account.sso.unlink': 'unlinked their account',
@@ -1145,6 +1329,7 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
   const change = async (changes: Partial<Security['settings']>) => {
     const { ok, body } = await send('/api/security', 'PUT', changes)
     if (!ok) return reportError('Could not change the setting', body.error)
+    notifySecurityChanged()
     await reload()
   }
 
@@ -1296,7 +1481,7 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
 
             {loaded.state === 'ready' && (
               <div className={PAGE_CARD}>
-                {current.value === 'access' && <AccessTab data={loaded.data} onChange={change} />}
+                {current.value === 'access' && <AccessTab data={loaded.data} onChange={change} reload={reload} />}
                 {current.value === 'sign-in' && <SignInTab data={loaded.data} reload={reload} />}
                 {current.value === 'keys' && <KeysTab data={loaded.data} reload={reload} />}
                 {current.value === 'sso' && <SsoTab data={loaded.data} reload={reload} />}

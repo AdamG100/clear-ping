@@ -99,6 +99,59 @@ describe('decide, with sign-in on', () => {
   })
 })
 
+describe('decide, with sign-in needed only to change things', () => {
+  const looking = { loginRequired: false, changesNeedSignIn: true }
+  const askHere = (pathname: string, method: string, identity: Identity) => decide({ pathname, method, policy: looking, identity, ...site })
+
+  it('lets anyone look, at the pages and the API', () => {
+    expect(askHere('/', 'GET', nobody)).toEqual({ allow: true })
+    expect(askHere('/api/targets', 'GET', nobody)).toEqual({ allow: true })
+  })
+
+  it('turns away a change from nobody', () => {
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(askHere('/api/targets', method, nobody)).toMatchObject({ allow: false, status: 401 })
+    }
+  })
+
+  it('takes a change from an account that may make it, or a key that may write', () => {
+    expect(askHere('/api/targets', 'POST', user)).toEqual({ allow: true })
+    expect(askHere('/api/targets', 'POST', editor)).toEqual({ allow: true })
+    expect(askHere('/api/targets', 'POST', writer)).toEqual({ allow: true })
+  })
+
+  it('still holds a viewer and a read-only key to looking', () => {
+    expect(askHere('/api/targets', 'POST', viewer)).toMatchObject({ allow: false, status: 403 })
+    expect(askHere('/api/targets', 'POST', reader)).toMatchObject({ allow: false, status: 403 })
+  })
+
+  it('leaves sign-in itself and the MCP address to look after themselves', () => {
+    expect(askHere('/api/auth/login', 'POST', nobody)).toEqual({ allow: true })
+    expect(askHere('/api/mcp', 'POST', nobody)).toEqual({ allow: true })
+  })
+})
+
+describe('decide, for a website an admin listed', () => {
+  const listed = { origin: 'https://home.example', host: 'ping.example' }
+  const withCors = (policy: { loginRequired: boolean; changesNeedSignIn?: boolean }, identity: Identity) =>
+    decide({ pathname: '/api/targets', method: 'POST', policy, identity, ...listed, fetchSite: 'cross-site', trustedOrigin: true })
+
+  it('may change things with a key', () => {
+    expect(withCors(on, writer)).toEqual({ allow: true })
+    expect(withCors(on, reader)).toMatchObject({ allow: false, status: 403 })
+  })
+
+  it('is nobody without one, so asked for a key where sign-in is on', () => {
+    expect(withCors(on, nobody)).toMatchObject({ allow: false, status: 401 })
+    expect(withCors({ loginRequired: false, changesNeedSignIn: true }, nobody)).toMatchObject({ allow: false, status: 401 })
+  })
+
+  it('is not held to the same-site rule, which is for cookies', () => {
+    expect(withCors(off, nobody)).toEqual({ allow: true })
+    expect(decide({ pathname: '/api/targets', method: 'POST', policy: off, identity: nobody, ...listed, fetchSite: 'cross-site' })).toMatchObject({ allow: false, status: 403 })
+  })
+})
+
 describe('reading credentials', () => {
   it('finds the session cookie among others', () => {
     expect(readCookie('theme=dark; clearping_session=abc%3D; x=1', 'clearping_session')).toBe('abc=')

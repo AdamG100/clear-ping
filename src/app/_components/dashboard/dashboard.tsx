@@ -41,6 +41,7 @@ import { AlertsView, type AlertResponse } from '../alerts/alerts-view'
 import { SettingsPage } from '../settings/settings-page'
 import { MaintenanceToast } from '../settings/maintenance-toast'
 import { AddTargetPage, EditTargetPage } from '../targets/target-page'
+import { SetupAdvice } from './setup-advice'
 import { useDashboardPage } from './use-dashboard-page'
 import { useSignedIn } from './use-signed-in'
 import { DEFAULT_SETTINGS_SECTION, isSettingsSection, pathOf, type DashboardPage } from '@/lib/dashboard-pages'
@@ -1169,6 +1170,7 @@ export function Dashboard() {
           own width, not the screen's (see pane-layout.ts). */}
       <main className="flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable pb-(--safe-bottom) pr-(--safe-right) max-lg:pl-(--safe-left) lg:pt-(--safe-top)">
         <div ref={paneRef} className="@container/main">
+        <SetupAdvice pageKey={pathOf(page)} onSetupSso={() => openSettings('sso')} />
         {(showLoadingState || showEmptyState) && !showingOverview ? (
           <PaneSkeleton />
         ) : (

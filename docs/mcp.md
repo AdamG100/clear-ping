@@ -190,8 +190,10 @@ keep their names, so the assistant can still say which one went down and why.
 ## Keys
 
 Each assistant gets a key of its own, made under Settings → Keys: **read only**,
-or **read and write**. Revoke one and that assistant alone is cut off; what
-each one changes is recorded under its name. Send it with every request:
+or **read and write**, lasting a set number of days or with no expiry. Revoke
+one and that assistant alone is cut off. Re-roll replaces it: the new key is
+shown once and the old one stops at once. What each one changes is recorded
+under its name. Send it with every request:
 
 ```bash
 claude mcp add --transport http clearping https://clearping.example.com/api/mcp \
@@ -213,8 +215,8 @@ Claude Desktop on Windows splits an argument at its spaces:
 
 Without a key an assistant can read but never change anything, unless
 **Require a key for AI assistants** is on under Settings → Access (it always is
-while sign-in is on), and then it is refused altogether. A wrong or revoked key
-is refused either way. Settings → AI assistant writes the command with a
+while sign-in is on), and then it is refused altogether. A wrong, revoked or
+expired key is refused either way. Settings → AI assistant writes the command with a
 place for the key; it is never shown a key.
 
 `CLEARPING_MCP_TOKEN`, the single token from before keys were made in the
@@ -252,7 +254,16 @@ should also have sign-in on, or a sign-in proxy in front; see
 
 A web page is only let through from the address ClearPing itself was reached
 at. Any other is refused, so that a website cannot have a visitor's browser
-read a ClearPing on their private network.
+read a ClearPing on their private network. A page of your own on another
+address can be added under Settings → Access → **Websites that may call the
+API**; it then has to send a key, like any assistant (see
+[security.md](security.md#websites-that-may-call-the-api-cors)).
+
+The levels, in short: an assistant with no key reads, unless **Require a key
+for AI assistants** is on; with a read-only key it reads; with a read and write
+key it also changes targets. Nothing deletes. To keep your readings from
+assistants altogether, turn that switch on and only give keys to the ones you
+trust, or hide addresses from them under Settings → Privacy.
 
 ## How it works
 
