@@ -26,7 +26,11 @@ import type { Alert, AlertMetric, AlertTargetState, GroupOrder, Target } from '@
 import {
   ALERT_METRIC_LABELS,
   DEFAULT_TRACE_COOLDOWN_MINUTES,
+  DEFAULT_TRACE_KEEP_COUNT,
+  DEFAULT_TRACE_KEEP_DAYS,
   MAX_TRACE_COOLDOWN_MINUTES,
+  MAX_TRACE_KEEP_COUNT,
+  MAX_TRACE_KEEP_DAYS,
   TRACEABLE_ALERT_METRICS,
   tracesByDefault,
 } from '@/types/probe'
@@ -121,6 +125,8 @@ interface AlertPayload {
   notifyUrls: string[]
   traceOnFire: boolean
   traceCooldownMinutes: number
+  traceKeepCount: number
+  traceKeepDays: number
   targetIds: string[]
 }
 
@@ -142,6 +148,7 @@ function AlertForm({
   saving,
   onSubmit,
   onCancel,
+  onPurgeTraces,
 }: {
   /** The alert being edited; absent for a new one. */
   alert: AlertResponse | null
@@ -150,6 +157,8 @@ function AlertForm({
   saving: boolean
   onSubmit: (payload: AlertPayload) => void
   onCancel: () => void
+  /** Delete the routes this alert has taken. Absent until the alert exists. */
+  onPurgeTraces?: () => Promise<void>
 }) {
   const [name, setName] = useState(alert?.name ?? '')
   const [metric, setMetric] = useState<AlertMetric>(alert?.metric ?? 'unreachable')
@@ -158,6 +167,8 @@ function AlertForm({
   const [notifyUrls, setNotifyUrls] = useState((alert?.notifyUrls ?? []).join('\n'))
   const [traceOnFire, setTraceOnFire] = useState(alert?.traceOnFire ?? tracesByDefault('unreachable'))
   const [traceCooldownMinutes, setTraceCooldownMinutes] = useState(alert?.traceCooldownMinutes ?? DEFAULT_TRACE_COOLDOWN_MINUTES)
+  const [traceKeepCount, setTraceKeepCount] = useState(alert?.traceKeepCount ?? DEFAULT_TRACE_KEEP_COUNT)
+  const [traceKeepDays, setTraceKeepDays] = useState(alert?.traceKeepDays ?? DEFAULT_TRACE_KEEP_DAYS)
   // A new alert traces or not by what it watches, until someone says which.
   const [traceChosen, setTraceChosen] = useState(alert !== null)
   const [selected, setSelected] = useState(() => new Set(alert?.targets.map(entry => entry.targetId) ?? []))
@@ -173,6 +184,12 @@ function AlertForm({
     traceable && traceOnFire &&
       (!Number.isInteger(traceCooldownMinutes) || traceCooldownMinutes < 1 || traceCooldownMinutes > MAX_TRACE_COOLDOWN_MINUTES) &&
       `The wait between traces must be from 1 to ${MAX_TRACE_COOLDOWN_MINUTES} minutes.`,
+    traceable && traceOnFire &&
+      (!Number.isInteger(traceKeepCount) || traceKeepCount < 1 || traceKeepCount > MAX_TRACE_KEEP_COUNT) &&
+      `Keep between 1 and ${MAX_TRACE_KEEP_COUNT} routes.`,
+    traceable && traceOnFire &&
+      (!Number.isInteger(traceKeepDays) || traceKeepDays < 1 || traceKeepDays > MAX_TRACE_KEEP_DAYS) &&
+      `Keep routes for between 1 and ${MAX_TRACE_KEEP_DAYS} days.`,
     !urls && 'Each notification URL must be an Apprise URL, such as discord://… or mailto://…, on a line of its own.',
     selected.size === 0 && 'Tick at least one target for the alert to watch.',
   ].filter((problem): problem is string => !!problem)
@@ -201,6 +218,8 @@ function AlertForm({
       notifyUrls: urls ?? [],
       traceOnFire: traceable && traceOnFire,
       traceCooldownMinutes,
+      traceKeepCount,
+      traceKeepDays,
       targetIds: [...selected],
     })
   }
@@ -289,21 +308,62 @@ function AlertForm({
             }}
           />
           {traceOnFire && (
-            <div className="space-y-2">
-              <NumberField
-                id="alert-trace-cooldown"
-                label="Then wait at least"
-                suffix=" minutes"
-                min={1}
-                max={MAX_TRACE_COOLDOWN_MINUTES}
-                step={5}
-                value={traceCooldownMinutes}
-                onValueChange={setTraceCooldownMinutes}
-              />
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <NumberField
+                  id="alert-trace-cooldown"
+                  label="Then wait at least"
+                  suffix=" minutes"
+                  min={1}
+                  max={MAX_TRACE_COOLDOWN_MINUTES}
+                  step={5}
+                  value={traceCooldownMinutes}
+                  onValueChange={setTraceCooldownMinutes}
+                />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Before the same target is traced again. A link that keeps dropping out fires again and again, and one trace
+                  per spell of trouble is enough to show where; more only adds load to a path that is already struggling.
+                </p>
+              </div>
+              <div className="grid items-start gap-4 sm:grid-cols-2">
+                <NumberField
+                  id="alert-trace-keep"
+                  label="Keep the newest"
+                  suffix=" routes"
+                  min={1}
+                  max={MAX_TRACE_KEEP_COUNT}
+                  value={traceKeepCount}
+                  onValueChange={setTraceKeepCount}
+                />
+                <NumberField
+                  id="alert-trace-keep-days"
+                  label="Delete them after"
+                  suffix=" days"
+                  min={1}
+                  max={MAX_TRACE_KEEP_DAYS}
+                  value={traceKeepDays}
+                  onValueChange={setTraceKeepDays}
+                />
+              </div>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Before the same target is traced again. A link that keeps dropping out fires again and again, and one trace
-                per spell of trouble is enough to show where; more only adds load to a path that is already struggling.
+                For each target, only this many of the newest routes this alert took are kept, and any older than that many
+                days are deleted. Saving a smaller number deletes the extra ones straight away. A route traced by hand is
+                kept for the usual time, and so is one taken by a different alert.
               </p>
+              {onPurgeTraces ? (
+                <ConfirmMorph
+                  label="Purge saved routes"
+                  prompt="Delete the routes this alert saved?"
+                  confirmLabel="Delete"
+                  doneLabel="Deleted"
+                  disabled={saving}
+                  onConfirm={onPurgeTraces}
+                />
+              ) : (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Once this alert has taken some routes, you can delete them from here.
+                </p>
+              )}
             </div>
           )}
         </fieldset>
@@ -471,6 +531,27 @@ export function AlertsView({
     if (!deleted) throw new Error('Not deleted')
   }
 
+  const purgeTraces = async (alert: AlertResponse) => {
+    try {
+      const response = await fetch(`/api/alerts/${alert.id}/traces`, { method: 'DELETE' })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        reportError('Could not delete the saved routes', result.error ?? `Server responded ${response.status}`)
+        throw new Error('Not deleted')
+      }
+      const deleted = typeof result.deleted === 'number' ? result.deleted : 0
+      notify({
+        tone: deleted === 0 ? 'info' : 'success',
+        title: deleted === 0 ? 'No saved routes to delete' : `Deleted ${deleted} saved route${deleted === 1 ? '' : 's'}`,
+        detail: 'Routes traced by hand were kept.',
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Not deleted') throw error
+      reportError('Could not delete the saved routes', error)
+      throw error
+    }
+  }
+
   const sendTest = async (alert: AlertResponse) => {
     setBusyId(alert.id)
     try {
@@ -537,6 +618,7 @@ export function AlertsView({
           saving={saving}
           onSubmit={save}
           onCancel={onCloseEditor}
+          onPurgeTraces={editing !== 'new' ? () => purgeTraces(editing) : undefined}
         />
       </PageFrame>
     )
@@ -600,7 +682,7 @@ export function AlertsView({
                     `${alert.targets.length} target${alert.targets.length === 1 ? '' : 's'}`,
                     deliveryLabel(alert),
                     alert.traceOnFire && TRACEABLE_ALERT_METRICS.includes(alert.metric)
-                      ? `Traces the route, at most ${cooldownLabel(alert.traceCooldownMinutes)}`
+                      ? `Traces the route, at most ${cooldownLabel(alert.traceCooldownMinutes)}, keeping the newest ${alert.traceKeepCount} for ${alert.traceKeepDays} days`
                       : null,
                   ].filter(Boolean).join(' · ')}
                   action={

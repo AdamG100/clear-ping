@@ -16,6 +16,8 @@ const {
   deleteTraceroute,
   deleteOlderTraceroutes,
   lastAlertTraceAt,
+  trimAlertTraces,
+  purgeAlertTraces,
 } = await import('./store')
 
 /** A stored trace, `minutesAgo` old, to `address`. */
@@ -24,7 +26,8 @@ async function keep(
   targetId: string,
   minutesAgo: number,
   address = '192.0.2.1',
-  trigger: Traceroute['trigger'] = 'manual'
+  trigger: Traceroute['trigger'] = 'manual',
+  alertId?: string
 ): Promise<void> {
   const trace: Traceroute = {
     id,
@@ -34,6 +37,7 @@ async function keep(
     address,
     hops: [{ hop: 1, address, rtts: [1.2, 1.4, 1.1], sent: 3 }],
     reached: true,
+    alertId,
   }
   await storeTraceroute(trace)
 }
@@ -123,6 +127,41 @@ describe('the last trace taken on an alert', () => {
     const at = await lastAlertTraceAt('single')
     expect(Date.now() - at!.getTime()).toBeGreaterThanOrEqual(25 * 60_000)
     expect(Date.now() - at!.getTime()).toBeLessThan(26 * 60_000)
+  })
+})
+
+describe('routes an alert keeps', () => {
+  const DAY = 24 * 60
+
+  it('drops routes older than the days it keeps, and past the newest it keeps, for each target', async () => {
+    await createTarget({ id: 'kept', name: 'kept', host: 'kept.example', probeType: 'ping', interval: 60, status: 'active' })
+    await createTarget({ id: 'kept2', name: 'kept2', host: 'kept2.example', probeType: 'ping', interval: 60, status: 'active' })
+    await keep('aged', 'kept', 31 * DAY, '192.0.2.1', 'alert', 'alert-keep')
+    await keep('hand', 'kept', 40 * DAY)
+    await keep('other', 'kept', 40 * DAY, '192.0.2.1', 'alert', 'alert-other')
+    await keep('a1', 'kept', 30, '192.0.2.1', 'alert', 'alert-keep')
+    await keep('a2', 'kept', 20, '192.0.2.1', 'alert', 'alert-keep')
+    await keep('a3', 'kept', 10, '192.0.2.1', 'alert', 'alert-keep')
+    await keep('b1', 'kept2', 30, '192.0.2.1', 'alert', 'alert-keep')
+    await keep('b2', 'kept2', 20, '192.0.2.1', 'alert', 'alert-keep')
+    await keep('b3', 'kept2', 10, '192.0.2.1', 'alert', 'alert-keep')
+
+    expect(await trimAlertTraces('alert-keep', 2, 30)).toBe(3)
+    const kept = await listed('kept')
+    expect(kept.slice(0, 2)).toEqual(['a3', 'a2'])
+    expect(kept.slice(2).sort()).toEqual(['hand', 'other'])
+    expect(await listed('kept2')).toEqual(['b3', 'b2'])
+    expect((await getTraceroutes('kept', 50)).find(trace => trace.id === 'a3')?.alertId).toBe('alert-keep')
+    expect((await getTraceroutes('kept', 50)).find(trace => trace.id === 'hand')?.alertId).toBeUndefined()
+  })
+
+  it('deletes every route that alert took, and no other', async () => {
+    expect(await purgeAlertTraces('alert-keep')).toBe(4)
+    expect((await listed('kept')).sort()).toEqual(['hand', 'other'])
+    expect(await listed('kept2')).toEqual([])
+    expect(await purgeAlertTraces('alert-keep')).toBe(0)
+    expect(await trimAlertTraces('', 1, 1)).toBe(0)
+    expect(await purgeAlertTraces('')).toBe(0)
   })
 })
 

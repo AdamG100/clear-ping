@@ -322,7 +322,27 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     [changeGroups]
   )
 
-  return { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
+  /** Point every target in a group, including the groups inside it, at one place. */
+  const setGroupProbe = useCallback(async (group: string, probeAgentId: string | null): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/groups/probe', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group, probeAgentId }),
+      })
+      if (response.ok) {
+        await loadTargets()
+        return true
+      }
+      const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
+      reportError('Could not switch where the group is probed from', error)
+    } catch (error) {
+      reportError('Could not switch where the group is probed from', error)
+    }
+    return false
+  }, [loadTargets, reportError])
+
+  return { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, setGroupProbe, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
 }
 
 function useAlerts(reportError: (title: string, error?: unknown) => void) {
@@ -594,7 +614,7 @@ function useRemembered(key: string): string | null {
 
 export function Dashboard() {
   const { notify, reportError } = useToast()
-  const { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
+  const { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, setGroupProbe, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
   // The sidebar's "probed from" filter: every target, this server's, or one probe agent's.
   const [probeFrom, setProbeFrom] = useState<ProbeFromFilter>('all')
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
@@ -1148,6 +1168,8 @@ export function Dashboard() {
         loading={!isLoaded}
         probeFrom={probeFrom}
         onProbeFromChange={setProbeFrom}
+        probeAgents={probeAgents}
+        onSetGroupProbe={readOnly ? undefined : setGroupProbe}
       />
 
       {/* Behind an open drawer the page cannot be used, by pointer or by

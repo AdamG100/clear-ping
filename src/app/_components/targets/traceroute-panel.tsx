@@ -563,7 +563,7 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
             </p>
           )}
         </div>
-        {!readOnly && <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+        {!readOnly && <div className="flex w-full min-w-0 max-w-full flex-wrap items-center justify-end gap-2 @2xl/main:w-auto @2xl/main:min-w-80">
           {olderCount > 0 && (
             <ConfirmMorph
               key={olderCount}
@@ -627,16 +627,17 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
                     )}
                   >
                     {/* Side by side, not one inside the other: a button
-                        cannot hold another button. On a phone, Delete gets a
-                        line of its own under the summary: beside it, the
-                        question it opens into ran off the edge of the screen,
-                        taking the button that answers it along. */}
-                    <div className="flex flex-wrap items-center gap-1 pr-2 @xl/main:flex-nowrap">
+                        cannot hold another button. Delete stays on its own
+                        line at every width. Beside the summary, the row gives
+                        the spare width to the summary, and the confirmation
+                        is clipped down to the Delete button: it flashes open
+                        and cannot be pressed. */}
+                    <div className="flex flex-wrap items-center gap-1 pr-2">
                       <button
                         type="button"
                         onClick={() => setChosenId(open ? null : item.id)}
                         aria-expanded={open}
-                        className="flex min-w-0 flex-1 basis-full cursor-pointer @xl/main:basis-0 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl px-3 py-2.5 text-left text-sm touch:py-3"
+                        className="flex min-w-0 w-full cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl px-3 py-2.5 text-left text-sm touch:py-3"
                       >
                         {open
                           ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -662,7 +663,7 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
                       {/* Asked in the route's own row, so "this" says which;
                           the time it was taken made the question too wide. */}
                       {readOnly ? null : (
-                        <div className="ml-auto flex max-w-full justify-end pb-2 @xl/main:pb-0">
+                        <div className="flex w-full shrink-0 justify-end pb-2">
                           <ConfirmMorph
                             label="Delete"
                             icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}

@@ -11,6 +11,8 @@ const rule = (over: Partial<AlertRule> = {}): AlertRule => ({
   notifyUrls: [],
   traceOnFire: true,
   traceCooldownMinutes: 15,
+  traceKeepCount: 10,
+  traceKeepDays: 30,
   enabled: true,
   state: 'ok',
   streak: 0,

@@ -447,6 +447,8 @@ export interface Traceroute {
   /** Whether the final hop was the address being traced. */
   reached: boolean;
   errorMessage?: string;
+  /** The alert that took this route, when it was taken because an alert fired. */
+  alertId?: string;
 }
 
 /**
@@ -509,6 +511,14 @@ export interface AlertSettings {
    * spell of trouble is what is useful.
    */
   traceCooldownMinutes: number;
+  /**
+   * How many routes this alert keeps for each target it traces. Older ones,
+   * past this many newest, are deleted. A route traced by hand is not one of
+   * these.
+   */
+  traceKeepCount: number;
+  /** Delete routes this alert took once they are older than this many days. */
+  traceKeepDays: number;
 }
 
 /** Alerts that can trace the route when they fire: the ones a path being broken or congested explains. */
@@ -524,6 +534,13 @@ export function tracesByDefault(metric: AlertMetric): boolean {
 
 export const DEFAULT_TRACE_COOLDOWN_MINUTES = 15;
 export const MAX_TRACE_COOLDOWN_MINUTES = 24 * 60;
+
+/** How many routes a new alert keeps for each target, until someone says otherwise. */
+export const DEFAULT_TRACE_KEEP_COUNT = 10;
+export const MAX_TRACE_KEEP_COUNT = 100;
+/** How long a new alert keeps the routes it takes, in days. */
+export const DEFAULT_TRACE_KEEP_DAYS = 30;
+export const MAX_TRACE_KEEP_DAYS = 365;
 
 /** How one target currently stands against an alert it is ticked for. */
 export interface AlertTargetState {

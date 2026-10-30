@@ -170,12 +170,17 @@ describe('opening a database left by an old version', () => {
     const migrated = await alerts.getAlerts()
     const tracingOf = (metric: string) => {
       const alert = migrated.find(entry => entry.metric === metric)!
-      return { traceOnFire: alert.traceOnFire, traceCooldownMinutes: alert.traceCooldownMinutes }
+      return {
+        traceOnFire: alert.traceOnFire,
+        traceCooldownMinutes: alert.traceCooldownMinutes,
+        traceKeepCount: alert.traceKeepCount,
+        traceKeepDays: alert.traceKeepDays,
+      }
     }
-    expect(tracingOf('packetLoss')).toEqual({ traceOnFire: true, traceCooldownMinutes: 15 })
-    expect(tracingOf('unreachable')).toEqual({ traceOnFire: true, traceCooldownMinutes: 15 })
+    expect(tracingOf('packetLoss')).toEqual({ traceOnFire: true, traceCooldownMinutes: 15, traceKeepCount: 10, traceKeepDays: 30 })
+    expect(tracingOf('unreachable')).toEqual({ traceOnFire: true, traceCooldownMinutes: 15, traceKeepCount: 10, traceKeepDays: 30 })
     // Latency alerts never traced, and still do not unless asked to.
-    expect(tracingOf('latency')).toEqual({ traceOnFire: false, traceCooldownMinutes: 15 })
+    expect(tracingOf('latency')).toEqual({ traceOnFire: false, traceCooldownMinutes: 15, traceKeepCount: 10, traceKeepDays: 30 })
   })
 
   it('leaves what an older version would send by where it would look for it', async () => {

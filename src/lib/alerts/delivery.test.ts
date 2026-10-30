@@ -22,6 +22,8 @@ function event(over: Partial<AlertEvent> = {}, rule: Partial<AlertEvent['rule']>
       notifyUrls: ['discord://123456789012345678/token'],
       traceOnFire: true,
       traceCooldownMinutes: 15,
+      traceKeepCount: 10,
+      traceKeepDays: 30,
       enabled: true,
       state: 'firing',
       streak: 0,

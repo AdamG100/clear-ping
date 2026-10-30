@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteAlert, getAlert, parseAlertInput, updateAlert } from '@/lib/alerts/store';
+import { trimAlertTraces } from '@/lib/traceroute/store';
 import { checkNotifyUrls } from '@/lib/alerts/apprise';
 import { initializeServer } from '@/lib/init';
 import { restoreRedacted } from '@/lib/alerts/delivery';
@@ -34,6 +35,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const alert = await updateAlert(alertId, parsed.input);
     if (!alert) return NextResponse.json({ error: 'Alert not found' }, { status: 404 });
+
+    // A tighter keep-count or a shorter life takes effect now, not at the next
+    // retention pass. Saving anything else leaves the routes alone.
+    if (parsed.input.traceKeepCount !== undefined || parsed.input.traceKeepDays !== undefined) {
+      await trimAlertTraces(alert.id, alert.traceKeepCount, alert.traceKeepDays);
+    }
 
     const { actor, via } = await actorFor(request);
     await recordActivity(actor, via, 'alert.change', `${alert.name || `${alert.metric} alert`}: ${Object.keys(parsed.input).join(', ')}`);

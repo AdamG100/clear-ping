@@ -474,6 +474,31 @@ async function alertTraceroutes(database: Database): Promise<void> {
 }
 
 /**
+ * How many routes an alert keeps, and for how many days, plus which alert a
+ * saved route was taken for. Routes already saved have no alert, so they stay
+ * under the usual retention until they age out.
+ */
+async function alertTraceRetention(database: Database): Promise<void> {
+  const columns = await all<{ name: string }>(database, 'PRAGMA table_info(alerts)');
+  const has = (name: string) => columns.some(column => column.name === name);
+  // 10 and 30 match DEFAULT_TRACE_KEEP_COUNT and DEFAULT_TRACE_KEEP_DAYS.
+  if (!has('trace_keep_count')) {
+    await run(database, 'ALTER TABLE alerts ADD COLUMN trace_keep_count INTEGER NOT NULL DEFAULT 10');
+  }
+  if (!has('trace_keep_days')) {
+    await run(database, 'ALTER TABLE alerts ADD COLUMN trace_keep_days INTEGER NOT NULL DEFAULT 30');
+  }
+
+  const tables = await all<{ name: string }>(database, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'traceroutes'");
+  if (tables.length === 0) return;
+  const traceColumns = await all<{ name: string }>(database, 'PRAGMA table_info(traceroutes)');
+  if (!traceColumns.some(column => column.name === 'alert_id')) {
+    await run(database, 'ALTER TABLE traceroutes ADD COLUMN alert_id TEXT');
+  }
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_traceroutes_alert ON traceroutes(alert_id, timestamp DESC)');
+}
+
+/**
  * Probe agents: other machines a target can be probed from. A target with no
  * probe agent is probed from here, as every target was until now.
  *
@@ -584,6 +609,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'alert traceroutes', up: alertTraceroutes },
   { name: 'probe agents', up: probeAgents },
   { name: 'bgp monitoring', up: bgpMonitoring },
+  { name: 'alert trace retention', up: alertTraceRetention },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

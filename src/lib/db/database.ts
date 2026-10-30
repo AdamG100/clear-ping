@@ -1362,6 +1362,43 @@ async function rebaseGroups(
 }
 
 /**
+ * Point every target in a group, and in the groups inside it, at one place:
+ * a probe agent, or this server when `probeAgentId` is null. Returns how
+ * many targets changed place. One already probed from there is left as it is.
+ */
+export async function setGroupProbeAgent(group: string, probeAgentId: string | null): Promise<number> {
+  const database = await getDatabase();
+  const source = normalizeGroupPath(group);
+  if (!source) return 0;
+
+  const rows = await allSql<{ id: string; probe_agent_id: string | null; group_name: string | null }>(
+    database,
+    'SELECT id, probe_agent_id, group_name FROM targets'
+  );
+  const ids = rows
+    .filter(row => !!row.group_name && isWithinGroup(row.group_name, source) && (row.probe_agent_id ?? null) !== probeAgentId)
+    .map(row => row.id);
+  if (ids.length === 0) return 0;
+
+  const now = Date.now();
+  await runSql(database, 'BEGIN IMMEDIATE');
+  try {
+    for (const id of ids) {
+      await runSql(
+        database,
+        'UPDATE targets SET probe_agent_id = ?, resolved_address = NULL, updated_at = ? WHERE id = ?',
+        [probeAgentId, now, id]
+      );
+    }
+    await runSql(database, 'COMMIT');
+  } catch (error) {
+    await runSql(database, 'ROLLBACK').catch(() => {});
+    throw error;
+  }
+  return ids.length;
+}
+
+/**
  * Rename a group, or move it inside another, taking everything beneath it
  * along. Returns how many targets ended up somewhere new.
  *

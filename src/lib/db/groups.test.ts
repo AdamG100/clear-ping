@@ -17,12 +17,14 @@ const {
   saveGroupOrders,
   updateTargetSortOrders,
   moveGroup,
+  setGroupProbeAgent,
   getGroups,
   createGroup,
   deleteGroup,
   deleteEmptyGroups,
 } = await import('./database')
 const { SCHEMA_VERSION, schemaVersion } = await import('./migrations')
+const { createProbeAgent } = await import('../probe-agents/store')
 
 async function add(id: string, group?: string) {
   await createTarget({ id, name: id, host: `${id}.example`, probeType: 'ping', interval: 60, status: 'active', group })
@@ -222,6 +224,59 @@ describe('deleteEmptyGroups', () => {
 
     expect(await deleteEmptyGroups(['Attic', ' / '])).toEqual([])
     expect(await getGroups()).toEqual(expect.arrayContaining(['Attic', 'Attic/Crate', 'Attic/Empty']))
+  })
+})
+
+describe('setGroupProbeAgent', () => {
+  it('points a group, and the groups inside it, at one probe agent', async () => {
+    const { probeAgent } = await createProbeAgent({
+      name: 'Frankfurt',
+      address: '192.0.2.20',
+      port: 9443,
+      exposure: 'private',
+    })
+    await add('probe-a', 'Probe')
+    await add('probe-b', 'Probe/Rack')
+    await add('probe-c', 'Probes')
+    await add('probe-d', 'P_obe')
+    await updateTarget('probe-c', { probeAgentId: probeAgent.id })
+
+    const database = await getDatabase()
+    await new Promise<void>((resolve, reject) => {
+      database.run(
+        'UPDATE targets SET resolved_address = ? WHERE id = ?',
+        ['192.0.2.50', 'probe-a'],
+        err => (err ? reject(err) : resolve())
+      )
+    })
+
+    expect(await setGroupProbeAgent('Probe', probeAgent.id)).toBe(2)
+
+    const probes = Object.fromEntries((await getAllTargets()).map(target => [target.id, target.probeAgentId ?? null]))
+    expect(probes['probe-a']).toBe(probeAgent.id)
+    expect(probes['probe-b']).toBe(probeAgent.id)
+    // A group that only starts with the same letters is not part of it.
+    expect(probes['probe-c']).toBe(probeAgent.id)
+    expect(probes['probe-d']).toBeNull()
+
+    const cleared = await new Promise<{ resolved_address: string | null }>((resolve, reject) => {
+      database.get(
+        'SELECT resolved_address FROM targets WHERE id = ?',
+        ['probe-a'],
+        (err, row) => (err ? reject(err) : resolve(row as { resolved_address: string | null }))
+      )
+    })
+    expect(cleared.resolved_address).toBeNull()
+
+    expect(await setGroupProbeAgent('Probe', probeAgent.id)).toBe(0)
+    expect(await setGroupProbeAgent('Probe', null)).toBe(2)
+    const back = Object.fromEntries((await getAllTargets()).map(target => [target.id, target.probeAgentId ?? null]))
+    expect(back['probe-a']).toBeNull()
+    expect(back['probe-b']).toBeNull()
+    expect(back['probe-c']).toBe(probeAgent.id)
+
+    expect(await setGroupProbeAgent('', probeAgent.id)).toBe(0)
+    expect(await setGroupProbeAgent('Missing', null)).toBe(0)
   })
 })
 

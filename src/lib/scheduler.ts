@@ -13,8 +13,8 @@ import { cleanOldProbeAgentOutages, getProbeAgentConnection, pairedProbeAgentCon
 import { measurementFrom, worstOf } from './probes/result';
 import type { IpVersion, ProbeConfig, ProbeResult, ProbeType } from '@/types/probe';
 import { randomUUID } from 'crypto';
-import { asksForTrace, dispatchAlert, evaluateAlerts, shouldTraceOnAlert } from './alerts/store';
-import { cleanOldTraceroutes, ensureTracerouteSchema, lastAlertTraceAt, traceAndStore } from './traceroute/store';
+import { asksForTrace, dispatchAlert, evaluateAlerts, getAlerts, shouldTraceOnAlert } from './alerts/store';
+import { cleanOldTraceroutes, ensureTracerouteSchema, lastAlertTraceAt, traceAndStore, trimAlertTraces } from './traceroute/store';
 
 /**
  * Targets probed at once, per kind. Bounded so a long target list cannot
@@ -437,12 +437,19 @@ class ProbeScheduler {
       // whatever went wrong, for the alerts set to trace. Not awaited: a
       // trace through a dead path can take a minute, and the next probe must
       // not wait for it.
-      if (events.some(asksForTrace)) {
+      const asking = events.filter(asksForTrace);
+      if (asking.length > 0) {
         if (shouldTraceOnAlert(events, await lastAlertTraceAt(target.id))) {
+          // One trace answers for every alert that fired. It is kept under the
+          // alert that allowed it soonest, which is the one that decided a
+          // trace was due.
+          const rule = asking.reduce((shortest, event) =>
+            event.rule.traceCooldownMinutes < shortest.rule.traceCooldownMinutes ? event : shortest
+          ).rule;
           console.log(`[Scheduler] Tracing route to ${target.name} after alert`);
-          void traceAndStore(target, 'alert').catch(error =>
-            console.error(`[Scheduler] Traceroute failed for ${target.name}:`, error)
-          );
+          void traceAndStore(target, 'alert', undefined, rule.id)
+            .then(() => trimAlertTraces(rule.id, rule.traceKeepCount, rule.traceKeepDays))
+            .catch(error => console.error(`[Scheduler] Traceroute failed for ${target.name}:`, error));
         } else {
           console.log(`[Scheduler] Not tracing ${target.name} again yet: a trace was taken on an alert recently`);
         }
@@ -543,6 +550,9 @@ class ProbeScheduler {
       }
       await cleanOldTraceroutes(this.retentionDays);
       await cleanOldProbeAgentOutages(this.retentionDays);
+      for (const alert of await getAlerts()) {
+        await trimAlertTraces(alert.id, alert.traceKeepCount, alert.traceKeepDays);
+      }
     } catch (error) {
       console.error('[Scheduler] Retention failed:', error);
     }

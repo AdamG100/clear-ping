@@ -30,6 +30,7 @@ interface TracerouteRow {
   hops: string;
   reached: number;
   error_message: string | null;
+  alert_id: string | null;
 }
 
 function toTraceroute(row: TracerouteRow): Traceroute {
@@ -49,6 +50,7 @@ function toTraceroute(row: TracerouteRow): Traceroute {
     hops,
     reached: row.reached === 1,
     errorMessage: row.error_message ?? undefined,
+    alertId: row.alert_id ?? undefined,
   };
 }
 
@@ -65,14 +67,38 @@ export async function ensureTracerouteSchema(): Promise<void> {
       hops TEXT NOT NULL,
       reached INTEGER NOT NULL,
       error_message TEXT,
+      alert_id TEXT,
       FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
     )`,
     'CREATE INDEX IF NOT EXISTS idx_traceroutes_target_timestamp ON traceroutes(target_id, timestamp DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_traceroutes_alert ON traceroutes(alert_id, timestamp DESC)',
   ]) {
     await new Promise<void>((resolve, reject) => {
       db.run(sql, err => (err ? reject(err) : resolve()));
     });
   }
+
+  // Created before a route remembered which alert took it.
+  const columns = await new Promise<{ name: string }[]>((resolve, reject) => {
+    db.all('PRAGMA table_info(traceroutes)', (err, rows) => (err ? reject(err) : resolve((rows ?? []) as { name: string }[])));
+  });
+  if (!columns.some(column => column.name === 'alert_id')) {
+    await new Promise<void>((resolve, reject) => {
+      db.run('ALTER TABLE traceroutes ADD COLUMN alert_id TEXT', err => (err ? reject(err) : resolve()));
+    });
+  }
+}
+
+function runChanges(sql: string, params: unknown[]): Promise<number> {
+  return getDatabase().then(
+    db =>
+      new Promise((resolve, reject) => {
+        db.run(sql, params, function (err) {
+          if (err) reject(err);
+          else resolve(this.changes);
+        });
+      })
+  );
 }
 
 export async function storeTraceroute(trace: Traceroute): Promise<void> {
@@ -80,8 +106,8 @@ export async function storeTraceroute(trace: Traceroute): Promise<void> {
 
   await new Promise<void>((resolve, reject) => {
     db.run(
-      `INSERT INTO traceroutes (id, target_id, timestamp, trigger_source, address, hops, reached, error_message)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO traceroutes (id, target_id, timestamp, trigger_source, address, hops, reached, error_message, alert_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         trace.id,
         trace.targetId,
@@ -91,6 +117,7 @@ export async function storeTraceroute(trace: Traceroute): Promise<void> {
         JSON.stringify(trace.hops),
         trace.reached ? 1 : 0,
         trace.errorMessage ?? null,
+        trace.alertId ?? null,
       ],
       err => (err ? reject(err) : resolve())
     );
@@ -188,6 +215,52 @@ export async function deleteOlderTraceroutes(targetId: string): Promise<number> 
     });
   }
   return old.length;
+}
+
+/**
+ * Delete routes an alert took that it no longer keeps: anything older than
+ * `keepDays`, then anything past the newest `keepCount` for each target.
+ * Returns how many were removed. A route traced by hand is left alone.
+ */
+export async function trimAlertTraces(alertId: string, keepCount: number, keepDays: number): Promise<number> {
+  if (!alertId) return 0;
+  await ensureTracerouteSchema();
+
+  let removed = 0;
+  if (Number.isInteger(keepDays) && keepDays > 0) {
+    const cutoff = Date.now() - keepDays * 24 * 60 * 60 * 1000;
+    removed += await runChanges('DELETE FROM traceroutes WHERE alert_id = ? AND timestamp < ?', [alertId, cutoff]);
+  }
+
+  if (Number.isInteger(keepCount) && keepCount > 0) {
+    const db = await getDatabase();
+    const rows = await new Promise<{ id: string; target_id: string }[]>((resolve, reject) => {
+      db.all(
+        'SELECT id, target_id FROM traceroutes WHERE alert_id = ? ORDER BY timestamp DESC, id DESC',
+        [alertId],
+        (err, result) => (err ? reject(err) : resolve((result ?? []) as { id: string; target_id: string }[]))
+      );
+    });
+    const seen = new Map<string, number>();
+    const extra: string[] = [];
+    for (const row of rows) {
+      const count = (seen.get(row.target_id) ?? 0) + 1;
+      seen.set(row.target_id, count);
+      if (count > keepCount) extra.push(row.id);
+    }
+    if (extra.length > 0) {
+      removed += await runChanges(`DELETE FROM traceroutes WHERE id IN (${extra.map(() => '?').join(', ')})`, extra);
+    }
+  }
+
+  return removed;
+}
+
+/** Delete every route an alert has taken. Returns how many were removed. */
+export async function purgeAlertTraces(alertId: string): Promise<number> {
+  if (!alertId) return 0;
+  await ensureTracerouteSchema();
+  return runChanges('DELETE FROM traceroutes WHERE alert_id = ?', [alertId]);
 }
 
 /** Delete traces past the retention window. Returns the number removed. */
@@ -307,7 +380,9 @@ export function traceFamiliesProblem(host: string, families: TraceFamilies): str
 export function traceAndStore(
   target: TraceTarget,
   trigger: Traceroute['trigger'],
-  families?: TraceFamilies
+  families?: TraceFamilies,
+  /** Set when an alert asked for the trace, so that alert can later keep or delete its own routes. */
+  alertId?: string
 ): Promise<Traceroute[]> {
   const key = `${target.id}:${families ?? ''}`;
   const running = inFlight.get(key);
@@ -321,6 +396,7 @@ export function traceAndStore(
     // replies from the routers they share near this end.
     for (const run of probeRuns(target.host, families ?? target.ipVersion)) {
       const result = await runTrace(target, trigger, run.ipVersion);
+      if (alertId) result.alertId = alertId;
       await storeTraceroute(result);
 
       // Not awaited: see nameHops.

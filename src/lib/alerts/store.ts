@@ -6,7 +6,11 @@ import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTar
 import {
   ALERT_METRIC_LABELS,
   DEFAULT_TRACE_COOLDOWN_MINUTES,
+  DEFAULT_TRACE_KEEP_COUNT,
+  DEFAULT_TRACE_KEEP_DAYS,
   MAX_TRACE_COOLDOWN_MINUTES,
+  MAX_TRACE_KEEP_COUNT,
+  MAX_TRACE_KEEP_DAYS,
   TRACEABLE_ALERT_METRICS,
   tracesByDefault,
 } from '@/types/probe';
@@ -29,6 +33,8 @@ interface AlertRow {
   notify_urls: string | null;
   trace_on_fire: number;
   trace_cooldown_minutes: number;
+  trace_keep_count: number;
+  trace_keep_days: number;
   enabled: number;
   created_at: number;
 }
@@ -62,6 +68,8 @@ function settingsFromRow(row: AlertRow): AlertSettings & { id: string; enabled: 
     notifyUrls: parseUrls(row.notify_urls),
     traceOnFire: row.trace_on_fire === 1,
     traceCooldownMinutes: row.trace_cooldown_minutes,
+    traceKeepCount: row.trace_keep_count ?? DEFAULT_TRACE_KEEP_COUNT,
+    traceKeepDays: row.trace_keep_days ?? DEFAULT_TRACE_KEEP_DAYS,
     enabled: row.enabled === 1,
     createdAt: new Date(row.created_at),
   };
@@ -134,8 +142,11 @@ export async function getAlertRules(targetId: string): Promise<AlertRule[]> {
  * may be left out: an alert made without saying traces if its metric is one
  * that always used to (see tracesByDefault).
  */
-export type AlertInput = Omit<AlertSettings, 'traceOnFire' | 'traceCooldownMinutes'> &
-  Partial<Pick<AlertSettings, 'traceOnFire' | 'traceCooldownMinutes'>> & { targetIds: string[]; enabled?: boolean };
+export type AlertInput = Omit<AlertSettings, 'traceOnFire' | 'traceCooldownMinutes' | 'traceKeepCount' | 'traceKeepDays'> &
+  Partial<Pick<AlertSettings, 'traceOnFire' | 'traceCooldownMinutes' | 'traceKeepCount' | 'traceKeepDays'>> & {
+    targetIds: string[];
+    enabled?: boolean;
+  };
 
 /**
  * Check and tidy what the API was sent for an alert.
@@ -198,6 +209,22 @@ export function parseAlertInput(
     input.traceCooldownMinutes = minutes;
   }
 
+  if (given('traceKeepCount')) {
+    const count = Number(body.traceKeepCount);
+    if (!Number.isInteger(count) || count < 1 || count > MAX_TRACE_KEEP_COUNT) {
+      return fail(`traceKeepCount must be a whole number from 1 to ${MAX_TRACE_KEEP_COUNT}`);
+    }
+    input.traceKeepCount = count;
+  }
+
+  if (given('traceKeepDays')) {
+    const days = Number(body.traceKeepDays);
+    if (!Number.isInteger(days) || days < 1 || days > MAX_TRACE_KEEP_DAYS) {
+      return fail(`traceKeepDays must be a whole number of days from 1 to ${MAX_TRACE_KEEP_DAYS}`);
+    }
+    input.traceKeepDays = days;
+  }
+
   if (given('targetIds') || !partial) {
     if (!Array.isArray(body.targetIds)) return fail('targetIds must be a list of target ids');
     input.targetIds = [...new Set(body.targetIds.map(String))];
@@ -222,8 +249,8 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
 
   await run(
     `INSERT INTO alerts
-      (id, name, metric, threshold, consecutive_probes, notify_urls, trace_on_fire, trace_cooldown_minutes, enabled, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, name, metric, threshold, consecutive_probes, notify_urls, trace_on_fire, trace_cooldown_minutes, trace_keep_count, trace_keep_days, enabled, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.name ?? '',
@@ -233,6 +260,8 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
       JSON.stringify(input.notifyUrls),
       (input.traceOnFire ?? tracesByDefault(input.metric)) ? 1 : 0,
       input.traceCooldownMinutes ?? DEFAULT_TRACE_COOLDOWN_MINUTES,
+      input.traceKeepCount ?? DEFAULT_TRACE_KEEP_COUNT,
+      input.traceKeepDays ?? DEFAULT_TRACE_KEEP_DAYS,
       input.enabled === false ? 0 : 1,
       Date.now(),
     ]
@@ -260,6 +289,8 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
   if (changes.notifyUrls !== undefined) set('notify_urls', JSON.stringify(changes.notifyUrls));
   if (changes.traceOnFire !== undefined) set('trace_on_fire', changes.traceOnFire ? 1 : 0);
   if (changes.traceCooldownMinutes !== undefined) set('trace_cooldown_minutes', changes.traceCooldownMinutes);
+  if (changes.traceKeepCount !== undefined) set('trace_keep_count', changes.traceKeepCount);
+  if (changes.traceKeepDays !== undefined) set('trace_keep_days', changes.traceKeepDays);
   if (changes.enabled !== undefined) set('enabled', changes.enabled ? 1 : 0);
 
   if (fields.length > 0) {

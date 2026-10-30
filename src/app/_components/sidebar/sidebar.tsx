@@ -5,6 +5,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import type { Target, TargetDefinition, GroupOrder, SparklinePoint } from '@/types/probe'
+import type { ProbeAgentSummary } from '@/types/probe-agent'
 import { BrandMark } from '../shell/brand-mark'
 import { SearchResults } from '@/components/search-results'
 import { UpdateNotice, useVersionStatus, VersionBadge } from './version-badge'
@@ -31,7 +32,7 @@ import { copyText } from '@/lib/clipboard'
 import { StatusIndicator } from './status-indicator'
 import { addressFamilyFor, isDualStack } from '@/lib/probes/host'
 import { targetAddressLabel } from '@/lib/probes/config'
-import { groupLabel, groupName, groupWithAncestors, isWithinGroup, rebaseGroupPath } from '@/lib/targets/group-path'
+import { MAX_GROUP_PATH_LENGTH, groupLabel, groupName, groupWithAncestors, isWithinGroup, joinGroupPath, parentGroup, rebaseGroupPath } from '@/lib/targets/group-path'
 import { combineSeries } from '@/lib/charts/group-series'
 import {
   UNGROUPED,
@@ -376,6 +377,10 @@ interface SidebarProps {
   /** Which targets are listed by where they are probed from: all, this server's, or one probe agent's. */
   probeFrom?: ProbeFromFilter
   onProbeFromChange?: (filter: ProbeFromFilter) => void
+  /** Where a target can be probed from, besides this server. */
+  probeAgents?: ProbeAgentSummary[]
+  /** Point every target in a group at one place. Resolves to whether that happened. */
+  onSetGroupProbe?: (group: string, probeAgentId: string | null) => Promise<boolean>
 }
 
 // ─── Target Row ─────────────────────────────────────────────────────────────
@@ -768,8 +773,10 @@ interface GroupTreeProps {
   /** Add a target straight into this group. */
   onAddTargetTo: (group: string) => void
   onReorderSubgroups: (parent: string, ordered: string[]) => void
-  onGroupDragStart: () => void
+  onGroupDragStart: (group: string) => void
   onGroupDragEnd: (parent: string) => void
+  /** The group a dragged group would move inside, if the pointer is over one. */
+  nestInto?: string | null
   onSelectTarget: (id: string) => void
   /** Each left out where the account may not do it: a row offers only what it can. */
   onEditTarget?: (target: Target) => void
@@ -780,11 +787,44 @@ interface GroupTreeProps {
 }
 
 /**
+ * The slice of a sibling's header, at the top and at the bottom, that still
+ * reorders it among those siblings. The middle is a drop into that group.
+ * A header in another part of the tree is a drop across the whole of it.
+ */
+const NEST_EDGE = 0.28
+/** How long a dragged group must rest on a folded one before that one opens. */
+const NEST_DWELL_MS = 480
+
+/**
+ * The group under the pointer that a dragged group would move inside, or null
+ * when the pointer is over nothing that can take it: itself, a group inside
+ * it, the Ungrouped list, or the edge of a sibling (which reorders instead).
+ */
+function nestGroupAt(x: number, y: number, dragged: string): string | null {
+  for (const node of document.elementsFromPoint(x, y)) {
+    if (!(node instanceof Element)) continue
+    const header = node.closest('[data-group-header]')
+    if (!(header instanceof HTMLElement)) continue
+    const group = header.dataset.groupHeader
+    if (!group || group === UNGROUPED || group === dragged || isWithinGroup(group, dragged)) continue
+    const destination = joinGroupPath(group, groupName(dragged))
+    if (destination === dragged || destination.length > MAX_GROUP_PATH_LENGTH) continue
+    if (parentGroup(group) === parentGroup(dragged)) {
+      const rect = header.getBoundingClientRect()
+      const ratio = rect.height > 0 ? (y - rect.top) / rect.height : 0.5
+      if (ratio < NEST_EDGE || ratio > 1 - NEST_EDGE) continue
+    }
+    return group
+  }
+  return null
+}
+
+/**
  * The groups inside one group, or the top level for an empty `parent`.
  *
- * Each level is its own reorderable list, so a group is dragged among its
- * siblings and cannot be dropped out of the group it belongs to by accident.
- * Moving a group somewhere else in the tree is done from its edit dialog.
+ * Each level is its own reorderable list. Dropping on the edge of a sibling
+ * reorders within that list. Dropping on the middle of a header, or on a
+ * group anywhere else in the tree, moves the dragged group inside that one.
  */
 function GroupList({ parent, depth = 0, ...tree }: GroupTreeProps & { parent: string; depth?: number }) {
   return (
@@ -818,6 +858,7 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
     onAddTargetTo,
     onGroupDragStart,
     onGroupDragEnd,
+    nestInto,
     onSelectTarget,
     onEditTarget,
     onDuplicateTarget,
@@ -876,7 +917,7 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
       // row enters or leaves it, which visibly stretches the header text.
       layout="position"
       transition={DRAG_SPRING}
-      onDragStart={onGroupDragStart}
+      onDragStart={() => onGroupDragStart(group)}
       onDragEnd={() => onGroupDragEnd(parent)}
     >
       {/* The header and the group's own rows are what a dragged target is
@@ -890,12 +931,18 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
         data-group={group}
       >
         {/* Group Header */}
-        <div className="flex items-center gap-1 px-2 py-1.5 group/header">
+        <div
+          className={cn(
+            'flex items-center gap-1 rounded-[inherit] px-2 py-1.5 group/header',
+            nestInto === group && 'bg-primary/10 ring-1 ring-inset ring-primary/50'
+          )}
+          data-group-header={group}
+        >
           {!readOnly && <button
             type="button"
             onPointerDown={(e) => dragControls.start(e)}
             className="p-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground transition-colors touch-none touch:px-1 touch:py-2"
-            aria-label={`Drag to reorder ${name}`}
+            aria-label={`Drag to reorder ${name}, or drop it on another group to move it inside`}
           >
             <GripVertical className="h-3.5 w-3.5" />
           </button>}
@@ -914,6 +961,7 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
             <span className="truncate text-xs font-medium text-sidebar-foreground">
               {name}
             </span>
+            {nestInto === group && <span className="shrink-0 text-[10px] text-primary">Move inside</span>}
           </button>
 
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
@@ -1108,6 +1156,8 @@ export function Sidebar({
   loading = false,
   probeFrom = 'all',
   onProbeFromChange,
+  probeAgents = [],
+  onSetGroupProbe,
 }: SidebarProps) {
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
@@ -1122,9 +1172,17 @@ export function Sidebar({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(readCollapsedGroups)
   const [searchQuery, setSearchQuery] = useState('')
   const [isGroupDragging, setIsGroupDragging] = useState(false)
+  /** The group a dragged group would move inside, from where the pointer is. */
+  const [nestInto, setNestInto] = useState<string | null>(null)
+  const draggedGroupRef = useRef<string | null>(null)
+  const nestIntoRef = useRef<string | null>(null)
+  // Set when a drop moves a group into another, so the sibling order Framer
+  // records as the pointer lifts is not kept.
+  const ignoreGroupReorder = useRef(false)
   const listRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const [theme, setTheme] = useTheme()
+  const { notify } = useToast()
 
   // Opened as a drawer, the keyboard goes with it: focus left on the button
   // that opened it would be on a page that can no longer be used.
@@ -1203,17 +1261,79 @@ export function Sidebar({
   }, [savedLayout, targetsById, searchQuery, fromFilter])
 
   const handleGroupReorder = useCallback((parent: string, ordered: string[]) => {
+    if (ignoreGroupReorder.current) return
     setLayout(current => reorderSubgroups(current, parent, ordered))
   }, [])
 
-  const handleGroupDragStart = useCallback(() => setIsGroupDragging(true), [])
+  const handleGroupDragStart = useCallback((group: string) => {
+    ignoreGroupReorder.current = false
+    draggedGroupRef.current = group
+    nestIntoRef.current = null
+    setNestInto(null)
+    setIsGroupDragging(true)
+  }, [])
 
-  // A group is only ever dragged among its siblings, so that one list is all
-  // there is to save.
+  useEffect(() => {
+    if (!isGroupDragging) return
+    const onMove = (event: PointerEvent) => {
+      const dragged = draggedGroupRef.current
+      if (!dragged) return
+      const into = nestGroupAt(event.clientX, event.clientY, dragged)
+      if (nestIntoRef.current === into) return
+      nestIntoRef.current = into
+      setNestInto(into)
+    }
+    window.addEventListener('pointermove', onMove, true)
+    return () => window.removeEventListener('pointermove', onMove, true)
+  }, [isGroupDragging])
+
+  // Resting on a folded group opens it, so what is inside can be dropped on.
+  useEffect(() => {
+    if (!nestInto) return
+    const timer = window.setTimeout(() => {
+      setCollapsedGroups(current => {
+        if (!current.has(nestInto)) return current
+        if (subgroups(layout, nestInto).length === 0) return current
+        const next = new Set(current)
+        next.delete(nestInto)
+        saveCollapsedGroups(next)
+        return next
+      })
+    }, NEST_DWELL_MS)
+    return () => window.clearTimeout(timer)
+  }, [nestInto, layout])
+
+  // A drop on a group moves inside it. Anywhere else, the drag only reordered
+  // the group among the ones that share its parent, and that order is saved.
   const handleGroupDragEnd = (parent: string) => {
+    const dragged = draggedGroupRef.current
+    const into = nestIntoRef.current
+    draggedGroupRef.current = null
+    nestIntoRef.current = null
+    setNestInto(null)
     setIsGroupDragging(false)
-    if (!onReorderGroups) return
 
+    if (dragged && into) {
+      ignoreGroupReorder.current = true
+      setLayout(savedLayout)
+      const destination = joinGroupPath(into, groupName(dragged))
+      if (destination !== dragged && !isWithinGroup(into, dragged) && destination.length <= MAX_GROUP_PATH_LENGTH) {
+        const next = new Set([...collapsedGroups].map(group => rebaseGroupPath(group, dragged, destination)))
+        for (const ancestor of groupWithAncestors(parentGroup(destination))) next.delete(ancestor)
+        setCollapsedGroups(next)
+        saveCollapsedGroups(next)
+        onMoveGroup?.(dragged, destination)
+      } else if (destination.length > MAX_GROUP_PATH_LENGTH) {
+        notify({
+          tone: 'warning',
+          title: 'That group cannot go there',
+          detail: `A group's path can be at most ${MAX_GROUP_PATH_LENGTH} characters.`,
+        })
+      }
+      return
+    }
+
+    if (!onReorderGroups) return
     const ordered = subgroups(layout, parent)
     const saved = subgroups(savedLayout, parent)
     if (ordered.some((group, i) => group !== saved[i])) {
@@ -1588,6 +1708,7 @@ export function Sidebar({
                 onReorderSubgroups={handleGroupReorder}
                 onGroupDragStart={handleGroupDragStart}
                 onGroupDragEnd={handleGroupDragEnd}
+                nestInto={nestInto}
                 onSelectTarget={onSelectTarget}
                 onEditTarget={readOnly ? undefined : openEdit}
                 onDuplicateTarget={readOnly ? undefined : openDuplicate}
@@ -1701,10 +1822,19 @@ export function Sidebar({
       <GroupDialog
         task={groupTask}
         groups={availableGroups}
+        probeAgents={probeAgents}
+        memberProbes={
+          groupTask?.kind === 'edit'
+            ? targets
+                .filter(target => !!target.group && isWithinGroup(target.group, groupTask.group))
+                .map(target => target.probeAgentId ?? null)
+            : []
+        }
         onCancel={() => setGroupTask(null)}
         onCreate={handleCreateGroup}
         onMove={handleMoveGroup}
         onDelete={handleDeleteGroup}
+        onSetProbe={onSetGroupProbe}
       />
 
       {/* Arriving by a share link opens it at the import, but not before the

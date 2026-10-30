@@ -235,11 +235,11 @@ describe('editing an alert', () => {
     const slow = await createAlert({ ...quiet, metric: 'latency' })
     const down = await createAlert({ ...quiet, metric: 'unreachable', traceOnFire: false, traceCooldownMinutes: 60 })
 
-    expect(loss).toMatchObject({ traceOnFire: true, traceCooldownMinutes: 15 })
-    expect(slow).toMatchObject({ traceOnFire: false, traceCooldownMinutes: 15 })
-    expect(down).toMatchObject({ traceOnFire: false, traceCooldownMinutes: 60 })
-    expect(await updateAlert(slow.id, { traceOnFire: true, traceCooldownMinutes: 45 }))
-      .toMatchObject({ traceOnFire: true, traceCooldownMinutes: 45 })
+    expect(loss).toMatchObject({ traceOnFire: true, traceCooldownMinutes: 15, traceKeepCount: 10, traceKeepDays: 30 })
+    expect(slow).toMatchObject({ traceOnFire: false, traceCooldownMinutes: 15, traceKeepCount: 10, traceKeepDays: 30 })
+    expect(down).toMatchObject({ traceOnFire: false, traceCooldownMinutes: 60, traceKeepCount: 10, traceKeepDays: 30 })
+    expect(await updateAlert(slow.id, { traceOnFire: true, traceCooldownMinutes: 45, traceKeepCount: 3, traceKeepDays: 7 }))
+      .toMatchObject({ traceOnFire: true, traceCooldownMinutes: 45, traceKeepCount: 3, traceKeepDays: 7 })
 
     for (const alert of [loss, slow, down]) await deleteAlert(alert.id)
   })
@@ -331,6 +331,17 @@ describe('parseAlertInput', () => {
     expect(parseAlertInput({ traceOnFire: 'yes' }, true)).toMatchObject({ ok: false })
     for (const minutes of [0, 1.5, 1441, 'soon']) {
       expect(parseAlertInput({ traceCooldownMinutes: minutes }, true)).toMatchObject({ ok: false })
+    }
+  })
+
+  it('takes how many routes to keep, and for how many days', () => {
+    expect(parseAlertInput({ ...valid, traceKeepCount: 4, traceKeepDays: 7 }))
+      .toMatchObject({ ok: true, input: { traceKeepCount: 4, traceKeepDays: 7 } })
+    for (const count of [0, 1.5, 101, 'lots']) {
+      expect(parseAlertInput({ traceKeepCount: count }, true)).toMatchObject({ ok: false })
+    }
+    for (const days of [0, 2.5, 366, 'soon']) {
+      expect(parseAlertInput({ traceKeepDays: days }, true)).toMatchObject({ ok: false })
     }
   })
 
