@@ -417,22 +417,30 @@ button on the sign-in page, with no password to keep for ClearPing.
 
 ### In Authentik
 
-1. **Applications → Providers → Create → OAuth2/OpenID Provider.**
+1. **Applications → Applications → New Application.** If that button has a
+   menu, choose **with New Provider**. The wizard creates the application and
+   the provider together.
+2. Name the application. Its slug is the last part of the issuer, such as
+   `clear-ping`.
+3. Choose provider type **OAuth2/OIDC**.
+4. On the provider step:
    - Client type: **Confidential**.
-   - Redirect URI: the one shown under Settings → Single sign-on in ClearPing, which is
-     `https://<your ClearPing>/api/auth/sso/callback`. Open that page at the
-     address people will use, since the URI is taken from it.
+   - Redirect URI: mode **Strict**, the one shown under Settings → Single
+     sign-on, which is `https://<your ClearPing>/api/auth/sso/callback`. Open
+     that page at the address people will use, since the URI is taken from it.
    - Signing key: pick one (the self-signed certificate is fine). ClearPing
      checks every sign-in against Authentik's published keys, so one is
      needed: without it Authentik signs with the client secret, which is not
      accepted.
    - Scopes: the defaults (`openid`, `email`, `profile`). `profile` is where
      Authentik puts the username and the person's groups.
-2. **Applications → Applications → Create**, using that provider. Optionally
-   bind a group or policy to it, so only some people can get to it at all.
-3. Note the provider's **Client ID**, **Client Secret** and **OpenID
-   Configuration Issuer**, which looks like
-   `https://auth.example.com/application/o/clearping/`.
+   - Skip bindings, unless only some people should see ClearPing on their
+     Authentik home page.
+5. Open the provider the wizard created. Copy its **Client ID** (the long
+   value, not the slug), **Client Secret**, and **OpenID Configuration
+   Issuer**, which looks like
+   `https://auth.example.com/application/o/clear-ping/`. That is the issuer,
+   not the OpenID Configuration URL.
 
 ### In ClearPing
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
 import { Bot, EyeOff, Fingerprint, History, KeyRound, LogIn, LogOut, Network, RadioTower, RefreshCw, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
+import { Accordion } from '@/components/arc/accordion/accordion'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -900,48 +901,41 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
   const passwordLocked = data.settings.passwordLogin && !(usable && data.me.sso)
 
   const label = form.label || 'Authentik'
-
-  return (
-    <div className="space-y-6">
-      <p className={HINT}>
-        The steps are for Authentik. Keycloak, Entra ID, Google and other OpenID Connect providers work the same way: a
-        confidential client with the redirect URI below, ID tokens signed with a key (RS256 or ES256) rather than the
-        client secret, the <Scope>openid</Scope> <Scope>email</Scope> <Scope>profile</Scope> scopes, and a{' '}
-        <Scope>groups</Scope> claim if roles come from groups.
-      </p>
-
-      <form
-        noValidate
-        onSubmit={event => {
-          event.preventDefault()
-          void save(form, 'save')
-        }}
-      >
-        <ol className="space-y-8">
-          <Step number={1} title="Create a provider in Authentik">
+  const guides = [
+    {
+      title: 'Authentik',
+      content: (
+        <ol className="space-y-5">
+          <Step number={1} title="Start with the application">
             <p className={STEP_TEXT}>
-              In Authentik&apos;s admin interface, go to <Path>Applications → Providers → Create</Path> and choose{' '}
-              <Path>OAuth2/OpenID Provider</Path>. Name it, pick an authorization flow (either default flow is fine), and set:
+              In Authentik admin, open <Path>Applications → Applications</Path> and click <Path>New Application</Path>.
+              If the button has a menu, choose <Path>with New Provider</Path>. The wizard makes the application and the
+              provider together.
             </p>
+          </Step>
+          <Step number={2} title="Name it">
+            <p className={STEP_TEXT}>
+              Name it ClearPing. The slug is the last part of the issuer, such as <span className="font-mono">clear-ping</span>.
+              Continue.
+            </p>
+          </Step>
+          <Step number={3} title="Choose OAuth2/OIDC">
+            <p className={STEP_TEXT}>On <Path>Choose a Provider</Path>, pick <Path>OAuth2/OIDC</Path>.</p>
+          </Step>
+          <Step number={4} title="Configure the provider">
             <dl className="divide-y divide-border rounded-2xl border border-border">
               <ProviderSetting name="Client type">
                 <span className="font-medium">Confidential</span>
               </ProviderSetting>
               <ProviderSetting name="Redirect URIs">
-                <CopyField id="sso-redirect" label="Redirect URI, matching Strict" value={redirectUri} />
-                <p className={HINT}>
-                  Taken from the address this page is open at, so open Settings at the address people use for ClearPing.
+                <p className="text-sm">
+                  Mode <span className="font-medium">Strict</span>, and the redirect URI from the form below. Open this
+                  page at the address people use for ClearPing. That address is where the URI comes from.
                 </p>
-                {savedElsewhere && (
-                  <p className="text-xs text-warning">
-                    Saved from another address ({saved.redirectUri}). Saving here switches to the one above, so Authentik
-                    needs that one.
-                  </p>
-                )}
               </ProviderSetting>
-              <ProviderSetting name="Signing Key">
+              <ProviderSetting name="Signing key">
                 <p className="text-sm">Any key, such as <span className="font-medium">authentik Self-signed Certificate</span>.</p>
-                <p className={HINT}>Required. Without one, Authentik signs with the client secret, and ClearPing refuses the sign-in.</p>
+                <p className={HINT}>Required. Without one, Authentik signs with the client secret and ClearPing refuses the sign-in.</p>
               </ProviderSetting>
               <ProviderSetting name="Scopes">
                 <p className="flex flex-wrap gap-1.5">
@@ -949,150 +943,216 @@ function SsoSettingsForm({ data, reload }: { data: Security; reload: () => void 
                   <Scope>email</Scope>
                   <Scope>profile</Scope>
                 </p>
-                <p className={HINT}>
-                  Under Advanced protocol settings. These are Authentik&apos;s defaults, so leave them as they are:{' '}
-                  <Scope>profile</Scope> carries the username and the groups ClearPing reads.
-                </p>
+                <p className={HINT}>Leave the defaults. <Scope>profile</Scope> carries the username and the groups.</p>
               </ProviderSetting>
             </dl>
-          </Step>
-
-          <Step number={2} title="Create an application for it">
             <p className={STEP_TEXT}>
-              Go to <Path>Applications → Applications → Create</Path>, name it ClearPing, and choose the provider from step 1.
-              To keep some people out entirely, bind a group or policy to the application there.
+              On <Path>Configure Bindings</Path>, add nothing unless only some people should see ClearPing on their
+              Authentik home page.
             </p>
           </Step>
-
-          <Step number={3} title="Paste its details here">
+          <Step number={5} title="Copy three values into the form below">
             <p className={STEP_TEXT}>
-              All three are on the provider&apos;s page in Authentik. The issuer is the{' '}
-              <Path>OpenID Configuration Issuer</Path>, ending in <span className="font-mono">/application/o/&lt;slug&gt;/</span>.
+              Submit the wizard, then open the provider it created. Copy <Path>Client ID</Path>, <Path>Client secret</Path>,
+              and <Path>OpenID Configuration Issuer</Path>.
             </p>
-            <div className="grid items-start gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Input
-                  label="Issuer"
-                  required
-                  placeholder="https://auth.example.com/application/o/clearping/"
-                  value={form.issuer}
-                  onChange={event => set('issuer')(event.target.value)}
-                />
-              </div>
-              <Input label="Client ID" required autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
-              <PasswordField
-                label="Client secret"
-                required={!saved.clientSecretSet}
-                autoComplete="new-password"
-                description={saved.clientSecretSet ? 'Saved. Leave it empty to keep it.' : undefined}
-                value={form.clientSecret}
-                onChange={event => set('clientSecret')(event.target.value)}
-              />
-              <Input
-                label="Button name"
-                placeholder="Authentik"
-                description={`The sign-in page shows "Sign in with ${label}".`}
-                value={form.label}
-                maxLength={40}
-                onChange={event => set('label')(event.target.value)}
-              />
-            </div>
-            {tested && <Alert tone={tested.ok ? 'success' : 'danger'} title={tested.ok ? 'The issuer answered' : 'The issuer did not answer'}>{tested.text}</Alert>}
-            <div>
-              <Button type="button" variant="secondary" size="sm" loading={busy === 'test'} disabled={(busy !== null && busy !== 'test') || !form.issuer} onClick={test}>
-                Check the issuer
-              </Button>
-            </div>
-          </Step>
-
-          <Step number={4} title="Choose who can sign in, and as what">
-            <Input
-              label="Only members of this group (optional)"
-              placeholder="clearping-users"
-              description={`An Authentik group name. Left empty, anyone ${label} lets into the application can sign in.`}
-              value={form.allowedGroup}
-              onChange={event => set('allowedGroup')(event.target.value)}
-            />
-            <SettingSwitch
-              checked={form.autoCreate}
-              onChange={on => set('autoCreate')(on)}
-              label="Create an account at first sign-in"
-              detail="Someone new gets an account under their Authentik username. Off: only accounts already linked can sign in this way."
-            />
-            <div className="space-y-1">
-              <p className={SECTION_TITLE}>Roles from groups (optional)</p>
-              <p className={HINT}>
-                Name an Authentik group for each role. Every sign-in then sets the role from the person&apos;s groups: admin
-                group, admin; editor group, editor; neither, viewer. Left empty, you set roles in Accounts. The last admin is
-                never demoted this way.
-              </p>
-            </div>
-            <div className="grid items-start gap-4 sm:grid-cols-2">
-              <Input label="Admin group" placeholder="clearping-admins" value={form.adminGroup} onChange={event => set('adminGroup')(event.target.value)} />
-              <Input label="Editor group" placeholder="clearping-editors" value={form.editorGroup} onChange={event => set('editorGroup')(event.target.value)} />
-            </div>
-            <div className="max-w-sm">
-              <Select
-                label="New accounts start as"
-                description={groupsDecide ? 'Set by their groups instead.' : undefined}
-                value={form.newAccountRole}
-                disabled={groupsDecide}
-                onValueChange={value => setForm(previous => ({ ...previous, newAccountRole: value as Role }))}
-                options={ROLE_OPTIONS}
-              />
-            </div>
-          </Step>
-
-          <Step number={5} title="Signing out (optional)">
-            <SettingSwitch
-              checked={form.signOutAtProvider}
-              onChange={on => set('signOutAtProvider')(on)}
-              label={`Signing out of ClearPing signs out of ${label} too`}
-              detail={
-                <>
-                  With the provider&apos;s default invalidation flow this ends only ClearPing&apos;s session at Authentik. Set
-                  the provider&apos;s <Path>Invalidation flow</Path> to <span className="font-mono">default-invalidation-flow</span>{' '}
-                  to log out of Authentik completely.
-                </>
-              }
-            />
-            <p className={STEP_TEXT}>
-              To be signed out of ClearPing when you sign out of Authentik (2025.8 or later), set these on the provider,
-              with <Path>Logout Method</Path> set to <span className="font-medium">Back-channel</span>:
+            <p className={HINT}>
+              The client ID is the long value on the provider. The slug is not the client ID. Authentik says the client
+              identifier is missing or invalid when those are mixed up. The issuer ends in{' '}
+              <span className="font-mono">/application/o/&lt;slug&gt;/</span>. That is the issuer, not the OpenID
+              Configuration URL.
             </p>
-            <CopyField id="sso-logout" label="Logout URI" value={logoutUri} />
-            <CopyField id="sso-after-logout" label="Post logout redirect URI, to come back to ClearPing's sign-in page" value={afterLogoutUri} />
-            <div className="pt-2">
-              <Button type="submit" loading={busy === 'save'} disabled={busy !== null && busy !== 'save'}>
-                Save single sign-on
-              </Button>
-            </div>
-          </Step>
-
-          <Step number={6} title="Turn it on">
-            <SettingSwitch
-              checked={saved.enabled}
-              disabled={busy !== null || (!saved.enabled && !configured)}
-              onChange={on => save({ enabled: on }, 'toggle')}
-              label={`Show "Sign in with ${saved.label}"`}
-              detail={configured ? 'Adds the button to the sign-in page.' : 'Save the issuer, client ID and client secret first.'}
-            />
-            <SsoLink data={{ ...data, sso: { ...data.sso, enabled: usable } }} reload={reload} />
-            <SettingSwitch
-              checked={data.settings.passwordLogin}
-              disabled={passwordLocked}
-              onChange={changePasswordLogin}
-              label="Allow signing in with a password"
-              detail={
-                passwordLocked
-                  ? `Can be turned off once ${saved.label} sign-in is on and your own account is linked to it.`
-                  : `Off: ${saved.label} is the only way in. If it ever fails, start ClearPing with CLEARPING_AUTH=off to get back in.`
-              }
-            />
           </Step>
         </ol>
-      </form>
-    </div>
+      ),
+    },
+    {
+      title: 'Other OpenID Connect providers',
+      content: (
+        <ol className="space-y-5">
+          <Step number={1} title="Create a confidential client">
+            <p className={STEP_TEXT}>
+              In Keycloak, Entra ID, Google, or another OpenID Connect provider, create a confidential client for ClearPing.
+            </p>
+          </Step>
+          <Step number={2} title="Set the redirect URI">
+            <p className={STEP_TEXT}>
+              Use the redirect URI from the form below, as an exact match. Open this page at the address people use for
+              ClearPing.
+            </p>
+          </Step>
+          <Step number={3} title="Sign tokens with a key">
+            <p className={STEP_TEXT}>
+              ID tokens must be signed with a key (<Scope>RS256</Scope> or <Scope>ES256</Scope>), not with the client secret.
+            </p>
+          </Step>
+          <Step number={4} title="Ask for the usual scopes">
+            <p className="flex flex-wrap gap-1.5">
+              <Scope>openid</Scope>
+              <Scope>email</Scope>
+              <Scope>profile</Scope>
+            </p>
+            <p className={HINT}>
+              Add a <Scope>groups</Scope> claim only if roles in ClearPing should follow the provider&apos;s groups.
+            </p>
+          </Step>
+          <Step number={5} title="Paste the issuer, client ID, and secret">
+            <p className={STEP_TEXT}>
+              The issuer is the address that serves <span className="font-mono">/.well-known/openid-configuration</span>,
+              without that ending.
+            </p>
+          </Step>
+        </ol>
+      ),
+    },
+  ]
+  const optional = [
+    {
+      title: 'Who can sign in',
+      content: (
+        <div className="space-y-4">
+          <Input
+            label="Only members of this group"
+            placeholder="clearping-users"
+            description={`Optional. A group name at ${label}. Empty: anyone ${label} lets into the application can sign in.`}
+            value={form.allowedGroup}
+            onChange={event => set('allowedGroup')(event.target.value)}
+          />
+          <SettingSwitch
+            checked={form.autoCreate}
+            onChange={on => set('autoCreate')(on)}
+            label="Create an account at first sign-in"
+            detail="Someone new gets an account under their provider username. Off: only accounts already linked can sign in this way."
+          />
+          <p className={HINT}>
+            Optional. Name a group for a role and each sign-in sets it: admin group, admin; editor group, editor; neither,
+            viewer. Leave both empty to set roles in Accounts. The last admin is never demoted this way.
+          </p>
+          <div className="grid items-start gap-4 sm:grid-cols-2">
+            <Input label="Admin group" placeholder="clearping-admins" value={form.adminGroup} onChange={event => set('adminGroup')(event.target.value)} />
+            <Input label="Editor group" placeholder="clearping-editors" value={form.editorGroup} onChange={event => set('editorGroup')(event.target.value)} />
+          </div>
+          <div className="max-w-sm">
+            <Select
+              label="New accounts start as"
+              description={groupsDecide ? 'Set by their groups instead.' : undefined}
+              value={form.newAccountRole}
+              disabled={groupsDecide}
+              onValueChange={value => setForm(previous => ({ ...previous, newAccountRole: value as Role }))}
+              options={ROLE_OPTIONS}
+            />
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: 'Signing out',
+      content: (
+        <div className="space-y-4">
+          <SettingSwitch
+            checked={form.signOutAtProvider}
+            onChange={on => set('signOutAtProvider')(on)}
+            label={`Signing out of ClearPing signs out of ${label} too`}
+            detail="Ends ClearPing's session at the provider. In Authentik, set the provider's invalidation flow to default-invalidation-flow to log out of Authentik itself."
+          />
+          <p className={STEP_TEXT}>
+            To be signed out here when you sign out at Authentik (2025.8 or later), set <Path>Logout Method</Path> to{' '}
+            <span className="font-medium">Back-channel</span> and use these addresses:
+          </p>
+          <CopyField id="sso-logout" label="Logout URI" value={logoutUri} />
+          <CopyField id="sso-after-logout" label="Post logout redirect URI" value={afterLogoutUri} />
+        </div>
+      ),
+    },
+  ]
+
+  return (
+    <form
+      className="space-y-6"
+      noValidate
+      onSubmit={event => {
+        event.preventDefault()
+        void save(form, 'save')
+      }}
+    >
+      <Accordion items={guides} defaultOpen={configured ? -1 : 0} />
+
+      <div className="space-y-4">
+        <h2 className={SECTION_TITLE}>Connection</h2>
+        <CopyField id="sso-redirect" label="Redirect URI, matching Strict" value={redirectUri} />
+        <p className={HINT}>Taken from the address this page is open at.</p>
+        {savedElsewhere && (
+          <p className="text-xs text-warning">
+            Saved from another address ({saved.redirectUri}). Saving here switches to the one above, so the provider
+            needs that one.
+          </p>
+        )}
+        <div className="grid items-start gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Input
+              label="Issuer"
+              required
+              placeholder="https://auth.example.com/application/o/clear-ping/"
+              value={form.issuer}
+              onChange={event => set('issuer')(event.target.value)}
+            />
+          </div>
+          <Input label="Client ID" required autoComplete="off" value={form.clientId} onChange={event => set('clientId')(event.target.value)} />
+          <PasswordField
+            label="Client secret"
+            required={!saved.clientSecretSet}
+            autoComplete="new-password"
+            description={saved.clientSecretSet ? 'Saved. Leave it empty to keep it.' : undefined}
+            value={form.clientSecret}
+            onChange={event => set('clientSecret')(event.target.value)}
+          />
+          <Input
+            label="Button name"
+            placeholder="Authentik"
+            description={`The sign-in page shows "Sign in with ${label}".`}
+            value={form.label}
+            maxLength={40}
+            onChange={event => set('label')(event.target.value)}
+          />
+        </div>
+        {tested && <Alert tone={tested.ok ? 'success' : 'danger'} title={tested.ok ? 'The issuer answered' : 'The issuer did not answer'}>{tested.text}</Alert>}
+        <div>
+          <Button type="button" variant="secondary" size="sm" loading={busy === 'test'} disabled={(busy !== null && busy !== 'test') || !form.issuer} onClick={test}>
+            Check the issuer
+          </Button>
+        </div>
+      </div>
+
+      <Accordion items={optional} defaultOpen={-1} />
+
+      <div>
+        <Button type="submit" loading={busy === 'save'} disabled={busy !== null && busy !== 'save'}>
+          Save single sign-on
+        </Button>
+      </div>
+
+      <div className="space-y-4">
+        <SettingSwitch
+          checked={saved.enabled}
+          disabled={busy !== null || (!saved.enabled && !configured)}
+          onChange={on => save({ enabled: on }, 'toggle')}
+          label={`Show "Sign in with ${saved.label}"`}
+          detail={configured ? 'Adds the button to the sign-in page.' : 'Save the issuer, client ID and client secret first.'}
+        />
+        <SsoLink data={{ ...data, sso: { ...data.sso, enabled: usable } }} reload={reload} />
+        <SettingSwitch
+          checked={data.settings.passwordLogin}
+          disabled={passwordLocked}
+          onChange={changePasswordLogin}
+          label="Allow signing in with a password"
+          detail={
+            passwordLocked
+              ? `Can be turned off once ${saved.label} sign-in is on and your own account is linked to it.`
+              : `Off: ${saved.label} is the only way in. If it ever fails, start ClearPing with CLEARPING_AUTH=off to get back in.`
+          }
+        />
+      </div>
+    </form>
   )
 }
 

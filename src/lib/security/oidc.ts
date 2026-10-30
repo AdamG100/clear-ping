@@ -13,11 +13,11 @@ import { getJsonSetting, setJsonSetting } from './settings-store'
  * settings, the provider's own description of itself, who may sign in and as
  * what, and signing out together with the provider, both ways.
  *
- * In Authentik: Applications → Providers → Create → OAuth2/OpenID Provider,
- * confidential client, with the redirect URI the dashboard shows. Its
- * issuer is https://<authentik>/application/o/<application slug>/. A signing
- * key is best; without one Authentik signs with the client secret (HS256),
- * which is accepted too.
+ * In Authentik: Applications → Applications → New Application, and create the
+ * provider in that wizard. Confidential client, the redirect URI the
+ * dashboard shows, and a signing key. The issuer is
+ * https://<authentik>/application/o/<application slug>/. Logout tokens signed
+ * with the client secret (HS256) are still accepted.
  */
 
 export interface SsoConfig {
