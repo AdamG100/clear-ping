@@ -356,6 +356,14 @@ the four.
   row picks its line out; clicking the name opens that target's own page.
 - Dragging across the chart zooms in, as on a single target's chart.
 - A target set to *Both* IP versions contributes two lines, one per family.
+- **Spikes stay on the chart.** A spike to 1000 ms among 20 ms readings would
+  either run off the top or press every other line flat along the bottom. The
+  chart gives spikes a narrow band along the top with a squeezed scale of its
+  own: the highest is labelled in ms on the left, a dashed line marks where the
+  scale changes, and the usual readings keep most of the height. A single
+  target's own chart does the same (*scale squeezed above 22 ms*).
+
+![A day of latency with one spike to 940 ms in a band along the top](screenshots/spikes.jpg)
 
 Only the median is drawn. The latency spread that surrounds it on a single
 target's chart would bury a dozen overlapping lines, and is one click away.

@@ -28,7 +28,18 @@ slow looks different from one that is unstable.
 - **Latency as a distribution.** Each probe sends several packets; the chart
   shows where they clustered and how far the outliers reached, with packet loss
   on its own strip underneath. Above it, the round-trip time and jitter are
-  drawn as their spread, and the loss as every probe by how much it lost.
+  drawn as their spread, and the loss as every probe by how much it lost. A
+  spike to a second among 20 ms readings does not flatten the rest: it gets a
+  narrow band along the top, with its height in ms.
+- **An overview.** Where ClearPing opens: what is wrong right now, how the
+  last 24 hours went, and every target that had trouble, with where the fault
+  probably lay (only that target, your own network, or out on the internet) and
+  who went down with it. Each problem is one click from its target.
+- **Routing.** Watch your own IP prefixes in BGP, as RIPE RIS's route
+  collectors see them, and be told when the way the world reaches them changes:
+  a new upstream, routes withdrawn, a prefix taken off an exchange onto
+  transit, or another network announcing it. Traceroutes into the prefix, from
+  here and from each probe agent, name the exchange the traffic crosses.
 - **Packet loss analysis.** When a target loses packets, a folded panel under
   the figures says what kind of loss it is (sporadic, bursts or sustained),
   the hour of day it peaks at, and which other targets lost packets at the
@@ -56,9 +67,16 @@ slow looks different from one that is unstable.
 - **Certificate expiry.** HTTPS targets record when their certificate runs
   out, and an alert can watch for it.
 - **Accounts and roles.** Admins, editors and viewers; authenticator apps and
-  passkeys; single sign-on with Authentik; and keys for scripts. A new account
-  can be given a one-time link to choose its own password, so no admin ever
-  knows it.
+  passkeys; single sign-on with Authentik, set up step by step; and keys for
+  scripts. A new account can be given a one-time link to choose its own
+  password, so no admin ever knows it.
+- **Privacy.** Hide IP addresses and host names on screen, from viewers or from
+  everyone (or in your own browser, for screenshots), and from AI assistants.
+  Choose how long Activity is kept, and whether ClearPing may check for updates.
+- **Looks after itself.** Maintenance checks the database, clears out what no
+  longer belongs and keeps the file tidy, every Sunday by default, and can send
+  its report through an alert. Patch notes in the dashboard say what each
+  version changed, and a notice says when a newer one is out.
 - **Ask an AI assistant.** ClearPing is an MCP server as well. Give Claude,
   or any assistant that speaks MCP, its address and say "gather the logs so I
   can report this to my ISP": it gets every outage with its times, what kept
@@ -72,17 +90,27 @@ slow looks different from one that is unstable.
 
 Everything in these is generated demo data.
 
+The overview, where ClearPing opens: what is wrong now, the last 24 hours, and
+each problem with where the fault probably lay:
+
+![The overview, with one target not answering and one losing packets](docs/screenshots/overview.jpg)
+
 A group on one chart over a day, with the evening slowdown on every line, and
-Cloudflare as seen from a probe agent in Frankfurt:
+Cloudflare as seen from a probe agent in Oslo:
 
 ![Four internet targets compared on one chart over 24 hours](docs/screenshots/group-comparison.jpg)
+
+A spike far above the usual readings gets a band of its own along the top of
+the chart, so it neither runs off the page nor flattens everything else:
+
+![A day of latency with one spike to 940 ms in a band along the top](docs/screenshots/spikes.jpg)
 
 A game server: how fast it answers its query, and what it says about itself:
 
 ![A CS2 server's page, with its name, players, map and version](docs/screenshots/game-server.jpg)
 
-Adding a target: the address picks the check (here a DNS resolver), and the
-target can be probed from a probe agent:
+Adding a target: the address is all that is needed, and the check (here a DNS
+lookup through several resolvers) and where it is probed from can be chosen:
 
 ![The add target page, in four numbered sections](docs/screenshots/add-target.jpg)
 
@@ -101,11 +129,20 @@ it is sent, and the targets:
 
 Sharing: tick the targets to send, and get a link that holds them:
 
-![The share dialog, with a link made for eleven of fourteen targets](docs/screenshots/share.jpg)
+![The share dialog, with a link made for nine of fifteen targets](docs/screenshots/share.jpg)
 
 Accounts: a new one gets a link to choose its own password:
 
 ![The accounts page, with the new account form open](docs/screenshots/accounts.jpg)
+
+Privacy: hide addresses on screen and from AI assistants, and choose what
+ClearPing keeps and asks of the internet:
+
+![The privacy settings](docs/screenshots/privacy.jpg)
+
+Maintenance: every step of a run, and the schedule it runs on:
+
+![The maintenance settings, with the steps of a run and its schedule](docs/screenshots/maintenance.jpg)
 
 ## Quick start
 
@@ -150,6 +187,28 @@ rely on, build it and run the prober as its own process; see
 
 ## Using it
 
+### Overview
+
+**Overview**, at the top of the sidebar, is where ClearPing opens. It runs from
+what matters most to what matters least:
+
+- **What is wrong now**, if anything, and four figures: how many targets are
+  answering, how many were up all day, the outages in the last 24 hours, and
+  the alerts firing.
+- **The last 24 hours** as a strip of quarter hours, green when everything
+  answered, amber when something lost packets and red when something stopped
+  answering. Click a red or amber stretch to see only who had trouble then.
+- **Problems in the last 24 hours**: every target that had trouble, whether it
+  stopped answering or lost packets, for how long, and whether it is still
+  going on. Targets that failed together are one event, and each says where
+  the fault probably lay: only that target, your own network (something inside
+  it went down too), or out on the internet (your own network kept answering).
+  A probe agent that could not be reached has a row of its own, listing its
+  targets. Filter by *Not answering* or *Losing packets*, and click a target to
+  go straight to it.
+- **Your groups** and **where readings are taken from** (this server and each
+  probe agent, and how each is doing), and a **Routing** panel while that is on.
+
 ### Targets
 
 **Add target** at the bottom of the sidebar opens a page of four numbered
@@ -161,10 +220,19 @@ default, so an address and Enter is a whole target. Fields that must be filled
 in are marked *Required*. A target is probed every five minutes unless you
 change its interval.
 
-Each row in the sidebar shows the target's state, its address and a trace of
-its recent readings. Its badges say what it is (IP, DNS, TCP, HTTP, Game), and
-a purple *Remote* badge marks one probed from a probe agent. The ⋯ button at
-the end of the row copies the address, pauses, edits, duplicates or deletes it.
+The sidebar, from the top: the name and version, with the theme and collapse
+buttons; **Overview** and **Routing**; a search over names and addresses, and a
+**Probed from** filter for one probe agent's targets or this server's; how
+many targets are online, offline and paused; then the targets in their groups.
+At the foot are **Add target**, **Alerts** (with how many are firing), the
+button for deleting several targets, sharing, and Settings. When a newer
+version of ClearPing is out, a notice at the top says which and opens its
+patch notes.
+
+Each row shows the target's state, its address and a trace of its recent
+readings. Its badges say what it is (IP, DNS, TCP, HTTP, Game), and a purple
+*Remote* badge marks one probed from a probe agent. The ⋯ button at the end of
+the row copies the address, pauses, edits, duplicates or deletes it.
 
 **Duplicate** opens the add form already filled in from that target, for the
 second port on a host or the same check against the next server along. Change
@@ -180,10 +248,11 @@ is remembered. On a phone or a narrow window the sidebar is a drawer, opened
 by the ☰ button at the top left. Tapping a chart shows the reading at that point, and dragging
 sideways across it zooms in.
 
-To clear out several targets at once, use the list button at the top of the
-sidebar, beside the search. Tick the ones to go, singly or a whole group at a
-time, and delete them together. Nothing starts ticked and the button asks
-twice: a target's whole history goes with it.
+To clear out several targets at once, use the delete button at the foot of the
+sidebar, beside Share and Settings. Tick the ones to go, singly or a whole
+group at a time (a group ticked with everything in it is deleted too, empty
+groups included), search to find them, and delete them together. Nothing
+starts ticked and the button asks twice: a target's whole history goes with it.
 
 A **paused** target is not probed. Its row and its status light go grey, its
 page stops passing judgement on readings nobody has taken since, and it is
@@ -263,6 +332,62 @@ matters. Details, what the message says and the finer points are in
 The Docker image includes Apprise. Running from source, install it with
 `pip install "apprise[all-plugins]"`.
 
+### Routing
+
+**Routing**, beside Overview in the sidebar, watches IP prefixes in BGP: for
+networks that announce their own address space, or anyone who wants to know
+when the way to a server moves. It is off until an admin turns it on under
+**Settings → Routing**, and while it is off ClearPing asks nothing of RIPE or
+PeeringDB.
+
+**Watch a prefix** takes a prefix, or the IP address of a server, and says as
+you type which announced prefix holds it and who announces it. ClearPing then
+follows the prefix as RIPE RIS's route collectors, at exchanges around the
+world, see it, live, and learns how it is usually carried. It is judged
+*Normal*, *Diverted* (a new upstream, a more-specific, or taken off an
+exchange onto transit), *Partly withdrawn*, *Withdrawn* or *Suspected hijack*,
+and what is normal follows the prefix by itself: something new that lasts a
+day becomes normal, so nothing needs accepting after a planned change.
+
+A prefix's page drills down by region, country and exchange, follows an
+upstream through the paths, and lists every update. **From your networks**
+shows what this server and each probe agent saw of it by day, with
+traceroutes into the prefix that name the exchange the traffic crossed, and
+flags a route that keeps changing as *Flapping*. **At the exchanges** lists the
+exchanges, anywhere in the world, that the way to it from your ISP passes
+through. The sidebar counts the prefixes that are not carried as normal. How it
+works and what it asks of whom is in [docs/bgp-monitoring.md](docs/bgp-monitoring.md).
+
+### Settings
+
+The cog at the foot of the sidebar opens Settings, with a menu down the side
+(a dropdown on a phone), each section opening with its name and a line on
+what it is for:
+
+- **Security**: **Access** (whether sign-in is required, and whether assistants need a key), **Sign-in** (your own password
+  and second factors), **Keys**, **Single sign-on**, **Accounts** and **Privacy**.
+- **Monitoring**: **Probe agents**, **Routing** and **Maintenance**.
+- **More**: **Activity** (a record of every change and who made it) and **AI
+  assistant**.
+
+An admin sees every section. Anyone else sees only what is theirs, such as
+their own sign-in and keys; see [Roles](docs/security.md#roles).
+
+**Privacy** hides IP addresses and host names on screen as dots (`203.0.113.10`
+becomes `•••.•••.•••.10`) from viewers or from everyone, hides them from AI
+assistants, and can be turned on for your own browser alone, for sharing a
+screen. It also sets whether sign-in addresses are recorded in Activity, how
+long Activity is kept (30 days, 90 days or a year) and whether ClearPing checks
+for updates. See [docs/security.md](docs/security.md#privacy).
+
+**Maintenance** checks the database file, clears out history, saved routes and
+alert ticks that belong to targets or alerts that no longer exist, drops
+readings past their retention, tidies the database and checks the probe
+scheduler. **Run now** shows each step as it runs, and carries on in the
+background if you leave the page. It also runs by itself, every Sunday at
+03:00 by the server's clock unless you change that, and can send its report
+through one of your alerts. See [docs/running.md](docs/running.md#maintenance).
+
 ### An AI assistant
 
 **Settings → AI assistant** (the cog at the foot of the sidebar) gives the address to
@@ -308,7 +433,9 @@ from that machine, on the same dashboard as everything else, marked *Remote*
 in the sidebar.
 
 The page counts how many are online and how many need attention, and lists
-each with its status, version and when it was last seen. **Details** on one
+each in a searchable table: its address and port, whether it is reached over a
+tailnet, a private network or the internet, its version, status and when it was
+last seen. **Details** on one
 has its machine, certificate and targets, and tests its connection, renames it
 or changes its address, makes it a new token or removes it.
 
@@ -341,6 +468,13 @@ Pull the new image and recreate the container:
 docker compose pull && docker compose up -d
 ```
 
+ClearPing asks every quarter of an hour whether a newer image is out, and when
+one is, a notice at the top of the sidebar says which. Open it, or the version
+beside the name, for the **patch notes**: what changed in each version, newest
+first, searchable and filterable by new things, fixes and what to do before
+updating, with the command to update ready to copy. Release notes for versions
+newer than the one you run are only in the patch notes once you update.
+
 The database is brought up to date by itself when the new version starts. It
 records which changes it has already had, applies the ones it has not, each in
 a transaction that either completes or leaves the database as it was, and logs
@@ -366,7 +500,8 @@ All optional. With Docker, pass them with `-e`.
 | `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard. Still works, as a key that can change things; keys made in Settings are better, one per assistant |
 | `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes the token over plain HTTP from anywhere, for when a VPN or tunnel does the encrypting. Otherwise it is taken only over HTTPS or from ClearPing's own network |
 | `CLEARPING_PEERINGDB_API_KEY` | unset | A PeeringDB API key, for Routing to read the exchanges' peering LANs with. Without one PeeringDB throttles anonymous reads; ClearPing reads them once a day and keeps a copy, so it is rarely needed ([docs/bgp-monitoring.md](docs/bgp-monitoring.md)) |
-| `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check of the registry for a newer image. The dashboard then shows the version it runs but not whether it is the latest |
+| `CLEARPING_UPDATE_CHECK` | on | `off` stops the quarter-hourly check of the registry for a newer image (the same as turning off Settings → Privacy → Check for updates). The dashboard then shows the version it runs but not whether it is the latest |
+| `CLEARPING_APPRISE_BIN` | `apprise` | The Apprise program that sends alerts, when it is not on the `PATH` |
 
 ## API
 
@@ -398,6 +533,7 @@ Everything the interface does goes through these.
 | `POST`, `PUT /api/bgp` | Watch a prefix (`{ resource, label? }`, a prefix or an IP address); turn monitoring on or off (`{ enabled }`, admins only); set your own network (`{ homeAsns: [64500] }`) |
 | `GET /api/bgp/lookup?resource=` | What watching an address or prefix would watch: the announced prefix that holds it, who announces it, and the announced prefixes around it |
 | `GET`, `POST`, `PATCH`, `DELETE /api/bgp/:id` | One watched prefix in full, with every update and how your network reaches it; trace into it now from this server and each probe agent (`POST`); rename it (`{ label }`) or take how it is carried now as normal (`{ acceptNormal: true }`); stop watching it |
+| `GET /api/overview` | The last 24 hours for the Overview: each target's uptime, the events with where each fault lay, and how many targets had trouble in each quarter of an hour |
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
 | `GET /api/health` | Whether the server is up; open even with sign-in on |
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
@@ -406,6 +542,9 @@ Everything the interface does goes through these.
 | `/api/security/…` | Sign-in switches, keys, accounts and their roles (`PATCH /api/security/users/:id`), another account's password or a password link for it (`…/users/:id/password`, `…/users/:id/link`), single sign-on, the activity record, and your own second factors (`/api/security/me`); signed in only, and most of it for admins ([docs/security.md](docs/security.md#roles)) |
 | `GET /api/auth/sso/start`, `/callback` | Signing in with Authentik or another OpenID Connect provider |
 | `POST /api/auth/sso/logout` | Where the provider says someone signed out there (back-channel logout) |
+| `GET`, `PUT /api/privacy` | The privacy settings, and whether addresses are hidden from whoever asks; changed by admins only ([docs/security.md](docs/security.md#privacy)) |
+| `GET`, `PUT`, `POST /api/maintenance` | The maintenance schedule, its last runs and any run under way; change the schedule (`PUT`) or run it now (`POST`); admins only ([docs/running.md](docs/running.md#maintenance)) |
+| `GET /api/release-notes` | What changed in each version up to the one running, newest first |
 | `GET /api/version` | The version, commit and build time running, the same for the newest published image, and whether that is an update |
 | `POST /api/mcp` | The MCP server an AI assistant connects to; `GET /api/mcp/info` says whether it asks for a token |
 
@@ -434,7 +573,8 @@ SQLite.
 
 ## Documentation
 
-- [docs/running.md](docs/running.md): running it, Docker, installing it as an app, upgrading, configuration
+- [docs/overview.md](docs/overview.md): the overview page, and how it tells where a fault lay
+- [docs/running.md](docs/running.md): running it, Docker, installing it as an app, maintenance, patch notes, upgrading, configuration
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
 - [docs/alerting.md](docs/alerting.md): alerts, and sending them with Apprise
 - [docs/probe-agents.md](docs/probe-agents.md): probing targets from other machines, over a tailnet or the internet

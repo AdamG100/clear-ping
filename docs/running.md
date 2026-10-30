@@ -166,6 +166,18 @@ top of the sidebar, and every quarter of an hour asks the registry what
 - **Updated to …, reload** under the name means the server has been updated
   while the page was open.
 
+The version badge, or that notice, opens the **patch notes**: a timeline of
+every release, newest first, each with when it came out, how many new things
+and fixes it has, and the one you are running marked. Each change is marked
+as new, a fix, or something to do before updating, which stands out. At the
+top it says where your server stands (on the latest version, or which newer one
+is out, with the command to update ready to copy), the notes can be searched
+or narrowed by kind, and on a wide screen the versions are listed down the
+side. The notes are the commit messages of each release, written for someone
+running ClearPing, and a build carries the notes up to its own version, so a
+newer version's notes can be read after updating to it. `GET /api/release-notes`
+answers the same as JSON.
+
 `GET /api/version` answers the same as JSON. The registry is asked without any
 credentials, because the image is public. Turn off **Check for updates** under
 Settings → Privacy, or set `CLEARPING_UPDATE_CHECK=off`, to
@@ -217,6 +229,56 @@ databases that have run them will not run them again.
 `src/lib/db/migration.test.ts` opens a database in the oldest shape there
 is and checks that everything survives the trip to the newest.
 
+## Maintenance
+
+**Settings → Maintenance** (admins only) checks that what ClearPing keeps is in
+order and clears out what no longer belongs.
+
+![The maintenance settings, with the steps of a run and its schedule](screenshots/maintenance.jpg)
+
+Deleting a target takes its history, alert ticks and saved routes with it
+through the database's own cascades. Those only work while foreign keys are on,
+and a database can have been through a time when they were not: a migration
+that rebuilt a table, an older ClearPing, a copy restored from a backup, or a
+process killed half way through a delete. What is left behind is rows that
+point at nothing, which are never shown and slow the queries that step over
+them. A run goes through these steps, in order:
+
+1. **Check the database file** for damage.
+2. **History of targets that no longer exist**: removed.
+3. **Saved routes of targets that no longer exist**: removed.
+4. **Alert ticks for targets or alerts that no longer exist**: removed.
+5. **Groups and their saved order**: a group a target is in is restored if it
+   went missing, and the saved position of a group that is gone is dropped.
+6. **Targets marked as probed in the future**: a clock that was wrong and then
+   corrected leaves a last-probe time that is still to come, and the target is
+   not probed until it arrives. They are made due now.
+7. **Measurements and routes past their retention**
+   (`CLEARPING_RETENTION_DAYS`).
+8. **Database upkeep**: folds the write-ahead log back in and refreshes the
+   statistics queries are planned by. With **Reclaim disk space** on, and at
+   least a fifth of the file (and 20 MB) empty, it also rewrites the file to
+   give the space back. That is off by default: nothing can write while it runs, so probes
+   wait, and it needs room for a second copy.
+9. **Probe scheduler**: reloads its list, so what is probed is what is in the
+   database.
+
+Each step stands alone: one that fails is reported and the rest still run.
+
+**Run now** is safe at any time: probing carries on while it runs. Each step
+spins while it runs and then says how it went (nothing to do, fixed, skipped,
+or a problem), with a progress bar above, and the run carries on in the
+background if you leave the page. A notification says when it has finished:
+passed, passed with a warning (the report could not be sent), or found a
+problem. The last runs are listed.
+
+It also runs on a schedule, **every Sunday at 03:00** by the server's clock
+unless you change it (a schedule you turned off before stays off). Choose daily,
+weekly (on any day) or monthly (the first of that day in the month), and the
+hour. The report can be sent through one of your [alerts](alerting.md): to
+that alert's notification URLs, after every run or only when something was
+wrong.
+
 ## Configuration
 
 See `.env.example`. All settings are optional.
@@ -228,7 +290,15 @@ See `.env.example`. All settings are optional.
 | `TZ` | unset | Time zone for every time ClearPing shows or sends (IANA name, e.g. `Europe/London`); unset, each viewer sees their own |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes |
 | `CLEARPING_APPRISE_BIN` | `apprise` | The Apprise program that sends alerts, when it is not on the `PATH` |
-| `CLEARPING_UPDATE_CHECK` | on | `off` stops the hourly check for a newer image (see [Versions](#versions)) |
+| `CLEARPING_UPDATE_CHECK` | on | `off` stops the quarter-hourly check for a newer image (see [Versions](#versions)) |
+| `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made ([security.md](security.md#locked-out)) |
+| `CLEARPING_SETUP_CODE` | made at start-up, written to the log | What the first account asks for besides a password |
+| `CLEARPING_ALLOWED_HOSTS` | unset (any) | Comma-separated hostnames ClearPing answers to; a request addressed to another name is refused |
+| `CLEARPING_TRUST_PROXY` | `0` | How many proxies in front of ClearPing add to `X-Forwarded-For` (`1` for Traefik) |
+| `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard ([mcp.md](mcp.md)) |
+| `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes an assistant's token over plain HTTP from anywhere ([mcp.md](mcp.md)) |
+| `CLEARPING_PEERINGDB_API_KEY` | unset | A PeeringDB API key, for Routing ([bgp-monitoring.md](bgp-monitoring.md)) |
+| `CLEARPING_DEV_USER` | unset | `off` stops `npm run dev` signing every page in as `dev` |
 
 ## Development
 

@@ -64,9 +64,12 @@ stored, charted and alerted on like any other reading
    trusts. The agent printed its own fingerprint when it started (it is in its
    log), and the two should be the same.
 
-The page lists every probe agent with its status and when it was last seen,
-below a count of how many are online and how many need attention. **Details**
-on a row has everything else about it: its machine, version, certificate
+The page counts how many are online and how many need attention, and lists
+every probe agent in a table you can search by name, address or machine and
+filter by status: its name (with the name the machine gives itself under it), its
+IP and port, how it is reached (**Tailnet**, **Private network** or
+**Internet**), its version, its status, when it was last seen and how many
+targets it probes. **Details** on a row has everything else about it: its machine, version, certificate
 and targets, and the buttons to test the connection, rename it or change
 where it is reached, make a new token or remove it. A renamed or moved probe
 agent keeps its pinned certificate, and its targets keep their history.
@@ -207,6 +210,14 @@ Everywhere a target appears, it says where it is probed from:
 - **Group comparisons.** Each line from an agent is named *Target · Agent*.
 - **Alerts.** *Cloudflare DNS is not responding (from Germany VPS)*, with a
   *Probed from* line in the details.
+- **The Overview.** *Where readings are taken from* has a tile for this server
+  and each probe agent, with how it is doing and how many targets it probes. A
+  probe agent that could not be reached has a row in the day's problems, listing
+  its targets, and a fault among its targets is judged by what else it was
+  probing ([overview.md](overview.md)).
+- **Routing.** Each probe agent traces into a watched prefix from where it is,
+  and its network is picked out across the page, unless you leave it out with
+  its chip ([bgp-monitoring.md](bgp-monitoring.md)).
 - **Assistant answers.** Targets from an agent come back with `probedFrom`,
   and the ISP report says those were measured from another machine.
 

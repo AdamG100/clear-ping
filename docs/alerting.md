@@ -20,7 +20,13 @@ about the rest. A target added later is not ticked for anything until you tick
 it, including one added to a group whose other targets are all ticked.
 
 The Alerts button shows how many alerts are firing, and each target's page lists
-the alerts watching it.
+the alerts watching it. On the Alerts screen each alert is a card that says
+whether it is firing (and on which targets), on, or muted, with buttons to send
+a test, mute it, edit it and delete it.
+
+![The alerts screen, with one alert firing](screenshots/alerts.jpg)
+
+![The alert editor](screenshots/alert-editor.jpg)
 
 ### Conditions
 
@@ -110,8 +116,9 @@ for you. A few things worth knowing:
   same in those formats.
 - **The URLs are checked when the alert is saved.** One that Apprise cannot
   make sense of is refused there and then, with Apprise's reason.
-- **They are secrets.** Anyone holding one can post to that channel. The list of
-  alerts shows only the name of each service, never the URL.
+- **They are secrets.** Anyone holding one can post to that channel. Only
+  someone who may change alerts is shown them whole; a viewer, a read-only key
+  and anyone not signed in see just the name of each service.
 
 Leave the box empty and nothing is sent. The alert still fires and clears, and
 shows on the Alerts screen and in the count on the Alerts button.
@@ -122,6 +129,11 @@ the alert's state, and if a service refuses the message it says why.
 
 Delivery failures are logged and swallowed: a service that is down must never
 stop the prober from measuring.
+
+The same URLs can carry another message: under **Settings → Maintenance**, pick
+one of your alerts and its notification URLs are sent the report of each
+maintenance run, or only of the runs that found a problem
+([running.md](running.md#maintenance)). Nothing else about the alert changes.
 
 ### What is sent
 
@@ -238,7 +250,9 @@ firing does not announce itself again.
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 
 An alert is created with `metric`, `threshold`, `consecutiveProbes`,
-`targetIds`, and optionally `name` and `notifyUrls`: the Apprise URLs to send it
+`targetIds`, and optionally `name`, `traceOnFire` and `traceCooldownMinutes`
+(tracing the route when it fires, and the wait before the same target is
+traced again), and `notifyUrls`: the Apprise URLs to send it
 to, as a list or as text with one to a line. An empty list is an alert that is
 only shown in the app. A URL Apprise cannot use is refused with a `400` and
 Apprise's reason.
