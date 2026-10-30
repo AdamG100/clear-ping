@@ -441,7 +441,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
                   ? status.changesNeedSignIn
                     ? 'Sign in to change what is monitored, as well as security settings and keys.'
                     : 'Sign in to change security settings, create keys and see who changed what.'
-                  : 'This ClearPing asks you to sign in.'}
+                  : 'Sign in to see the dashboard.'}
             </p>
           </div>
 
