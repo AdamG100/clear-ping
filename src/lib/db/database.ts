@@ -266,6 +266,49 @@ export function databasePath(): string {
 }
 
 /**
+ * A bind mount Docker created as root, while the image runs as uid 1000, is
+ * the usual reason a new install cannot open its database. The process cannot
+ * change that ownership itself, so the log gives the command that does.
+ */
+function databasePermissionMessage(dbPath: string): string {
+  const uid = process.getuid?.();
+  const who = uid === undefined ? '' : ` It runs as uid ${uid}.`;
+  const fix = uid === undefined
+    ? ''
+    : ` For a Docker bind mount, on the host in the directory with the Compose file:\n\n  sudo chown -R ${uid}:${uid} ./data\n\nor use a named volume, as the docker run examples do.`;
+  return `Cannot open the database at ${dbPath}: permission denied.${who}${fix}`;
+}
+
+function isDatabasePermissionError(error: unknown): boolean {
+  const code = (error as { code?: string }).code;
+  return code === 'EACCES' || code === 'EPERM' || code === 'SQLITE_CANTOPEN';
+}
+
+/**
+ * Open `dbPath` and report failure through the callback. Without one, sqlite3
+ * emits the error on the database object and it becomes an uncaught exception
+ * before anything can explain it.
+ */
+function openSqlite(dbPath: string): Promise<Database> {
+  const sqlite = sqlite3.verbose();
+  return new Promise((resolve, reject) => {
+    try {
+      const handle = new sqlite.Database(dbPath, err => {
+        if (!err) {
+          resolve(handle);
+          return;
+        }
+        // close() never calls back on a handle that failed to open.
+        handle.close(() => {});
+        reject(err);
+      });
+    } catch (error) {
+      reject(error as Error);
+    }
+  });
+}
+
+/**
  * Initialize the SQLite database and create tables
  */
 export async function initDatabase(): Promise<Database> {
@@ -274,20 +317,22 @@ export async function initDatabase(): Promise<Database> {
   // Return existing promise if initialization is in progress
   if (dbInitPromise) return dbInitPromise;
 
-  dbInitPromise = (async () => {
-    // Ensure data directory exists
-    // Configurable so the standalone prober (which may run from a different
-    // working directory) and the tests can point at their own file.
+  const opening = (async () => {
     const dbPath = databasePath();
 
     const dataDir = path.dirname(dbPath);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    try {
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      db = await openSqlite(dbPath);
+    } catch (error) {
+      db = null;
+      if (!isDatabasePermissionError(error)) throw error;
+      const message = databasePermissionMessage(dbPath);
+      console.error(`Database: ${message}`);
+      throw new Error(message, { cause: error });
     }
-    
-    // Initialize sqlite3 database
-    const sqlite = sqlite3.verbose();
-    db = new sqlite.Database(dbPath);
 
     // Foreign keys are off by default in SQLite, which silently disables the
     // ON DELETE CASCADE below — deleting a target would leave its measurements
@@ -495,7 +540,14 @@ export async function initDatabase(): Promise<Database> {
     return db!;
   })();
 
-  return dbInitPromise;
+  dbInitPromise = opening;
+  // A failed open must not stick, or the next attempt in this process repeats
+  // it after the folder has been fixed.
+  void opening.catch(() => {
+    if (dbInitPromise === opening && !db) dbInitPromise = null;
+  });
+
+  return opening;
 }
 
 /**

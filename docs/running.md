@@ -93,6 +93,13 @@ matches the machine. 32-bit ARM is not supported.
 file, set up to sit behind Traefik. Copy it to `compose.yaml` and change the
 hostname and network to yours.
 
+The container runs as uid 1000. When Compose mounts `./data`, Docker creates
+that folder as root if it is not already there, and ClearPing cannot create
+its database. Startup stops and the log gives the command that fixes it, run
+on the host next to the Compose file: `sudo chown -R 1000:1000 ./data`. A
+named volume, as in the `docker run` examples, is created writable and does
+not need this.
+
 ## Installing it as an app
 
 ClearPing can be installed to a phone's home screen, or as a desktop app, and

@@ -35,8 +35,9 @@ services:
       TZ: Europe/London
     volumes:
       # The database. The container runs as uid 1000, so on Linux create the
-      # directory first and hand it over, or the app cannot write to it:
-      #   mkdir -p data && sudo chown 1000:1000 data
+      # directory first and hand it over, or the app cannot write to it.
+      # Startup logs this command if the folder is still root's:
+      #   mkdir -p data && sudo chown -R 1000:1000 data
       - ./data:/data
     networks:
       - proxy
