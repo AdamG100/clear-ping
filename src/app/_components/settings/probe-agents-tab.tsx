@@ -46,7 +46,7 @@ import { Masked } from '../privacy/masked'
  * agent's certificate, so from then on this dashboard talks to that agent and
  * nothing else, encrypted, on any network.
  *
- * Laid out as a fleet: this server, a count of how they are doing, then every
+ * Laid out as a fleet: the local probe, a count of how they are doing, then every
  * probe agent in a table, with what can be done to one in its details panel.
  */
 
@@ -164,7 +164,7 @@ function Tile({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: str
   )
 }
 
-export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentId: string) => void }) {
+export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTargets?: (probeAgentId: string) => void; onProbesChanged?: () => void }) {
   const { notify, reportError } = useToast()
   const now = useNow()
   const [loaded, setLoaded] = useState<Loaded | null>(null)
@@ -286,7 +286,15 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
 
   return (
     <div className="space-y-5 text-foreground">
-      <LocalProbe />
+      <LocalProbe
+        version={loaded.dashboardVersion}
+        oldestCheck={oldestCheck && (
+          <span className="text-xs text-muted-foreground" title={when(oldestCheck)}>
+            Oldest probe agent check {ago(oldestCheck, now).toLowerCase()}
+          </span>
+        )}
+        onRenamed={onProbesChanged}
+      />
       <ProbeHeartbeat />
       <ProbePlaces />
       <DuplicateMonitors />
@@ -306,25 +314,6 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
             Add probe agent
           </Button>
         </div>
-      </div>
-
-      {/* This server, which every target is probed from unless told otherwise. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-border px-4 py-3">
-        <span className="text-sm font-medium">This server</span>
-        <span className="text-sm text-muted-foreground">Where this dashboard runs</span>
-        <Badge size="sm" tone="success" icon={<CircleCheck size={11} strokeWidth={2} aria-hidden />}>
-          Always probes
-        </Badge>
-        {loaded.dashboardVersion && (
-          <span className="text-xs text-muted-foreground">
-            Version <span className="font-mono">{loaded.dashboardVersion}</span>
-          </span>
-        )}
-        {oldestCheck && (
-          <span className="ml-auto text-xs text-muted-foreground" title={when(oldestCheck)}>
-            Oldest probe agent check {ago(oldestCheck, now).toLowerCase()}
-          </span>
-        )}
       </div>
 
       {made && madeAgent && commands && (
@@ -416,7 +405,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
           <EmptyState
             icon={<RadioTower size={24} strokeWidth={1.75} />}
             title="No probe agents yet"
-            description="Every monitor is probed from this server. Add a probe agent to take readings from somewhere else too."
+            description="Every monitor is measured by the local probe. Add a probe agent to take readings from somewhere else too."
           />
         ) : (
           <>

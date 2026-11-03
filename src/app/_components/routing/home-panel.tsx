@@ -330,7 +330,7 @@ function Vantage({
         </span>
         <div className="min-w-0">
           <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            {vantage.kind === 'server' ? 'This server' : `Probe agent: ${vantage.name}`}
+            {vantage.kind === 'server' ? vantage.name : `Probe agent: ${vantage.name}`}
             <Badge size="sm" tone="info">{vantageLabel(vantage)}</Badge>
             {flapping.length > 0 && <Badge size="sm" tone="warning">Flapping</Badge>}
           </h3>
@@ -375,7 +375,7 @@ function Vantage({
 
       {events.length > 0 ? (
         <Timeline
-          label={`What ${vantage.kind === 'server' ? 'this server' : vantage.name} saw of the prefix`}
+          label={`What ${vantage.name} saw of the prefix`}
           events={events}
           now={now || Math.max(...events.map(event => Number(event.at)))}
           timeZone={displayTimeZone() ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
@@ -454,6 +454,9 @@ export function HomePanel({
     }
   }
 
+  // The local probe, by the name it has been given.
+  const localName = home.vantages.find(vantage => vantage.kind === 'server')?.name ?? 'the local probe'
+
   return (
     <section className="min-w-0 rounded-3xl border border-primary/40 bg-card p-4 text-foreground @2xl/main:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -463,9 +466,9 @@ export function HomePanel({
             {flapping && <Badge size="sm" tone="warning">Flapping</Badge>}
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            How {detail.prefix} is reached from this server
+            How {detail.prefix} is reached from {localName}
             {agents > 0 ? ` and your ${agents} probe agent${agents === 1 ? '' : 's'}` : ''}. Their routes are marked across the page:
-            &ldquo;Your ISP&rdquo; for this server&apos;s network{agents > 0 ? ', and each probe agent by name' : ''}.
+            &ldquo;Your ISP&rdquo; for {localName}&apos;s network{agents > 0 ? ', and each probe agent by name' : ''}.
           </p>
         </div>
         {!readOnly && (
@@ -493,7 +496,7 @@ export function HomePanel({
           <span className="text-xs text-muted-foreground">{readOnly ? 'Looking from' : 'Looking from, choose which'}:</span>
           <span className="flex items-center gap-1.5 rounded-full border border-primary/50 bg-primary/15 py-0.5 pl-2 pr-2.5 text-xs">
             <Server size={12} strokeWidth={1.75} aria-hidden="true" />
-            This server
+            {localName}
           </span>
           {home.agents.map(agent =>
             readOnly ? (

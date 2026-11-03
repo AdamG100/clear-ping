@@ -22,7 +22,7 @@ import { Button } from '@/components/arc/button/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/arc/popover/popover'
 import { ScrollArea } from '@/components/arc/scroll-area/scroll-area'
 import { SearchField } from '@/components/arc/search-field/search-field'
-import { matchesProbeFrom, ProbedFrom, type ProbeFromFilter } from '../targets/probed-from'
+import { matchesProbeFrom, ProbeCount, type ProbeFromFilter } from '../targets/probed-from'
 import { ThemeSwitch } from '@/components/arc/theme-switch/theme-switch'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useTheme } from '../shell/use-theme'
@@ -530,8 +530,7 @@ function TargetRow({
                 <TypeBadge type={target.type} />
               </span>
             )}
-            {/* Where it is measured from, when that is another machine. */}
-            <ProbedFrom agent={target.probeAgent} count={probeIdsOf(target).length} />
+            <ProbeCount count={probeIdsOf(target).length} />
             {deleting ? (
               <span className="shrink-0">
                 <Badge size="sm">Deleting</Badge>
@@ -1665,7 +1664,7 @@ export function Sidebar({
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-sm text-sidebar-foreground truncate"><Masked text value={target.name} /></span>
                                   {target.type && <TypeBadge type={target.type} />}
-                                  <ProbedFrom agent={target.probeAgent} count={probeIdsOf(target).length} />
+                                  <ProbeCount count={probeIdsOf(target).length} />
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">

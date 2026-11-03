@@ -3,7 +3,9 @@ import { countryRegion } from './countries'
 import type { Target } from '@/types/probe'
 import { getAllTargets } from '../db/database'
 import { runTrace } from '../probe-agents/client'
+import { localProbeName } from '../probe-agents/probes'
 import { listProbeAgents } from '../probe-agents/store'
+import { DEFAULT_LOCAL_PROBE_NAME } from '@/types/probe-agent'
 import { collectorInfo } from './collectors'
 import { crossingOf, exchangeData, exchangeOf, likelyCrossing, memberOf, type ExchangeData } from './exchanges'
 import { upstreamOf } from './path'
@@ -46,9 +48,13 @@ interface Vantage {
 }
 
 async function vantages(): Promise<Vantage[]> {
-  const [agents, excluded] = await Promise.all([listProbeAgents().catch(() => []), getExcludedAgents().catch((): string[] => [])])
+  const [agents, excluded, localName] = await Promise.all([
+    listProbeAgents().catch(() => []),
+    getExcludedAgents().catch((): string[] => []),
+    localProbeName().catch(() => DEFAULT_LOCAL_PROBE_NAME),
+  ])
   return [
-    { id: SERVER, name: 'This server', probeAgentId: null, unavailable: null },
+    { id: SERVER, name: localName, probeAgentId: null, unavailable: null },
     ...agents.filter(agent => !excluded.includes(agent.id)).map(agent => ({
       id: agent.id,
       name: agent.name,

@@ -23,29 +23,34 @@ const REMOTE_COLOURS = {
 } as CSSProperties
 
 /**
- * Where a target is probed from, wherever the target is shown: a "Remote"
- * badge beside its type, with the probe agent named in its tooltip. A target
- * probed from this server shows nothing, so the dashboard looks as it always
- * has for anyone without probe agents.
+ * How many probes measure a monitor, in the sidebar, when it is more than one:
+ * a plain count, since its page has the names. A monitor on a single probe,
+ * local or a probe agent, shows nothing; a probe agent that is down greys the
+ * monitor's status dot and says why there.
+ */
+export function ProbeCount({ count, className }: { count: number; className?: string }) {
+  if (count < 2) return null
+  return (
+    <Tooltip content={`Measured from ${count} probes. Open it to see each one.`}>
+      <span className={cn('flex shrink-0', className)}>
+        <span className="sr-only">Measured from {count} probes</span>
+        <Badge size="sm" tone="neutral" icon={<MapPin size={10} strokeWidth={2} aria-hidden />} aria-hidden>
+          {count} probes
+        </Badge>
+      </span>
+    </Tooltip>
+  )
+}
+
+/**
+ * Where a line in a comparison is probed from: a "Remote" badge, with the
+ * probe agent named in its tooltip. A line from the local probe shows nothing.
  *
  * While the agent cannot be reached the badge says so in the warning colour:
- * the target's readings have stopped because of the agent, not the target.
+ * the readings have stopped because of the agent, not the monitor.
  */
-export function ProbedFrom({ agent, count = 1, className }: { agent?: ProbeAgentSummary; count?: number; className?: string }) {
+export function ProbedFrom({ agent, className }: { agent?: ProbeAgentSummary; className?: string }) {
   const mask = useMask()
-  // Measured from several probes: how many, not which, since there is no room for names.
-  if (count > 1) {
-    return (
-      <Tooltip content={`Measured from ${count} probes. Open it to see each one.`}>
-        <span className={cn('flex shrink-0', className)}>
-          <span className="sr-only">Measured from {count} probes</span>
-          <Badge size="sm" tone="neutral" icon={<MapPin size={10} strokeWidth={2} aria-hidden />} style={REMOTE_COLOURS} aria-hidden>
-            {count} probes
-          </Badge>
-        </span>
-      </Tooltip>
-    )
-  }
   if (!agent) return null
   const down = agent.state !== 'online' && agent.state !== 'unpaired'
   const machine = [agent.hostname, agent.address].filter((part): part is string => !!part).map(mask.address).join(', ')
@@ -102,11 +107,4 @@ export type ProbeFromFilter = 'all' | 'local' | (string & {})
 export function matchesProbeFrom(target: Pick<Target, 'probes' | 'probeAgentId'>, filter: ProbeFromFilter): boolean {
   if (filter === 'all') return true
   return probeIdsOf(target).includes(filter)
-}
-
-/** The sentence for a target's page: where its readings are taken from, and whether that is working. */
-export function probedFromLine(agent: ProbeAgentSummary | undefined): string {
-  if (!agent) return 'Measured from the local probe'
-  const state = PROBE_AGENT_STATE[agent.state].label
-  return `Probed from ${agent.name}${agent.hostname ? ` · ${agent.hostname}` : ''} · ${state}`
 }

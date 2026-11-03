@@ -1364,6 +1364,8 @@ interface SettingsPageProps {
   onShowTargetsFrom?: (probeAgentId: string) => void
   /** Go to the Routing page. */
   onOpenRouting?: () => void
+  /** The probes changed (the local probe renamed), so the rest of the dashboard catches up. */
+  onProbesChanged?: () => void
 }
 
 /**
@@ -1371,7 +1373,7 @@ interface SettingsPageProps {
  * single sign-on, accounts, the activity record, and connecting an AI
  * assistant, each a tab of its own.
  */
-export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRouting }: SettingsPageProps) {
+export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRouting, onProbesChanged }: SettingsPageProps) {
   const { reportError } = useToast()
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
 
@@ -1551,7 +1553,7 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
                 {current.value === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}
                 {current.value === 'activity' && <ActivityTab />}
                 {current.value === 'maintenance' && <MaintenanceTab />}
-                {current.value === 'probes' && <ProbeAgentsTab onShowTargets={onShowTargetsFrom} />}
+                {current.value === 'probes' && <ProbeAgentsTab onShowTargets={onShowTargetsFrom} onProbesChanged={onProbesChanged} />}
                 {current.value === 'routing' && <RoutingTab onOpenRouting={() => onOpenRouting?.()} />}
               </div>
             )}

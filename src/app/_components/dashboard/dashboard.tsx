@@ -1377,6 +1377,7 @@ export function Dashboard() {
               <SettingsPage
                 section={page.section}
                 onOpenRouting={openRouting}
+                onProbesChanged={() => void reloadTargets()}
                 onSection={section => goTo({ kind: 'settings', section }, 'replace')}
                 onShowTargetsFrom={agentId => {
                   // The list of that agent's targets is in the sidebar, which

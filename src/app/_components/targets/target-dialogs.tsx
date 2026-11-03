@@ -589,7 +589,7 @@ type RequiredField = 'address' | 'port'
  * is told apart at a glance (never amber, which reads as a warning): its
  * number, what it is and a line about it on the left, its fields on the
  * right, stacked where the page is narrow.
- * Probe from is purple, the colour of the Remote badge in the sidebar.
+ * Probes is purple, the colour of probe agents wherever they are marked.
  */
 function FormSection({ number, tone, title, hint, children }: {
   number: number

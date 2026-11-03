@@ -285,12 +285,14 @@ function Day({
   report,
   targetsById,
   probeAgents,
+  localProbeName,
   onSelectTarget,
   onShowTargetsFrom,
 }: {
   report: OverviewReport
   targetsById: Map<string, Target>
   probeAgents: ProbeAgentSummary[]
+  localProbeName: string
   onSelectTarget: (id: string) => void
   onShowTargetsFrom: (from: string) => void
 }) {
@@ -495,9 +497,9 @@ function Day({
                       {problem.kind === 'outage' ? 'Not answering' : 'Losing packets'}
                       {problem.reasons.length > 0 ? `: ${problem.reasons.slice(0, 2).join('; ')}` : ''}
                     </span>
-                    {scopeNote(problem.event, agentName(problem.event.probeAgentId)) && (
+                    {scopeNote(problem.event, agentName(problem.event.probeAgentId), localProbeName) && (
                       <span className="block truncate text-xs text-muted-foreground">
-                        {scopeNote(problem.event, agentName(problem.event.probeAgentId))}
+                        {scopeNote(problem.event, agentName(problem.event.probeAgentId), localProbeName)}
                       </span>
                     )}
                   </span>
@@ -525,9 +527,9 @@ function Day({
 }
 
 /** Where a spell's fault lay, from what else was probed from the same place at the time. */
-function scopeNote(event: OverviewEvent, fromAgent: string | undefined): string | null {
+function scopeNote(event: OverviewEvent, fromAgent: string | undefined, localProbeName: string): string | null {
   const others = event.targets.length - 1
-  const from = fromAgent ?? 'this server'
+  const from = fromAgent ?? localProbeName
   switch (event.scope) {
     case 'local':
       return `Likely ${fromAgent ? `${fromAgent}'s` : 'your'} own network: something inside it went down too`
@@ -768,7 +770,7 @@ export function OverviewPage({
   }
 
   const sourcesLine =
-    probeAgents.length === 0 ? 'measured by the local probe' : `measured by the local probe and ${plural(probeAgents.length, 'probe agent')}`
+    probeAgents.length === 0 ? 'measured by the local probe' : `measured by ${localProbeName} and ${plural(probeAgents.length, 'probe agent')}`
 
   // Until the targets are in, the page has nothing true to say: its figures
   // would read 0 of 0 and its headline that it waits for the first readings.
@@ -843,6 +845,7 @@ export function OverviewPage({
             report={report}
             targetsById={targetsById}
             probeAgents={probeAgents}
+            localProbeName={localProbeName}
             onSelectTarget={onSelectTarget}
             onShowTargetsFrom={onShowTargetsFrom}
           />
