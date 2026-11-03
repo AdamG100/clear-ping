@@ -199,7 +199,7 @@ function LossBar({ bands, unit }: { bands: number[]; unit: string }) {
     const value = (count / total) * 100
     return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)}%`
   }
-  const probes = (count: number) => `${count.toLocaleString()} probe${count === 1 ? "" : "s"}`
+  const probes = (count: number) => `${count.toLocaleString()} reading${count === 1 ? "" : "s"}`
 
   return (
     <div className="space-y-2">
@@ -211,7 +211,7 @@ function LossBar({ bands, unit }: { bands: number[]; unit: string }) {
               <span className="block space-y-1 text-left">
                 <span className="block font-medium">{band.label} loss: {band.range} of {unit}</span>
                 <TipRow label="Probes" value={probes(band.count)} />
-                <TipRow label="Of all probes" value={share(band.count)} />
+                <TipRow label="Of all readings" value={share(band.count)} />
                 <span className="block pt-1 text-xs opacity-70">{band.description}</span>
               </span>
             }
@@ -228,7 +228,7 @@ function LossBar({ bands, unit }: { bands: number[]; unit: string }) {
       {/* Probes counted by how much of what they sent was lost: a probe of 20
           packets that lost one is in "Minor", at 5%. */}
       <p className="text-[11px] text-muted-foreground">
-        {total > 0 ? `Probes by the share of their ${unit} lost` : `No ${unit} sent`}
+        {total > 0 ? `Readings by the share of their ${unit} lost` : `No ${unit} sent`}
       </p>
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-hidden="true">
         {shown.map(band => (
@@ -465,8 +465,8 @@ export default function StatsCards({
   const lossLabel = !hasData
     ? vocabulary.lossLabel
     : affected === 0
-      ? probes === 1 ? "The one probe came back in full" : `All ${probes.toLocaleString()} probes came back in full`
-      : `${affected.toLocaleString()} of ${probes.toLocaleString()} probes lost ${vocabulary.unit}`
+      ? probes === 1 ? "The one reading came back in full" : `All ${probes.toLocaleString()} readings came back in full`
+      : `${affected.toLocaleString()} of ${probes.toLocaleString()} readings lost ${vocabulary.unit}`
   // Each headline says what period it is over, which the cards otherwise leave to the buttons above.
   const over = (text: string) => (period && hasData ? `${text}, ${period}` : text)
 
@@ -522,8 +522,8 @@ export default function StatsCards({
         lastUpdated={lastUpdated}
         visual={<LossBar bands={statistics?.lossBands ?? []} unit={vocabulary.unit} />}
         figures={[
-          { label: "Worst probe", value: pct(maxPacketLoss), loss: maxPacketLoss },
-          { label: "No reply at all", value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()} probes` : "—", loss: (statistics?.failedProbes ?? 0) > 0 ? 100 : 0 },
+          { label: "Worst reading", value: pct(maxPacketLoss), loss: maxPacketLoss },
+          { label: "No reply at all", value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()} readings` : "—", loss: (statistics?.failedProbes ?? 0) > 0 ? 100 : 0 },
           { label: "Latest", value: pct(current.packetLoss), loss: current.packetLoss },
         ]}
       />

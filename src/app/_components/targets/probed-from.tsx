@@ -34,8 +34,9 @@ export function ProbeCount({ count, className }: { count: number; className?: st
     <Tooltip content={`Measured from ${count} probes. Open it to see each one.`}>
       <span className={cn('flex shrink-0', className)}>
         <span className="sr-only">Measured from {count} probes</span>
+        {/* The icon and the number only: the row's name needs the room more. */}
         <Badge size="sm" tone="neutral" icon={<MapPin size={10} strokeWidth={2} aria-hidden />} aria-hidden>
-          {count} probes
+          {count}
         </Badge>
       </span>
     </Tooltip>

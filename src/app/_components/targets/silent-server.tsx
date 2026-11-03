@@ -95,7 +95,7 @@ export function SilentServerNote({
       {/* Spans, not paragraphs: the alert sets what it is given in a <p> of its own. */}
       <span className="block space-y-3">
         <span className="block">
-          It has not answered once since it was added ({probes.toLocaleString()} probes in this period, none
+          It has not answered once since it was added ({probes.toLocaleString()} readings in this period, none
           answered). The server, or a firewall in front of it, drops packets to closed ports without replying, as
           Google Cloud&apos;s firewall does. That says nothing about whether the game is up, so it is shown grey,
           not as down, and raises no alerts until it answers.

@@ -26,19 +26,19 @@ const PATTERN: Record<Exclude<LossPattern, "none">, { label: string; color: stri
     label: "Sporadic",
     color: "var(--signal-minor)",
     says: () =>
-      "Isolated losses, never in consecutive probes. Typical of ICMP rate limiting on a router along the path, or brief congestion. Usually harmless unless it lines up with problems users report.",
+      "Isolated losses, never in consecutive readings. Typical of ICMP rate limiting on a router along the path, or brief congestion. Usually harmless unless it lines up with problems users report.",
   },
   spells: {
     label: "Bursts",
     color: "var(--signal-moderate)",
     says: unit =>
-      `Consecutive probes lost ${unit} for a few minutes at a time. Points to an intermittent fault: Wi-Fi interference, a flapping link or port, or congestion at peak times.`,
+      `Consecutive readings lost ${unit} for a few minutes at a time. Points to an intermittent fault: Wi-Fi interference, a flapping link or port, or congestion at peak times.`,
   },
   constant: {
     label: "Sustained",
     color: "var(--signal-critical)",
     says: unit =>
-      `Most probes lose ${unit}. Points to a persistent fault: a bad cable or port, a saturated link, or a device dropping traffic.`,
+      `Most readings lose ${unit}. Points to a persistent fault: a bad cable or port, a saturated link, or a device dropping traffic.`,
   },
 }
 
@@ -106,13 +106,13 @@ function PatternTile({ analysis, unit, longPeriod }: { analysis: LossAnalysis; u
           </Fact>
         )}
         {analysis.worst && (
-          <Fact label="Worst probe">
+          <Fact label="Worst reading">
             {analysis.worst.loss.toFixed(0)}% at {moment(analysis.worst.at, longPeriod)}
           </Fact>
         )}
         {analysis.failedProbes > 0 && (
           <Fact label="No reply">
-            <span className="text-destructive">{count(analysis.failedProbes)} probes</span>
+            <span className="text-destructive">{count(analysis.failedProbes)} readings</span>
           </Fact>
         )}
       </dl>
@@ -124,7 +124,7 @@ function PatternTile({ analysis, unit, longPeriod }: { analysis: LossAnalysis; u
  * The period folded into one day. Loss that comes every evening at the same
  * hour is congestion at the busy hour, and this is the only place it shows.
  */
-/** A share of probes, as a percentage worth reading: "16.7%", "0.8%", "100%". */
+/** A share of readings, as a percentage worth reading: "16.7%", "0.8%", "100%". */
 function percent(share: number): string {
   const value = share * 100
   return `${value >= 10 || value === 0 ? value.toFixed(0) : value.toFixed(1)}%`
@@ -137,7 +137,7 @@ function HourTip({ hour, peak, unit }: { hour: LossAnalysis["hours"][number]; pe
     <span className="block space-y-0.5 text-left">
       <span className="block font-medium">{span}{peak && " · peak hour"}</span>
       {hour.probes === 0 ? (
-        <span className="block">No probes in this hour</span>
+        <span className="block">No readings in this hour</span>
       ) : (
         <>
           <span className="block">
@@ -176,8 +176,8 @@ function HoursTile({ analysis, unit }: { analysis: LossAnalysis; unit: string })
                   <div
                     tabIndex={0}
                     aria-label={hour.probes === 0
-                      ? `${hourLabel(hour.hour)}: no probes`
-                      : `${hourLabel(hour.hour)}: ${hour.affected} of ${hour.probes} probes lost ${unit}`}
+                      ? `${hourLabel(hour.hour)}: no readings`
+                      : `${hourLabel(hour.hour)}: ${hour.affected} of ${hour.probes} readings lost ${unit}`}
                     className="group flex h-full items-end rounded-t-sm outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
                   >
                     <div

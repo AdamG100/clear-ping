@@ -139,11 +139,11 @@ function Headline({ now, agentsDown }: { now: ReturnType<typeof standing>; agent
     )
   }
   if (now.answering.length === 0) {
-    return <Alert tone="info" title="Waiting for the first readings">New monitors are probed straight away, so this fills in within a minute.</Alert>
+    return <Alert tone="info" title="Waiting for the first readings">New monitors are measured straight away, so this fills in within a minute.</Alert>
   }
   return (
     <Alert tone="success" title="Everything is answering">
-      All {plural(now.answering.length, 'monitor')} answered every probe last time round.
+      All {plural(now.answering.length, 'monitor')} answered {now.answering.length === 1 ? 'its latest reading' : 'their latest readings'}.
     </Alert>
   )
 }
@@ -304,7 +304,7 @@ function Day({
   const troubled = slices.filter(slice => slice.down > 0).length
   // "All day" only of a day that was watched all through.
   const watched = slices.filter(slice => slice.watched > 0).length
-  const quiet = watched === slices.length ? 'Every monitor answered all day' : 'Every monitor answered whenever it was probed'
+  const quiet = watched === slices.length ? 'Every monitor answered all day' : 'Every monitor answered whenever it was measured'
   // A label every six hours, on the hour, on the clock times are shown by.
   const zone = displayTimeZone()
   const ticks = slices
@@ -811,7 +811,7 @@ export function OverviewPage({
       {/* Two by two on a phone: four tiles one under another were a screen
           of scrolling before anything else. */}
       <div className="grid grid-cols-2 gap-3 @2xl/main:gap-4 @5xl/main:grid-cols-4">
-        <MetricCard label="Answering now" value={now.answering.length} context={`of ${now.active.length} being probed`} />
+        <MetricCard label="Answering now" value={now.answering.length} context={`of ${now.active.length} being measured`} />
         <MetricCard
           label="Up all day"
           value={day?.fullyUp ?? 0}

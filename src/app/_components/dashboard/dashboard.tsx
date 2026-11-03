@@ -889,9 +889,9 @@ export function Dashboard() {
   const resolverChart = {
     description:
       `One line for each resolver, on a shared scale. A point is one probe: the average of the ${DNS_QUERIES_PER_PROBE} ` +
-      'queries that probe sent to that resolver. The strips underneath mark the probes in which it failed to answer some or all of them.',
+      'queries that probe sent to that resolver. The strips underneath mark the readings in which it failed to answer some or all of them.',
     note:
-      'Failed is the share of the queries sent to that resolver that got no usable answer. Uptime is the share of probes in which it answered at least one.',
+      'Failed is the share of the queries sent to that resolver that got no usable answer. Uptime is the share of readings in which it answered at least one.',
   }
 
   // The members of the group on screen, in sidebar order, including those of
@@ -1653,7 +1653,7 @@ export function Dashboard() {
                     lossLabel={selectedTarget.probeType === 'dns' ? 'Failed' : undefined}
                     note={
                       selectedTarget.probeType === 'dns'
-                        ? 'Failed is the share of queries that got no usable answer. Uptime is the share of probes in which at least one query was answered.'
+                        ? 'Failed is the share of queries that got no usable answer. Uptime is the share of readings in which at least one query was answered.'
                         : undefined
                     }
                     nameSeries={(target, family) => (family ? FAMILY_LABEL[family] : target.name)}
@@ -1802,7 +1802,7 @@ export function Dashboard() {
                     </p>
                   ) : lastUpdated && !showSpinner && (
                     <p className="font-mono text-[11px] text-muted-foreground">
-                      last probe{' '}
+                      last reading{' '}
                       {lastUpdated.toLocaleTimeString('en-US', inDisplayZone({
                         hour: '2-digit',
                         minute: '2-digit',
