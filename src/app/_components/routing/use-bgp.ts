@@ -4,11 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BgpOverview, BgpPrefixDetail } from '@/types/bgp'
 
 /**
- * BGP monitoring as the routing pages see it, asked for again every few
- * seconds while a page is open and the tab is in view: the routes change as
- * RIS Live delivers them, and the page is meant to be watched.
+ * BGP monitoring as the routing pages see it, asked for again while a page is
+ * open and the tab is in view: the routes change as RIS Live delivers them, and
+ * the page is meant to be watched. A prefix's page is every peer's route and a
+ * day of its updates, so not every few seconds.
  */
-const REFRESH_MS = 8_000
+const REFRESH_MS = 20_000
 
 /**
  * What each address last answered, kept while the dashboard is open: going
