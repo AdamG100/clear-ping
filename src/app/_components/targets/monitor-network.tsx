@@ -37,7 +37,7 @@ export function NetworkLine({
   refreshKey?: string | number
 }) {
   const mask = useMask()
-  const [loaded, setLoaded] = useState<{ key: string; found: Found | null } | null>(null)
+  const [loaded, setLoaded] = useState<{ key: string; targetId: string; found: Found | null } | null>(null)
   const key = `${targetId}|${probe ?? ''}|${family ?? ''}|${refreshKey ?? ''}`
 
   useEffect(() => {
@@ -48,12 +48,21 @@ export function NetworkLine({
     fetch(`/api/targets/${targetId}/network?${query}`)
       .then(response => (response.ok ? (response.json() as Promise<Found>) : null))
       .catch(() => null)
-      .then(found => { if (current) setLoaded({ key, found }) })
+      .then(found => { if (current) setLoaded({ key, targetId, found }) })
     return () => { current = false }
   }, [targetId, probe, family, key])
 
-  // Until it answers, a shimmer holds the place, so the header does not jump.
-  if (loaded?.key !== key) return <TextShimmer className="text-xs">Looking up who runs it</TextShimmer>
+  // Until the first answer, a shimmer holds the place, at the height of the
+  // line, so the header does not jump. Moving to another probe or family keeps
+  // the last answer on screen until the new one is in, rather than flashing
+  // the shimmer and nudging the page each time.
+  if (!loaded || loaded.targetId !== targetId) {
+    return (
+      <span className="flex h-4 items-center overflow-hidden">
+        <TextShimmer className="text-xs">Looking up who runs it</TextShimmer>
+      </span>
+    )
+  }
   const found = loaded.found
   if (!found || !found.enabled || !found.network) return null
   const { network } = found

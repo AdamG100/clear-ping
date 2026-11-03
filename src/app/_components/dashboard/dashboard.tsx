@@ -20,6 +20,7 @@ import { DEFAULT_LOCAL_PROBE_NAME, LOCAL_PROBE } from '@/types/probe-agent'
 import { probeIdsOf } from '@/lib/targets/probes'
 import { probeSummaries } from '../targets/probe-checklist'
 import { COMPARE_PROBES, ProbeSwitch } from '../targets/probe-switch'
+import { ViewSwap } from './view-swap'
 import { NetworkLine, ProbeChips } from '../targets/monitor-network'
 import type { ProbeAgentOutage, ProbeAgentSummary, ProbeId } from '@/types/probe-agent'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
@@ -1604,17 +1605,16 @@ export function Dashboard() {
               }
               aria-busy={pending}
             >
-              {/* The view is what is faded: the old one leaves quickly and the
-                  new one comes up, so switching between Compare, a probe, IPv4 and IPv6
-                  is a change of picture and not a cut. The route and the
-                  alerts below belong to the target, not to the view, and stay. */}
-              <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={`${familyView}|${comparingProbes ? COMPARE_PROBES : shownProbe}`}
+              {/* The view is what changes: Compare and a single probe, IPv4 or IPv6,
+                  cross-fade in place while the room they take glides to its new
+                  height, so the route and the alerts below, which belong to the
+                  monitor and not to the view, move smoothly instead of jumping.
+                  One probe to another is the same view with other readings: it
+                  stays, and its numbers roll to the new probe's. */}
+              <ViewSwap
+                viewKey={`${familyView}|${comparingProbes ? COMPARE_PROBES : 'one probe'}`}
+                holdKey={comparingProbes ? COMPARE_PROBES : shownProbe}
                 className="space-y-4 @2xl/main:space-y-6"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] } }}
-                exit={{ opacity: 0, transition: { duration: 0.1, ease: 'easeIn' } }}
               >
               {comparingProbes && !comparingFamilies ? (
                 <ComparePanel
@@ -1872,8 +1872,7 @@ export function Dashboard() {
                 )}
               </>
               )}
-              </motion.div>
-              </AnimatePresence>
+              </ViewSwap>
 
                 {/* Where the loss breakdown's "Trace the route" goes. */}
                 <div id="route" className="scroll-mt-4">
