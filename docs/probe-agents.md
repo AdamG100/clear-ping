@@ -188,6 +188,7 @@ Each probe agent's **Details** shows both commands.
 | `CLEARPING_PROBE_AGENT_TOKEN` | required | The token ClearPing gave when the agent was added. The agent will not start without one |
 | `CLEARPING_PROBE_AGENT_LISTEN` | `0.0.0.0:7380` | The address and port to listen on. Give a tailnet address to stay off every other interface. `[::]:7380` listens on IPv6 as well |
 | `CLEARPING_PROBE_AGENT_DATA` | `/data` in Docker, `/var/lib/clearping-probe-agent` from the installer | Where the certificate is kept |
+| `CLEARPING_LOG_READINGS` | unset | `1` logs every reading; otherwise only those that lost something are logged |
 
 `clearping-probe-agent --version` prints its version.
 

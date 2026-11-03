@@ -136,6 +136,23 @@ export function combined(combine: AlertCombine, held: boolean[]): boolean {
 }
 
 /**
+ * Whether a reading left a probe's state as it was, so it need not be written
+ * back. Almost every reading of a healthy monitor does. When it was last judged
+ * is not compared: that only matters to a run under way, and there is none at a
+ * streak of 0, where the next reading starts afresh whatever it says.
+ */
+export function probeStateUnchanged(before: ProbeRuleState, after: ProbeRuleState): boolean {
+  return (
+    before.streak === 0 &&
+    after.streak === 0 &&
+    before.inBreach === after.inBreach &&
+    before.since === after.since &&
+    JSON.stringify(before.held) === JSON.stringify(after.held) &&
+    JSON.stringify(before.recent) === JSON.stringify(after.recent)
+  );
+}
+
+/**
  * Judge one reading from one probe. Each condition is latched on its own: on at
  * its threshold, off at its clear threshold, which falls back on the threshold
  * itself. One with no value in this reading keeps what it was. The conditions

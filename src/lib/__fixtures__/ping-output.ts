@@ -102,3 +102,45 @@ export const LINUX_IPV6_REPLY = [
   '--- 2606:4700:4700::1111 ping statistics ---',
   '1 packets transmitted, 1 received, 0% packet loss, time 0ms',
 ].join('\n')
+
+/**
+ * One `ping` sending a whole round, in the shape iputils prints it. A reply can
+ * arrive twice, and a packet that is lost leaves no line of its own.
+ */
+export const LINUX_ROUND = [
+  'PING 192.0.2.1 (192.0.2.1) 56(84) bytes of data.',
+  '64 bytes from 192.0.2.1: icmp_seq=1 ttl=57 time=10.0 ms',
+  '64 bytes from 192.0.2.1: icmp_seq=2 ttl=57 time=12.0 ms',
+  '64 bytes from 192.0.2.1: icmp_seq=3 ttl=57 time=13.0 ms',
+  '64 bytes from 192.0.2.1: icmp_seq=4 ttl=57 time=15.0 ms',
+  '',
+  '--- 192.0.2.1 ping statistics ---',
+  '4 packets transmitted, 4 received, 0% packet loss, time 150ms',
+  'rtt min/avg/max/mdev = 10.000/12.500/15.000/1.803 ms',
+].join('\n')
+
+export const LINUX_ROUND_WITH_LOSS = [
+  'PING 192.0.2.1 (192.0.2.1) 56(84) bytes of data.',
+  '64 bytes from 192.0.2.1: icmp_seq=1 ttl=57 time=10.0 ms',
+  '64 bytes from 192.0.2.1: icmp_seq=1 ttl=57 time=30.0 ms (DUP!)',
+  '64 bytes from 192.0.2.1: icmp_seq=3 ttl=57 time=12.0 ms',
+  '',
+  '--- 192.0.2.1 ping statistics ---',
+  '4 packets transmitted, 2 received, +1 duplicates, 50% packet loss, time 150ms',
+].join('\n')
+
+export const LINUX_ROUND_ALL_LOST = [
+  'PING 192.0.2.1 (192.0.2.1) 56(84) bytes of data.',
+  '',
+  '--- 192.0.2.1 ping statistics ---',
+  '4 packets transmitted, 0 received, 100% packet loss, time 150ms',
+].join('\n')
+
+export const LINUX_ROUND_UNREACHABLE = [
+  'PING 192.0.2.1 (192.0.2.1) 56(84) bytes of data.',
+  'From 192.0.2.254 icmp_seq=1 Destination Host Unreachable',
+  'From 192.0.2.254 icmp_seq=2 Destination Host Unreachable',
+  '',
+  '--- 192.0.2.1 ping statistics ---',
+  '2 packets transmitted, 0 received, +2 errors, 100% packet loss, time 50ms',
+].join('\n')

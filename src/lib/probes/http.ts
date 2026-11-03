@@ -8,6 +8,7 @@ import { mean, round } from './metrics';
 import { httpUrlFor } from './config';
 import { failedProbe, pause, summarizeProbe } from './result';
 import { resolveHost, type ResolvedAddress } from './resolve';
+import { logReading } from './log';
 
 /**
  * HTTP(S) probe.
@@ -271,7 +272,8 @@ export async function executeHttpProbe(
     details,
   });
 
-  console.log(
+  logReading(
+    result,
     `[HTTP] ${url.href}${resolved ? ` (${resolved.address})` : ''}: ` +
     `requests=${count} ok=${latencies.length} status=${statusCode ?? '-'} ` +
     `loss=${result.packetLoss}% avg=${result.latency ?? '-'}ms`

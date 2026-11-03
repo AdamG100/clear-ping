@@ -9,7 +9,7 @@ ClearPing includes an automatic probe scheduler that works similarly to **Smokep
 ### Automatic Probing
 
 - When you create a monitor, you specify a **probe interval** (in seconds)
-- The scheduler checks every 10 seconds for monitors that need to be probed
+- The scheduler checks every second for monitors that need to be probed
 - When a monitor's interval has elapsed, the scheduler automatically:
   1. Executes a probe (ICMP ping or DNS query)
   2. Captures the latency and packet loss
@@ -48,12 +48,11 @@ Common intervals:
 
 ### Ping Configuration
 
-By default, each probe sends **20 pings**, spaced **10 ms** apart, with a **1 second
-timeout** per packet. The defaults live in [src/lib/probes/ping.ts](../src/lib/probes/ping.ts):
-
-```typescript
-const DEFAULTS = { count: 20, timeout: 1000, interval: 10 };
-```
+By default, each probe sends **20 pings** with a **1 second timeout**. On Linux, which
+is what the Docker image and the probe agent run, one `ping` sends them all, **50 ms**
+apart, so a reading takes about a second. Where `ping` will not send that fast without
+root, and on Windows and macOS, each goes out on its own **10 ms** after the answer to
+the one before. The defaults live in [src/lib/probes/ping.ts](../src/lib/probes/ping.ts).
 
 ## What Each Kind of Monitor Measures
 

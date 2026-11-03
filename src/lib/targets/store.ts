@@ -44,13 +44,30 @@ export async function getPairTimes(): Promise<Map<string, number>> {
  * resolved the name to for each family (an address is a family of its own, so
  * the caller says which). The monitor's own last-probe time never moves back:
  * an older image reads it, and it is the newest of its probes'.
+ *
+ * `monitor` changes the monitor's own row in the same write, for a round that
+ * also says what its address now is. A probe that resolved nothing, as for any
+ * monitor given as an address, has no address to read back and merge.
  */
 export async function recordPairRound(
   targetId: string,
   probe: ProbeId,
   at: number,
-  resolved: Array<{ family?: AddressFamily; address: string }> = []
+  resolved: Array<{ family?: AddressFamily; address: string }> = [],
+  monitor?: { updatedAt: number; address: string | null }
 ): Promise<void> {
+  const stamp = () =>
+    run(
+      `UPDATE targets SET last_probe_at = MAX(COALESCE(last_probe_at, 0), ?), updated_at = COALESCE(?, updated_at), resolved_address = COALESCE(?, resolved_address) WHERE id = ?`,
+      [at, monitor?.updatedAt ?? null, monitor?.address ?? null, targetId]
+    );
+
+  if (resolved.length === 0) {
+    await run('UPDATE target_probes SET last_probe_at = MAX(last_probe_at, ?) WHERE target_id = ? AND probe = ?', [at, targetId, probe]);
+    await stamp();
+    return;
+  }
+
   const [row] = await all<{ resolved: string | null }>(
     'SELECT resolved FROM target_probes WHERE target_id = ? AND probe = ?',
     [targetId, probe]
@@ -71,5 +88,5 @@ export async function recordPairRound(
     `UPDATE target_probes SET last_probe_at = MAX(last_probe_at, ?), resolved = ? WHERE target_id = ? AND probe = ?`,
     [at, Object.keys(stored).length > 0 ? JSON.stringify(stored) : null, targetId, probe]
   );
-  await run('UPDATE targets SET last_probe_at = MAX(COALESCE(last_probe_at, 0), ?) WHERE id = ?', [at, targetId]);
+  await stamp();
 }

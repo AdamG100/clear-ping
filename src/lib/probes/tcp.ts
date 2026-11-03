@@ -3,6 +3,7 @@ import type { ProbeIpVersion, ProbeResult } from '@/types/probe';
 import { classifyHost, normalizeHost, type AddressFamily } from './host';
 import { elapsedSince, failedProbe, pause, summarizeProbe } from './result';
 import { resolveHost } from './resolve';
+import { logReading } from './log';
 
 /**
  * TCP connect probe.
@@ -130,7 +131,8 @@ export async function executeTcpProbe(
     resolvedAddress: kind === 'hostname' ? address : undefined,
   });
 
-  console.log(
+  logReading(
+    result,
     `[TCP] ${trimmedHost}:${port}${kind === 'hostname' ? ` (${address})` : ''}: ` +
     `attempts=${count} connected=${latencies.length} loss=${result.packetLoss}% ` +
     `avg=${result.latency ?? '-'}ms jitter=${result.jitter ?? '-'}ms`

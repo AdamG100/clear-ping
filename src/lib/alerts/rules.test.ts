@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbePolicy } from '@/types/alert-rules'
 import type { ProbeResult } from '@/types/probe'
-import { combined, describePolicy, FRESH_PROBE_STATE, judgeMonitor, policyHolds, stepProbe, type ProbeRules, type ProbeRuleState, type ProbeStanding } from './rules'
+import { combined, describePolicy, FRESH_PROBE_STATE, judgeMonitor, policyHolds, probeStateUnchanged, stepProbe, type ProbeRules, type ProbeRuleState, type ProbeStanding } from './rules'
 
 const MINUTE = 60_000
 const reading = (fields: Partial<ProbeResult> = {}): ProbeResult => ({
@@ -166,5 +166,42 @@ describe('the probes of a monitor', () => {
   it('says what the policy is', () => {
     expect(describePolicy({ kind: 'atLeast', count: 4 }, 7)).toBe('at least 4 of 7 probes')
     expect(describePolicy({ kind: 'any' }, 7)).toBe('any probe')
+  })
+})
+
+describe('whether a reading needs writing back', () => {
+  const healthy = (at: number) => stepProbe(loss5, FRESH_PROBE_STATE, reading(), at, MINUTE).state
+
+  it('does not, for a probe that was healthy and still is, however much later', () => {
+    const before = healthy(0)
+    expect(probeStateUnchanged(before, stepProbe(loss5, before, reading(), MINUTE, MINUTE).state)).toBe(true)
+  })
+
+  it('does when a run towards a change starts, goes on or stops', () => {
+    const rules = { ...loss5, readings: 3 }
+    const before = stepProbe(rules, FRESH_PROBE_STATE, reading(), 0, MINUTE).state
+    const started = stepProbe(rules, before, reading({ packetLoss: 50 }), MINUTE, MINUTE).state
+    expect(probeStateUnchanged(before, started)).toBe(false)
+    const goesOn = stepProbe(rules, started, reading({ packetLoss: 50 }), 2 * MINUTE, MINUTE).state
+    expect(probeStateUnchanged(started, goesOn)).toBe(false)
+    expect(probeStateUnchanged(started, stepProbe(rules, started, reading(), 2 * MINUTE, MINUTE).state)).toBe(false)
+  })
+
+  it('does when a condition judged over a window has new readings to remember', () => {
+    const rules: ProbeRules = { ...loss5, conditions: [{ metric: 'packetLoss', threshold: 5, window: 3 }] }
+    const before = stepProbe(rules, FRESH_PROBE_STATE, reading(), 0, MINUTE).state
+    expect(probeStateUnchanged(before, stepProbe(rules, before, reading(), MINUTE, MINUTE).state)).toBe(false)
+  })
+
+  it('leaves a run in minutes judged the same, however long ago the stored state was last written', () => {
+    const rules: ProbeRules = { ...loss5, minutes: 5 }
+    // Written at its first reading and not since, as a healthy probe's is.
+    const stored = stepProbe(rules, FRESH_PROBE_STATE, reading(), 0, MINUTE).state
+    const start = 60 * MINUTE
+    let step = stepProbe(rules, stored, reading({ packetLoss: 50 }), start, MINUTE)
+    expect(step.transition).toBeNull()
+    expect(step.state.since).toBe(start)
+    for (let minute = 1; minute <= 5; minute++) step = stepProbe(rules, step.state, reading({ packetLoss: 50 }), start + minute * MINUTE, MINUTE)
+    expect(step.transition).toBe('firing')
   })
 })

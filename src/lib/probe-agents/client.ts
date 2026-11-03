@@ -42,6 +42,8 @@ const PROBE_TIMEOUT_MS = 120_000;
 /** Each family is traced one after the other, up to 90 seconds each. */
 const TRACE_TIMEOUT_MS = 200_000;
 const INFO_TIMEOUT_MS = 15_000;
+/** How long a connection to a probe agent is kept with nothing to ask. Past the longest usual interval, and short of how long the agent keeps it (probe-agent/server.ts). */
+const CONNECTION_KEPT_MS = 90_000;
 
 /**
  * A round that could not be taken because of the probe agent, not the target.
@@ -59,6 +61,9 @@ export class ProbeAgentUnavailableError extends Error {
     this.name = 'ProbeAgentUnavailableError';
   }
 }
+
+/** Connections kept open to one probe agent: as many as it is asked at once (see the scheduler's lane for it). */
+const AGENT_CONNECTIONS_KEPT = 4;
 
 const CERTIFICATE_ERRORS = new Set([
   'DEPTH_ZERO_SELF_SIGNED_CERT',
@@ -123,6 +128,41 @@ interface AgentReply {
   body: unknown;
 }
 
+/**
+ * The connections kept open to each probe agent. A new one for each reading was
+ * a TLS handshake a reading on both machines, to say nothing the last one had
+ * not. The pin is the pool's, not each request's: Node keeps no connection made
+ * by a request with a checkServerIdentity of its own. A pool only ever connects
+ * to the certificate it was made for, and is let go when that changes. Sessions
+ * are not resumed, since a resumed handshake is shown no certificate to check.
+ */
+const connections = new Map<string, { to: string; pool: https.Agent }>();
+
+function connectionsTo(agent: ProbeAgentConnection): https.Agent {
+  const to = `${agent.address}|${agent.port}|${agent.fingerprint}`;
+  const kept = connections.get(agent.id);
+  if (kept?.to === to) return kept.pool;
+  kept?.pool.destroy();
+  const pinned = agent.fingerprint;
+  const pool = new https.Agent({
+    keepAlive: true,
+    maxFreeSockets: AGENT_CONNECTIONS_KEPT,
+    timeout: CONNECTION_KEPT_MS,
+    maxCachedSessions: 0,
+    servername: sniFor(agent.address),
+    ca: agent.certPem!,
+    // The chain is checked against the pinned certificate above; this checks
+    // it is that very certificate, whatever name it was reached by.
+    checkServerIdentity: (_host, cert) =>
+      cert.fingerprint256 === pinned
+        ? undefined
+        : Object.assign(new Error('The certificate is not the pinned one'), { code: 'CERT_PINNED_MISMATCH' }),
+    minVersion: 'TLSv1.3',
+  });
+  connections.set(agent.id, { to, pool });
+  return pool;
+}
+
 /** One request to a paired agent, over its pinned certificate. */
 function callProbeAgent(
   agent: ProbeAgentConnection,
@@ -135,24 +175,14 @@ function callProbeAgent(
     return Promise.reject(new ProbeAgentUnavailableError(agent.name, 'Not connected yet', 'unpaired'));
   }
   const payload = body === undefined ? undefined : JSON.stringify(body);
-  const pinned = agent.fingerprint;
 
-  return new Promise((resolve, reject) => {
+  const attempt = (): Promise<AgentReply> => new Promise((resolve, reject) => {
     const request = https.request({
       host: agent.address,
       port: agent.port,
       method,
       path,
-      servername: sniFor(agent.address),
-      ca: agent.certPem!,
-      // The chain is checked against the pinned certificate above; this checks
-      // it is that very certificate, whatever name it was reached by.
-      checkServerIdentity: (_host, cert) =>
-        cert.fingerprint256 === pinned
-          ? undefined
-          : Object.assign(new Error('The certificate is not the pinned one'), { code: 'CERT_PINNED_MISMATCH' }),
-      minVersion: 'TLSv1.3',
-      agent: false,
+      agent: connectionsTo(agent),
       headers: {
         Authorization: `Bearer ${agent.token}`,
         Accept: 'application/json',
@@ -168,7 +198,10 @@ function callProbeAgent(
       () => request.destroy(Object.assign(new Error(`No reply within ${timeoutMs / 1000}s`), { code: 'ETIMEDOUT' })),
       timeoutMs
     );
-    request.on('socket', socket => socket.once('secureConnect', () => clearTimeout(connectTimer)));
+    request.on('socket', socket => {
+      if (request.reusedSocket) clearTimeout(connectTimer);
+      else socket.once('secureConnect', () => clearTimeout(connectTimer));
+    });
 
     request.on('response', response => {
       const chunks: Buffer[] = [];
@@ -189,10 +222,14 @@ function callProbeAgent(
     request.on('error', error => {
       clearTimeout(connectTimer);
       clearTimeout(overallTimer);
-      reject(error);
+      // A kept connection that had closed at the agent's end, as it may at any
+      // moment: that says nothing about the agent, and a new one will.
+      if (request.reusedSocket && (error as NodeJS.ErrnoException).code === 'ECONNRESET') resolve(attempt());
+      else reject(error);
     });
     request.end(payload);
   });
+  return attempt();
 }
 
 /**

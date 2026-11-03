@@ -122,6 +122,67 @@ describe('pairing with a probe agent', () => {
   })
 })
 
+describe('keeping the connection to a probe agent', () => {
+  const reading = (probeAgentId: string) =>
+    runProbes({ id: 'target-1', host: 'example.com', probeType: 'ping', ipVersion: 'auto', probeConfig: {}, probeAgentId })
+
+  async function paired(name: string) {
+    const { probeAgent, token } = await newAgent(name, 1)
+    const running = await startAgent(token)
+    await agents.updateProbeAgent(probeAgent.id, { port: running.port })
+    await connectProbeAgent(probeAgent.id)
+    return { id: probeAgent.id, server: servers[servers.length - 1] }
+  }
+
+  it('takes reading after reading over one handshake', async () => {
+    const { id, server } = await paired('One handshake')
+    let handshakes = 0
+    server.on('secureConnection', () => handshakes++)
+
+    for (let i = 0; i < 3; i++) expect(await reading(id)).toHaveLength(1)
+    expect(handshakes).toBe(0)
+  })
+
+  it('makes another, and says nothing of it, when the agent has closed the one it kept', async () => {
+    const { id, server } = await paired('Closed')
+    const asked = vi.mocked(work.probe).mock.calls.length
+    vi.mocked(work.probe).mockImplementationOnce(async () => {
+      server.closeAllConnections()
+      return []
+    })
+
+    expect(await reading(id)).toHaveLength(1)
+    expect(vi.mocked(work.probe).mock.calls.length).toBe(asked + 2)
+    expect((await agents.getProbeAgent(id))!.state).toBe('online')
+  })
+
+  it('holds a kept connection to the certificate that was pinned, not just to its chain', async () => {
+    const { id } = await paired('Pinned')
+    const stored = (await agents.getProbeAgentConnection(id))!
+    // Another record of the same agent, pinned to something it does not present.
+    await agents.pinProbeAgentCertificate(id, stored.certPem!, 'AA:BB')
+    await expect(reading(id)).rejects.toMatchObject({ state: 'cert-changed' })
+  })
+
+  it('still says when the agent has really gone', async () => {
+    const { id } = await paired('Gone')
+    await stopAgents()
+    await expect(reading(id)).rejects.toBeInstanceOf(ProbeAgentUnavailableError)
+  })
+
+  it('checks the certificate afresh on a new connection, however many came before', async () => {
+    const { probeAgent, token } = await newAgent('Replaced', 1)
+    const first = await startAgent(token)
+    await agents.updateProbeAgent(probeAgent.id, { port: first.port })
+    await connectProbeAgent(probeAgent.id)
+    await reading(probeAgent.id)
+
+    await stopAgents()
+    await startAgent(token, first.port)
+    await expect(reading(probeAgent.id)).rejects.toMatchObject({ state: 'cert-changed' })
+  })
+})
+
 describe('taking readings through a probe agent', () => {
   it('stamps them with the dashboard’s clock and the target they are for', async () => {
     const { probeAgent, token } = await newAgent('Readings', 1)

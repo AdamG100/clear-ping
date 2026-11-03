@@ -156,7 +156,9 @@ ENV CLEARPING_VERSION=${CLEARPING_VERSION} \
 USER node
 EXPOSE 3000
 
+# Asked with bash rather than node: starting a whole Node every half a minute
+# only to ask this is a spike of its own on a small machine.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+  CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/${PORT:-3000} && printf "GET /api/health HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && read -r -t 4 status <&3 && [[ $status == *" 200 "* ]]'
 
 CMD ["node", "server.js"]
