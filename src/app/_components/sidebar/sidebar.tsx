@@ -73,7 +73,7 @@ import {
   Bell,
   ClipboardCopy,
   LayoutDashboard,
-  Scale,
+
   ListX,
   MoreHorizontal,
   Network,
@@ -355,9 +355,6 @@ interface SidebarProps {
   onOpenOverview?: () => void
   /** Whether BGP monitoring is what the main pane is showing. */
   routingOpen?: boolean
-  /** Saved comparisons, a page of their own so they add nothing to the list. */
-  compareOpen?: boolean
-  onOpenCompare?: () => void
   onOpenRouting?: () => void
   /** How many watched prefixes are not carried as normal. */
   routingTrouble?: number
@@ -1149,8 +1146,6 @@ export function Sidebar({
   overviewOpen = false,
   onOpenOverview,
   routingOpen = false,
-  compareOpen = false,
-  onOpenCompare,
   onOpenRouting,
   routingTrouble = 0,
   routingEnabled = true,
@@ -1528,7 +1523,7 @@ export function Sidebar({
             tool of its own (BGP monitoring, for networks that announce their
             own prefixes) rather than a setting. Tiles, not rows: as rows they
             read as two more targets and went unnoticed. */}
-        {(onOpenOverview || onOpenRouting || onOpenCompare) && (
+        {(onOpenOverview || onOpenRouting) && (
           <nav aria-label="Pages" className={cn('grid gap-2', onOpenOverview && onOpenRouting ? 'grid-cols-2' : 'grid-cols-1')}>
             {onOpenOverview && (
               <PageTile icon={<LayoutDashboard {...ICON} />} label="Overview" open={overviewOpen} onOpen={onOpenOverview} />
@@ -1549,9 +1544,6 @@ export function Sidebar({
                 count={routingTrouble > 0 ? routingTrouble : undefined}
                 countLabel={`${routingTrouble} prefix${routingTrouble === 1 ? '' : 'es'} not as normal`}
               />
-            )}
-            {onOpenCompare && (
-              <PageTile icon={<Scale {...ICON} />} label="Compare" open={compareOpen} onOpen={onOpenCompare} />
             )}
           </nav>
         )}

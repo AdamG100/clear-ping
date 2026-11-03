@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { Accordion } from '@/components/arc/accordion/accordion'
 import { Button } from '@/components/arc/button/button'
@@ -11,7 +10,6 @@ import { SegmentedField } from '@/components/segmented-field'
 import { groupLabel } from '@/lib/targets/group-path'
 import { describePolicy } from '@/lib/alerts/rules'
 import type { AlertCondition, AlertCombine, AlertScopeEntry, ProbePolicy } from '@/types/alert-rules'
-import type { Comparison } from '@/types/comparison'
 import { ALERT_METRIC_LABELS, type AlertMetric } from '@/types/probe'
 import type { ProbeId, ProbeSummary } from '@/types/probe-agent'
 import { ProbeChecklist } from '../targets/probe-checklist'
@@ -36,13 +34,12 @@ export interface RuleOptions {
   /** The probes that count; null for every probe. */
   probes: ProbeId[] | null
   groups: string[]
-  comparisons: string[]
   probeScope: ProbeId[]
 }
 
 export const NO_OPTIONS: RuleOptions = {
   extra: [], combine: 'any', combineCount: 2, byMinutes: false, minutes: 5, clearAfter: 0, clearThreshold: null, window: 1,
-  policy: 'any', policyCount: 2, policyPercent: 60, probes: null, groups: [], comparisons: [], probeScope: [],
+  policy: 'any', policyCount: 2, policyPercent: 60, probes: null, groups: [], probeScope: [],
 }
 
 /** The options an existing alert has, as the form keeps them. */
@@ -66,7 +63,6 @@ export function optionsOf(alert: {
     policyPercent: policy.kind === 'share' ? policy.percent : 60,
     probes: alert.probes ?? null,
     groups: (alert.scope ?? []).filter(entry => entry.kind === 'group').map(entry => entry.ref),
-    comparisons: (alert.scope ?? []).filter(entry => entry.kind === 'comparison').map(entry => entry.ref),
     probeScope: (alert.scope ?? []).filter(entry => entry.kind === 'probe').map(entry => entry.ref),
   }
 }
@@ -98,7 +94,6 @@ export function ruleFields(
     probes: options.probes,
     scope: [
       ...options.groups.map(ref => ({ kind: 'group' as const, ref })),
-      ...options.comparisons.map(ref => ({ kind: 'comparison' as const, ref })),
       ...options.probeScope.map(ref => ({ kind: 'probe' as const, ref })),
     ],
   }
@@ -127,16 +122,6 @@ export function RuleOptionsPanel({
   probes: ProbeSummary[]
   firstMetric: AlertMetric
 }) {
-  const [comparisons, setComparisons] = useState<Comparison[]>([])
-  useEffect(() => {
-    let current = true
-    fetch('/api/comparisons')
-      .then(response => (response.ok ? response.json() : null))
-      .catch(() => null)
-      .then(data => { if (current) setComparisons(data?.comparisons ?? []) })
-    return () => { current = false }
-  }, [])
-
   const set = (changes: Partial<RuleOptions>) => onChange({ ...options, ...changes })
   const several = probes.length > 1
   const unit = options.byMinutes ? ' minutes' : ' readings'
@@ -246,14 +231,6 @@ export function RuleOptionsPanel({
           ))}
         </fieldset>
       )}
-      {comparisons.length > 0 && (
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">Saved comparisons</legend>
-          {comparisons.map(comparison => (
-            <Checkbox key={comparison.id} label={comparison.name} description={`${comparison.lines.length} lines, each from its own probe`} checked={options.comparisons.includes(comparison.id)} onCheckedChange={on => set({ comparisons: toggle(options.comparisons, comparison.id, on === true) })} />
-          ))}
-        </fieldset>
-      )}
       {several && (
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">Everything one probe measures</legend>
@@ -262,8 +239,8 @@ export function RuleOptionsPanel({
           ))}
         </fieldset>
       )}
-      {groups.length === 0 && comparisons.length === 0 && !several && (
-        <p className="text-xs text-muted-foreground">There are no groups, comparisons or probe agents to add yet.</p>
+      {groups.length === 0 && !several && (
+        <p className="text-xs text-muted-foreground">There are no groups or probe agents to add yet.</p>
       )}
     </div>
   )

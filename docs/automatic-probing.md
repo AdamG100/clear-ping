@@ -350,14 +350,8 @@ all of them. Put four resolvers in a group and that is a query-time comparison o
 the four.
 
 A group only compares what is in it, and only from each monitor's first probe.
-**Compare**, in the sidebar's pages, is for the rest: pick monitors from any
-group, and the probes to compare them from, and keep the chart under a name.
-Each line is a monitor as one probe measures it, named *Monitor · Probe*, so
-home and the VPS can be drawn against each other, or two groups against one
-another. A saved comparison is a page of its own and adds nothing to the
-sidebar's list. **Compare with…** on a monitor's page starts one with that
-monitor ticked. A line goes when its monitor is deleted, and a monitor that was
-merged into another keeps its lines.
+To set one monitor's probes against each other, open it and choose **Compare**
+beside its probes: one line for each probe that measures it.
 
 - Under the lines there is a **loss strip per monitor**, in the same order as the
   legend, marking when each one lost packets (or failed requests, or queries).

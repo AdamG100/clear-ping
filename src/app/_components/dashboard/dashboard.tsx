@@ -21,7 +21,6 @@ import { probeIdsOf } from '@/lib/targets/probes'
 import { probeSummaries } from '../targets/probe-checklist'
 import { COMPARE_PROBES, ProbeSwitch } from '../targets/probe-switch'
 import { NetworkLine, ProbeChips } from '../targets/monitor-network'
-import { ComparisonsPage } from '../comparisons/comparisons-page'
 import type { ProbeAgentOutage, ProbeAgentSummary, ProbeId } from '@/types/probe-agent'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
 import { Sidebar, SIDEBAR_FOLD_MS, SIDEBAR_FOLD_PX } from '../sidebar/sidebar'
@@ -656,7 +655,6 @@ export function Dashboard() {
   // main pane. Which one is part of the address.
   const { page, goTo } = useDashboardPage()
   // The list of alerts, or the form for one in its place.
-  const showingCompare = page?.kind === 'compare' || page?.kind === 'compare-new' || page?.kind === 'compare-view' || page?.kind === 'compare-edit'
   const showingAlerts = page?.kind === 'alerts' || page?.kind === 'alert-new' || page?.kind === 'alert-edit'
   const alertEditor = page?.kind === 'alert-new' ? 'new' : page?.kind === 'alert-edit' ? page.id : null
   const targetPage = page?.kind === 'target-new' || page?.kind === 'target-edit' ? page : null
@@ -763,7 +761,6 @@ export function Dashboard() {
   }, [goTo, hideSidebar])
   const openOverview = useCallback(() => openPage({ kind: 'overview' }), [openPage])
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
-  const openCompare = useCallback(() => openPage({ kind: 'compare' }), [openPage])
   const openRouting = useCallback(() => openPage({ kind: 'routing' }), [openPage])
   const openRoutingSettings = useCallback(() => openPage({ kind: 'settings', section: 'routing' }), [openPage])
   const openProbeAgentSettings = useCallback(() => openPage({ kind: 'settings', section: 'probes' }), [openPage])
@@ -1203,8 +1200,6 @@ export function Dashboard() {
         onOpenOverview={openOverview}
         routingOpen={showingRouting}
         onOpenRouting={openRouting}
-        compareOpen={showingCompare}
-        onOpenCompare={readOnly ? undefined : openCompare}
         routingTrouble={routing.trouble}
         routingEnabled={routing.enabled !== false}
         onTurnOnRouting={canTurnOnRouting ? openRoutingSettings : undefined}
@@ -1294,28 +1289,6 @@ export function Dashboard() {
                 onAddTarget={() => openAddTarget()}
                 onOpenRouting={openRouting}
                 onOpenRoutingPrefix={openRoutingPrefix}
-                reportError={reportError}
-              />
-            </ErrorBoundary>
-          </motion.div>
-          ) : showingCompare && page ? (
-          <motion.div
-            key={pathOf(page)}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
-            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
-          >
-            <ErrorBoundary label="Comparisons">
-              <ComparisonsPage
-                page={page as Extract<typeof page, { kind: 'compare' | 'compare-new' | 'compare-view' | 'compare-edit' }>}
-                targets={transformedTargets}
-                groupOrders={groupOrders}
-                probeAgents={probeAgents}
-                localProbeName={localProbeName}
-                readOnly={readOnly}
-                onOpenPage={openPage}
-                onSelectTarget={setSelectedTargetId}
                 reportError={reportError}
               />
             </ErrorBoundary>
@@ -1556,13 +1529,6 @@ export function Dashboard() {
               </div>
               <div className={PANE_ACTIONS}>
                 <TimeRangeSelector value={timeRange} onChange={handleTimeRangeChange} busy={pending} />
-                {!readOnly && targets.length > 1 && (
-                  <span className={PANE_ACTION}>
-                    <Button variant="secondary" size="sm" className="w-full" onClick={() => openPage({ kind: 'compare-new', targets: [selectedTarget.id] })}>
-                      Compare with…
-                    </Button>
-                  </span>
-                )}
                 {!readOnly && (
                   <span className={PANE_ACTION}>
                     <Button variant="secondary" size="sm" className="w-full" onClick={handleProbe} loading={probing}>
@@ -1587,11 +1553,19 @@ export function Dashboard() {
                   value={comparingProbes ? COMPARE_PROBES : shownProbe}
                   onChange={view => { setProbeChoice({ targetId: selectedTargetId, view }); setZoom(null) }}
                 />
-                <p className="text-xs text-muted-foreground">
-                  {comparingProbes
-                    ? 'Measured from every probe at once. Pick one for its full readings.'
-                    : `Readings taken from ${probeNameOf(shownProbe)} only.`}
-                </p>
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.p
+                    key={comparingProbes ? COMPARE_PROBES : shownProbe}
+                    className="text-xs text-muted-foreground"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1, transition: { duration: 0.18 } }}
+                    exit={{ opacity: 0, transition: { duration: 0.08 } }}
+                  >
+                    {comparingProbes
+                      ? 'Measured from every probe at once. Pick one for its full readings.'
+                      : `Readings taken from ${probeNameOf(shownProbe)} only.`}
+                  </motion.p>
+                </AnimatePresence>
               </div>
             )}
 
@@ -1625,12 +1599,12 @@ export function Dashboard() {
               aria-busy={pending}
             >
               {/* The view is what is faded: the old one leaves quickly and the
-                  new one comes up, so switching between Compare, IPv4 and IPv6
+                  new one comes up, so switching between Compare, a probe, IPv4 and IPv6
                   is a change of picture and not a cut. The route and the
                   alerts below belong to the target, not to the view, and stay. */}
               <AnimatePresence mode="wait" initial={false}>
               <motion.div
-                key={familyView}
+                key={`${familyView}|${comparingProbes ? COMPARE_PROBES : shownProbe}`}
                 className="space-y-4 @2xl/main:space-y-6"
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] } }}

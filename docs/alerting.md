@@ -215,9 +215,8 @@ never fires the moment it comes back. **Clear after** can be a different time
 from the time to fire, in the same unit.
 
 **Where it applies.** The monitors ticked, plus everything in chosen
-**groups** (including any added later), the lines of chosen **saved
-comparisons** (each monitor from the probe the comparison draws it from) and
-**everything one probe measures**.
+**groups** (including any added later) and **everything one probe
+measures**.
 
 **How many probes must agree.** With more than one probe, a monitor measured
 from several is judged probe by probe, each on its own readings, and the
@@ -304,7 +303,7 @@ clearThreshold?, window? }`, the first of which is also `metric` and
 `clearAfter`, `policy` (`"any"`, `"all"`, `{ kind: "atLeast", count }` or
 `{ kind: "share", percent }`), `probes` (the probes that count, `"local"` being
 the dashboard's own) and `scope` (a list of `{ kind: "monitor" | "group" |
-"comparison" | "probe", ref }`), and also `name`, `traceOnFire` and `traceCooldownMinutes`
+"probe", ref }`), and also `name`, `traceOnFire` and `traceCooldownMinutes`
 (tracing the route when it fires, and the wait before the same monitor is
 traced again), and `notifyUrls`: the Apprise URLs to send it
 to, as a list or as text with one to a line. An empty list is an alert that is

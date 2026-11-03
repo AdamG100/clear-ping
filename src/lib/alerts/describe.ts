@@ -35,7 +35,7 @@ export function describeRule(alert: Pick<AlertSettings, 'metric' | 'threshold' |
     : alert.consecutiveProbes === 1 ? 'on a single reading' : `for ${alert.consecutiveProbes} readings in a row`;
   const clears = alert.clearAfter ? `clears after ${alert.clearAfter} ${alert.forMinutes ? 'minutes' : 'readings'}` : '';
   const scope = (alert.scope ?? []).filter(entry => entry.kind !== 'monitor');
-  const where = scope.length > 0 ? `also ${scope.length} ${scope.length === 1 ? 'place' : 'places'} by group, comparison or probe` : '';
+  const where = scope.length > 0 ? `also ${scope.length} ${scope.length === 1 ? 'place' : 'places'} by group or probe` : '';
   const only = alert.probes && alert.probes.length > 0 ? `counting ${alert.probes.length} probe${alert.probes.length === 1 ? '' : 's'}` : '';
 
   return [joined, duration, clears, policyPhrase(alert), only, where].filter(Boolean).join(', ');

@@ -211,8 +211,8 @@ function AlertForm({
       (!Number.isInteger(traceKeepDays) || traceKeepDays < 1 || traceKeepDays > MAX_TRACE_KEEP_DAYS) &&
       `Keep routes for between 1 and ${MAX_TRACE_KEEP_DAYS} days.`,
     !urls && 'Each notification URL must be an Apprise URL, such as discord://… or mailto://…, on a line of its own.',
-    selected.size === 0 && options.groups.length + options.comparisons.length + options.probeScope.length === 0 &&
-      'Tick at least one monitor, group, comparison or probe for the alert to watch.',
+    selected.size === 0 && options.groups.length + options.probeScope.length === 0 &&
+      'Tick at least one monitor, group or probe for the alert to watch.',
     options.byMinutes && (!Number.isInteger(options.minutes) || options.minutes < 1) && 'Hold for a whole number of minutes, one or more.',
   ].filter((problem): problem is string => !!problem)
 

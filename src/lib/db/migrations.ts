@@ -691,32 +691,6 @@ async function probesPerMonitor(database: Database): Promise<void> {
 }
 
 /**
- * Saved comparisons: a name and the lines to draw against each other, each a
- * monitor as one probe measures it, from any group. A line goes when its
- * monitor does. `family` and `resolver` are empty for the line drawn by
- * default, and say which of a monitor's lines it is when it has more than one.
- */
-async function savedComparisons(database: Database): Promise<void> {
-  await run(database, `CREATE TABLE IF NOT EXISTS comparisons (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  )`);
-  await run(database, `CREATE TABLE IF NOT EXISTS comparison_series (
-    comparison_id TEXT NOT NULL REFERENCES comparisons(id) ON DELETE CASCADE,
-    target_id TEXT NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
-    probe TEXT NOT NULL,
-    family TEXT NOT NULL DEFAULT '',
-    resolver TEXT NOT NULL DEFAULT '',
-    position INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (comparison_id, target_id, probe, family, resolver)
-  )`);
-  await run(database, 'CREATE INDEX IF NOT EXISTS idx_comparison_series_target ON comparison_series(target_id)');
-}
-
-/**
  * Alert rules: several conditions, how long they must hold, where an alert
  * applies, and how many of a monitor's probes must agree.
  *
@@ -725,7 +699,7 @@ async function savedComparisons(database: Database): Promise<void> {
  * it, and fires when any probe is in breach: exactly what it did. Those old
  * columns are still written from the first condition, for an older image.
  * `alert_scope` holds where it applies besides the ticked monitors (groups,
- * comparisons, probes); `alert_events` is its history.
+ * probes); `alert_events` is its history.
  */
 async function alertRules(database: Database): Promise<void> {
   const columns = await all<{ name: string }>(database, 'PRAGMA table_info(alerts)');
@@ -744,7 +718,7 @@ async function alertRules(database: Database): Promise<void> {
 
   await run(database, `CREATE TABLE IF NOT EXISTS alert_scope (
     alert_id TEXT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL CHECK (kind IN ('monitor', 'group', 'comparison', 'probe')),
+    kind TEXT NOT NULL CHECK (kind IN ('monitor', 'group', 'probe')),
     ref TEXT NOT NULL,
     PRIMARY KEY (alert_id, kind, ref)
   )`);
@@ -785,7 +759,6 @@ const MIGRATIONS: Migration[] = [
   { name: 'bgp monitoring', up: bgpMonitoring },
   { name: 'alert trace retention', up: alertTraceRetention },
   { name: 'probes per monitor', up: probesPerMonitor },
-  { name: 'saved comparisons', up: savedComparisons },
   { name: 'alert rules', up: alertRules },
 ];
 

@@ -29,8 +29,8 @@ export type ProbePolicy =
   | { kind: 'atLeast'; count: number }
   | { kind: 'share'; percent: number };
 
-/** Somewhere an alert applies: a monitor, everything in a group, a saved comparison's lines, or what one probe measures. */
-export type AlertScopeEntry = { kind: 'monitor' | 'group' | 'comparison' | 'probe'; ref: string };
+/** Somewhere an alert applies: a monitor, everything in a group, or what one probe measures. */
+export type AlertScopeEntry = { kind: 'monitor' | 'group' | 'probe'; ref: string };
 
 /** What an alert says beyond one metric and threshold. All optional: left out, the alert is as it was. */
 export interface AlertRuleSettings {

@@ -5,7 +5,6 @@ import { sendNotification, type DeliveryResult } from './apprise';
 import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
 import { LOCAL_PROBE, type ProbeAgentState } from '@/types/probe-agent';
 import type { AlertCombine, AlertCondition, AlertScopeEntry, ConditionResult, ProbePolicy, ProbeVerdict } from '@/types/alert-rules';
-import type { ComparisonLine } from '@/types/comparison';
 import { isProbeAgentDown } from '../probe-agents/store';
 import { probeNames } from '../probe-agents/probes';
 import { recordAlertEvent } from './history';
@@ -365,7 +364,7 @@ export function parseAlertInput(
   }
 
   if (given('scope')) {
-    if (!Array.isArray(body.scope) || !body.scope.every(isScopeEntry)) return fail('scope is a list of { kind: "monitor" | "group" | "comparison" | "probe", ref }');
+    if (!Array.isArray(body.scope) || !body.scope.every(isScopeEntry)) return fail('scope is a list of { kind: "monitor" | "group" | "probe", ref }');
     input.scope = body.scope.map(entry => ({ kind: entry.kind, ref: entry.ref }));
   }
 
@@ -431,7 +430,7 @@ function policyColumns(policy: ProbePolicy | undefined): [string, number] {
 /**
  * Where an alert applies. A `scope` replaces everything; monitors alone (the
  * ticks an older client sends) replace only the monitor entries and leave the
- * groups, comparisons and probes as they are. Ticked monitors are also kept
+ * groups and probes as they are. Ticked monitors are also kept
  * as `alert_targets`, which is where each one's state lives.
  */
 async function writeScope(alertId: string, change: { monitors?: string[]; scope?: AlertScopeEntry[] }): Promise<void> {
@@ -621,20 +620,17 @@ export async function evaluateAlerts(
   const alertRows = (await all<AlertRow>('SELECT * FROM alerts WHERE enabled = 1')).map(settingsFromRow);
   if (alertRows.length === 0) return events;
 
-  const [scopeRows, ticks, probeRows, agentRows, comparisonRows, stateRows] = await Promise.all([
+  const [scopeRows, ticks, probeRows, agentRows, stateRows] = await Promise.all([
     all<ScopeRow>('SELECT alert_id, kind, ref FROM alert_scope'),
     all<AlertTargetRow>('SELECT * FROM alert_targets WHERE target_id = ?', [target.id]),
     all<{ probe: string; last_probe_at: number }>('SELECT probe, last_probe_at FROM target_probes WHERE target_id = ? AND removed_at IS NULL ORDER BY position', [target.id]),
     all<{ id: string; state: ProbeAgentState }>('SELECT id, state FROM probe_agents'),
-    all<{ comparison_id: string; target_id: string; probe: string }>('SELECT comparison_id, target_id, probe FROM comparison_series'),
     all<ProbeStateRow>('SELECT alert_id, probe, in_breach, streak, memory FROM alert_probe_states WHERE target_id = ?', [target.id]),
   ]);
 
   const probes = probeRows.length > 0 ? probeRows.map(row => row.probe) : [result.probe ?? LOCAL_PROBE];
   const lastAt = new Map(probeRows.map(row => [row.probe, row.last_probe_at]));
   const agentDown = new Map(agentRows.map(row => [row.id, isProbeAgentDown(row.state)]));
-  const comparisons = new Map<string, ComparisonLine[]>();
-  for (const row of comparisonRows) comparisons.set(row.comparison_id, [...(comparisons.get(row.comparison_id) ?? []), { targetId: row.target_id, probe: row.probe }]);
 
   const now = Date.now();
   const probe = result.probe ?? LOCAL_PROBE;
@@ -645,7 +641,7 @@ export async function evaluateAlerts(
     const scope: AlertScopeEntry[] = scopeRows.filter(row => row.alert_id === alert.id);
     // Ticked monitors are monitor entries, whether or not the scope table has them yet.
     if (ticks.some(tick => tick.alert_id === alert.id)) scope.push({ kind: 'monitor', ref: target.id });
-    const covered = coveredProbes(scope, alert.probes, target, probes, comparisons);
+    const covered = coveredProbes(scope, alert.probes, target, probes);
     if (!covered.includes(probe)) continue;
 
     const tick = ticks.find(each => each.alert_id === alert.id);

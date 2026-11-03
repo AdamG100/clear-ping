@@ -91,20 +91,3 @@ describe('the pages for adding and editing a target', () => {
   })
 })
 
-describe('the pages for saved comparisons', () => {
-  it('reads each from its address, and writes it back', () => {
-    const pages: DashboardPage[] = [
-      { kind: 'compare' },
-      { kind: 'compare-new' },
-      { kind: 'compare-new', targets: ['a', 'b'] },
-      { kind: 'compare-view', id: 'abc-123' },
-      { kind: 'compare-edit', id: 'abc-123' },
-    ]
-    for (const page of pages) expect(pageFromPath(pathOf(page))).toEqual(page)
-    expect(pathOf({ kind: 'compare-view', id: 'x y' })).toBe('/compare/x%20y')
-  })
-
-  it('takes nothing it does not know for one', () => {
-    for (const path of ['/compare/abc/edit/x', '/compare/new/with', '/compare/new/other/a']) expect(pageFromPath(path)).toBeNull()
-  })
-})

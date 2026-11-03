@@ -48,7 +48,6 @@ src/
 | `networks/` | Who runs an address: the network that holds it and the exchange it is on (`lookup.ts`), for a monitor's page. |
 | `traceroute/` | Running (`run.ts`), reading (`parse.ts`), keeping (`store.ts`) and exporting (`export.ts`) traceroutes. |
 | `probe-agents/` | The dashboard's side of probe agents: the protocol both ends share (`protocol.ts`), talking to one (`client.ts`), keeping them (`store.ts`), and checking and installing one. |
-| `comparisons/` | Saved comparisons: their names and lines (`store.ts`). |
 | `alerts/` | Alerts and how targets stand against them (`store.ts`), what they say (`delivery.ts`), sending them (`apprise.ts`). |
 | `bgp/` | BGP monitoring: following RIS Live (`ris-live.ts`) and asking RIPEstat (`ripestat.ts`), judging a prefix (`assess.ts`), learning what is normal for it (`learn.ts`), the monitor that runs it all (`monitor.ts`), keeping it (`store.ts`), how your networks reach a prefix, from this server and each probe agent (`home.ts`), when a route is flapping (`flapping.ts`), exchanges' peering LANs from PeeringDB (`exchanges.ts`), their members' addresses on them from IXPDB (`ixpdb.ts`), and the pure helpers the pages share (`prefix.ts`, `path.ts`, `collectors.ts`, `countries.ts`, and `scope.ts` for narrowing a prefix's page to a place or an upstream). |
 | `db/` | The database: opening and querying it, migrations, maintenance. |
@@ -75,7 +74,6 @@ installs Arc components that import it as `@/lib/utils`.
 | `targets/` | A target's page and form, and the panels on it. |
 | `charts/` | Charts and what drives them: the smoke trace, comparisons, the time range. |
 | `alerts/` | The alerts page. |
-| `comparisons/` | Saved comparisons: the list, the builder and the page that draws one. |
 | `routing/` | BGP monitoring: the list of watched prefixes and a prefix's page, with its charts, and placeholders shaped like them for while they load (`skeleton.tsx`). |
 | `settings/` | The settings page and each of its tabs. |
 | `privacy/` | Hiding addresses on screen: whether this page hides them (`use-privacy.ts`) and the component that does (`masked.tsx`). |
