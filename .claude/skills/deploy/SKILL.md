@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Deploy ClearPing - check the work, push to main, and confirm the new version is published and running. Use when the user asks to deploy, release, ship, publish or push ClearPing to main, or to check which version is deployed. The user usually pushes themselves; the version is decided when committing (see CLAUDE.md), not here.
+description: Deploy ClearPing - check the work, push to main, and confirm the new version is published and running. Use when the user asks to deploy, release, ship, publish or push ClearPing to main, or to check which version is deployed. Work normally reaches main through a pull request that merges itself (see CLAUDE.md), and the version is decided when committing, not here.
 ---
 
 # Deploying ClearPing

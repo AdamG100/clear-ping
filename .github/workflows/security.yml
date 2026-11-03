@@ -1,0 +1,61 @@
+name: Security review
+
+# Has Claude read the changes in a pull request for security holes, and comment
+# on what it finds (anthropics/claude-code-security-review). The action only
+# works on pull requests, so a commit pushed straight to main is not reviewed.
+#
+# Needs the CLAUDE_API_KEY repository secret. Dependabot's pull requests are
+# left out, because GitHub does not give them that secret, and so are drafts,
+# because each review costs API credit.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  review:
+    name: Review
+    if: github.event.pull_request.user.login != 'dependabot[bot]' && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # To comment on the pull request.
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      # The action publishes no version tags, so this is main as of 2026-02-11.
+      # Every commit is reviewed, because a passing review is what lets the
+      # pull request merge itself (auto-merge.yml).
+      - name: Review
+        uses: anthropics/claude-code-security-review@0c6a49f1fa56a1d472575da86a94dbc1edb78eda # main
+        with:
+          comment-pr: true
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+          claude-model: claude-opus-5-5
+          run-every-commit: true
+
+      # The action passes whatever happens, even when the review could not run.
+      # This job passes only for a review that ran and found nothing.
+      - name: Check the result
+        run: |
+          results=claudecode-results.json
+          if [ ! -f "$results" ]; then
+            echo "::error::The review left no results"
+            exit 1
+          fi
+          if jq -e .error "$results" > /dev/null; then
+            echo "::error::The review did not finish: $(jq -r .error "$results")"
+            exit 1
+          fi
+          count=$(jq -er '.findings | arrays | length' "$results")
+          if [ "$count" != 0 ]; then
+            echo "::error::The review found $count security issue(s); see its comments on the pull request"
+            exit 1
+          fi

@@ -25,7 +25,8 @@
 # runtime stages must stay on the same release for the same reason.
 #
 # The base image is pinned by digest, so a tag that is moved or replaced cannot
-# change what is built. Dependabot proposes the new digest as a pull request;
+# change what is built. Dependabot proposes the new one as a pull request, which
+# is merged once the images built with it pass (.github/workflows/auto-merge.yml);
 # the tag in the FROM line says which Node and Debian it is.
 
 # ── Dependencies ─────────────────────────────────────────────────────────────

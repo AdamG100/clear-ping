@@ -1,11 +1,25 @@
 @AGENTS.md
 
+## Getting work to main
+
+Commit on a short-lived branch from `main`, never on `main`. When the work is
+finished, push the branch and open a pull request with `gh pr create`, without
+being asked again. Opening it is what releases it: `auto-merge.yml` merges and
+releases it once the Docker image, Checks and Security review workflows pass on
+its latest commit. Open a draft to hold one back.
+
+- A security finding or a failure leaves the pull request open for the user.
+  Report it; do not merge past it.
+- A pull request that changes a workflow has to be merged by hand: GitHub does
+  not let the workflow's token do it. Say so when opening one.
+- Never squash these: the patch notes and the version are read from each commit.
+- Dependabot's Node updates merge themselves too; its other updates do not.
+
 ## Version numbers
 
-Every push to `main` is released, numbered by CI (`scripts/next-version.mjs`).
-The user pushes from GitHub themselves, so the version is decided in the
-commit message: when a commit deserves more than a patch, end its message
-with a `Release:` trailer beside `Co-Authored-By`.
+Every push to `main` is released, numbered by CI (`scripts/next-version.mjs`),
+so the version is decided in the commit message: when a commit deserves more
+than a patch, end its message with a `Release:` trailer beside `Co-Authored-By`.
 
 | What changed | Trailer |
 |---|---|

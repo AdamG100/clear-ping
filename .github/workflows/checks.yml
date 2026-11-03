@@ -1,0 +1,36 @@
+name: Checks
+
+# Lint, types and unit tests for a pull request, on the Node the images are
+# built with, so an update of Node is tested on that Node before it is merged.
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    name: Lint, types and tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the images' Node version
+        id: node
+        run: echo "version=$(sed -nE 's/^FROM node:([0-9.]+)-.*/\1/p' docker/Dockerfile | head -n 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
