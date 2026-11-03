@@ -543,7 +543,8 @@ in its place and stops the old one at once. See
 | `POST /api/groups` | Make a group (`{ group }`, a path such as `Home/Network`) |
 | `PUT /api/groups` | Rename a group or move it inside another (`{ from, to }`) |
 | `DELETE /api/groups` | Delete a group (`{ group }`); what was in it moves up a level |
-| `GET /api/compare` | The same period of several monitors (`?targets=id,id`); `&split=resolver` gives a DNS monitor's resolvers a line each (`&family=4` or `6` for one side of a monitor on both) |
+| `GET`, `POST /api/comparisons`; `GET`, `PATCH`, `DELETE /api/comparisons/:id` | Saved comparisons: a name and `lines` of `{ targetId, probe }`, from any group |
+| `GET /api/compare` | The same period of several monitors (`?targets=id,id`; `&probes=all` draws a line for each probe of each monitor, `&probe=id` moves them to one probe, and `?series=id:probe,…` names the lines exactly); `&split=resolver` gives a DNS monitor's resolvers a line each (`&family=4` or `6` for one side of a monitor on both) |
 | `GET`, `POST /api/alerts` | Every alert; make one |
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |

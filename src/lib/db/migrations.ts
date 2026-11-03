@@ -690,6 +690,32 @@ async function probesPerMonitor(database: Database): Promise<void> {
   ]);
 }
 
+/**
+ * Saved comparisons: a name and the lines to draw against each other, each a
+ * monitor as one probe measures it, from any group. A line goes when its
+ * monitor does. `family` and `resolver` are empty for the line drawn by
+ * default, and say which of a monitor's lines it is when it has more than one.
+ */
+async function savedComparisons(database: Database): Promise<void> {
+  await run(database, `CREATE TABLE IF NOT EXISTS comparisons (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`);
+  await run(database, `CREATE TABLE IF NOT EXISTS comparison_series (
+    comparison_id TEXT NOT NULL REFERENCES comparisons(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
+    probe TEXT NOT NULL,
+    family TEXT NOT NULL DEFAULT '',
+    resolver TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (comparison_id, target_id, probe, family, resolver)
+  )`);
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_comparison_series_target ON comparison_series(target_id)');
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
@@ -705,6 +731,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'bgp monitoring', up: bgpMonitoring },
   { name: 'alert trace retention', up: alertTraceRetention },
   { name: 'probes per monitor', up: probesPerMonitor },
+  { name: 'saved comparisons', up: savedComparisons },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

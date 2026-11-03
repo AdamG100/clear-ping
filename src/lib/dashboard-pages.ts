@@ -22,6 +22,11 @@ export type DashboardPage =
   /** The form for a new alert, in the main pane rather than a panel over it. */
   | { kind: 'alert-new' }
   | { kind: 'alert-edit'; id: string }
+  /** Saved comparisons: the list, a blank builder (seeded from monitors or a saved one), one drawn, and one being changed. */
+  | { kind: 'compare' }
+  | { kind: 'compare-new'; targets?: string[] }
+  | { kind: 'compare-view'; id: string }
+  | { kind: 'compare-edit'; id: string }
   | { kind: 'settings'; section: SettingsSection }
   /** A blank form for a new target, started in `group` or as a copy of the target `from`. */
   | { kind: 'target-new'; group?: string; from?: string }
@@ -58,6 +63,17 @@ function decodeSegment(segment: string): string {
 export function pageFromPath(pathname: string): DashboardPage | null {
   const [first, second, ...rest] = pathname.split('/').filter(Boolean)
 
+  if (first === 'compare' && second) {
+    if (second === 'new') {
+      if (rest.length === 0) return { kind: 'compare-new' }
+      if (rest[0] === 'with' && rest.length === 2) return { kind: 'compare-new', targets: decodeSegment(rest[1]).split(',').filter(Boolean) }
+      return null
+    }
+    if (rest.length === 0) return { kind: 'compare-view', id: decodeSegment(second) }
+    if (rest.length === 1 && rest[0] === 'edit') return { kind: 'compare-edit', id: decodeSegment(second) }
+    return null
+  }
+
   if (first === 'alerts' && second) {
     if (second === 'new' && rest.length === 0) return { kind: 'alert-new' }
     if (rest.length === 1 && rest[0] === 'edit') return { kind: 'alert-edit', id: decodeSegment(second) }
@@ -85,6 +101,7 @@ export function pageFromPath(pathname: string): DashboardPage | null {
   if (rest.length > 0) return null
   if (first === 'overview' && !second) return { kind: 'overview' }
   if (first === 'alerts' && !second) return { kind: 'alerts' }
+  if (first === 'compare' && !second) return { kind: 'compare' }
   if (first === 'patch-notes' && !second) return { kind: 'patch-notes' }
   if (first === 'settings') {
     if (!second) return { kind: 'settings', section: DEFAULT_SETTINGS_SECTION }
@@ -105,6 +122,11 @@ export function pathOf(page: DashboardPage | null): string {
   }
   if (page.kind === 'target-edit') return `/monitors/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'routing-prefix') return `/routing/${encodeURIComponent(page.id)}`
+  if (page.kind === 'compare-new') {
+    return page.targets && page.targets.length > 0 ? `/compare/new/with/${encodeURIComponent(page.targets.join(','))}` : '/compare/new'
+  }
+  if (page.kind === 'compare-view') return `/compare/${encodeURIComponent(page.id)}`
+  if (page.kind === 'compare-edit') return `/compare/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'alert-new') return '/alerts/new'
   if (page.kind === 'alert-edit') return `/alerts/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'target-new') {

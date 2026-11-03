@@ -123,6 +123,9 @@ export async function mergeMonitors(keep: string, merge: string[]): Promise<numb
        SELECT alert_id, ?, probe, in_breach, streak FROM alert_probe_states WHERE target_id = ?`,
       [keep, from]
     );
+    // A saved comparison that drew the merged monitor draws the kept one (a line
+    // it already has is left as it is).
+    await run('UPDATE OR IGNORE comparison_series SET target_id = ? WHERE target_id = ?', [keep, from]);
     await deleteTargets([from]);
   }
 
