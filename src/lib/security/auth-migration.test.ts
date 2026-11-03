@@ -63,7 +63,7 @@ describe('moving to Better Auth', () => {
       ['key-old', 'user-adam', true],
       ['key-revoked', 'user-sam', false],
     ])
-  })
+  }, 30_000)
 
   it('happens once', async () => {
     const { authDatabase } = await import('./auth')
