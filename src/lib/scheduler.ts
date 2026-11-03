@@ -6,11 +6,12 @@
  * are captured and stored for visualization on graphs.
  */
 
-import { getAllTargets, storeMeasurements, getDatabase, getNeverAnswered, cleanOldMeasurements } from './db/database';
+import { getAllTargets, storeMeasurements, getNeverAnswered, cleanOldMeasurements } from './db/database';
 import { isClosedPortCheck } from './probes/config';
 import { checkProbeAgent, ProbeAgentUnavailableError, runProbes } from './probe-agents/client';
 import { cleanOldProbeAgentOutages, pairedProbeAgentConnections } from './probe-agents/store';
 import { probedFromPhrase } from './probe-agents/probes';
+import { logReading } from './probes/log';
 import { measurementFrom, worstOf } from './probes/result';
 import { agentIdOf, probesOf } from './targets/probes';
 import { getPairTimes, pairKey, recordPairRound } from './targets/store';
@@ -367,7 +368,6 @@ class ProbeScheduler {
     target: ScheduledTarget,
     results: ProbeResult[]
   ): Promise<void> {
-    const db = await getDatabase();
     const round = worstOf(results);
 
     try {
@@ -375,32 +375,21 @@ class ProbeScheduler {
     } finally {
       // The probe's own record: when it last measured this, and what each
       // family resolved to from there (a name can resolve differently in
-      // different places).
+      // different places). A probe that could not resolve the name has no
+      // address to report, and the last one that worked is kept rather than
+      // blanked. The monitor's own address is its primary probe's.
       await recordPairRound(
         target.id,
         target.probe,
         target.lastProbeTime,
-        results.flatMap(result => (result.resolvedAddress ? [{ family: result.family, address: result.resolvedAddress }] : []))
+        results.flatMap(result => (result.resolvedAddress ? [{ family: result.family, address: result.resolvedAddress }] : [])),
+        { updatedAt: Date.now(), address: target.primary ? round.resolvedAddress ?? null : null }
       );
-      await new Promise<void>((resolve, reject) => {
-        db.run(
-          // A probe that could not resolve the name has no address to report;
-          // COALESCE keeps the last one that worked rather than blanking it.
-          // The monitor's own address is its primary probe's.
-          `UPDATE targets
-           SET updated_at = ?, resolved_address = COALESCE(?, resolved_address)
-           WHERE id = ?`,
-          [Date.now(), target.primary ? round.resolvedAddress ?? null : null, target.id],
-          function (err) {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
-      });
     }
 
     for (const result of results) {
-      console.log(
+      logReading(
+        result,
         `[Scheduler] Probe complete for ${target.name}${target.probe !== LOCAL_PROBE ? ` from ${target.probe}` : ''}${result.family && results.length > 1 ? ` (IPv${result.family})` : ''}: ` +
         `${result.success ? `${result.latency}ms` : 'FAILED'} ` +
         `(Loss: ${result.packetLoss ?? 0}%)`

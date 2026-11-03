@@ -9,7 +9,7 @@ import { isProbeAgentDown } from '../probe-agents/store';
 import { probeNames } from '../probe-agents/probes';
 import { recordAlertEvent } from './history';
 import { coveredProbes, isScopeEntry } from './scope';
-import { conditionsOf, describePolicy, describeSpread, FRESH_PROBE_STATE, judgeMonitor, policyOf, stepProbe, type ProbeRuleState, type ProbeStanding } from './rules';
+import { conditionsOf, describePolicy, describeSpread, FRESH_PROBE_STATE, judgeMonitor, policyOf, probeStateUnchanged, stepProbe, type ProbeRuleState, type ProbeStanding } from './rules';
 import { describeCause, likelyCause, whereSeen } from './cause';
 import { probePlaces } from '../probe-agents/places';
 import {
@@ -666,8 +666,10 @@ export async function evaluateAlerts(
   const now = Date.now();
   const probe = result.probe ?? LOCAL_PROBE;
   const intervalMs = Math.max(1, (target.interval ?? 300) * 1000);
-  const names = await probeNames(probes);
-  const places = await probePlaces();
+  // Where the probes are is read for an alert that asks, or that has something
+  // to say, and who they are only for the latter: not at every reading.
+  let places: Awaited<ReturnType<typeof probePlaces>> | undefined;
+  let names: Awaited<ReturnType<typeof probeNames>> | undefined;
 
   for (const alert of alertRows) {
     const scope: AlertScopeEntry[] = scopeRows.filter(row => row.alert_id === alert.id);
@@ -703,7 +705,7 @@ export async function evaluateAlerts(
       intervalMs
     );
 
-    await run(
+    if (!mine || !probeStateUnchanged(before, step.state)) await run(
       `INSERT INTO alert_probe_states (alert_id, target_id, probe, in_breach, streak, memory) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(alert_id, target_id, probe) DO UPDATE SET in_breach = excluded.in_breach, streak = excluded.streak, memory = excluded.memory`,
       [
@@ -717,14 +719,15 @@ export async function evaluateAlerts(
     );
 
     // The monitor's probes, put to the policy.
-    const standing: ProbeStanding[] = covered.map(id => {
+    const standingAt = (known: typeof places): ProbeStanding[] => covered.map(id => {
       const inBreach = id === probe ? step.state.inBreach : stateRows.some(row => row.alert_id === alert.id && row.probe === id && row.in_breach === 1);
       const last = lastAt.get(id) ?? 0;
       const silent = id !== probe && (!!agentDown.get(id) || (last > 0 && now - last > intervalMs * 2));
-      return { probe: id, inBreach, silent, region: places.get(id)?.region, network: places.get(id)?.network };
+      return { probe: id, inBreach, silent, region: known?.get(id)?.region, network: known?.get(id)?.network };
     });
+    if (alert.spread) places ??= await probePlaces();
     const policy = policyOf(alert);
-    const verdict = judgeMonitor(policy, was, standing, alert.spread);
+    const verdict = judgeMonitor(policy, was, standingAt(places), alert.spread);
     // The target's own streak is what an older image reads: with one probe it is that probe's.
     const targetStreak = covered.length <= 1 ? step.state.streak : 0;
 
@@ -733,8 +736,11 @@ export async function evaluateAlerts(
     }
     if (!verdict.transition) continue;
 
+    places ??= await probePlaces();
+    names ??= await probeNames(probes);
+    const standing = standingAt(places);
     const inBreach = standing.filter(each => each.inBreach).map(each => each.probe);
-    const verdicts: ProbeVerdict[] = standing.map(each => ({ probe: each.probe, name: names.get(each.probe) ?? each.probe, breaching: each.inBreach, silent: each.silent, region: each.region, network: each.network }));
+    const verdicts: ProbeVerdict[] = standing.map(each => ({ probe: each.probe, name: names!.get(each.probe) ?? each.probe, breaching: each.inBreach, silent: each.silent, region: each.region, network: each.network }));
     const results: ConditionResult[] = step.outcomes.map(outcome => ({
       label: describeConditionOf(outcome.condition),
       observed: worded(outcome.condition.metric, outcome.observed),
