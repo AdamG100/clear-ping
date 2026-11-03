@@ -216,10 +216,17 @@ How that works, for when it matters:
 - **Each change is all or nothing.** It runs inside a transaction. If one
   fails, the database is left exactly as it was and the app stops with the
   error, rather than running against a database in a shape it does not expect.
-- **Measurement history is never rewritten by an upgrade.** The one upgrade
-  that has to rebuild a table (very old databases, from before TCP and HTTP
-  probes) first saves a copy next to the database, named
-  `clearping.db.before-probe-types-<time>.bak`.
+- **Measurement history is kept by every upgrade.** The one that has to
+  rebuild a table (very old databases, from before TCP and HTTP probes) first
+  saves a copy next to the database, named
+  `clearping.db.before-probe-types-<time>.bak`. The upgrade to probes per
+  monitor tags each reading a probe agent took with that probe agent, a few
+  thousand at a time, and carries on where it stopped if it is interrupted:
+  `Database: tagged 152,765 readings with the probe that took them`.
+- **A long history makes that first start slower.** It also builds an index of
+  readings by probe and time, and refreshes SQLite's statistics so queries use
+  it. On a few million readings that is a minute or so, and it needs free disk
+  about the size of one index. The dashboard answers once it is done.
 - **With a separate prober**, both processes open the same file and either may
   get there first. The other waits for it and finds nothing left to do.
 - **Going back to an older image** works: it starts, and logs that the

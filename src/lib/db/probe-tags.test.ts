@@ -7,7 +7,7 @@ const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clearping-probe-
 process.env.CLEARPING_DB_PATH = dbFile
 
 const { initDatabase, closeDatabase, getDatabase, getTargetById } = await import('./database')
-const { finishProbeUpgrade, reconcileTargetProbes } = await import('./probe-tags')
+const { finishProbeUpgrade, reconcileTargetProbes, settleProbeIndexes } = await import('./probe-tags')
 const { ensureTracerouteSchema } = await import('../traceroute/store')
 const { PROBE_TAGS_KEY } = await import('./migrations')
 
@@ -73,6 +73,30 @@ describe('tagging the readings a probe agent took', () => {
     await finishProbeUpgrade(await getDatabase())
     const [{ tagged }] = await sql("SELECT COUNT(*) AS tagged FROM measurements WHERE probe = 'home'")
     expect(tagged).toBe(10_000)
+  })
+})
+
+describe('an install that took the first upgrade, with statistics made before it', () => {
+  it('gets the index of readings by probe and time, fresh statistics, and sparklines planned through it', async () => {
+    const database = await getDatabase()
+    // As v0.18.0 left it: tagged, without the index, with statistics from before.
+    await sql('DROP INDEX IF EXISTS idx_measurements_target_probe_timestamp')
+    await sql("DELETE FROM settings WHERE key = 'upgrade.planner-stats'")
+    await sql('ANALYZE')
+
+    await settleProbeIndexes(database)
+
+    const [index] = await sql("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_measurements_target_probe_timestamp'")
+    expect(index).toBeTruthy()
+    const [flag] = await sql("SELECT value FROM settings WHERE key = 'upgrade.planner-stats'")
+    expect(flag?.value).toBe('2')
+
+    // The query behind the sidebar's sparklines seeks one probe's newest readings, never sorts a history.
+    const plan = await sql(
+      `EXPLAIN QUERY PLAN SELECT timestamp FROM measurements WHERE target_id = 'remote' AND probe = 'home' ORDER BY timestamp DESC LIMIT 1 OFFSET 47`
+    )
+    expect(plan.map(row => String(row.detail)).join(' ')).toContain('idx_measurements_target_probe_timestamp')
+    expect(plan.map(row => String(row.detail)).join(' ')).not.toContain('TEMP B-TREE')
   })
 })
 

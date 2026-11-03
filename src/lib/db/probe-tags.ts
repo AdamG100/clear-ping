@@ -173,6 +173,8 @@ export async function finishProbeUpgrade(database: Database): Promise<void> {
   const state = await readState(database);
   if (!state || state.done) return;
 
+  // First, so that walking each monitor's history to tag it is a seek.
+  await ensureProbeTimeIndex(database);
   await tagReadings(database, state);
 
   // The newest reading of each probe of each monitor, and of each of its
@@ -187,4 +189,51 @@ export async function finishProbeUpgrade(database: Database): Promise<void> {
 
   state.done = true;
   await writeState(database, state);
+}
+
+/**
+ * The readings of one probe of a monitor, in time order: what nearly every
+ * chart, sparkline and statistic reads. The index on family as well cannot
+ * serve "the newest readings of this probe" or "this probe since then", since
+ * family sits between the probe and the time; a query planned through it reads
+ * and sorts a monitor's whole history, for every row it returns.
+ */
+async function ensureProbeTimeIndex(database: Database): Promise<void> {
+  const [existing] = await all<{ name: string }>(
+    database,
+    "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_measurements_target_probe_timestamp'"
+  );
+  if (existing) return;
+  console.log('Database: building the index of readings by probe and time');
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_measurements_target_probe_timestamp ON measurements(target_id, probe, timestamp DESC)');
+}
+
+/** Raised when the planner's statistics need making again after indexes change. */
+const PLANNER_STATS_KEY = 'upgrade.planner-stats';
+const PLANNER_STATS_VERSION = '2';
+
+/**
+ * Make sure the indexes readings are looked up by exist, and that SQLite's
+ * statistics describe them.
+ *
+ * An install that has run for a while has statistics (the weekly maintenance
+ * runs PRAGMA optimize) that were made before readings had a probe. With those,
+ * SQLite chose the index on family for the sidebar's sparklines, which reads a
+ * monitor's whole history again for every reading it returns: the dashboard
+ * never finished loading. A new database has no statistics and planned it
+ * well, which is why starting afresh worked. Cheap at every start after the
+ * first: one lookup and one setting.
+ */
+export async function settleProbeIndexes(database: Database): Promise<void> {
+  const state = await readState(database);
+  // Still tagging (a start that was stopped part-way): finishProbeUpgrade does this next time.
+  if (state && !state.done) return;
+  await ensureProbeTimeIndex(database);
+
+  const [stats] = await all<{ value: string }>(database, 'SELECT value FROM settings WHERE key = ?', [PLANNER_STATS_KEY]);
+  if (stats?.value === PLANNER_STATS_VERSION) return;
+  const started = Date.now();
+  await run(database, 'ANALYZE');
+  await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [PLANNER_STATS_KEY, PLANNER_STATS_VERSION]);
+  console.log(`Database: refreshed the query planner's statistics in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }

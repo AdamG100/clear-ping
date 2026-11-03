@@ -7,7 +7,7 @@ import { median, percentile } from '../probes/metrics';
 import { lossBandIndex, PACKET_LOSS_BANDS } from '../charts/packet-loss-colors';
 import { groupWithAncestors, isWithinGroup, normalizeGroupPath, parentGroup, rebaseGroupPath } from '../targets/group-path';
 import { runMigrations } from './migrations';
-import { finishProbeUpgrade, reconcileTargetProbes } from './probe-tags';
+import { finishProbeUpgrade, reconcileTargetProbes, settleProbeIndexes } from './probe-tags';
 import { LOCAL_PROBE, type ProbeId } from '@/types/probe-agent';
 import { agentIdOf, probeIdsOf, probeOf } from '../targets/probes';
 
@@ -322,8 +322,18 @@ interface StatisticsRow {
   last_probe: number | null;
 }
 
-let db: Database | null = null;
-let dbInitPromise: Promise<Database> | null = null;
+/**
+ * The one connection, and its opening, for the whole process. Held on
+ * globalThis because Next.js bundles route handlers into separate module
+ * graphs: a module-local handle meant each of them opened the file again and
+ * ran every startup step on its own connection, in parallel with the rest.
+ */
+const CONNECTION_KEY = Symbol.for('clearping.database');
+type ConnectionStore = { db: Database | null; opening: Promise<Database> | null };
+const connection: ConnectionStore = ((globalThis as typeof globalThis & { [CONNECTION_KEY]?: ConnectionStore })[CONNECTION_KEY] ??= {
+  db: null,
+  opening: null,
+});
 
 /**
  * Where the database file is. Configurable so the standalone prober (which may
@@ -386,10 +396,10 @@ function openSqlite(dbPath: string): Promise<Database> {
  * Initialize the SQLite database and create tables
  */
 export async function initDatabase(): Promise<Database> {
-  if (db) return db;
+  if (connection.db) return connection.db;
   
   // Return existing promise if initialization is in progress
-  if (dbInitPromise) return dbInitPromise;
+  if (connection.opening) return connection.opening;
 
   const opening = (async () => {
     const dbPath = databasePath();
@@ -399,9 +409,9 @@ export async function initDatabase(): Promise<Database> {
       if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
       }
-      db = await openSqlite(dbPath);
+      connection.db = await openSqlite(dbPath);
     } catch (error) {
-      db = null;
+      connection.db = null;
       if (!isDatabasePermissionError(error)) throw error;
       const message = databasePermissionMessage(dbPath);
       console.error(`Database: ${message}`);
@@ -423,7 +433,7 @@ export async function initDatabase(): Promise<Database> {
       'PRAGMA busy_timeout = 5000',
     ]) {
       await new Promise<void>((resolve, reject) => {
-        db!.run(pragma, function (err) {
+        connection.db!.run(pragma, function (err) {
           if (err) reject(err);
           else resolve();
         });
@@ -432,7 +442,7 @@ export async function initDatabase(): Promise<Database> {
 
     // Create targets table
     await new Promise<void>((resolve, reject) => {
-      db!.run(targetsTableSql('targets').replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'), function(err) {
+      connection.db!.run(targetsTableSql('targets').replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'), function(err) {
         if (err) {
           console.error('Database: Error creating targets table:', err);
           reject(err);
@@ -445,7 +455,7 @@ export async function initDatabase(): Promise<Database> {
 
     // Create measurements table
     await new Promise<void>((resolve, reject) => {
-      db!.run(`
+      connection.db!.run(`
         CREATE TABLE IF NOT EXISTS measurements (
           id TEXT PRIMARY KEY,
           target_id TEXT NOT NULL,
@@ -495,7 +505,7 @@ export async function initDatabase(): Promise<Database> {
       'latency_p90 REAL',
     ]) {
       await new Promise<void>((resolve, reject) => {
-        db!.run(`ALTER TABLE measurements ADD COLUMN ${column}`, function (err) {
+        connection.db!.run(`ALTER TABLE measurements ADD COLUMN ${column}`, function (err) {
           if (err && !err.message.includes('duplicate column name')) {
             console.error(`Database: Error adding column ${column}:`, err);
             reject(err);
@@ -508,7 +518,7 @@ export async function initDatabase(): Promise<Database> {
 
     // Create indexes
     await new Promise<void>((resolve, reject) => {
-      db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_target_timestamp 
+      connection.db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_target_timestamp 
               ON measurements(target_id, timestamp DESC)`, function(err) {
         if (err) reject(err);
         else resolve();
@@ -520,7 +530,7 @@ export async function initDatabase(): Promise<Database> {
     // with their probe (see probe-tags.ts), in place of the index on family alone.
 
     await new Promise<void>((resolve, reject) => {
-      db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
+      connection.db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
               ON measurements(timestamp DESC)`, function(err) {
         if (err) reject(err);
         else resolve();
@@ -529,7 +539,7 @@ export async function initDatabase(): Promise<Database> {
 
     // Add sort_order column to targets if missing
     await new Promise<void>((resolve, reject) => {
-      db!.run(`ALTER TABLE targets ADD COLUMN sort_order INTEGER DEFAULT 0`, function(err) {
+      connection.db!.run(`ALTER TABLE targets ADD COLUMN sort_order INTEGER DEFAULT 0`, function(err) {
         if (err && !err.message.includes('duplicate column name')) {
           console.error('Database: Error adding sort_order column:', err);
           reject(err);
@@ -549,7 +559,7 @@ export async function initDatabase(): Promise<Database> {
       'probe_config TEXT',
     ]) {
       await new Promise<void>((resolve, reject) => {
-        db!.run(`ALTER TABLE targets ADD COLUMN ${column}`, function (err) {
+        connection.db!.run(`ALTER TABLE targets ADD COLUMN ${column}`, function (err) {
           if (err && !err.message.includes('duplicate column name')) {
             console.error(`Database: Error adding column ${column}:`, err);
             reject(err);
@@ -563,26 +573,26 @@ export async function initDatabase(): Promise<Database> {
     // Databases created before TCP and HTTP probes existed only accept 'ping'
     // and 'dns' in probe_type. Every column the rebuild copies exists by now,
     // because the ALTERs above have already run.
-    const targetsSql = await tableDefinition(db, 'targets');
+    const targetsSql = await tableDefinition(connection.db, 'targets');
     if (targetsSql && /CHECK\s*\(\s*probe_type/i.test(targetsSql)) {
       // A rebuild is transactional, but it is also the one migration here that
       // rewrites existing rows rather than adding to them, so take a snapshot
       // first. VACUUM INTO copies a consistent image, write-ahead log included.
       const backupPath = `${dbPath}.before-probe-types-${Date.now()}.bak`;
       try {
-        await runSql(db, 'VACUUM INTO ?', [backupPath]);
+        await runSql(connection.db, 'VACUUM INTO ?', [backupPath]);
         console.log(`Database: Backed up to ${backupPath} before migrating the targets table`);
       } catch (error) {
         console.warn('Database: Could not back up before migrating; continuing:', error);
       }
 
-      await rebuildTable(db, 'targets', targetsTableSql, TARGET_COLUMNS);
+      await rebuildTable(connection.db, 'targets', targetsTableSql, TARGET_COLUMNS);
       console.log('Database: Migrated targets table to accept new probe types');
     }
 
     // Create group_orders table
     await new Promise<void>((resolve, reject) => {
-      db!.run(`
+      connection.db!.run(`
         CREATE TABLE IF NOT EXISTS group_orders (
           group_name TEXT PRIMARY KEY,
           sort_order INTEGER NOT NULL DEFAULT 0
@@ -599,23 +609,24 @@ export async function initDatabase(): Promise<Database> {
 
     // Everything above brings a database of any age up to the shape the
     // numbered migrations start from. Changes made since are in that list.
-    await runMigrations(db);
+    await runMigrations(connection.db);
 
     // After the migrations, which make the settings these keep their place in.
-    await backfillMeasurementFamilies(db);
-    await reconcileTargetProbes(db);
-    await finishProbeUpgrade(db);
+    await backfillMeasurementFamilies(connection.db);
+    await reconcileTargetProbes(connection.db);
+    await finishProbeUpgrade(connection.db);
+    await settleProbeIndexes(connection.db);
 
     console.log('Database: Tables and indexes created successfully');
 
-    return db!;
+    return connection.db!;
   })();
 
-  dbInitPromise = opening;
+  connection.opening = opening;
   // A failed open must not stick, or the next attempt in this process repeats
   // it after the folder has been fixed.
   void opening.catch(() => {
-    if (dbInitPromise === opening && !db) dbInitPromise = null;
+    if (connection.opening === opening && !connection.db) connection.opening = null;
   });
 
   return opening;
@@ -643,9 +654,9 @@ export function saveDatabaseToDisk(): void {
  * temporary database without it.
  */
 export async function closeDatabase(): Promise<void> {
-  const handle = db;
-  db = null;
-  dbInitPromise = null;
+  const handle = connection.db;
+  connection.db = null;
+  connection.opening = null;
   if (!handle) return;
 
   await new Promise<void>((resolve, reject) => {
@@ -660,10 +671,10 @@ export async function closeDatabase(): Promise<void> {
  * Get database instance
  */
 export async function getDatabase(): Promise<Database> {
-  if (!db) {
+  if (!connection.db) {
     return await initDatabase();
   }
-  return db;
+  return connection.db;
 }
 
 /**
@@ -1562,6 +1573,28 @@ export async function setGroupProbes(group: string, probes: ProbeId[]): Promise<
 
   for (const id of ids) await setTargetProbes(id, probes);
   return ids.length;
+}
+
+/**
+ * Add a probe to monitors, keeping the probes each already has (it goes last,
+ * so no monitor's primary probe changes): every monitor, or those in `group`
+ * and the groups inside it. Returns how many monitors gained it.
+ */
+export async function addProbeToMonitors(probe: ProbeId, scope: { group?: string } = {}): Promise<number> {
+  const database = await getDatabase();
+  const within = scope.group ? normalizeGroupPath(scope.group) : '';
+  const [rows, listed] = await Promise.all([
+    allSql<{ id: string; probe_agent_id: string | null; group_name: string | null }>(database, 'SELECT id, probe_agent_id, group_name FROM targets'),
+    loadProbes(database),
+  ]);
+  let added = 0;
+  for (const row of rows) {
+    if (within && (!row.group_name || !isWithinGroup(row.group_name, within))) continue;
+    const now = probeIdsOf({ probes: listed.get(row.id), probeAgentId: row.probe_agent_id });
+    if (now.includes(probe)) continue;
+    if (await setTargetProbes(row.id, [...now, probe])) added++;
+  }
+  return added;
 }
 
 /**
