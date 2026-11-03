@@ -309,6 +309,7 @@ See `.env.example`. All settings are optional.
 | `CLEARPING_RETENTION_DAYS` | `90` | Measurement retention; `0` keeps everything |
 | `TZ` | unset | Time zone for every time ClearPing shows or sends (IANA name, e.g. `Europe/London`); unset, each viewer sees their own |
 | `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes |
+| `CLEARPING_LOG_READINGS` | unset | `1` logs every reading; otherwise only those that lost something are logged |
 | `CLEARPING_APPRISE_BIN` | `apprise` | The Apprise program that sends alerts, when it is not on the `PATH` |
 | `CLEARPING_UPDATE_CHECK` | on | `off` stops the quarter-hourly check for a newer image (see [Versions](#versions)) |
 | `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made ([security.md](security.md#locked-out)) |

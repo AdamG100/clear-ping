@@ -1,6 +1,6 @@
 import https from 'node:https'
 import type { AddressInfo } from 'node:net'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProbeResult } from '@/types/probe'
 import { createCertificate } from './certificate'
 import { createProbeAgentServer, type ProbeAgentWork } from './server'
@@ -23,7 +23,8 @@ const work: ProbeAgentWork = {
   })),
 }
 
-const server = createProbeAgentServer({ token: TOKEN, key, cert, version: '9.9.9', tools: { ping: true, traceroute: true }, work })
+const logged: string[] = []
+const server = createProbeAgentServer({ token: TOKEN, key, cert, version: '9.9.9', tools: { ping: true, traceroute: true }, work, log: line => logged.push(line) })
 let port = 0
 
 beforeAll(async () => {
@@ -129,6 +130,36 @@ describe('the probe agent’s server', () => {
 
   it('answers the health check to this machine without a token', async () => {
     expect(await ask('GET', '/healthz', { token: null })).toEqual({ status: 200, body: 'ok' })
+  })
+
+  describe('what it logs of a reading', () => {
+    const asked = JSON.stringify({ target: { id: 't', host: '192.0.2.1', probeType: 'ping' } })
+    const reading = (fields: Partial<ProbeResult>) => [{ targetId: 't', timestamp: new Date(), latency: 12, packetLoss: 0, jitter: 1, success: true, ...fields } as ProbeResult]
+
+    beforeEach(() => {
+      logged.length = 0
+    })
+    afterEach(() => vi.unstubAllEnvs())
+
+    it('nothing, when it came back clean', async () => {
+      await ask('POST', '/v1/probe', { body: asked })
+      expect(logged).toEqual([])
+    })
+
+    it.each([
+      ['failed', { success: false, packetLoss: 100, latency: null }],
+      ['lost something', { packetLoss: 5 }],
+    ])('a line, when it %s', async (_label, fields) => {
+      vi.mocked(work.probe).mockResolvedValueOnce(reading(fields))
+      await ask('POST', '/v1/probe', { body: asked })
+      expect(logged).toHaveLength(1)
+    })
+
+    it('every one, when asked to', async () => {
+      vi.stubEnv('CLEARPING_LOG_READINGS', '1')
+      await ask('POST', '/v1/probe', { body: asked })
+      expect(logged).toHaveLength(1)
+    })
   })
 
   it('makes an address that keeps guessing wait', async () => {

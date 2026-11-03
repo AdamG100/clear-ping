@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { arch, hostname, platform } from 'node:os';
 import type { ProbeIpVersion, ProbeResult, Traceroute } from '@/types/probe';
+import { readingWorthLogging } from '@/lib/probes/log';
 import { executeProbes, type ProbeTarget } from '@/lib/probes/probe';
 import {
   PROBE_AGENT_MAX_BODY_BYTES,
@@ -189,7 +190,7 @@ export function createProbeAgentServer(options: ProbeAgentOptions): Server {
         if (!asked.ok) throw new Refused(400, asked.error);
         const { target } = asked.value;
         const results = await work.probe(target);
-        log(`${target.probeType} ${target.host}: ${results.map(r => (r.success ? `${r.latency}ms` : 'failed')).join(', ')}`);
+        if (results.some(readingWorthLogging)) log(`${target.probeType} ${target.host}: ${results.map(r => (r.success ? `${r.latency}ms` : 'failed')).join(', ')}`);
         send(response, 200, { results });
       } else {
         const asked = readTraceRequest(body);
@@ -227,5 +228,8 @@ export function createProbeAgentServer(options: ProbeAgentOptions): Server {
   // up to 90 seconds per family.
   server.headersTimeout = 10_000;
   server.requestTimeout = 240_000;
+  // The dashboard keeps its connection for the next reading, and lets go of it
+  // first (CONNECTION_KEPT_MS in src/lib/probe-agents/client.ts).
+  server.keepAliveTimeout = 120_000;
   return server;
 }

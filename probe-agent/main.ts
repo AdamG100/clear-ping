@@ -20,6 +20,8 @@ import { createProbeAgentServer } from './server';
  *                                 tailnet address to stay off every other
  *                                 interface.
  *   CLEARPING_PROBE_AGENT_DATA    where the certificate is kept
+ *   CLEARPING_LOG_READINGS        1 logs every reading, not only those that
+ *                                 lost something
  */
 
 // Replaced with the release's number when the agent is built (scripts/build-probe-agent.mjs).

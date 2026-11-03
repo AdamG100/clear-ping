@@ -6,6 +6,7 @@ import { jitterFromLatencies, mean, round } from './metrics';
 import { DNS_QUERIES_PER_PROBE, dnsQueryNameFor, isAddressRecord, nameRecordType } from './config';
 import { elapsedSince, failedProbe, pause, summarizeProbe } from './result';
 import { resolveHost } from './resolve';
+import { logReading } from './log';
 
 interface DnsOptions extends Pick<ProbeConfig, 'queryName' | 'recordType' | 'expectedAnswer' | 'resolvers'> {
   /**
@@ -210,7 +211,8 @@ async function probeThroughResolvers(
   const jitter = mean(jitters);
   const result: ProbeResult = { ...summary, jitter: jitter === null ? null : round(jitter, 2) };
 
-  console.log(
+  logReading(
+    result,
     `[DNS] ${asking.recordType} ${name} via ${readings.map(reading => reading.label).join(', ')}: ` +
     `queries=${asking.count * resolvers.length} answered=${latencies.length} loss=${result.packetLoss}% ` +
     `avg=${result.latency ?? '-'}ms`
@@ -315,7 +317,8 @@ export async function executeDnsProbe(
     details: asked.answers ? { answers: sample(asked.answers) } : undefined,
   });
 
-  console.log(
+  logReading(
+    result,
     `[DNS] ${description}: queries=${timing.count} answered=${asked.latencies.length} loss=${result.packetLoss}% ` +
     `avg=${result.latency ?? '-'}ms jitter=${result.jitter ?? '-'}ms`
   );

@@ -5,6 +5,7 @@ import { classifyHost, normalizeHost, type AddressFamily } from './host';
 import { minecraftPing } from './game/minecraft';
 import { elapsedSince, failedProbe, pause, summarizeProbe } from './result';
 import { resolveHost } from './resolve';
+import { logReading } from './log';
 
 /**
  * Game server probe: asks a game server how it is, in the game's own query,
@@ -239,7 +240,8 @@ export async function executeGameProbe(
     details: gameServer ? { gameServer } : undefined,
   });
 
-  console.log(
+  logReading(
+    result,
     `[Game] ${trimmedHost}:${port}${kind === 'hostname' ? ` (${address})` : ''} ${query}: ` +
     `queries=${count} answered=${latencies.length} loss=${result.packetLoss}% ` +
     `avg=${result.latency ?? '-'}ms jitter=${result.jitter ?? '-'}ms`
