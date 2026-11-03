@@ -3,7 +3,8 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { ChartLine, ChevronRight, MapPin, Plus, Server, X } from 'lucide-react'
 import type { GroupOrder, LatestMeasurement, Target } from '@/types/probe'
-import type { ProbeAgentSummary } from '@/types/probe-agent'
+import { LOCAL_PROBE, DEFAULT_LOCAL_PROBE_NAME, type ProbeAgentSummary } from '@/types/probe-agent'
+import { probeIdsOf } from '@/lib/targets/probes'
 import type { IncidentKind, OverviewEvent, OverviewReport, OverviewSlice } from '@/types/overview'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
@@ -50,6 +51,8 @@ interface OverviewPageProps {
   targets: Target[]
   latest: Record<string, LatestMeasurement>
   probeAgents: ProbeAgentSummary[]
+  /** What the local probe is called. */
+  localProbeName?: string
   alerts: AlertResponse[]
   groups: string[]
   groupOrders: GroupOrder[]
@@ -634,11 +637,13 @@ function Network({
 function ProbeAgents({
   targets,
   probeAgents,
+  localProbeName,
   report,
   onShowTargetsFrom,
 }: {
   targets: Target[]
   probeAgents: ProbeAgentSummary[]
+  localProbeName: string
   report: OverviewReport | null
   onShowTargetsFrom: (from: string) => void
 }) {
@@ -671,7 +676,7 @@ function ProbeAgents({
     <section className={PANEL} aria-labelledby="overview-sources">
       <h2 id="overview-sources" className="text-sm font-medium">Where readings are taken from</h2>
       <ul className="mt-3 grid gap-2 @xl/main:grid-cols-2 @5xl/main:grid-cols-3 @[100rem]/main:grid-cols-4">
-        {tile('local', <Server {...ICON} />, 'This server', null, [], targets.filter(target => !target.probeAgentId))}
+        {tile('local', <Server {...ICON} />, localProbeName, null, [], targets.filter(target => probeIdsOf(target).includes(LOCAL_PROBE)))}
         {probeAgents.map(agent => {
           const outages = report?.probeAgentOutages[agent.id] ?? []
           const down = agent.state !== 'online' && agent.state !== 'unpaired'
@@ -688,7 +693,7 @@ function ProbeAgents({
                   ? 'Reachable all day'
                   : `${plural(outages.length, 'outage')} in the last 24 hours`,
             ],
-            targets.filter(target => target.probeAgentId === agent.id)
+            targets.filter(target => probeIdsOf(target).includes(agent.id))
           )
         })}
       </ul>
@@ -702,6 +707,7 @@ export function OverviewPage({
   targets: allTargets,
   latest,
   probeAgents,
+  localProbeName = DEFAULT_LOCAL_PROBE_NAME,
   alerts,
   groups,
   groupOrders,
@@ -850,7 +856,7 @@ export function OverviewPage({
         onSelectGroup={onSelectGroup}
       />
 
-      <ProbeAgents targets={targets} probeAgents={probeAgents} report={report} onShowTargetsFrom={onShowTargetsFrom} />
+      <ProbeAgents targets={targets} probeAgents={probeAgents} localProbeName={localProbeName} report={report} onShowTargetsFrom={onShowTargetsFrom} />
     </div>
   )
 }

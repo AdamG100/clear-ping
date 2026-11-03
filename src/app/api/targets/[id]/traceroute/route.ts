@@ -3,6 +3,7 @@ import { getTargetById } from '@/lib/db/database';
 import { isTraceFamilies } from '@/lib/probes/host';
 import { initializeServer } from '@/lib/init';
 import { ProbeAgentUnavailableError } from '@/lib/probe-agents/client';
+import { chosenProbe } from '@/lib/targets/probes';
 import {
   countTraceroutes,
   deleteOlderTraceroutes,
@@ -24,11 +25,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     await ensureTracerouteSchema();
 
     const { id } = await params;
-    const limit = Number(new URL(request.url).searchParams.get('limit') ?? 10);
+    const query = new URL(request.url).searchParams;
+    const limit = Number(query.get('limit') ?? 10);
+
+    // The routes of the probe asked for, or of every probe with probe=all;
+    // the primary probe's when it is not said, as every monitor's were.
+    const target = await getTargetById(id);
+    const asked = query.get('probe');
+    const probe = asked === 'all' || !target ? undefined : chosenProbe(target, asked);
 
     const [traceroutes, total] = await Promise.all([
-      getTraceroutes(id, Number.isFinite(limit) ? limit : 10),
-      countTraceroutes(id),
+      getTraceroutes(id, Number.isFinite(limit) ? limit : 10, probe),
+      countTraceroutes(id, probe),
     ]);
     return NextResponse.json({ traceroutes, total });
   } catch (error) {
@@ -64,7 +72,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const problem = family && traceFamiliesProblem(target.host, family);
     if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
-    return NextResponse.json({ traceroutes: await traceAndStore(target, 'manual', family) });
+    // From the probe asked for, else the primary one.
+    const probe = chosenProbe(target, new URL(request.url).searchParams.get('probe'));
+    return NextResponse.json({ traceroutes: await traceAndStore(target, 'manual', family, undefined, probe) });
   } catch (error) {
     if (error instanceof ProbeAgentUnavailableError) {
       return NextResponse.json({ error: `Probe agent ${error.agentName}: ${error.message}` }, { status: 503 });

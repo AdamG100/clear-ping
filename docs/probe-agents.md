@@ -15,7 +15,7 @@ the same dashboard beside everything else.
 - [Over a tailnet](#over-a-tailnet)
 - [Over the internet](#over-the-internet)
 - [Running it](#running-it)
-- [Probing a target from it](#probing-a-target-from-it)
+- [Measuring a monitor from several probes](#measuring-a-monitor-from-several-probes)
 - [When it cannot be reached](#when-it-cannot-be-reached)
 - [Its certificate](#its-certificate)
 - [Updating it](#updating-it)
@@ -191,19 +191,36 @@ Each probe agent's **Details** shows both commands.
 
 `clearping-probe-agent --version` prints its version.
 
-## Probing a target from it
+## Measuring a monitor from several probes
 
-When you add or edit a target, its **Probe from** section offers *This
-server* and each of your probe agents, as cards side by side. It only appears
-once a probe agent exists. With more than five, a search box narrows the cards
-down. You can also set this from an assistant: `add_targets` and
-`update_target` take `probe_agent`, and `list_probe_agents` lists them.
+A **probe** is a place readings are taken from: the **local probe**, which is
+the machine the dashboard runs on, and each probe agent. A monitor can be
+measured from one probe or from several, and stays one row in the sidebar
+either way.
+
+When you add or edit a monitor, its **Probes** section lists the local probe
+and each of your probe agents with a box to tick. It only appears once a probe
+agent exists. Tick more than one to compare them; the first you tick is the
+**primary** probe, the one the page opens on. With more than five, a search
+box narrows the list. The local probe is called *Local probe* until you name
+it for the place it is, under Settings, Probes. You can also set this from an
+assistant: `add_targets` and `update_target` take `probes`, and
+`list_probe_agents` lists them.
+
+Each probe keeps its own readings. A monitor with several probes has a switch
+at the top of its page, **Compare** and then each probe: Compare draws them on
+one chart, and a probe shows its readings, statistics, loss and route in full.
+Taking a probe off a monitor keeps its readings, which stay in the history
+until they age out; putting it back picks them up again. A probe agent cannot
+be removed while a monitor is measured from it.
 
 Everywhere a target appears, it says where it is probed from:
 
 - **The sidebar.** A purple *Remote* badge beside the target's type, which
-  names the agent when you point at it. The **Probed from** filter under the
-  search box lists only one agent's targets, or only this server's.
+  names the agent when you point at it, or *2 probes* for a monitor measured
+  from several. Its dot is green while any probe reaches it, with the loss of
+  the worst, and its note names the probes that fail. The **Measured by**
+  filter under the search box lists only the monitors one probe measures.
 - **The target's page.** A *Probed from …* line under the address. The
   *Route* panel says *traced from …*, because a traceroute also runs from the
   agent.
@@ -221,9 +238,11 @@ Everywhere a target appears, it says where it is probed from:
 - **Assistant answers.** Targets from an agent come back with `probedFrom`,
   and the ISP report says those were measured from another machine.
 
-Moving a target to another probe agent keeps its history. The activity record
-says where it was moved from and to, because the readings before and after
-the move come from two different places.
+Changing the probes of a monitor keeps its history. The activity record says
+what they were and what they became, because the readings before and after
+come from different places. Readings from before a monitor's last change are
+filed under the probe it has now, since nothing recorded which probe took
+them earlier.
 
 ## When it cannot be reached
 

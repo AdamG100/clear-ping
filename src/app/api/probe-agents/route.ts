@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { initializeServer } from '@/lib/init';
 import { listProbeAgentSummaries } from '@/lib/probe-agents/store';
+import { localProbeName } from '@/lib/probe-agents/probes';
+import { LOCAL_PROBE } from '@/types/probe-agent';
 
 /**
  * GET /api/probe-agents - The probe agents targets can be probed from
@@ -12,7 +14,9 @@ import { listProbeAgentSummaries } from '@/lib/probe-agents/store';
 export async function GET() {
   try {
     await initializeServer();
-    return NextResponse.json({ probeAgents: await listProbeAgentSummaries() });
+    // The local probe is listed too, so the dashboard has every probe from one call.
+    const [probeAgents, name] = await Promise.all([listProbeAgentSummaries(), localProbeName()]);
+    return NextResponse.json({ probeAgents, localProbe: { id: LOCAL_PROBE, name } });
   } catch (error) {
     console.error('Error listing probe agents:', error);
     return NextResponse.json({ error: 'Failed to list probe agents' }, { status: 500 });

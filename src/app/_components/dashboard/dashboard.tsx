@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useEffect, useRef, useSyncExternalStore
 import type {
   AddressFamily,
   FamilyReading,
+  ProbeReading,
   Target,
   TimeRange,
   DataPoint,
@@ -15,7 +16,11 @@ import type {
   TargetDefinition,
   TimeWindow,
 } from '@/types/probe'
-import type { ProbeAgentOutage, ProbeAgentSummary } from '@/types/probe-agent'
+import { DEFAULT_LOCAL_PROBE_NAME, LOCAL_PROBE } from '@/types/probe-agent'
+import { probeIdsOf } from '@/lib/targets/probes'
+import { probeSummaries } from '../targets/probe-checklist'
+import { COMPARE_PROBES, ProbeSwitch } from '../targets/probe-switch'
+import type { ProbeAgentOutage, ProbeAgentSummary, ProbeId } from '@/types/probe-agent'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
 import { Sidebar, SIDEBAR_FOLD_MS, SIDEBAR_FOLD_PX } from '../sidebar/sidebar'
 import { DeleteProgress } from './delete-progress'
@@ -87,6 +92,8 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
   const [groupOrders, setGroupOrders] = useState<GroupOrder[]>([])
   // The machines targets can be probed from, besides this one.
   const [probeAgents, setProbeAgents] = useState<ProbeAgentSummary[]>([])
+  // What the local probe is called: Settings can rename it.
+  const [localProbeName, setLocalProbeName] = useState(DEFAULT_LOCAL_PROBE_NAME)
   const [isLoaded, setIsLoaded] = useState(false)
 
   const loadTargets = useCallback(async () => {
@@ -96,23 +103,32 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         const data = await response.json()
         setTargets(data.targets || data)
         setProbeAgents(data.probeAgents || [])
+        if (typeof data.localProbeName === 'string') setLocalProbeName(data.localProbeName)
 
         // Timestamps arrive as text, including the ones inside each family's
         // reading of a target probed over both.
         type RawReading = Omit<FamilyReading, 'timestamp'> & { timestamp: string }
-        const rawLatest: Record<string, RawReading & { byFamily?: Partial<Record<AddressFamily, RawReading>> }> =
+        type RawProbeReading = RawReading & { byFamily?: Partial<Record<AddressFamily, RawReading>> }
+        const rawLatest: Record<string, RawProbeReading & { byProbe?: Record<string, RawProbeReading> }> =
           data.latest || {}
         const parseReading = (entry: RawReading): FamilyReading => ({ ...entry, timestamp: new Date(entry.timestamp) })
+        const parseWithFamilies = ({ byFamily, ...entry }: RawProbeReading): ProbeReading => {
+          const reading: ProbeReading = parseReading(entry)
+          if (byFamily) {
+            reading.byFamily = {}
+            for (const family of [4, 6] as const) {
+              const one = byFamily[family]
+              if (one) reading.byFamily[family] = parseReading(one)
+            }
+          }
+          return reading
+        }
 
         const parsed: Record<string, LatestMeasurement> = {}
-        for (const [id, { byFamily, ...entry }] of Object.entries(rawLatest)) {
-          parsed[id] = parseReading(entry)
-          if (byFamily) {
-            parsed[id].byFamily = {}
-            for (const family of [4, 6] as const) {
-              const reading = byFamily[family]
-              if (reading) parsed[id].byFamily[family] = parseReading(reading)
-            }
+        for (const [id, { byProbe, ...entry }] of Object.entries(rawLatest)) {
+          parsed[id] = parseWithFamilies(entry)
+          if (byProbe) {
+            parsed[id].byProbe = Object.fromEntries(Object.entries(byProbe).map(([probe, reading]) => [probe, parseWithFamilies(reading)]))
           }
         }
         setLatest(parsed)
@@ -154,7 +170,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
           interval: target.interval || 300,
           status: 'active',
           group: target.group,
-          probeAgentId: target.probeAgentId ?? null,
+          probes: target.probes?.length ? target.probes.map(probe => probe.id) : [target.probeAgentId ?? LOCAL_PROBE],
         }),
       })
       if (response.ok) {
@@ -196,7 +212,8 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(updates),
+        // The API takes the probes as a list of ids.
+        body: JSON.stringify({ ...updates, probes: updates.probes?.map(probe => probe.id), probeAgentId: undefined }),
       })
       if (response.ok) {
         await loadTargets()
@@ -322,13 +339,13 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     [changeGroups]
   )
 
-  /** Point every target in a group, including the groups inside it, at one place. */
-  const setGroupProbe = useCallback(async (group: string, probeAgentId: string | null): Promise<boolean> => {
+  /** Measure every target in a group, including the groups inside it, from the same probes. */
+  const setGroupProbe = useCallback(async (group: string, probes: ProbeId[]): Promise<boolean> => {
     try {
       const response = await fetch('/api/groups/probe', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group, probeAgentId }),
+        body: JSON.stringify({ group, probes }),
       })
       if (response.ok) {
         await loadTargets()
@@ -342,7 +359,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     return false
   }, [loadTargets, reportError])
 
-  return { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, setGroupProbe, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
+  return { targets, latest, series, groups, groupOrders, probeAgents, localProbeName, createGroup, deleteGroup, setGroupProbe, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
 }
 
 function useAlerts(reportError: (title: string, error?: unknown) => void) {
@@ -400,7 +417,9 @@ function useTargetMeasurements(
   reportError: (title: string, error?: unknown) => void,
   zoom: TimeWindow | null,
   /** One side of a target probed over both address families; null for all of it. */
-  family: AddressFamily | null
+  family: AddressFamily | null,
+  /** One probe of a monitor measured from several. */
+  probe?: string
 ) {
   // The snapshot carries the target it belongs to. Keeping stale data across a
   // *range* change is the point of this hook, but keeping it across a *target*
@@ -417,7 +436,7 @@ function useTargetMeasurements(
   const [cache] = useState(() => new Map<string, RangeSnapshot>())
   // A family is its own series, so it owns its snapshot the way a target does:
   // IPv4's history must not sit under the IPv6 tab while IPv6 loads.
-  const owner = targetId ? `${targetId}:${family ?? 'all'}` : null
+  const owner = targetId ? `${targetId}:${family ?? 'all'}:${probe ?? ''}` : null
   const cacheKey = `${owner}:${timeRange}:${zoom ? `${zoom.start}-${zoom.end}` : 'all'}`
 
   // What is on screen: what was last loaded for this target and family, or
@@ -452,7 +471,7 @@ function useTargetMeasurements(
       const period = zoom
         ? `start=${zoom.start}&end=${zoom.end}`
         : `hours=${TIME_RANGE_CONFIG[timeRange].hours}`
-      const query = family ? `${period}&family=${family}` : period
+      const query = `${period}${family ? `&family=${family}` : ''}${probe ? `&probe=${encodeURIComponent(probe)}` : ''}`
       const response = await fetch(`/api/targets/${targetId}/measurements?${query}`)
       if (!response.ok) {
         reportError('Could not load measurements', `Server responded ${response.status}`)
@@ -487,7 +506,7 @@ function useTargetMeasurements(
     } finally {
       if (requestId === requestIdRef.current) setPending(false)
     }
-  }, [targetId, owner, family, timeRange, zoom, cache, cacheKey, probeIntervalSeconds, reportError])
+  }, [targetId, owner, family, probe, timeRange, zoom, cache, cacheKey, probeIntervalSeconds, reportError])
 
   const loadMeasurementsRef = useRef(loadMeasurements)
   useEffect(() => {
@@ -496,7 +515,7 @@ function useTargetMeasurements(
 
   useEffect(() => {
     loadMeasurementsRef.current()
-  }, [targetId, family, timeRange, zoom, probeIntervalSeconds])
+  }, [targetId, family, probe, timeRange, zoom, probeIntervalSeconds])
 
   return {
     points: shown ? shown.points : [],
@@ -614,7 +633,7 @@ function useRemembered(key: string): string | null {
 
 export function Dashboard() {
   const { notify, reportError } = useToast()
-  const { targets, latest, series, groups, groupOrders, probeAgents, createGroup, deleteGroup, setGroupProbe, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
+  const { targets, latest, series, groups, groupOrders, probeAgents, localProbeName, createGroup, deleteGroup, setGroupProbe, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
   // The sidebar's "probed from" filter: every target, this server's, or one probe agent's.
   const [probeFrom, setProbeFrom] = useState<ProbeFromFilter>('all')
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
@@ -680,6 +699,8 @@ export function Dashboard() {
   const [probing, setProbing] = useState(false)
   // For a target probed over both address families: which is on screen.
   const [familyView, setFamilyView] = useState<FamilyView>('both')
+  // Which of a monitor's probes is on screen, kept for the monitor it was chosen on.
+  const [probeChoice, setProbeChoice] = useState<{ targetId: string | null; view: string }>({ targetId: null, view: '' })
 
   // Remembered for the tab, not for good: a reload stays on what was being
   // looked at, and opening ClearPing afresh starts at the overview.
@@ -731,7 +752,7 @@ export function Dashboard() {
   const openAlerts = useCallback(() => openPage({ kind: 'alerts' }), [openPage])
   const openRouting = useCallback(() => openPage({ kind: 'routing' }), [openPage])
   const openRoutingSettings = useCallback(() => openPage({ kind: 'settings', section: 'routing' }), [openPage])
-  const openProbeAgentSettings = useCallback(() => openPage({ kind: 'settings', section: 'probe-agents' }), [openPage])
+  const openProbeAgentSettings = useCallback(() => openPage({ kind: 'settings', section: 'probes' }), [openPage])
   // Routing is turned on in Settings, which is an admin's. Before anyone has
   // signed in (no accounts yet), Settings is where an account is made first.
   const canTurnOnRouting = !signedIn || signedIn.role === 'admin'
@@ -810,10 +831,17 @@ export function Dashboard() {
   const selectedTarget = useMemo(() => {
     return targets.find(t => t.id === selectedTargetId) || null
   }, [targets, selectedTargetId])
-  // Where its readings come from, when that is not this server.
-  const selectedAgent = selectedTarget?.probeAgentId
-    ? probeAgents.find(agent => agent.id === selectedTarget.probeAgentId)
-    : undefined
+  // The probes it is measured from: with more than one, the page shows one at a
+  // time (the first, until another is chosen) or all of them against each other.
+  const monitorProbeIds = useMemo(() => (selectedTarget ? probeIdsOf(selectedTarget) : []), [selectedTarget])
+  const multiProbe = monitorProbeIds.length > 1
+  const probeList = useMemo(() => probeSummaries(probeAgents, localProbeName), [probeAgents, localProbeName])
+  const chosenView = probeChoice.targetId === selectedTargetId ? probeChoice.view : ''
+  const comparingProbes = multiProbe && chosenView === COMPARE_PROBES
+  const shownProbe = multiProbe && !comparingProbes && monitorProbeIds.includes(chosenView) ? chosenView : monitorProbeIds[0] ?? LOCAL_PROBE
+  const probeNameOf = (id: string) => probeList.find(probe => probe.id === id)?.name ?? 'A removed probe agent'
+  // Where the readings on screen come from, when that is not the local probe.
+  const selectedAgent = shownProbe !== LOCAL_PROBE ? probeAgents.find(agent => agent.id === shownProbe) : undefined
   const selectedOnHold = selectedAgent ? agentDown(selectedAgent) : undefined
 
   // A DNS target's numbers are query times, not round trips; the page says so.
@@ -868,10 +896,10 @@ export function Dashboard() {
   }, [selectedGroup, targets, groupOrders])
 
   // A comparison loads its own data, so the single-series fetch stands down.
-  const singleSeriesTargetId = groupTargets || comparingFamilies ? null : selectedTargetId
+  const singleSeriesTargetId = groupTargets || comparingFamilies || comparingProbes ? null : selectedTargetId
 
   const { points, statistics, window: shownWindow, span: shownSpan, outages: agentOutages, pending, reload, initialLoad } =
-    useTargetMeasurements(singleSeriesTargetId, timeRange, selectedTarget?.interval ?? 300, reportError, zoom, shownFamily)
+    useTargetMeasurements(singleSeriesTargetId, timeRange, selectedTarget?.interval ?? 300, reportError, zoom, shownFamily, multiProbe ? shownProbe : undefined)
 
   const handleTimeRangeChange = useCallback((range: TimeRange) => {
     setTimeRange(range)
@@ -915,7 +943,8 @@ export function Dashboard() {
 
     setProbing(true)
     try {
-      const response = await fetch(`/api/targets/${selectedTargetId}/probe`, { method: 'POST' })
+      const asked = comparingProbes ? '?probes=all' : multiProbe ? `?probe=${encodeURIComponent(shownProbe)}` : ''
+      const response = await fetch(`/api/targets/${selectedTargetId}/probe${asked}`, { method: 'POST' })
       if (!response.ok) {
         const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
         reportError('Probe failed', error)
@@ -938,7 +967,7 @@ export function Dashboard() {
     } finally {
       setProbing(false)
     }
-  }, [selectedTargetId, probing, reload, reloadTargets, notify, reportError, vocabulary])
+  }, [selectedTargetId, probing, comparingProbes, multiProbe, shownProbe, reload, reloadTargets, notify, reportError, vocabulary])
 
   // Pausing stops the scheduler probing a target without deleting its history.
   // The 'paused' status existed in the type from the start but nothing could
@@ -1021,9 +1050,10 @@ export function Dashboard() {
 
   // The newest reading of what is on screen: the target's, or one family's.
   const latestReading = useMemo(() => {
-    const reading = selectedTargetId ? latest[selectedTargetId] : undefined
+    const overall = selectedTargetId ? latest[selectedTargetId] : undefined
+    const reading = multiProbe ? overall?.byProbe?.[shownProbe] ?? overall : overall
     return shownFamily ? reading?.byFamily?.[shownFamily] : reading
-  }, [selectedTargetId, latest, shownFamily])
+  }, [selectedTargetId, latest, shownFamily, multiProbe, shownProbe])
 
   // The time of the newest real probe — not the newest chart bucket, which
   // always sits at the current wall-clock time whether or not anything ran.
@@ -1047,20 +1077,37 @@ export function Dashboard() {
   const deletingIds = deleteJob?.ids
   const transformedTargets = useMemo(() => {
     const agentsById = new Map(probeAgents.map(agent => [agent.id, agent]))
+    const names = new Map(probeSummaries(probeAgents, localProbeName).map(probe => [probe.id, probe.name]))
     return targets.map(t => {
       const lastMeasurement = latest[t.id]
       const probeAgent = t.probeAgentId ? agentsById.get(t.probeAgentId) : undefined
+      const ids = probeIdsOf(t)
+      // With several probes the monitor is on hold only when none of them can
+      // take a reading; one that cannot is named in the note instead.
+      const down = ids.filter(id => id !== LOCAL_PROBE && !!agentsById.get(id) && agentDown(agentsById.get(id)!))
+      const onHold = ids.length > 1
+        ? (down.length === ids.length ? 'No readings: none of its probes can take one' : undefined)
+        : probeAgent ? holdReason(probeAgent) : undefined
+      const byProbe = ids.length > 1 ? lastMeasurement?.byProbe : undefined
+      const probeNote = ids.length > 1
+        ? [
+            ...ids.filter(id => down.includes(id)).map(id => `${names.get(id) ?? id} is offline`),
+            ...ids.filter(id => !down.includes(id) && byProbe?.[id] && !byProbe[id].success).map(id => `No reply from ${names.get(id) ?? id}`),
+          ].join('; ')
+        : ''
       return {
         ...t,
         probeAgent,
-        onHold: probeAgent ? holdReason(probeAgent) : undefined,
+        onHold,
         address: t.host,
         type: targetTypeFor(t.host, t.probeType),
         // Reachability comes from the last measurement. `status` only records
         // whether the user paused the target, so deriving online/offline from
         // it marked every target — including dead ones — as online.
         isOnline: lastMeasurement ? lastMeasurement.success : undefined,
-        statusNote: lastMeasurement?.byFamily
+        statusNote: probeNote
+          ? probeNote
+          : lastMeasurement?.byFamily
           ? ([4, 6] as const)
               .filter(family => lastMeasurement.byFamily?.[family])
               .map(family => `${FAMILY_LABEL[family]} ${lastMeasurement.byFamily![family]!.success ? 'answering' : 'not answering'}`)
@@ -1073,7 +1120,7 @@ export function Dashboard() {
         deleting: deletingIds?.has(t.id),
       }
     })
-  }, [targets, latest, probeAgents, deletingIds])
+  }, [targets, latest, probeAgents, localProbeName, deletingIds])
 
   // Alerts that are firing on at least one target, for the sidebar's count.
   const firingAlerts = useMemo(
@@ -1169,6 +1216,7 @@ export function Dashboard() {
         probeFrom={probeFrom}
         onProbeFromChange={setProbeFrom}
         probeAgents={probeAgents}
+        localProbeName={localProbeName}
         onSetGroupProbe={readOnly ? undefined : setGroupProbe}
       />
 
@@ -1217,6 +1265,7 @@ export function Dashboard() {
                 targets={transformedTargets}
                 latest={latest}
                 probeAgents={probeAgents}
+                localProbeName={localProbeName}
                 alerts={alerts}
                 groups={groups}
                 groupOrders={groupOrders}
@@ -1345,6 +1394,7 @@ export function Dashboard() {
                 <AddTargetPage
                   availableGroups={availableGroups}
                   probeAgents={probeAgents}
+                  localProbeName={localProbeName}
                   group={targetPage.group ?? ''}
                   template={targetPage.from ? targets.find(target => target.id === targetPage.from) ?? null : null}
                   onAddTarget={copy =>
@@ -1357,6 +1407,7 @@ export function Dashboard() {
                   target={targets.find(target => target.id === targetPage.id) ?? null}
                   availableGroups={availableGroups}
                   probeAgents={probeAgents}
+                  localProbeName={localProbeName}
                   onSave={handleSaveTarget}
                   onClose={closeTargetPage}
                 />
@@ -1474,6 +1525,21 @@ export function Dashboard() {
               </Alert>
             )}
 
+            {multiProbe && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <ProbeSwitch
+                  probes={monitorProbeIds.map(id => probeList.find(probe => probe.id === id) ?? { id, name: probeNameOf(id), local: false, state: 'offline' as const })}
+                  value={comparingProbes ? COMPARE_PROBES : shownProbe}
+                  onChange={view => { setProbeChoice({ targetId: selectedTargetId, view }); setZoom(null) }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {comparingProbes
+                    ? 'Measured from every probe at once. Pick one for its full readings.'
+                    : `Readings taken from ${probeNameOf(shownProbe)} only.`}
+                </p>
+              </div>
+            )}
+
             {dualStack && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <FamilySwitch value={familyView} onChange={view => { setFamilyView(view); setZoom(null) }} />
@@ -1515,7 +1581,24 @@ export function Dashboard() {
                 animate={{ opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] } }}
                 exit={{ opacity: 0, transition: { duration: 0.1, ease: 'easeIn' } }}
               >
-              {comparingFamilies ? (
+              {comparingProbes && !comparingFamilies ? (
+                <ComparePanel
+                  targets={[selectedTarget]}
+                  timeRange={timeRange}
+                  zoom={zoom}
+                  onZoom={handleZoom}
+                  onResetZoom={handleResetZoom}
+                  refreshKey={lastUpdated?.getTime()}
+                  title={`${vocabulary.latencyTitle}: each probe`}
+                  description={`The same monitor from each probe that measures it, on a shared scale. The strips underneath mark when each one had ${vocabulary.lossTitle.toLowerCase()}.`}
+                  lossLabel={selectedTarget.probeType === 'dns' ? 'Failed' : undefined}
+                  probes="all"
+                  probeNames={new Map(probeList.map(probe => [probe.id, probe.name]))}
+                  nameSeries={(target, _family, _resolver, probeName) => probeName ?? target.name}
+                  showAddress={false}
+                  reportError={reportError}
+                />
+              ) : comparingFamilies ? (
                 <>
                   <ComparePanel
                     targets={[selectedTarget]}
@@ -1647,6 +1730,7 @@ export function Dashboard() {
                   zoom={zoom}
                   hours={TIME_RANGE_CONFIG[timeRange].hours}
                   family={shownFamily}
+                  probe={multiProbe ? shownProbe : undefined}
                   refreshKey={statistics.lastProbe?.getTime()}
                   vocabulary={vocabulary}
                 />
@@ -1760,12 +1844,13 @@ export function Dashboard() {
                 <div id="route" className="scroll-mt-4">
                   <ErrorBoundary label="Route">
                     <TraceroutePanel
-                      key={selectedTarget.id}
+                      key={`${selectedTarget.id}:${shownProbe}`}
                       targetId={selectedTarget.id}
                       name={selectedTarget.name}
                       host={selectedTarget.host}
                       ipVersion={selectedTarget.ipVersion}
-                      tracedFrom={selectedAgent?.name}
+                      tracedFrom={selectedAgent?.name ?? (multiProbe ? probeNameOf(shownProbe) : undefined)}
+                      probe={multiProbe ? shownProbe : undefined}
                       refreshKey={lastUpdated?.getTime()}
                       readOnly={readOnly}
                     />

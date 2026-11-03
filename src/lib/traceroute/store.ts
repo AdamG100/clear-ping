@@ -1,6 +1,8 @@
 import { lookupService } from 'dns/promises';
 import type { Target, Traceroute, TracerouteHop } from '@/types/probe';
+import { LOCAL_PROBE, type ProbeId } from '@/types/probe-agent';
 import { getDatabase } from '../db/database';
+import { primaryProbeOf } from '../targets/probes';
 import { classifyHost, normalizeHost, probeRuns, type TraceFamilies } from '../probes/host';
 import { runTrace } from '../probe-agents/client';
 import { newestPerFamily } from './parse';
@@ -19,7 +21,7 @@ export { runTraceroute };
  */
 
 /** With its probe agent, if it has one: a target is traced from where it is probed from. */
-type TraceTarget = Pick<Target, 'id' | 'host' | 'ipVersion'> & Partial<Pick<Target, 'probeAgentId'>>;
+type TraceTarget = Pick<Target, 'id' | 'host' | 'ipVersion'> & Partial<Pick<Target, 'probeAgentId' | 'probes'>>;
 
 interface TracerouteRow {
   id: string;
@@ -31,6 +33,7 @@ interface TracerouteRow {
   reached: number;
   error_message: string | null;
   alert_id: string | null;
+  probe?: string;
 }
 
 function toTraceroute(row: TracerouteRow): Traceroute {
@@ -51,14 +54,19 @@ function toTraceroute(row: TracerouteRow): Traceroute {
     reached: row.reached === 1,
     errorMessage: row.error_message ?? undefined,
     alertId: row.alert_id ?? undefined,
+    probe: row.probe ?? LOCAL_PROBE,
   };
 }
 
 export async function ensureTracerouteSchema(): Promise<void> {
   const db = await getDatabase();
 
-  for (const sql of [
-    `CREATE TABLE IF NOT EXISTS traceroutes (
+  const run = (sql: string) =>
+    new Promise<void>((resolve, reject) => {
+      db.run(sql, err => (err ? reject(err) : resolve()));
+    });
+
+  await run(`CREATE TABLE IF NOT EXISTS traceroutes (
       id TEXT PRIMARY KEY,
       target_id TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
@@ -68,25 +76,22 @@ export async function ensureTracerouteSchema(): Promise<void> {
       reached INTEGER NOT NULL,
       error_message TEXT,
       alert_id TEXT,
+      probe TEXT NOT NULL DEFAULT 'local',
       FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
-    )`,
-    'CREATE INDEX IF NOT EXISTS idx_traceroutes_target_timestamp ON traceroutes(target_id, timestamp DESC)',
-    'CREATE INDEX IF NOT EXISTS idx_traceroutes_alert ON traceroutes(alert_id, timestamp DESC)',
-  ]) {
-    await new Promise<void>((resolve, reject) => {
-      db.run(sql, err => (err ? reject(err) : resolve()));
-    });
-  }
+    )`);
 
-  // Created before a route remembered which alert took it.
+  // A table an older image made lacks the columns added since, and an index
+  // on one of them cannot be built until it is there.
   const columns = await new Promise<{ name: string }[]>((resolve, reject) => {
     db.all('PRAGMA table_info(traceroutes)', (err, rows) => (err ? reject(err) : resolve((rows ?? []) as { name: string }[])));
   });
-  if (!columns.some(column => column.name === 'alert_id')) {
-    await new Promise<void>((resolve, reject) => {
-      db.run('ALTER TABLE traceroutes ADD COLUMN alert_id TEXT', err => (err ? reject(err) : resolve()));
-    });
-  }
+  // Created before a route remembered which alert took it, and which probe.
+  if (!columns.some(column => column.name === 'alert_id')) await run('ALTER TABLE traceroutes ADD COLUMN alert_id TEXT');
+  if (!columns.some(column => column.name === 'probe')) await run("ALTER TABLE traceroutes ADD COLUMN probe TEXT NOT NULL DEFAULT 'local'");
+
+  await run('CREATE INDEX IF NOT EXISTS idx_traceroutes_target_timestamp ON traceroutes(target_id, timestamp DESC)');
+  await run('CREATE INDEX IF NOT EXISTS idx_traceroutes_alert ON traceroutes(alert_id, timestamp DESC)');
+  await run('CREATE INDEX IF NOT EXISTS idx_traceroutes_target_probe ON traceroutes(target_id, probe, timestamp DESC)');
 }
 
 function runChanges(sql: string, params: unknown[]): Promise<number> {
@@ -106,8 +111,8 @@ export async function storeTraceroute(trace: Traceroute): Promise<void> {
 
   await new Promise<void>((resolve, reject) => {
     db.run(
-      `INSERT INTO traceroutes (id, target_id, timestamp, trigger_source, address, hops, reached, error_message, alert_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO traceroutes (id, target_id, timestamp, trigger_source, address, hops, reached, error_message, alert_id, probe)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         trace.id,
         trace.targetId,
@@ -118,19 +123,21 @@ export async function storeTraceroute(trace: Traceroute): Promise<void> {
         trace.reached ? 1 : 0,
         trace.errorMessage ?? null,
         trace.alertId ?? null,
+        trace.probe ?? LOCAL_PROBE,
       ],
       err => (err ? reject(err) : resolve())
     );
   });
 }
 
-export async function getTraceroutes(targetId: string, limit = 10): Promise<Traceroute[]> {
+/** A target's newest routes, from one probe when `probe` is given and from all of them otherwise. */
+export async function getTraceroutes(targetId: string, limit = 10, probe?: ProbeId): Promise<Traceroute[]> {
   const db = await getDatabase();
 
   return new Promise((resolve, reject) => {
     db.all(
-      'SELECT * FROM traceroutes WHERE target_id = ? ORDER BY timestamp DESC LIMIT ?',
-      [targetId, Math.min(50, Math.max(1, Math.floor(limit)))],
+      `SELECT * FROM traceroutes WHERE target_id = ? ${probe ? 'AND probe = ?' : ''} ORDER BY timestamp DESC LIMIT ?`,
+      [targetId, ...(probe ? [probe] : []), Math.min(50, Math.max(1, Math.floor(limit)))],
       (err, rows) => {
         if (err) reject(err);
         else resolve((rows as TracerouteRow[]).map(toTraceroute));
@@ -144,13 +151,13 @@ export async function getTraceroutes(targetId: string, limit = 10): Promise<Trac
  * there is none. Read from what is stored, so the pause between alert traces
  * holds across a restart and between the app and a separate prober.
  */
-export async function lastAlertTraceAt(targetId: string): Promise<Date | null> {
+export async function lastAlertTraceAt(targetId: string, probe?: ProbeId): Promise<Date | null> {
   const db = await getDatabase();
 
   return new Promise<Date | null>((resolve, reject) => {
     db.get(
-      `SELECT MAX(timestamp) AS at FROM traceroutes WHERE target_id = ? AND trigger_source = 'alert'`,
-      [targetId],
+      `SELECT MAX(timestamp) AS at FROM traceroutes WHERE target_id = ? AND trigger_source = 'alert' ${probe ? 'AND probe = ?' : ''}`,
+      probe ? [targetId, probe] : [targetId],
       (err, row) => {
         if (err) reject(err);
         else {
@@ -163,11 +170,11 @@ export async function lastAlertTraceAt(targetId: string): Promise<Date | null> {
 }
 
 /** How many traces are kept for a target, including those too old to be listed. */
-export async function countTraceroutes(targetId: string): Promise<number> {
+export async function countTraceroutes(targetId: string, probe?: ProbeId): Promise<number> {
   const db = await getDatabase();
 
   return new Promise<number>((resolve, reject) => {
-    db.get('SELECT COUNT(*) AS total FROM traceroutes WHERE target_id = ?', [targetId], (err, row) => {
+    db.get(`SELECT COUNT(*) AS total FROM traceroutes WHERE target_id = ? ${probe ? 'AND probe = ?' : ''}`, probe ? [targetId, probe] : [targetId], (err, row) => {
       if (err) reject(err);
       else resolve((row as { total: number } | undefined)?.total ?? 0);
     });
@@ -192,21 +199,24 @@ export async function deleteTraceroute(targetId: string, traceId: string): Promi
 }
 
 /**
- * Delete a target's old traces, leaving the newest to each address family.
- * Returns the number removed.
+ * Delete a target's old traces, leaving the newest to each address family of
+ * each probe. Returns the number removed.
  */
 export async function deleteOlderTraceroutes(targetId: string): Promise<number> {
   const db = await getDatabase();
 
-  const all = await new Promise<Pick<TracerouteRow, 'id' | 'address'>[]>((resolve, reject) => {
+  const all = await new Promise<Pick<TracerouteRow, 'id' | 'address' | 'probe'>[]>((resolve, reject) => {
     db.all(
-      'SELECT id, address FROM traceroutes WHERE target_id = ? ORDER BY timestamp DESC',
+      'SELECT id, address, probe FROM traceroutes WHERE target_id = ? ORDER BY timestamp DESC',
       [targetId],
-      (err, rows) => (err ? reject(err) : resolve((rows ?? []) as Pick<TracerouteRow, 'id' | 'address'>[]))
+      (err, rows) => (err ? reject(err) : resolve((rows ?? []) as Pick<TracerouteRow, 'id' | 'address' | 'probe'>[]))
     );
   });
 
-  const kept = new Set(newestPerFamily(all).map(trace => trace.id));
+  // What is newest is judged within a probe: its route is not another's.
+  const byProbe = new Map<string, typeof all>();
+  for (const trace of all) byProbe.set(trace.probe ?? LOCAL_PROBE, [...(byProbe.get(trace.probe ?? LOCAL_PROBE) ?? []), trace]);
+  const kept = new Set([...byProbe.values()].flatMap(traces => newestPerFamily(traces).map(trace => trace.id)));
   const old = all.filter(trace => !kept.has(trace.id));
 
   for (const trace of old) {
@@ -234,18 +244,21 @@ export async function trimAlertTraces(alertId: string, keepCount: number, keepDa
 
   if (Number.isInteger(keepCount) && keepCount > 0) {
     const db = await getDatabase();
-    const rows = await new Promise<{ id: string; target_id: string }[]>((resolve, reject) => {
+    const rows = await new Promise<{ id: string; target_id: string; probe: string | null }[]>((resolve, reject) => {
       db.all(
-        'SELECT id, target_id FROM traceroutes WHERE alert_id = ? ORDER BY timestamp DESC, id DESC',
+        'SELECT id, target_id, probe FROM traceroutes WHERE alert_id = ? ORDER BY timestamp DESC, id DESC',
         [alertId],
-        (err, result) => (err ? reject(err) : resolve((result ?? []) as { id: string; target_id: string }[]))
+        (err, result) => (err ? reject(err) : resolve((result ?? []) as { id: string; target_id: string; probe: string | null }[]))
       );
     });
+    // Counted for each probe of each target: a monitor measured from several
+    // probes has a route from each, and one probe's must not push out another's.
     const seen = new Map<string, number>();
     const extra: string[] = [];
     for (const row of rows) {
-      const count = (seen.get(row.target_id) ?? 0) + 1;
-      seen.set(row.target_id, count);
+      const key = `${row.target_id}|${row.probe ?? LOCAL_PROBE}`;
+      const count = (seen.get(key) ?? 0) + 1;
+      seen.set(key, count);
       if (count > keepCount) extra.push(row.id);
     }
     if (extra.length > 0) {
@@ -382,9 +395,12 @@ export function traceAndStore(
   trigger: Traceroute['trigger'],
   families?: TraceFamilies,
   /** Set when an alert asked for the trace, so that alert can later keep or delete its own routes. */
-  alertId?: string
+  alertId?: string,
+  /** From this probe; the target's primary one when left out. */
+  probe: ProbeId = primaryProbeOf(target)
 ): Promise<Traceroute[]> {
-  const key = `${target.id}:${families ?? ''}`;
+  // The probe is part of what is running: the same trace from two probes is two.
+  const key = `${target.id}:${probe}:${families ?? ''}`;
   const running = inFlight.get(key);
   if (running) return running;
 
@@ -395,7 +411,7 @@ export function traceAndStore(
     // One after the other. Run together they would compete for the same
     // replies from the routers they share near this end.
     for (const run of probeRuns(target.host, families ?? target.ipVersion)) {
-      const result = await runTrace(target, trigger, run.ipVersion);
+      const result = await runTrace(target, trigger, run.ipVersion, probe);
       if (alertId) result.alertId = alertId;
       await storeTraceroute(result);
 

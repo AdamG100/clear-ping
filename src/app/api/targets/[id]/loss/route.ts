@@ -6,6 +6,7 @@ import { DEFAULT_PING_PACKETS } from '@/lib/probes/config';
 import { isTimeZone } from '@/lib/reports/evidence';
 import { analyzeLoss } from '@/lib/reports/loss';
 import { readNeighbours } from '@/lib/reports/neighbours';
+import { chosenProbe } from '@/lib/targets/probes';
 
 /**
  * Where a target's loss over a period is: its pattern, the hours it falls in
@@ -31,9 +32,11 @@ export async function GET(
     const family = requestedFamily === 4 || requestedFamily === 6 ? requestedFamily : undefined;
     const timeZone = searchParams.get('tz');
 
+    // Of the probe asked for; the primary one when it is not said.
+    const probe = chosenProbe(target, searchParams.get('probe'));
     const [readings, neighbours] = await Promise.all([
-      getProbeReadings(id, startTime, endTime),
-      readNeighbours(target, startTime, endTime),
+      getProbeReadings(id, startTime, endTime, { probe }),
+      readNeighbours(target, startTime, endTime, probe),
     ]);
 
     return NextResponse.json(

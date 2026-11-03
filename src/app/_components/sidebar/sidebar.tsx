@@ -32,6 +32,8 @@ import { copyText } from '@/lib/clipboard'
 import { StatusIndicator } from './status-indicator'
 import { addressFamilyFor, isDualStack } from '@/lib/probes/host'
 import { targetAddressLabel } from '@/lib/probes/config'
+import { probeIdsOf } from '@/lib/targets/probes'
+import { DEFAULT_LOCAL_PROBE_NAME } from '@/types/probe-agent'
 import { MAX_GROUP_PATH_LENGTH, groupLabel, groupName, groupWithAncestors, isWithinGroup, joinGroupPath, parentGroup, rebaseGroupPath } from '@/lib/targets/group-path'
 import { combineSeries } from '@/lib/charts/group-series'
 import {
@@ -379,8 +381,10 @@ interface SidebarProps {
   onProbeFromChange?: (filter: ProbeFromFilter) => void
   /** Where a target can be probed from, besides this server. */
   probeAgents?: ProbeAgentSummary[]
-  /** Point every target in a group at one place. Resolves to whether that happened. */
-  onSetGroupProbe?: (group: string, probeAgentId: string | null) => Promise<boolean>
+  /** What the local probe is called. */
+  localProbeName?: string
+  /** Measure every target in a group from the same probes. Resolves to whether that happened. */
+  onSetGroupProbe?: (group: string, probes: string[]) => Promise<boolean>
 }
 
 // ─── Target Row ─────────────────────────────────────────────────────────────
@@ -527,7 +531,7 @@ function TargetRow({
               </span>
             )}
             {/* Where it is measured from, when that is another machine. */}
-            <ProbedFrom agent={target.probeAgent} />
+            <ProbedFrom agent={target.probeAgent} count={probeIdsOf(target).length} />
             {deleting ? (
               <span className="shrink-0">
                 <Badge size="sm">Deleting</Badge>
@@ -1157,6 +1161,7 @@ export function Sidebar({
   probeFrom = 'all',
   onProbeFromChange,
   probeAgents = [],
+  localProbeName,
   onSetGroupProbe,
 }: SidebarProps) {
   const [isShareOpen, setIsShareOpen] = useState(false)
@@ -1232,11 +1237,13 @@ export function Sidebar({
 
   // The probe agents targets are probed from, for the filter: only once there
   // is more than one place readings come from.
-  const agentsInUse = useMemo(() => {
-    const byId = new Map<string, NonNullable<Target['probeAgent']>>()
-    for (const target of targets) if (target.probeAgent) byId.set(target.probeAgent.id, target.probeAgent)
-    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
-  }, [targets])
+  const agentsInUse = useMemo(
+    () =>
+      probeAgents
+        .filter(agent => targets.some(target => probeIdsOf(target).includes(agent.id)))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [targets, probeAgents]
+  )
   // A filter for an agent no target uses any more lists everything again.
   const fromFilter: ProbeFromFilter =
     probeFrom === 'all' || probeFrom === 'local' || agentsInUse.some(agent => agent.id === probeFrom) ? probeFrom : 'all'
@@ -1554,13 +1561,13 @@ export function Sidebar({
           <div className="[&_label]:sr-only">
             <Select
               id="sidebar-probe-from"
-              label="Probed from"
+              label="Measured by"
               value={fromFilter}
               onValueChange={value => onProbeFromChange(value)}
               options={[
-                { value: 'all', label: 'Probed from anywhere' },
-                { value: 'local', label: 'Probed from this server' },
-                ...agentsInUse.map(agent => ({ value: agent.id, label: `Probed from ${agent.name}` })),
+                { value: 'all', label: 'Measured by any probe' },
+                { value: 'local', label: `Measured by ${localProbeName ?? DEFAULT_LOCAL_PROBE_NAME}` },
+                ...agentsInUse.map(agent => ({ value: agent.id, label: `Measured by ${agent.name}` })),
               ]}
             />
           </div>
@@ -1660,7 +1667,7 @@ export function Sidebar({
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-sm text-sidebar-foreground truncate"><Masked text value={target.name} /></span>
                                   {target.type && <TypeBadge type={target.type} />}
-                                  <ProbedFrom agent={target.probeAgent} />
+                                  <ProbedFrom agent={target.probeAgent} count={probeIdsOf(target).length} />
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
@@ -1823,11 +1830,12 @@ export function Sidebar({
         task={groupTask}
         groups={availableGroups}
         probeAgents={probeAgents}
+        localProbeName={localProbeName}
         memberProbes={
           groupTask?.kind === 'edit'
             ? targets
                 .filter(target => !!target.group && isWithinGroup(target.group, groupTask.group))
-                .map(target => target.probeAgentId ?? null)
+                .map(target => probeIdsOf(target))
             : []
         }
         onCancel={() => setGroupTask(null)}

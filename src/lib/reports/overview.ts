@@ -6,6 +6,7 @@ import { isMeaningfulLoss } from '../charts/packet-loss-colors'
 import { isClosedPortCheck } from '../probes/config'
 import { classifyHost, FAMILY_LABEL, isDualStack, isLocalHost, isPrivateAddress } from '../probes/host'
 import { listProbeAgentSummaries, probeAgentOutages } from '../probe-agents/store'
+import { agentIdOf, probeIdsOf } from '../targets/probes'
 import { anyBetween, summarizeReadings } from './evidence'
 import { findIncidents, type Incident, type ProbeReading } from './outages'
 
@@ -249,10 +250,38 @@ export async function readOverview(hours = 24, now = Date.now()): Promise<Overvi
   const unmeasured = await getNeverAnswered(all.filter(isClosedPortCheck).map(target => target.id))
   const targets = all.filter(target => !unmeasured.has(target.id))
 
+  // A monitor measured from several probes is a line for each: what one sees
+  // is not what another does, and an event is about the probe that saw it. The
+  // first probe keeps the monitor's own id; the others are told apart by
+  // theirs, and put back to the monitor's after.
+  const pairs = targets.flatMap(target =>
+    probeIdsOf(target).map((probe, index) => ({
+      ...target,
+      id: index === 0 ? target.id : `${target.id}${PAIR_SEPARATOR}${probe}`,
+      probeAgentId: agentIdOf(probe),
+      probe,
+      monitor: target.id,
+    }))
+  );
+
   const readings = new Map<string, Reading[]>()
-  for (const target of targets) readings.set(target.id, await getProbeReadings(target.id, new Date(start), new Date(now)))
+  for (const pair of pairs) {
+    readings.set(pair.id, await getProbeReadings(pair.monitor, new Date(start), new Date(now), { probe: pair.probe }))
+  }
 
   const outages = await Promise.all(agents.map(async agent => [agent.id, await probeAgentOutages(agent.id, start, now)] as const))
 
-  return buildOverview({ start, end: now, targets, readings, probeAgentOutages: Object.fromEntries(outages) })
+  const report = buildOverview({ start, end: now, targets: pairs, readings, probeAgentOutages: Object.fromEntries(outages) })
+  return {
+    ...report,
+    // The monitors' own figures are their first probe's.
+    targets: report.targets.filter(each => !each.targetId.includes(PAIR_SEPARATOR)),
+    events: report.events.map(event => ({
+      ...event,
+      targets: event.targets.map(each => ({ ...each, targetId: each.targetId.split(PAIR_SEPARATOR)[0] })),
+    })),
+  }
 }
+
+/** Between a monitor's id and its probe's, on the line of a probe other than its first. */
+const PAIR_SEPARATOR = '|'

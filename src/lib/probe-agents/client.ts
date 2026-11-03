@@ -3,8 +3,9 @@ import https from 'https';
 import { isIP } from 'net';
 import tls from 'tls';
 import type { ProbeIpVersion, ProbeResult, Target, Traceroute } from '@/types/probe';
-import type { ProbeAgentExposure, ProbeAgentState } from '@/types/probe-agent';
+import { LOCAL_PROBE, type ProbeAgentExposure, type ProbeAgentState, type ProbeId } from '@/types/probe-agent';
 import { executeProbes, type ProbeTarget } from '../probes/probe';
+import { primaryProbeOf } from '../targets/probes';
 import { exposureOfAddress, isTailnetAddress } from './exposure';
 import {
   PROBE_AGENT_PROTOCOL,
@@ -365,10 +366,13 @@ function notWorking(state: ProbeAgentState): string {
  * An agent known to be down is not tried: the health checks notice when it is
  * back, and until then each target's round is skipped at once.
  */
-export async function runProbes(target: ProbeTarget & Pick<Target, 'probeAgentId'>): Promise<ProbeResult[]> {
-  if (!target.probeAgentId) return executeProbes(target);
+export async function runProbes(
+  target: ProbeTarget & Pick<Target, 'probeAgentId' | 'probes'>,
+  probe: ProbeId = primaryProbeOf(target)
+): Promise<ProbeResult[]> {
+  if (probe === LOCAL_PROBE) return (await executeProbes(target)).map(result => ({ ...result, probe }));
 
-  const agent = await getProbeAgentConnection(target.probeAgentId);
+  const agent = await getProbeAgentConnection(probe);
   if (!agent) throw new ProbeAgentUnavailableError('(removed)', 'Its probe agent no longer exists');
   if (agent.state !== 'online') throw new ProbeAgentUnavailableError(agent.name, notWorking(agent.state));
 
@@ -385,18 +389,22 @@ export async function runProbes(target: ProbeTarget & Pick<Target, 'probeAgentId
     if (!revived) throw new ProbeAgentUnavailableError(agent.name, 'It sent back something that is not a reading');
     return revived;
   });
-  return results.map(result => ({ ...result, targetId: target.id, timestamp: startedAt }));
+  return results.map(result => ({ ...result, targetId: target.id, timestamp: startedAt, probe }));
 }
 
-/** Trace the route to a target over one family: here, or from its probe agent. */
+/**
+ * Trace the route to a target over one family: from here, or from a probe
+ * agent. From the target's primary probe unless told which.
+ */
 export async function runTrace(
-  target: Pick<Target, 'id' | 'host' | 'probeAgentId'>,
+  target: Pick<Target, 'id' | 'host' | 'probeAgentId' | 'probes'>,
   trigger: Traceroute['trigger'],
-  ipVersion: ProbeIpVersion
+  ipVersion: ProbeIpVersion,
+  probe: ProbeId = primaryProbeOf(target)
 ): Promise<Traceroute> {
-  if (!target.probeAgentId) return runTraceroute(target, trigger, ipVersion);
+  if (probe === LOCAL_PROBE) return { ...(await runTraceroute(target, trigger, ipVersion)), probe };
 
-  const agent = await getProbeAgentConnection(target.probeAgentId);
+  const agent = await getProbeAgentConnection(probe);
   if (!agent) throw new ProbeAgentUnavailableError('(removed)', 'Its probe agent no longer exists');
   if (agent.state !== 'online') throw new ProbeAgentUnavailableError(agent.name, notWorking(agent.state));
 
@@ -407,7 +415,7 @@ export async function runTrace(
     if (!revived) throw new ProbeAgentUnavailableError(agent.name, 'It sent back something that is not a trace');
     return revived;
   });
-  return { ...trace, targetId: target.id, trigger, timestamp: startedAt };
+  return { ...trace, targetId: target.id, trigger, timestamp: startedAt, probe };
 }
 
 /**

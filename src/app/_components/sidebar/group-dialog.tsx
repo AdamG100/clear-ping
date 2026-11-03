@@ -7,6 +7,7 @@ import { ConfirmMorph } from '@/components/arc/confirm-morph/confirm-morph'
 import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { Input } from '@/components/arc/input/input'
 import { Select } from '@/components/arc/select/select'
+import { ProbeChecklist, probeSummaries } from '../targets/probe-checklist'
 import {
   GROUP_SEPARATOR,
   groupLabel,
@@ -16,15 +17,11 @@ import {
   parentGroup,
   splitGroupPath,
 } from '@/lib/targets/group-path'
-import type { ProbeAgentSummary } from '@/types/probe-agent'
+import { LOCAL_PROBE, type ProbeAgentSummary, type ProbeId } from '@/types/probe-agent'
 import { ChevronRight } from 'lucide-react'
 
 /** The select cannot hold an empty value, so the top level needs a name. */
 const TOP_LEVEL = '__top__'
-/** Probed from this server, as distinct from a probe agent's id. */
-const THIS_SERVER = '__server__'
-/** The targets in the group are not all probed from the same place. */
-const MIXED = '__mixed__'
 
 /** What the dialog has been opened to do. */
 export type GroupDialogTask =
@@ -46,19 +43,21 @@ interface GroupDialogProps {
   task: GroupDialogTask | null
   /** Every group there is, as paths. */
   groups: string[]
-  /** Where a target can be probed from, besides this server. */
+  /** Where a target can be measured from, besides the local probe. */
   probeAgents?: ProbeAgentSummary[]
+  /** What the local probe is called. */
+  localProbeName?: string
   /**
-   * Where each target in the group being edited is probed from, groups inside
-   * it included. Empty when nothing in it is a target. Null is this server.
+   * The probes each target in the group being edited is measured from, groups
+   * inside it included. Empty when nothing in it is a target.
    */
-  memberProbes?: (string | null)[]
+  memberProbes?: ProbeId[][]
   onCancel: () => void
   onCreate: (group: string) => void
   onMove: (from: string, to: string) => void
   onDelete: (group: string) => void
-  /** Point every target in the group at one place. Resolves to whether that happened. */
-  onSetProbe?: (group: string, probeAgentId: string | null) => Promise<boolean>
+  /** Measure every target in the group from these probes. Resolves to whether that happened. */
+  onSetProbe?: (group: string, probes: ProbeId[]) => Promise<boolean>
 }
 
 /**
@@ -116,6 +115,7 @@ function GroupForm({
   task,
   groups,
   probeAgents = [],
+  localProbeName,
   memberProbes = [],
   onCancel,
   onCreate,
@@ -131,20 +131,19 @@ function GroupForm({
   const [attempted, setAttempted] = useState(false)
   const [savingProbe, setSavingProbe] = useState(false)
 
-  // One value when every target is probed from the same place, otherwise a
-  // choice that changes nothing until someone picks a place.
-  const uniform = memberProbes.length > 0 && memberProbes.every(id => id === memberProbes[0])
-  const initialProbe = memberProbes.length === 0 ? THIS_SERVER : uniform ? memberProbes[0] ?? THIS_SERVER : MIXED
-  const [probe, setProbe] = useState(initialProbe)
-  const showProbe = !!editing && memberProbes.length > 0 && (probeAgents.length > 0 || memberProbes.some(id => id))
-  const probeOptions = [
-    ...(initialProbe === MIXED ? [{ value: MIXED, label: 'Leave each target as it is' }] : []),
-    { value: THIS_SERVER, label: 'This server' },
-    ...probeAgents.map(agent => ({ value: agent.id, label: agent.name })),
-    ...(uniform && memberProbes[0] && !probeAgents.some(agent => agent.id === memberProbes[0])
-      ? [{ value: memberProbes[0], label: 'A removed probe agent' }]
-      : []),
-  ]
+  // The probes every target has start ticked, and those only some have show
+  // part-ticked; nothing changes until a box is touched.
+  const everyProbe = [...new Set(memberProbes.flat())]
+  const shared = everyProbe.filter(id => memberProbes.every(list => list.includes(id)))
+  const someHave = everyProbe.filter(id => !shared.includes(id))
+  const [probes, setProbes] = useState<ProbeId[]>(shared.length > 0 ? shared : memberProbes.length === 0 ? [LOCAL_PROBE] : [])
+  const [touched, setTouched] = useState(false)
+  const showProbe = !!editing && memberProbes.length > 0 && (probeAgents.length > 0 || everyProbe.some(id => id !== LOCAL_PROBE))
+  const summaries = probeSummaries(probeAgents, localProbeName)
+  // A probe the targets have but that is no longer listed (a removed probe agent).
+  for (const id of everyProbe) {
+    if (!summaries.some(probe => probe.id === id)) summaries.push({ id, name: 'A removed probe agent', local: false, state: 'offline' })
+  }
 
   // A group cannot go inside itself, or inside anything it contains.
   const parents = editing ? groups.filter(candidate => !isWithinGroup(candidate, editing.group)) : groups
@@ -183,10 +182,9 @@ function GroupForm({
         }
         // The probe is switched on the group's current path, before a rename
         // moves the targets out from under it.
-        const probeChanged = !!editing && probe !== initialProbe && probe !== MIXED
-        if (probeChanged && editing && onSetProbe) {
+        if (touched && probes.length > 0 && editing && onSetProbe) {
           setSavingProbe(true)
-          const switched = await onSetProbe(editing.group, probe === THIS_SERVER ? null : probe)
+          const switched = await onSetProbe(editing.group, probes)
           setSavingProbe(false)
           if (!switched) return
         }
@@ -229,15 +227,18 @@ function GroupForm({
 
       {showProbe && (
         <div className="space-y-2">
-          <Select
-            label="Probe from"
-            value={probe}
-            onValueChange={setProbe}
-            options={probeOptions}
+          <p className="text-sm font-medium text-foreground">Measure from</p>
+          <ProbeChecklist
+            idPrefix="group-probes"
+            probes={summaries}
+            value={probes}
+            partial={touched ? [] : someHave}
+            onChange={next => { setTouched(true); setProbes(next) }}
           />
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Switches {plural(memberProbes.length, 'target')} in this group, including any group inside it, in one go.
-            Readings already taken stay where they were taken from.
+            {someHave.length > 0 && !touched ? 'These targets are not all measured from the same probes; a part-ticked probe is one only some have. ' : ''}
+            Sets the probes of {plural(memberProbes.length, 'target')} in this group, including any group inside it, in one go.
+            Readings already taken stay in their history.
           </p>
         </div>
       )}

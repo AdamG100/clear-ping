@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import type { DnsRecordType, DnsResolver, IpVersion, ProbeConfig, ProbeType, Target, GameQuery } from '@/types/probe'
-import type { ProbeAgentSummary } from '@/types/probe-agent'
-import { PROBE_AGENT_STATE } from '../settings/probe-agent-labels'
+import { LOCAL_PROBE, DEFAULT_LOCAL_PROBE_NAME, type ProbeAgentSummary, type ProbeId } from '@/types/probe-agent'
+import { ProbeChecklist, probeSummaries } from './probe-checklist'
+import { probeIdsOf, sameProbes } from '@/lib/targets/probes'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -13,7 +14,6 @@ import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { Input } from '@/components/arc/input/input'
 import { RadioCards } from '@/components/arc/radio-cards/radio-cards'
 import { SegmentedField } from '@/components/segmented-field'
-import { SearchField } from '@/components/arc/search-field/search-field'
 import { Select } from '@/components/arc/select/select'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { addressFamilyFor, classifyHost, isDualStack, isWellKnownResolver, targetTypeFor } from '@/lib/probes/host'
@@ -35,7 +35,7 @@ import {
 } from '@/lib/probes/config'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { ResolverList } from './resolver-list'
-import { Gamepad2, Globe, MapPin, Network, Pause, Plug, Server, Trash2, Wifi } from 'lucide-react'
+import { Gamepad2, Globe, Network, Pause, Plug, Trash2, Wifi } from 'lucide-react'
 import { Masked } from '../privacy/masked'
 
 /**
@@ -114,12 +114,9 @@ export interface TargetFormValues {
   interval: number
   /** Empty for no group. */
   group: string
-  /** The probe agent it is probed from, or null for this server. */
-  probeAgentId: string | null
+  /** The probes it is measured from, primary first. */
+  probes: ProbeId[]
 }
-
-/** Stands for "this server" in the list of places to probe from. */
-const THIS_SERVER = 'local'
 
 // ─── Probe method ───────────────────────────────────────────────────────────
 
@@ -166,72 +163,6 @@ function ProbeMethodPicker({
         meta: value === method.value && suggested === method.value ? <Badge size="sm" tone="info">Detected</Badge> : undefined,
       }))}
     />
-  )
-}
-
-/** Past this many probe agents, a search narrows the cards down and they scroll. */
-const PROBE_FROM_SEARCH_AFTER = 5
-
-/**
- * Where the target is probed from: this server or a probe agent, as cards side
- * by side that wrap onto more rows. With many probe agents a search narrows
- * them, and the list scrolls inside a set height so the form below stays in
- * reach. This server and the chosen one are always shown, whatever is typed.
- */
-function ProbeFromPicker({
-  idPrefix,
-  probeAgents,
-  value,
-  onChange,
-}: {
-  idPrefix: string
-  probeAgents: ProbeAgentSummary[]
-  value: string | null
-  onChange: (probeAgentId: string | null) => void
-}) {
-  const [search, setSearch] = useState('')
-  const many = probeAgents.length > PROBE_FROM_SEARCH_AFTER
-  const query = search.trim().toLowerCase()
-  const shown = probeAgents.filter(agent =>
-    !query || agent.id === value || [agent.name, agent.address, agent.hostname ?? ''].some(text => text.toLowerCase().includes(query))
-  )
-  const labelId = `${idPrefix}-probe-from-label`
-
-  return (
-    <div className="space-y-3">
-      <p id={labelId} className="sr-only">Where should it be probed from?</p>
-      {many && (
-        <SearchField
-          label="Find a probe agent"
-          placeholder={`Search ${probeAgents.length} probe agents`}
-          value={search}
-          onValueChange={setSearch}
-        />
-      )}
-      <div className={cn(many && 'max-h-80 overflow-y-auto p-0.5')}>
-        <RadioCards
-          aria-labelledby={labelId}
-          name={`${idPrefix}-probe-from`}
-          value={value ?? THIS_SERVER}
-          onValueChange={next => onChange(next === THIS_SERVER ? null : next)}
-          minColumnWidth={200}
-          options={[
-            { value: THIS_SERVER, label: 'This server', description: 'Where this dashboard runs', icon: <Server {...ICON} /> },
-            ...shown.map(agent => ({
-              value: agent.id,
-              // Wrapped rather than cut short: the name is how the card is told apart.
-              label: <span className="block whitespace-normal wrap-break-word">{agent.name}</span>,
-              description: <span className="break-all"><Masked value={agent.hostname ?? agent.address} /></span>,
-              icon: <MapPin {...ICON} />,
-              meta: agent.state === 'online'
-                ? undefined
-                : <Badge size="sm" tone={PROBE_AGENT_STATE[agent.state].tone}>{PROBE_AGENT_STATE[agent.state].label}</Badge>,
-            })),
-          ]}
-        />
-      </div>
-      {query && shown.length === 0 && <FieldHint>No probe agent matches &ldquo;{search.trim()}&rdquo;.</FieldHint>}
-    </div>
   )
 }
 
@@ -647,6 +578,8 @@ export interface TargetFormProps {
   onCancel: () => void
   /** The other machines it could be probed from. None, and the question is not asked. */
   probeAgents?: ProbeAgentSummary[]
+  /** What the local probe is called. */
+  localProbeName?: string
 }
 
 type RequiredField = 'address' | 'port'
@@ -697,10 +630,11 @@ function FormSection({ number, tone, title, hint, children }: {
  * schedule, which already hold a sensible answer. Only the first has to be
  * answered, so an address and Enter is a whole target.
  */
-export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit, onCancel, probeAgents = [] }: TargetFormProps) {
+export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, onSubmit, onCancel, probeAgents = [], localProbeName = DEFAULT_LOCAL_PROBE_NAME }: TargetFormProps) {
   const initialGroupIsNew = !!initial.group && !availableGroups.includes(initial.group)
-  const [probeAgentId, setProbeAgentId] = useState<string | null>(initial.probeAgentId)
-  const placeName = (id: string | null) => (id ? probeAgents.find(agent => agent.id === id)?.name ?? 'a removed probe agent' : 'this server')
+  const [probes, setProbes] = useState<ProbeId[]>(initial.probes)
+  const summaries = probeSummaries(probeAgents, localProbeName)
+  const placeName = (id: ProbeId) => summaries.find(probe => probe.id === id)?.name ?? 'a removed probe agent'
 
   const [name, setName] = useState(initial.name)
   const [address, setAddress] = useState(initial.host)
@@ -820,7 +754,7 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
       probeConfig: validation.config,
       interval,
       group: group === NEW_GROUP ? newGroupPath : group,
-      probeAgentId,
+      probes,
     })
   }
 
@@ -962,12 +896,12 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
 
         {/* From where: asked only once there is somewhere besides here. */}
         {probeAgents.length > 0 && (
-          <FormSection number={4} tone="series-2" title="Probe from" hint="Readings show the network as the chosen machine sees it.">
-            <ProbeFromPicker idPrefix={idPrefix} probeAgents={probeAgents} value={probeAgentId} onChange={setProbeAgentId} />
-            {initial.host !== '' && probeAgentId !== initial.probeAgentId && (
+          <FormSection number={4} tone="series-2" title="Probes" hint="Readings show the network as each chosen machine sees it. Tick more than one to compare them.">
+            <ProbeChecklist idPrefix={idPrefix} probes={summaries} value={probes} onChange={setProbes} />
+            {initial.host !== '' && !sameProbes(probes, initial.probes) && (
               <FieldHint>
-                Readings before this change were taken from {placeName(initial.probeAgentId)}, and stay in its history.
-                From now on they come from {placeName(probeAgentId)}.
+                Readings before this change stay in their history, under the probe that took them
+                ({initial.probes.map(placeName).join(', ')}). From now on they come from {probes.map(placeName).join(', ')}.
               </FieldHint>
             )}
           </FormSection>
@@ -1020,7 +954,7 @@ export const BLANK_TARGET: TargetFormValues = {
   probeConfig: {},
   interval: 300,
   group: '',
-  probeAgentId: null,
+  probes: [LOCAL_PROBE],
 }
 
 /** A target as the form holds it. */
@@ -1033,7 +967,7 @@ export function formValuesOf(target: Target): TargetFormValues {
     probeConfig: target.probeConfig ?? {},
     interval: target.interval,
     group: target.group || '',
-    probeAgentId: target.probeAgentId ?? null,
+    probes: probeIdsOf(target),
   }
 }
 

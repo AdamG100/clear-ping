@@ -9,8 +9,12 @@
 import { getAllTargets, storeMeasurements, getDatabase, getNeverAnswered, cleanOldMeasurements } from './db/database';
 import { isClosedPortCheck } from './probes/config';
 import { checkProbeAgent, ProbeAgentUnavailableError, runProbes } from './probe-agents/client';
-import { cleanOldProbeAgentOutages, getProbeAgentConnection, pairedProbeAgentConnections } from './probe-agents/store';
+import { cleanOldProbeAgentOutages, pairedProbeAgentConnections } from './probe-agents/store';
+import { probedFromPhrase } from './probe-agents/probes';
 import { measurementFrom, worstOf } from './probes/result';
+import { agentIdOf, probesOf } from './targets/probes';
+import { getPairTimes, pairKey, recordPairRound } from './targets/store';
+import { LOCAL_PROBE, type ProbeId } from '@/types/probe-agent';
 import type { IpVersion, ProbeConfig, ProbeResult, ProbeType } from '@/types/probe';
 import { randomUUID } from 'crypto';
 import { asksForTrace, dispatchAlert, evaluateAlerts, getAlerts, shouldTraceOnAlert } from './alerts/store';
@@ -114,8 +118,17 @@ export class Lane {
   }
 }
 
+/**
+ * One monitor measured from one probe. A monitor with several probes is
+ * several of these, each due at its own moment in the interval and each with
+ * its own lane and its own record of having answered.
+ */
 interface ScheduledTarget {
   id: string;
+  /** Where the readings are taken from: the local probe, or a probe agent's id. */
+  probe: ProbeId;
+  /** The monitor's primary probe, whose resolved address stands for the monitor's. */
+  primary: boolean;
   name: string;
   host: string;
   /** Only so an alert can say where the target lives. */
@@ -123,7 +136,7 @@ interface ScheduledTarget {
   probeType: ProbeType;
   ipVersion: IpVersion;
   probeConfig?: ProbeConfig;
-  /** Probed from this probe agent, or from here when null. */
+  /** The probe agent it is probed from, or null for the local probe. */
   probeAgentId: string | null;
   interval: number; // seconds
   /** The interval in milliseconds, and the target's moment in it: worked out once, not at every look. */
@@ -232,71 +245,62 @@ class ProbeScheduler {
    */
   private async loadTargets(): Promise<void> {
     try {
-      // Every last_probe_at in one query rather than one per target, read
-      // alongside the targets.
-      const db = await getDatabase();
-      const [targets, lastProbeTimes] = await Promise.all([
-        getAllTargets(),
-        new Promise<Map<string, number>>((resolve, reject) => {
-          db.all('SELECT id, last_probe_at FROM targets', [], (err, rows) => {
-            if (err) {
-              reject(err);
-              return;
-            }
-            const map = new Map<string, number>();
-            for (const row of (rows ?? []) as { id: string; last_probe_at: number | null }[]) {
-              map.set(row.id, row.last_probe_at ?? 0);
-            }
-            resolve(map);
-          });
-        }),
-      ]);
+      // Every probe's last-probe time in one query rather than one per
+      // monitor, read alongside the monitors.
+      const [targets, lastProbeTimes] = await Promise.all([getAllTargets(), getPairTimes()]);
       const activeTargets = targets.filter(t => t.status === 'active');
 
+      const live = new Set<string>();
       for (const target of activeTargets) {
-        const existing = this.scheduledTargets.get(target.id);
-        const settings = {
-          name: target.name,
-          host: target.host,
-          group: target.group,
-          probeType: target.probeType,
-          ipVersion: target.ipVersion ?? 'auto',
-          probeConfig: target.probeConfig,
-          probeAgentId: target.probeAgentId ?? null,
-          interval: target.interval,
-          intervalMs: target.interval * 1000,
-          phase: phaseOf(target.id, target.interval * 1000),
-          hasAnswered: undefined,
-        };
+        for (const probe of probesOf(target)) {
+          const key = pairKey(target.id, probe.id);
+          live.add(key);
+          const existing = this.scheduledTargets.get(key);
+          const settings = {
+            probe: probe.id,
+            primary: probe.position === 0,
+            name: target.name,
+            host: target.host,
+            group: target.group,
+            probeType: target.probeType,
+            ipVersion: target.ipVersion ?? 'auto',
+            probeConfig: target.probeConfig,
+            probeAgentId: agentIdOf(probe.id),
+            interval: target.interval,
+            intervalMs: target.interval * 1000,
+            // The same for all of a monitor's probes: readings taken at the
+            // same moment make their comparison, and a quorum of them, fairer.
+            // They never share a lane, so nothing is stacked up by it.
+            phase: phaseOf(target.id, target.interval * 1000),
+            hasAnswered: undefined,
+          };
 
-        if (existing) {
-          // Updated in place, never replaced: a probe in flight holds this
-          // object and clears `isProbing` on it when it finishes. A fresh copy
-          // would inherit `isProbing: true` and be skipped forever after.
-          Object.assign(existing, settings);
-          // Never moved back: a probe in flight has already claimed its
-          // interval, and so has a reading taken with Probe now, which is
-          // only known here.
-          existing.lastProbeTime = Math.max(existing.lastProbeTime, lastProbeTimes.get(target.id) ?? 0);
-        } else {
-          this.scheduledTargets.set(target.id, {
-            id: target.id,
-            ...settings,
-            lastProbeTime: lastProbeTimes.get(target.id) ?? 0,
-            isProbing: false,
-          });
+          if (existing) {
+            // Updated in place, never replaced: a probe in flight holds this
+            // object and clears `isProbing` on it when it finishes. A fresh copy
+            // would inherit `isProbing: true` and be skipped forever after.
+            Object.assign(existing, settings);
+            // Never moved back: a probe in flight has already claimed its
+            // interval, and so has a reading taken with Measure now, which is
+            // only known here.
+            existing.lastProbeTime = Math.max(existing.lastProbeTime, lastProbeTimes.get(key) ?? 0);
+          } else {
+            this.scheduledTargets.set(key, {
+              id: target.id,
+              ...settings,
+              lastProbeTime: lastProbeTimes.get(key) ?? 0,
+              isProbing: false,
+            });
+          }
         }
       }
 
-      // Remove targets that no longer exist or are inactive
-      const activeIds = new Set(activeTargets.map(t => t.id));
-      for (const [id] of this.scheduledTargets) {
-        if (!activeIds.has(id)) {
-          this.scheduledTargets.delete(id);
-        }
+      // Remove what no longer exists, is paused, or is no longer measured from there.
+      for (const key of [...this.scheduledTargets.keys()]) {
+        if (!live.has(key)) this.scheduledTargets.delete(key);
       }
 
-      console.log(`[Scheduler] Loaded ${this.scheduledTargets.size} active targets`);
+      console.log(`[Scheduler] Loaded ${activeTargets.length} active targets (${this.scheduledTargets.size} to measure)`);
     } catch (error) {
       console.error('[Scheduler] Error loading targets:', error);
     }
@@ -304,25 +308,25 @@ class ProbeScheduler {
 
   /** The lane a target waits in: its probe agent's, or this server's for its kind. */
   private laneFor(target: ScheduledTarget): Lane {
-    if (!target.probeAgentId) return target.probeType === 'ping' ? this.pingLane : this.otherLane;
-    let lane = this.agentLanes.get(target.probeAgentId);
+    if (target.probe === LOCAL_PROBE) return target.probeType === 'ping' ? this.pingLane : this.otherLane;
+    let lane = this.agentLanes.get(target.probe);
     if (!lane) {
       lane = new Lane(AGENT_CONCURRENCY);
-      this.agentLanes.set(target.probeAgentId, lane);
+      this.agentLanes.set(target.probe, lane);
     }
     return lane;
   }
 
   /** Hand every target whose moment has come to its lane. */
   queueDueTargets(now: number = Date.now()): void {
-    for (const target of this.scheduledTargets.values()) {
+    for (const [key, target] of this.scheduledTargets) {
       if (target.isProbing) continue;
       if (!isDue(now, target.lastProbeTime, target.intervalMs, target.phase)) continue;
 
       // Claimed now, so the next look does not hand it over a second time
       // while it waits.
       target.isProbing = true;
-      this.laneFor(target).add(() => this.probeTarget(target.id));
+      this.laneFor(target).add(() => this.probeTarget(key));
     }
   }
 
@@ -366,16 +370,26 @@ class ProbeScheduler {
     const round = worstOf(results);
 
     try {
-      await storeMeasurements(results.map(result => measurementFrom(randomUUID(), result)));
+      await storeMeasurements(results.map(result => ({ ...measurementFrom(randomUUID(), result), probe: target.probe })));
     } finally {
+      // The probe's own record: when it last measured this, and what each
+      // family resolved to from there (a name can resolve differently in
+      // different places).
+      await recordPairRound(
+        target.id,
+        target.probe,
+        target.lastProbeTime,
+        results.flatMap(result => (result.resolvedAddress ? [{ family: result.family, address: result.resolvedAddress }] : []))
+      );
       await new Promise<void>((resolve, reject) => {
         db.run(
           // A probe that could not resolve the name has no address to report;
           // COALESCE keeps the last one that worked rather than blanking it.
+          // The monitor's own address is its primary probe's.
           `UPDATE targets
-           SET updated_at = ?, last_probe_at = ?, resolved_address = COALESCE(?, resolved_address)
+           SET updated_at = ?, resolved_address = COALESCE(?, resolved_address)
            WHERE id = ?`,
-          [Date.now(), target.lastProbeTime, round.resolvedAddress ?? null, target.id],
+          [Date.now(), target.primary ? round.resolvedAddress ?? null : null, target.id],
           function (err) {
             if (err) reject(err);
             else resolve();
@@ -386,7 +400,7 @@ class ProbeScheduler {
 
     for (const result of results) {
       console.log(
-        `[Scheduler] Probe complete for ${target.name}${result.family && results.length > 1 ? ` (IPv${result.family})` : ''}: ` +
+        `[Scheduler] Probe complete for ${target.name}${target.probe !== LOCAL_PROBE ? ` from ${target.probe}` : ''}${result.family && results.length > 1 ? ` (IPv${result.family})` : ''}: ` +
         `${result.success ? `${result.latency}ms` : 'FAILED'} ` +
         `(Loss: ${result.packetLoss ?? 0}%)`
       );
@@ -414,16 +428,23 @@ class ProbeScheduler {
       if (isClosedPortCheck(target)) {
         if (result.success) target.hasAnswered = true;
         else {
-          target.hasAnswered ??= !(await getNeverAnswered([target.id])).has(target.id);
+          // Asked of this probe alone: a server can answer one place and not another.
+          target.hasAnswered ??= !(await getNeverAnswered([target.id], target.probe)).has(target.id);
           if (!target.hasAnswered) return;
         }
       }
 
-      const found = await evaluateAlerts({ id: target.id, name: target.name, host: target.host, group: target.group }, result);
-      // Which probe agent it was probed from is only looked up for an alert to say so.
-      const probedFrom =
-        found.length > 0 && target.probeAgentId ? (await getProbeAgentConnection(target.probeAgentId))?.name : undefined;
-      const events = probedFrom ? found.map(event => ({ ...event, probedFrom })) : found;
+      const found = await evaluateAlerts(
+        { id: target.id, name: target.name, host: target.host, group: target.group },
+        { ...result, probe: target.probe }
+      );
+      // Where it was measured from is only looked up for an alert to say so.
+      const events = await Promise.all(
+        found.map(async event => {
+          const probedFrom = await probedFromPhrase(event);
+          return probedFrom ? { ...event, probedFrom } : event;
+        })
+      );
 
       for (const event of events) {
         console.log(
@@ -439,19 +460,25 @@ class ProbeScheduler {
       // not wait for it.
       const asking = events.filter(asksForTrace);
       if (asking.length > 0) {
-        if (shouldTraceOnAlert(events, await lastAlertTraceAt(target.id))) {
-          // One trace answers for every alert that fired. It is kept under the
-          // alert that allowed it soonest, which is the one that decided a
-          // trace was due.
-          const rule = asking.reduce((shortest, event) =>
-            event.rule.traceCooldownMinutes < shortest.rule.traceCooldownMinutes ? event : shortest
-          ).rule;
-          console.log(`[Scheduler] Tracing route to ${target.name} after alert`);
-          void traceAndStore(target, 'alert', undefined, rule.id)
-            .then(() => trimAlertTraces(rule.id, rule.traceKeepCount, rule.traceKeepDays))
-            .catch(error => console.error(`[Scheduler] Traceroute failed for ${target.name}:`, error));
-        } else {
-          console.log(`[Scheduler] Not tracing ${target.name} again yet: a trace was taken on an alert recently`);
+        // From each probe that sees the trouble, up to three: the route
+        // through the failure is that probe's own. Each has its pause, since
+        // it is the same path whichever alert noticed.
+        const tracing = [...new Set(asking.flatMap(event => (event.breaching?.length ? event.breaching : [target.probe])))].slice(0, 3);
+        for (const probe of tracing) {
+          if (shouldTraceOnAlert(events, await lastAlertTraceAt(target.id, probe))) {
+            // One trace answers for every alert that fired. It is kept under the
+            // alert that allowed it soonest, which is the one that decided a
+            // trace was due.
+            const rule = asking.reduce((shortest, event) =>
+              event.rule.traceCooldownMinutes < shortest.rule.traceCooldownMinutes ? event : shortest
+            ).rule;
+            console.log(`[Scheduler] Tracing route to ${target.name}${probe !== LOCAL_PROBE ? ` from ${probe}` : ''} after alert`);
+            void traceAndStore({ ...target, probeAgentId: agentIdOf(probe) }, 'alert', undefined, rule.id, probe)
+              .then(() => trimAlertTraces(rule.id, rule.traceKeepCount, rule.traceKeepDays))
+              .catch(error => console.error(`[Scheduler] Traceroute failed for ${target.name}:`, error));
+          } else {
+            console.log(`[Scheduler] Not tracing ${target.name} again yet: a trace was taken on an alert recently`);
+          }
         }
       }
     } catch (error) {
@@ -462,8 +489,8 @@ class ProbeScheduler {
   /**
    * Probe a single target
    */
-  private async probeTarget(targetId: string): Promise<void> {
-    const target = this.scheduledTargets.get(targetId);
+  private async probeTarget(key: string): Promise<void> {
+    const target = this.scheduledTargets.get(key);
     if (!target) return;
 
     // Mark as probing
@@ -471,10 +498,11 @@ class ProbeScheduler {
     target.lastProbeTime = Date.now();
 
     try {
-      const results = await runProbes(target);
+      const results = await runProbes(target, target.probe);
 
-      // Deleted while it was being probed: nothing to record against.
-      if (this.scheduledTargets.get(targetId) !== target) return;
+      // Deleted, or taken off this probe, while it was being probed: nothing
+      // to record against.
+      if (this.scheduledTargets.get(key) !== target) return;
 
       await this.recordResults(target, results);
     } catch (error) {
@@ -487,7 +515,7 @@ class ProbeScheduler {
       }
       // A result stored just as its target was deleted fails the foreign key;
       // that is the delete winning the race, not an error.
-      const removed = this.scheduledTargets.get(targetId) !== target;
+      const removed = this.scheduledTargets.get(key) !== target;
       if (!(removed && (error as { code?: string })?.code === 'SQLITE_CONSTRAINT')) {
         console.error(`[Scheduler] Error probing target ${target.name}:`, error);
       }
@@ -501,22 +529,27 @@ class ProbeScheduler {
    * now). It stands for the one due in the same interval, which is then not
    * taken: asking for a reading should not get two a few seconds apart.
    */
-  noteProbed(targetId: string, at: number): void {
-    const target = this.scheduledTargets.get(targetId);
-    if (target) target.lastProbeTime = Math.max(target.lastProbeTime, at);
+  noteProbed(targetId: string, at: number, probe?: ProbeId): void {
+    for (const target of this.pairsOf(targetId, probe)) target.lastProbeTime = Math.max(target.lastProbeTime, at);
+  }
+
+  /** The probes' schedules for a monitor, or for just one of its probes. */
+  private pairsOf(targetId: string, probe?: ProbeId): ScheduledTarget[] {
+    return [...this.scheduledTargets.values()].filter(pair => pair.id === targetId && (probe === undefined || pair.probe === probe));
   }
 
   /**
-   * Force probe a specific target immediately
+   * Force probe a specific target immediately, from one of its probes or from
+   * all of them.
    */
-  async forceProbe(targetId: string): Promise<void> {
-    const target = this.scheduledTargets.get(targetId);
-    if (!target) {
+  async forceProbe(targetId: string, probe?: ProbeId): Promise<void> {
+    const pairs = this.pairsOf(targetId, probe);
+    if (pairs.length === 0) {
       console.warn(`[Scheduler] Target ${targetId} not found in scheduler`);
       return;
     }
 
-    await this.probeTarget(targetId);
+    await Promise.all(pairs.map(pair => this.probeTarget(pairKey(pair.id, pair.probe))));
   }
 
   /**
@@ -525,7 +558,10 @@ class ProbeScheduler {
    * writing a measurement for a target that no longer exists.
    */
   forget(ids: string[]): void {
-    for (const id of ids) this.scheduledTargets.delete(id);
+    const gone = new Set(ids);
+    for (const [key, pair] of [...this.scheduledTargets]) {
+      if (gone.has(pair.id)) this.scheduledTargets.delete(key);
+    }
   }
 
   /**
@@ -564,8 +600,10 @@ class ProbeScheduler {
   getStatus(): {
     isRunning: boolean;
     targetCount: number;
+    /** Each monitor listed once for each probe it is measured from. */
     targets: Array<{
       id: string;
+      probe: ProbeId;
       name: string;
       host: string;
       interval: number;
@@ -577,6 +615,7 @@ class ProbeScheduler {
     const now = Date.now();
     const targets = Array.from(this.scheduledTargets.values()).map(t => ({
       id: t.id,
+      probe: t.probe,
       name: t.name,
       host: t.host,
       interval: t.interval,
@@ -587,7 +626,7 @@ class ProbeScheduler {
 
     return {
       isRunning: this.isRunning,
-      targetCount: this.scheduledTargets.size,
+      targetCount: new Set(targets.map(t => t.id)).size,
       targets,
     };
   }

@@ -1,4 +1,4 @@
-import type { ProbeAgentSummary } from './probe-agent';
+import type { ProbeAgentSummary, ProbeId } from './probe-agent';
 
 export type ProbeType = 'ping' | 'dns' | 'tcp' | 'game' | 'http';
 
@@ -171,6 +171,17 @@ export type ProbeIpVersion = Exclude<IpVersion, 'both'>;
 
 export type AddressFamily = 4 | 6;
 
+/** One probe a monitor is measured from, in the order they were chosen. */
+export interface TargetProbe {
+  id: ProbeId;
+  /** 0 for the primary probe, the one the page opens on. */
+  position: number;
+  /** The address each family last resolved to from there, for a name. */
+  resolved?: Partial<Record<AddressFamily, string>>;
+  /** Taken off the monitor: its readings stay until they age out, but it takes no more. */
+  former?: boolean;
+}
+
 export interface Target {
   id: string;
   name: string;
@@ -187,9 +198,15 @@ export interface Target {
   /**
    * The probe agent this target is probed from, or none for this server.
    * Belongs to this installation, so it is not part of a TargetDefinition and
-   * never travels in a share link.
+   * never travels in a share link. With several probes this is the primary
+   * one (the first of `probes`), which older clients and the API still read.
    */
   probeAgentId?: string | null;
+  /**
+   * Every probe it is measured from, primary first. Absent on a target built
+   * by hand, which reads as its `probeAgentId` alone.
+   */
+  probes?: TargetProbe[];
   createdAt: Date;
   updatedAt: Date;
   // Extended fields for UI compatibility
@@ -258,6 +275,8 @@ export interface ProbeMeasurement {
   details?: ProbeDetails;
   /** The address family this reading was taken over, when it is known. */
   family?: AddressFamily;
+  /** The probe it was taken from; the local probe when absent. */
+  probe?: ProbeId;
 }
 
 export interface DataPoint {
@@ -310,6 +329,8 @@ export interface ProbeResult {
   details?: ProbeDetails;
   /** The address family the probe ran over, when it is known. */
   family?: AddressFamily;
+  /** The probe the reading was taken from; the local probe when absent. */
+  probe?: ProbeId;
 }
 
 export interface SmokeGraphData {
@@ -396,10 +417,19 @@ export interface LatestMeasurement {
    * and with the loss of the worse one, so a row that is half down looks it.
    */
   byFamily?: Partial<Record<AddressFamily, FamilyReading>>;
+  /**
+   * Set for a monitor measured from several probes: each one's newest reading
+   * (with its own `byFamily`). The fields above then describe them together:
+   * reachable if any probe reaches it, with the loss of the worst.
+   */
+  byProbe?: Record<ProbeId, ProbeReading>;
 }
 
 /** One family's share of a dual-stack target's latest reading. */
-export type FamilyReading = Omit<LatestMeasurement, 'byFamily'>;
+export type FamilyReading = Omit<LatestMeasurement, 'byFamily' | 'byProbe'>;
+
+/** One probe's share of a monitor's latest reading. */
+export type ProbeReading = Omit<LatestMeasurement, 'byProbe'>;
 
 /**
  * One line on a comparison chart: a target, or one address family of a target
@@ -407,6 +437,8 @@ export type FamilyReading = Omit<LatestMeasurement, 'byFamily'>;
  */
 export interface ComparisonSeries {
   targetId: string;
+  /** The probe the line was measured from. */
+  probe?: ProbeId;
   /** Null when the target is not split by family. */
   family: AddressFamily | null;
   /** Set when the line is one resolver of a DNS target that asks several. */
@@ -449,6 +481,8 @@ export interface Traceroute {
   errorMessage?: string;
   /** The alert that took this route, when it was taken because an alert fired. */
   alertId?: string;
+  /** The probe it was traced from; the local probe when absent. */
+  probe?: ProbeId;
 }
 
 /**
@@ -550,6 +584,8 @@ export interface AlertTargetState {
   streak: number;
   lastFiredAt?: Date | null;
   lastResolvedAt?: Date | null;
+  /** The probes that see it breached while it fires: the ones holding it open. */
+  breachingProbes?: ProbeId[];
 }
 
 /**
@@ -577,8 +613,14 @@ export interface AlertEvent {
   targetHost: string;
   /** The group the target is in, as a path; absent for a target with none. */
   targetGroup?: string;
-  /** The probe agent the target is probed from; absent for this server. */
+  /** Where it was measured from, in words, when that is worth saying: a probe agent, or several probes. */
   probedFrom?: string;
+  /** The probe whose reading caused this; the local probe when absent. */
+  probe?: ProbeId;
+  /** The probes in breach once this reading was judged. */
+  breaching?: ProbeId[];
+  /** How many probes measure the monitor. */
+  probeCount?: number;
   transition: 'firing' | 'resolved';
   metric: AlertMetric;
   observed: number | null;

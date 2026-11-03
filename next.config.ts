@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
   // endpoint is not there to be reached.
   images: { unoptimized: true },
 
+  // Addresses that were renamed keep working, for bookmarks and for the
+  // browser's history.
+  async redirects() {
+    return [{ source: "/settings/probe-agents", destination: "/settings/probes", permanent: true }];
+  },
+
   async headers() {
     return [
       {

@@ -4,6 +4,15 @@
  * agents or the assistant.
  */
 
+/** Where readings are taken from: 'local' for the dashboard's own probe, otherwise a probe agent's id. */
+export type ProbeId = string;
+
+/** The dashboard's own probe: readings taken from the machine it runs on. */
+export const LOCAL_PROBE: ProbeId = 'local';
+
+/** What the local probe is called until it is renamed in Settings. */
+export const DEFAULT_LOCAL_PROBE_NAME = 'Local probe';
+
 /**
  * - `unpaired`: added, but never connected to yet
  * - `online`: answered the last time it was asked
@@ -25,6 +34,22 @@ export interface ProbeAgentSummary {
   exposure: ProbeAgentExposure;
   address: string;
   /** The machine's own name, as it reported it. */
+  hostname?: string;
+  lastSeenAt?: number;
+}
+
+/**
+ * A place readings are taken from, as the dashboard lists it: the local probe
+ * first, then each probe agent. The local probe is always online.
+ */
+export interface ProbeSummary {
+  id: ProbeId;
+  name: string;
+  /** The dashboard's own probe. */
+  local: boolean;
+  state: ProbeAgentState;
+  exposure?: ProbeAgentExposure;
+  address?: string;
   hostname?: string;
   lastSeenAt?: number;
 }

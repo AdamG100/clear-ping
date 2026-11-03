@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import type { ProbeAgent } from '@/types/probe-agent'
 import { CopyField } from './mcp-setup'
 import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
+import { LocalProbe } from './local-probe'
 import { addressOf, ago, ExposureNote, HINT, ICON, isOutdated, OutcomeAlert, OutdatedBadge, ProbeAgentDetails, send, uninstallCommands, when, type Outcome } from './probe-agent-details'
 import { Masked } from '../privacy/masked'
 
@@ -281,10 +282,11 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
 
   return (
     <div className="space-y-5 text-foreground">
+      <LocalProbe />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className={`${HINT} min-w-0 max-w-xl pt-1`}>
-          Install one on another machine, add it here, then choose it under Probe from in a target&apos;s settings. Its
-          readings are then taken from there.
+          Install a probe agent on another machine, add it here, then tick it under Probes in a monitor&apos;s settings.
+          Its readings are then taken from there, beside those of any other probe the monitor has.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="secondary" loading={refreshing} onClick={() => void refresh()}>

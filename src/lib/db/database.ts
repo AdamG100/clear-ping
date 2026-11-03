@@ -1,12 +1,15 @@
 import path from 'path';
 import fs from 'fs';
 import sqlite3 from 'sqlite3';
-import { Target, ProbeMeasurement, TargetStatistics, GroupOrder, LatestMeasurement, FamilyReading, BucketedMeasurement, SparklinePoint, IpVersion, ProbeType, AddressFamily, DnsResolverReading, ProbeDetails } from '@/types/probe';
+import { Target, TargetProbe, ProbeMeasurement, TargetStatistics, GroupOrder, LatestMeasurement, FamilyReading, ProbeReading, BucketedMeasurement, SparklinePoint, IpVersion, ProbeType, AddressFamily, DnsResolverReading, ProbeDetails } from '@/types/probe';
 import { addressFamilyFor, FAMILY_LABEL, isDualStack } from '../probes/host';
 import { median, percentile } from '../probes/metrics';
 import { lossBandIndex, PACKET_LOSS_BANDS } from '../charts/packet-loss-colors';
 import { groupWithAncestors, isWithinGroup, normalizeGroupPath, parentGroup, rebaseGroupPath } from '../targets/group-path';
 import { runMigrations } from './migrations';
+import { finishProbeUpgrade, reconcileTargetProbes } from './probe-tags';
+import { LOCAL_PROBE, type ProbeId } from '@/types/probe-agent';
+import { agentIdOf, probeIdsOf, probeOf } from '../targets/probes';
 
 // Use sqlite3.Database type
 type Database = sqlite3.Database;
@@ -130,6 +133,12 @@ export async function rebuildTable(
  * the resolver's preference changed part-way through its history.
  */
 async function backfillMeasurementFamilies(database: Database): Promise<void> {
+  // Once only: readings are stored with their family now, and with no index
+  // that holds `family` first, looking for the ones without it reads the
+  // whole table at every start.
+  const [done] = await allSql<{ value: string }>(database, 'SELECT value FROM settings WHERE key = ?', [FAMILIES_BACKFILLED]);
+  if (done) return;
+
   const targets = await new Promise<Pick<TargetRow, 'id' | 'host' | 'ip_version' | 'resolved_address'>[]>(
     (resolve, reject) => {
       database.all(
@@ -153,7 +162,12 @@ async function backfillMeasurementFamilies(database: Database): Promise<void> {
       target.id,
     ]);
   }
+
+  await runSql(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [FAMILIES_BACKFILLED, 'true']);
 }
+
+/** Set once every reading that predates the family column has been filed under one. */
+const FAMILIES_BACKFILLED = 'upgrade.families-backfilled';
 
 const TARGET_COLUMNS = [
   'id', 'name', 'host', 'probe_type', 'interval', 'status', 'group_name', 'created_at',
@@ -184,7 +198,46 @@ const targetsTableSql = (name: string) => `
     probe_config TEXT
   )`;
 
-function targetFromRow(r: TargetRow): Target {
+interface TargetProbeRow {
+  target_id: string;
+  probe: string;
+  position: number;
+  resolved: string | null;
+  removed_at: number | null;
+}
+
+function probesFromRows(rows: TargetProbeRow[]): Map<string, TargetProbe[]> {
+  const byTarget = new Map<string, TargetProbe[]>();
+  for (const row of rows) {
+    const resolved = parseJson<Record<string, string>>(row.resolved);
+    const probe: TargetProbe = {
+      id: row.probe,
+      position: row.position,
+      ...(resolved ? { resolved: { ...(resolved['4'] ? { 4: resolved['4'] } : {}), ...(resolved['6'] ? { 6: resolved['6'] } : {}) } } : {}),
+      ...(row.removed_at !== null ? { former: true } : {}),
+    };
+    const list = byTarget.get(row.target_id) ?? [];
+    list.push(probe);
+    byTarget.set(row.target_id, list);
+  }
+  // Active ones first, in the order they were chosen; then the former ones.
+  for (const list of byTarget.values()) {
+    list.sort((a, b) => Number(!!a.former) - Number(!!b.former) || a.position - b.position);
+  }
+  return byTarget;
+}
+
+/** Every probe of the given monitors (or of all), active and former. */
+async function loadProbes(database: Database, targetId?: string): Promise<Map<string, TargetProbe[]>> {
+  const rows = await allSql<TargetProbeRow>(
+    database,
+    `SELECT target_id, probe, position, resolved, removed_at FROM target_probes ${targetId ? 'WHERE target_id = ?' : ''}`,
+    targetId ? [targetId] : []
+  );
+  return probesFromRows(rows);
+}
+
+function targetFromRow(r: TargetRow, probes?: TargetProbe[]): Target {
   return {
     id: r.id,
     name: r.name,
@@ -198,6 +251,9 @@ function targetFromRow(r: TargetRow): Target {
     resolvedAddress: r.resolved_address ?? undefined,
     probeConfig: parseJson(r.probe_config),
     probeAgentId: r.probe_agent_id ?? null,
+    // A monitor with no row of its own (made by an older image) is measured
+    // from its one probe agent, which `probesOf` reads from the field above.
+    ...(probes && probes.length > 0 ? { probes } : {}),
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
   };
@@ -218,6 +274,7 @@ interface MeasurementRow {
   success: number;
   error_message: string | null;
   family: number | null;
+  probe?: string;
 }
 
 /** A stored family, or undefined for a row written before it was recorded. */
@@ -226,11 +283,28 @@ function familyFromRow(value: number | null): AddressFamily | undefined {
 }
 
 /**
- * Restrict a measurements query to one address family. Without a family the
- * query covers every row, which is right for any target that is not split.
+ * Which of a monitor's readings a query covers: one address family, one probe,
+ * or (left out) every one. A monitor that is not split by either has nothing
+ * to leave out.
  */
-function familyFilter(family?: AddressFamily): { clause: string; params: number[] } {
-  return family ? { clause: 'AND family = ?', params: [family] } : { clause: '', params: [] };
+export interface ReadingScope {
+  family?: AddressFamily;
+  probe?: ProbeId;
+}
+
+/** Restrict a measurements query to a scope. */
+function readingFilter(scope: ReadingScope = {}): { clause: string; params: (number | string)[] } {
+  const clauses: string[] = [];
+  const params: (number | string)[] = [];
+  if (scope.probe) {
+    clauses.push('AND probe = ?');
+    params.push(scope.probe);
+  }
+  if (scope.family) {
+    clauses.push('AND family = ?');
+    params.push(scope.family);
+  }
+  return { clause: clauses.join(' '), params };
 }
 
 interface StatisticsRow {
@@ -441,15 +515,9 @@ export async function initDatabase(): Promise<Database> {
       });
     });
 
-    // What finds the newest reading of each family of each target without
-    // reading the history behind it.
-    await new Promise<void>((resolve, reject) => {
-      db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_target_family_timestamp
-              ON measurements(target_id, family, timestamp DESC)`, function(err) {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    // What finds the newest reading of each probe, and each family of it,
+    // without reading the history behind it is made once readings are tagged
+    // with their probe (see probe-tags.ts), in place of the index on family alone.
 
     await new Promise<void>((resolve, reject) => {
       db!.run(`CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
@@ -512,8 +580,6 @@ export async function initDatabase(): Promise<Database> {
       console.log('Database: Migrated targets table to accept new probe types');
     }
 
-    await backfillMeasurementFamilies(db);
-
     // Create group_orders table
     await new Promise<void>((resolve, reject) => {
       db!.run(`
@@ -534,6 +600,11 @@ export async function initDatabase(): Promise<Database> {
     // Everything above brings a database of any age up to the shape the
     // numbered migrations start from. Changes made since are in that list.
     await runMigrations(db);
+
+    // After the migrations, which make the settings these keep their place in.
+    await backfillMeasurementFamilies(db);
+    await reconcileTargetProbes(db);
+    await finishProbeUpgrade(db);
 
     console.log('Database: Tables and indexes created successfully');
 
@@ -606,24 +677,81 @@ export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt
   // A target named into a group nobody has made yet makes it.
   await keepGroup(database, group);
 
-  return new Promise<Target>((resolve, reject) => {
-    database.run(`
-      INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, sort_order, ip_version, probe_config, probe_agent_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [target.id, target.name, target.host, target.probeType, target.interval, target.status, group, target.sortOrder ?? 0, target.ipVersion ?? 'auto', toJson(target.probeConfig), target.probeAgentId ?? null, now, now], function(err) {
-      if (err) {
-        reject(err);
-        return;
-      }
-      saveDatabase();
-      resolve({
-        ...target,
-        group: group || undefined,
-        createdAt: new Date(now),
-        updatedAt: new Date(now),
-      });
-    });
-  });
+  // The probes it is measured from, primary first; the column an older image
+  // reads holds the primary one.
+  const probeIds = probeIdsOf(target);
+  const primaryAgent = agentIdOf(probeIds[0]);
+
+  await runSql(
+    database,
+    `INSERT INTO targets (id, name, host, probe_type, interval, status, group_name, sort_order, ip_version, probe_config, probe_agent_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [target.id, target.name, target.host, target.probeType, target.interval, target.status, group, target.sortOrder ?? 0, target.ipVersion ?? 'auto', toJson(target.probeConfig), primaryAgent, now, now]
+  );
+  for (const [position, probe] of probeIds.entries()) {
+    await runSql(
+      database,
+      'INSERT INTO target_probes (target_id, probe, position, added_at) VALUES (?, ?, ?, ?)',
+      [target.id, probe, position, now]
+    );
+  }
+  saveDatabase();
+  return {
+    ...target,
+    group: group || undefined,
+    probeAgentId: primaryAgent,
+    probes: probeIds.map((id, position) => ({ id, position })),
+    createdAt: new Date(now),
+    updatedAt: new Date(now),
+  };
+}
+
+/**
+ * Set the probes a monitor is measured from, primary first.
+ *
+ * One taken off is kept as a former probe, so its readings still show until
+ * they age out, and ticking it again picks its history up where it left off.
+ * Its alert states go at once: a probe that no longer measures the monitor
+ * cannot hold an alert open. If the primary probe changes, the address stored
+ * for the monitor described the old one and goes too.
+ */
+export async function setTargetProbes(targetId: string, probes: ProbeId[]): Promise<boolean> {
+  const database = await getDatabase();
+  const [row] = await allSql<Pick<TargetRow, 'probe_agent_id'>>(database, 'SELECT probe_agent_id FROM targets WHERE id = ?', [targetId]);
+  if (!row || probes.length === 0) return false;
+
+  const now = Date.now();
+  const primaryChanged = probeOf(row.probe_agent_id) !== probes[0];
+  await runSql(database, 'BEGIN IMMEDIATE');
+  try {
+    for (const [position, probe] of probes.entries()) {
+      await runSql(
+        database,
+        `INSERT INTO target_probes (target_id, probe, position, added_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(target_id, probe) DO UPDATE SET position = excluded.position, removed_at = NULL`,
+        [targetId, probe, position, now]
+      );
+    }
+    const kept = probes.map(() => '?').join(', ');
+    await runSql(
+      database,
+      `UPDATE target_probes SET removed_at = ?, position = position + 1000
+       WHERE target_id = ? AND removed_at IS NULL AND probe NOT IN (${kept})`,
+      [now, targetId, ...probes]
+    );
+    await runSql(database, `DELETE FROM alert_probe_states WHERE target_id = ? AND probe NOT IN (${kept})`, [targetId, ...probes]);
+    await runSql(
+      database,
+      `UPDATE targets SET probe_agent_id = ?, updated_at = ?${primaryChanged ? ', resolved_address = NULL' : ''} WHERE id = ?`,
+      [agentIdOf(probes[0]), now, targetId]
+    );
+    await runSql(database, 'COMMIT');
+  } catch (error) {
+    await runSql(database, 'ROLLBACK').catch(() => {});
+    throw error;
+  }
+  saveDatabase();
+  return true;
 }
 
 /**
@@ -631,22 +759,12 @@ export async function createTarget(target: Omit<Target, 'createdAt' | 'updatedAt
  */
 export async function getAllTargets(): Promise<Target[]> {
   const database = await getDatabase();
-  
-  return new Promise((resolve, reject) => {
-    database.all('SELECT * FROM targets ORDER BY sort_order ASC, name ASC', [], (err, rows) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      
-      if (!rows || rows.length === 0) {
-        resolve([]);
-        return;
-      }
 
-      resolve(rows.map(row => targetFromRow(row as TargetRow)));
-    });
-  });
+  const [rows, probes] = await Promise.all([
+    allSql<TargetRow>(database, 'SELECT * FROM targets ORDER BY sort_order ASC, name ASC'),
+    loadProbes(database),
+  ]);
+  return rows.map(row => targetFromRow(row, probes.get(row.id)));
 }
 
 /**
@@ -654,22 +772,10 @@ export async function getAllTargets(): Promise<Target[]> {
  */
 export async function getTargetById(id: string): Promise<Target | null> {
   const database = await getDatabase();
-  
-  return new Promise((resolve, reject) => {
-    database.get('SELECT * FROM targets WHERE id = ?', [id], (err, row) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      
-      if (!row) {
-        resolve(null);
-        return;
-      }
 
-      resolve(targetFromRow(row as TargetRow));
-    });
-  });
+  const [row] = await allSql<TargetRow>(database, 'SELECT * FROM targets WHERE id = ?', [id]);
+  if (!row) return null;
+  return targetFromRow(row, (await loadProbes(database, id)).get(id));
 }
 
 /**
@@ -718,40 +824,44 @@ export async function updateTarget(id: string, updates: Partial<Target>): Promis
     fields.push('probe_config = ?');
     values.push(toJson(updates.probeConfig));
   }
-  if (updates.probeAgentId !== undefined) {
-    fields.push('probe_agent_id = ?');
-    values.push(updates.probeAgentId);
-  }
-  // The stored address describes what the old host resolved to. Once the host,
-  // its address family or its probe changes it describes nothing, and showing
-  // it until the next probe would label the target with somewhere it no longer
-  // points.
-  // Nor does it once the target is probed from somewhere else, which may
-  // resolve the name differently.
-  if (updates.host !== undefined || updates.ipVersion !== undefined || updates.probeType !== undefined || updates.probeAgentId !== undefined) {
+  // Where it is measured from: a list, or the one probe agent an older client
+  // sends, which then is the whole list. Kept apart from the fields above,
+  // since the probes are a table of their own.
+  const probeChange =
+    updates.probes !== undefined ? probeIdsOf(updates)
+    : updates.probeAgentId !== undefined ? [probeOf(updates.probeAgentId)]
+    : undefined;
+
+  // The stored address describes what the old host resolved to. Once the host
+  // or its address family changes it describes nothing, and showing it until
+  // the next probe would label the target with somewhere it no longer points.
+  // (Its primary probe changing does the same, which setTargetProbes sees to.)
+  if (updates.host !== undefined || updates.ipVersion !== undefined || updates.probeType !== undefined) {
     fields.push('resolved_address = NULL');
   }
 
-  if (fields.length === 0) return false;
+  if (fields.length === 0 && !probeChange) return false;
 
   if (updates.group !== undefined) await keepGroup(database, updates.group);
 
-  fields.push('updated_at = ?');
-  values.push(now);
-  values.push(id);
+  let changed = false;
+  if (fields.length > 0) {
+    fields.push('updated_at = ?');
+    values.push(now);
+    values.push(id);
 
-  return new Promise<boolean>((resolve, reject) => {
-    database.run(`UPDATE targets SET ${fields.join(', ')} WHERE id = ?`, values, function(err) {
-      if (err) {
-        reject(err);
-        return;
-      }
-      saveDatabase();
-      // `this.changes` is 0 when no row matched, which is how callers tell a
-      // successful update from an update against a target that doesn't exist.
-      resolve(this.changes > 0);
+    // `this.changes` is 0 when no row matched, which is how callers tell a
+    // successful update from an update against a target that doesn't exist.
+    changed = await new Promise<boolean>((resolve, reject) => {
+      database.run(`UPDATE targets SET ${fields.join(', ')} WHERE id = ?`, values, function(err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
+      });
     });
-  });
+  }
+  if (probeChange) changed = (await setTargetProbes(id, probeChange)) || changed;
+  saveDatabase();
+  return changed;
 }
 
 /**
@@ -831,8 +941,8 @@ export async function setResolvedAddress(id: string, address: string): Promise<v
 }
 
 const INSERT_MEASUREMENT = `
-  INSERT INTO measurements (id, target_id, timestamp, latency, latency_min, latency_max, latency_p10, latency_p25, latency_p50, latency_p75, latency_p90, packet_loss, jitter, success, error_message, details, family)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO measurements (id, target_id, timestamp, latency, latency_min, latency_max, latency_p10, latency_p25, latency_p50, latency_p75, latency_p90, packet_loss, jitter, success, error_message, details, family, probe)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 function measurementParams(measurement: ProbeMeasurement & { packetLoss?: number }) {
@@ -854,6 +964,7 @@ function measurementParams(measurement: ProbeMeasurement & { packetLoss?: number
     measurement.errorMessage || null,
     toJson(measurement.details),
     measurement.family ?? null,
+    measurement.probe ?? LOCAL_PROBE,
   ];
 }
 
@@ -880,16 +991,18 @@ export async function storeMeasurements(measurements: ProbeMeasurement[]): Promi
 export async function getMeasurements(
   targetId: string,
   startTime: Date,
-  endTime: Date
+  endTime: Date,
+  scope: ReadingScope = {}
 ): Promise<ProbeMeasurement[]> {
   const database = await getDatabase();
-  
+  const only = readingFilter(scope);
+
   return new Promise((resolve, reject) => {
     database.all(`
       SELECT * FROM measurements
-      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
+      WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? ${only.clause}
       ORDER BY timestamp ASC
-    `, [targetId, startTime.getTime(), endTime.getTime()], (err, rows) => {
+    `, [targetId, startTime.getTime(), endTime.getTime(), ...only.params], (err, rows) => {
       if (err) {
         reject(err);
         return;
@@ -912,9 +1025,10 @@ export async function getMeasurements(
           success: r.success === 1,
           errorMessage: r.error_message || undefined,
           family: familyFromRow(r.family),
+          probe: r.probe ?? LOCAL_PROBE,
         };
       });
-      
+
       resolve(measurements);
     });
   });
@@ -936,15 +1050,16 @@ export interface StoredReading {
  * thousands of rows, read here for every target a report covers, so the
  * columns a chart needs and this does not are left where they are.
  */
-export async function getProbeReadings(targetId: string, startTime: Date, endTime: Date): Promise<StoredReading[]> {
+export async function getProbeReadings(targetId: string, startTime: Date, endTime: Date, scope: ReadingScope = {}): Promise<StoredReading[]> {
   const database = await getDatabase();
+  const only = readingFilter(scope);
 
   const rows = await allSql<Pick<MeasurementRow, 'timestamp' | 'latency' | 'packet_loss' | 'success' | 'error_message' | 'family'>>(
     database,
     `SELECT timestamp, latency, packet_loss, success, error_message, family FROM measurements
-     WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
+     WHERE target_id = ? AND timestamp >= ? AND timestamp <= ? ${only.clause}
      ORDER BY timestamp ASC`,
-    [targetId, startTime.getTime(), endTime.getTime()]
+    [targetId, startTime.getTime(), endTime.getTime(), ...only.params]
   );
 
   return rows.map(row => ({
@@ -963,16 +1078,18 @@ export async function getProbeReadings(targetId: string, startTime: Date, endTim
  * answered stops being read at its first answer, but one that never has is
  * read to the end.
  */
-export async function getNeverAnswered(targetIds: string[]): Promise<Set<string>> {
+export async function getNeverAnswered(targetIds: string[], probe?: ProbeId): Promise<Set<string>> {
   if (targetIds.length === 0) return new Set();
   const database = await getDatabase();
+  // From one probe when asked: a server can answer one place and not another.
+  const from = probe ? 'AND m.probe = ?' : '';
   const rows = await allSql<{ id: string }>(
     database,
     `SELECT t.id FROM targets t
      WHERE t.id IN (${targetIds.map(() => '?').join(', ')})
-       AND EXISTS (SELECT 1 FROM measurements m WHERE m.target_id = t.id)
-       AND NOT EXISTS (SELECT 1 FROM measurements m WHERE m.target_id = t.id AND m.success = 1)`,
-    targetIds
+       AND EXISTS (SELECT 1 FROM measurements m WHERE m.target_id = t.id ${from})
+       AND NOT EXISTS (SELECT 1 FROM measurements m WHERE m.target_id = t.id AND m.success = 1 ${from})`,
+    probe ? [...targetIds, probe, probe] : targetIds
   );
   return new Set(rows.map(row => row.id));
 }
@@ -985,27 +1102,30 @@ export async function getNeverAnswered(targetIds: string[]): Promise<Set<string>
 export async function getLossMoments(
   targetIds: string[],
   startTime: Date,
-  endTime: Date
+  endTime: Date,
+  /** Only readings taken from this probe: the others' losses are a different path's. */
+  probe?: ProbeId
 ): Promise<Map<string, { probes: number; affected: number[] }>> {
   const moments = new Map(targetIds.map(id => [id, { probes: 0, affected: [] as number[] }]));
   if (targetIds.length === 0) return moments;
 
   const database = await getDatabase();
   const ids = targetIds.map(() => '?').join(', ');
-  const window = [...targetIds, startTime.getTime(), endTime.getTime()];
+  const only = readingFilter({ probe });
+  const window = [...targetIds, startTime.getTime(), endTime.getTime(), ...only.params];
 
   const [counts, lost] = await Promise.all([
     allSql<{ target_id: string; probes: number }>(
       database,
       `SELECT target_id, COUNT(*) AS probes FROM measurements
-       WHERE target_id IN (${ids}) AND timestamp >= ? AND timestamp <= ?
+       WHERE target_id IN (${ids}) AND timestamp >= ? AND timestamp <= ? ${only.clause}
        GROUP BY target_id`,
       window
     ),
     allSql<{ target_id: string; timestamp: number }>(
       database,
       `SELECT target_id, timestamp FROM measurements
-       WHERE target_id IN (${ids}) AND timestamp >= ? AND timestamp <= ? AND (success = 0 OR packet_loss > 0)
+       WHERE target_id IN (${ids}) AND timestamp >= ? AND timestamp <= ? ${only.clause} AND (success = 0 OR packet_loss > 0)
        ORDER BY timestamp ASC`,
       window
     ),
@@ -1027,15 +1147,16 @@ export async function getLossMoments(
  *
  * Pass a `family` for a target probed over both: its IPv4 and IPv6 readings
  * are two paths, and one set of statistics over the pair describes neither.
+ * The same goes for a `probe` of a monitor measured from several.
  */
 export async function getTargetStatistics(
   targetId: string,
   startTime: Date,
   endTime: Date,
-  family?: AddressFamily
+  scope: ReadingScope = {}
 ): Promise<TargetStatistics | null> {
   const database = await getDatabase();
-  const only = familyFilter(family);
+  const only = readingFilter(scope);
   const window = [targetId, startTime.getTime(), endTime.getTime(), ...only.params];
 
   const aggregates = await new Promise<StatisticsRow | null>((resolve, reject) => {
@@ -1112,6 +1233,7 @@ export async function getTargetStatistics(
 
 interface LatestRow {
   target_id: string;
+  probe: string;
   family: number | null;
   timestamp: number;
   packet_loss: number | null;
@@ -1178,53 +1300,96 @@ function combineFamilies(byFamily: Partial<Record<AddressFamily, FamilyReading>>
 export async function getLatestMeasurementForAllTargets(): Promise<Record<string, LatestMeasurement>> {
   const database = await getDatabase();
 
-  const rows = await new Promise<LatestRow[]>((resolve, reject) => {
-    // The newest reading of each family of each target is one lookup through
-    // idx_measurements_target_family_timestamp. Grouping the whole table for it
-    // took longer the more history there was, on every refresh of the
-    // dashboard. CROSS JOIN keeps the targets as the outer loop: left to
-    // itself SQLite walked the measurements instead.
-    const newestOf = (family: string) => `
-      SELECT m.target_id, m.family, m.timestamp, m.packet_loss, m.latency, m.success, m.error_message, m.details,
-             t.host, t.ip_version
-      FROM targets t
-      CROSS JOIN measurements m ON m.target_id = t.id AND m.family ${family}
-        AND m.timestamp = (SELECT MAX(timestamp) FROM measurements WHERE target_id = t.id AND family ${family})`;
+  // The newest reading of each family of each probe of each target is one
+  // lookup through idx_measurements_target_probe_family_timestamp. Grouping
+  // the whole table for it took longer the more history there was, on every
+  // refresh of the dashboard. CROSS JOIN keeps the probes as the outer loop:
+  // left to itself SQLite walked the measurements instead.
+  const newestOf = (family: string) => `
+    SELECT m.target_id, m.probe, m.family, m.timestamp, m.packet_loss, m.latency, m.success, m.error_message, m.details,
+           t.host, t.ip_version
+    FROM target_probes tp
+    CROSS JOIN targets t ON t.id = tp.target_id
+    CROSS JOIN measurements m ON m.target_id = tp.target_id AND m.probe = tp.probe AND m.family ${family}
+      AND m.timestamp = (SELECT MAX(timestamp) FROM measurements WHERE target_id = tp.target_id AND probe = tp.probe AND family ${family})
+    WHERE tp.removed_at IS NULL`;
 
-    database.all(`
-      SELECT * FROM (
+  const [rows, probes] = await Promise.all([
+    allSql<LatestRow>(
+      database,
+      `SELECT * FROM (
         ${newestOf('IS NULL')} UNION ALL ${newestOf('= 4')} UNION ALL ${newestOf('= 6')}
       )
-      ORDER BY timestamp DESC
-    `, [], (err, result) => {
-      if (err) reject(err);
-      else resolve((result ?? []) as LatestRow[]);
-    });
-  });
+      ORDER BY timestamp DESC`
+    ),
+    loadProbes(database),
+  ]);
 
-  // Newest first, so the first row seen for a target (or for one family of
-  // it) is the one to keep.
-  const newest = new Map<string, LatestRow>();
-  const perFamily = new Map<string, Partial<Record<AddressFamily, FamilyReading>>>();
+  // Newest first, so the first row seen for a probe of a target (or for one
+  // family of it) is the one to keep.
+  const newest = new Map<string, Map<ProbeId, LatestRow>>();
+  const perFamily = new Map<string, Map<ProbeId, Partial<Record<AddressFamily, FamilyReading>>>>();
 
   for (const row of rows) {
-    if (!newest.has(row.target_id)) newest.set(row.target_id, row);
+    const ofTarget = newest.get(row.target_id) ?? new Map<ProbeId, LatestRow>();
+    if (!ofTarget.has(row.probe)) ofTarget.set(row.probe, row);
+    newest.set(row.target_id, ofTarget);
 
     const family = familyFromRow(row.family);
     if (family && isDualStack(row.host, row.ip_version ?? 'auto')) {
-      const readings = perFamily.get(row.target_id) ?? {};
+      const ofProbes = perFamily.get(row.target_id) ?? new Map<ProbeId, Partial<Record<AddressFamily, FamilyReading>>>();
+      const readings = ofProbes.get(row.probe) ?? {};
       readings[family] ??= readingFromRow(row);
-      perFamily.set(row.target_id, readings);
+      ofProbes.set(row.probe, readings);
+      perFamily.set(row.target_id, ofProbes);
     }
   }
 
   const map: Record<string, LatestMeasurement> = {};
-  for (const [targetId, row] of newest) {
-    const byFamily = perFamily.get(targetId);
-    map[targetId] = byFamily ? combineFamilies(byFamily) : readingFromRow(row);
+  for (const [targetId, ofTarget] of newest) {
+    const wanted = (probes.get(targetId) ?? []).filter(probe => !probe.former).map(probe => probe.id);
+    const readings = new Map<ProbeId, ProbeReading>();
+    for (const [probe, row] of ofTarget) {
+      const byFamily = perFamily.get(targetId)?.get(probe);
+      readings.set(probe, byFamily ? combineFamilies(byFamily) : readingFromRow(row));
+    }
+    // One probe: the reading as it always was. Several: each one's, and the
+    // monitor's as the best of them (see combineProbes).
+    map[targetId] = wanted.length > 1
+      ? combineProbes(readings, wanted)
+      : [...readings.values()][0];
   }
 
   return map;
+}
+
+/**
+ * The newest readings of a monitor measured from several probes, as one.
+ *
+ * Reachable if any probe reaches it, with the loss of the worst, as for the
+ * two families of a dual-stack target: a monitor one probe cannot reach while
+ * another can is not down, but it is not fine either. `order` is the monitor's
+ * probes, primary first, which decides whose latency stands for the whole.
+ * Which probes fail and what they said is in `byProbe`, for the page to name.
+ */
+export function combineProbes(byProbe: Map<ProbeId, ProbeReading>, order: ProbeId[]): LatestMeasurement {
+  const known = order.filter(probe => byProbe.has(probe));
+  // A probe that has been taken off still has readings; it stands for nothing.
+  const readings = known.length > 0 ? known.map(probe => byProbe.get(probe)!) : [...byProbe.values()];
+  const newest = readings.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
+  const reachable = readings.find(reading => reading.success);
+
+  return {
+    targetId: newest.targetId,
+    timestamp: newest.timestamp,
+    packetLoss: Math.max(...readings.map(reading => reading.packetLoss)),
+    latency: reachable?.latency ?? null,
+    success: !!reachable,
+    errorMessage: reachable ? undefined : readings.find(reading => reading.errorMessage)?.errorMessage,
+    details: (reachable ?? newest).details,
+    byFamily: reachable?.byFamily ?? newest.byFamily,
+    byProbe: Object.fromEntries(byProbe),
+  };
 }
 
 /**
@@ -1367,34 +1532,35 @@ async function rebaseGroups(
  * many targets changed place. One already probed from there is left as it is.
  */
 export async function setGroupProbeAgent(group: string, probeAgentId: string | null): Promise<number> {
+  return setGroupProbes(group, [probeOf(probeAgentId)]);
+}
+
+/**
+ * Measure every target in a group, and in the groups inside it, from the same
+ * probes, primary first. Returns how many targets changed. One already
+ * measured from exactly those is left as it is.
+ */
+export async function setGroupProbes(group: string, probes: ProbeId[]): Promise<number> {
   const database = await getDatabase();
   const source = normalizeGroupPath(group);
-  if (!source) return 0;
+  if (!source || probes.length === 0) return 0;
 
-  const rows = await allSql<{ id: string; probe_agent_id: string | null; group_name: string | null }>(
-    database,
-    'SELECT id, probe_agent_id, group_name FROM targets'
-  );
+  const [rows, listed] = await Promise.all([
+    allSql<{ id: string; probe_agent_id: string | null; group_name: string | null }>(
+      database,
+      'SELECT id, probe_agent_id, group_name FROM targets'
+    ),
+    loadProbes(database),
+  ]);
   const ids = rows
-    .filter(row => !!row.group_name && isWithinGroup(row.group_name, source) && (row.probe_agent_id ?? null) !== probeAgentId)
+    .filter(row => {
+      if (!row.group_name || !isWithinGroup(row.group_name, source)) return false;
+      const now = probeIdsOf({ probes: listed.get(row.id), probeAgentId: row.probe_agent_id });
+      return now.length !== probes.length || now.some((probe, index) => probe !== probes[index]);
+    })
     .map(row => row.id);
-  if (ids.length === 0) return 0;
 
-  const now = Date.now();
-  await runSql(database, 'BEGIN IMMEDIATE');
-  try {
-    for (const id of ids) {
-      await runSql(
-        database,
-        'UPDATE targets SET probe_agent_id = ?, resolved_address = NULL, updated_at = ? WHERE id = ?',
-        [probeAgentId, now, id]
-      );
-    }
-    await runSql(database, 'COMMIT');
-  } catch (error) {
-    await runSql(database, 'ROLLBACK').catch(() => {});
-    throw error;
-  }
+  for (const id of ids) await setTargetProbes(id, probes);
   return ids.length;
 }
 
@@ -1609,18 +1775,19 @@ export async function updateTargetSortOrders(updates: { id: string; sortOrder: n
  * probe ran" from "probe ran and lost everything" by the presence of the row,
  * not by a zero.
  *
- * Pass a `family` to read one side of a target probed over both.
+ * Pass a `family` to read one side of a target probed over both, and a
+ * `probe` to read one of the probes that measure it.
  */
 export async function getBucketedMeasurements(
   targetId: string,
   startTime: Date,
   endTime: Date,
   bucketMs: number,
-  family?: AddressFamily
+  scope: ReadingScope = {}
 ): Promise<BucketedMeasurement[]> {
   const database = await getDatabase();
   const width = Math.max(1000, Math.floor(bucketMs));
-  const only = familyFilter(family);
+  const only = readingFilter(scope);
 
   return new Promise((resolve, reject) => {
     database.all(
@@ -1707,12 +1874,12 @@ export async function getResolverRounds(
   targetId: string,
   startTime: Date,
   endTime: Date,
-  family?: AddressFamily
+  scope: ReadingScope = {}
 ): Promise<Array<{ timestamp: number; readings: DnsResolverReading[] }>> {
   const database = await getDatabase();
   // A target on both families asks for a different record over each, and the
-  // two are not one resolver's line.
-  const only = familyFilter(family);
+  // two are not one resolver's line. Nor are two probes': each asks its own.
+  const only = readingFilter(scope);
 
   const rows = await allSql<{ timestamp: number; details: string }>(
     database,
@@ -1740,12 +1907,20 @@ export async function cleanOldMeasurements(daysToKeep: number = 90): Promise<num
   const database = await getDatabase();
   const cutoffTime = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
 
-  return new Promise<number>((resolve, reject) => {
+  const removed = await new Promise<number>((resolve, reject) => {
     database.run('DELETE FROM measurements WHERE timestamp < ?', [cutoffTime], function (err) {
       if (err) reject(err);
       else resolve(this.changes);
     });
   });
+
+  // A probe taken off a monitor is listed only while readings of it remain.
+  await runSql(
+    database,
+    `DELETE FROM target_probes WHERE removed_at IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM measurements m WHERE m.target_id = target_probes.target_id AND m.probe = target_probes.probe)`
+  );
+  return removed;
 }
 
 /**
@@ -1757,12 +1932,17 @@ export async function cleanOldMeasurements(daysToKeep: number = 90): Promise<num
  * Rows sharing a target and a timestamp are one round of a target probed over
  * both families, and are drawn as one point carrying the worse loss. Left as
  * two, the trace would zigzag between the IPv4 and IPv6 latencies.
+ *
+ * Of one probe when `probe` is given, otherwise of each target's primary
+ * probe: a monitor measured from several would otherwise zigzag between them.
  */
 export async function getRecentSeriesForAllTargets(
-  pointsPerTarget = 24
+  pointsPerTarget = 24,
+  probe?: ProbeId
 ): Promise<Record<string, SparklinePoint[]>> {
   const database = await getDatabase();
   const limit = Math.min(120, Math.max(2, Math.floor(pointsPerTarget)));
+  const from = probe ? '?' : "COALESCE(tp.probe, 'local')";
 
   return new Promise((resolve, reject) => {
     database.all(
@@ -1776,14 +1956,15 @@ export async function getRecentSeriesForAllTargets(
                MIN(m.success) AS success,
                ROW_NUMBER() OVER (PARTITION BY m.target_id ORDER BY m.timestamp DESC) AS rn
         FROM targets t
+        LEFT JOIN target_probes tp ON tp.target_id = t.id AND tp.position = 0 AND tp.removed_at IS NULL
         -- Only the newest rows of each target are looked at, found through the
         -- (target_id, timestamp) index. A target probed over both families
         -- has two rows per reading, so twice the limit is read and the
         -- ROW_NUMBER below keeps the newest readings among them. Looking at
         -- every row there is took longer the more history was kept.
-        CROSS JOIN measurements m ON m.target_id = t.id
+        CROSS JOIN measurements m ON m.target_id = t.id AND m.probe = ${from}
           AND m.timestamp >= COALESCE(
-            (SELECT timestamp FROM measurements WHERE target_id = t.id ORDER BY timestamp DESC LIMIT 1 OFFSET ?),
+            (SELECT timestamp FROM measurements WHERE target_id = t.id AND probe = ${from} ORDER BY timestamp DESC LIMIT 1 OFFSET ?),
             0
           )
         GROUP BY m.target_id, m.timestamp
@@ -1791,7 +1972,7 @@ export async function getRecentSeriesForAllTargets(
       WHERE rn <= ?
       ORDER BY target_id ASC, timestamp ASC
       `,
-      [limit * 2 - 1, limit],
+      probe ? [probe, probe, limit * 2 - 1, limit] : [limit * 2 - 1, limit],
       (err, rows) => {
         if (err) {
           reject(err);

@@ -4,6 +4,9 @@ import { createTarget, getAllTargets, setResolvedAddress, storeMeasurement } fro
 import { runProbes } from '../probe-agents/client';
 import { measurementFrom, worstOf } from '../probes/result';
 import { getScheduler } from '../scheduler';
+import { agentIdOf, primaryProbeOf, probeOf } from './probes';
+import { recordPairRound } from './store';
+import type { ProbeId } from '@/types/probe-agent';
 
 /**
  * Things done to targets that more than one door leads to.
@@ -21,11 +24,13 @@ import { getScheduler } from '../scheduler';
  */
 export async function addTargets(
   definitions: TargetDefinition[],
-  options: { probeAgentId?: string | null } = {}
+  options: { probeAgentId?: string | null; probes?: ProbeId[] } = {}
 ): Promise<Target[]> {
   const existing = await getAllTargets();
   let sortOrder = Math.max(-1, ...existing.map(target => target.sortOrder ?? 0)) + 1;
 
+  // Where they are measured from: the probes named, or the one probe agent an older caller names.
+  const probes = options.probes?.length ? options.probes : [probeOf(options.probeAgentId)];
   const created: Target[] = [];
   for (const definition of definitions) {
     created.push(
@@ -34,7 +39,8 @@ export async function addTargets(
         ...definition,
         status: 'active',
         sortOrder: sortOrder++,
-        probeAgentId: options.probeAgentId ?? null,
+        probeAgentId: agentIdOf(probes[0]),
+        probes: probes.map((id, position) => ({ id, position })),
       })
     );
   }
@@ -57,21 +63,35 @@ export interface ProbedNow {
  * other. From its probe agent if it has one; a ProbeAgentUnavailableError
  * means nothing was taken or kept.
  */
-export async function probeNow(target: Target): Promise<ProbedNow> {
-  const startedAt = Date.now();
-  const results = await runProbes(target);
-  // Counts as this interval's reading, so the scheduled one is not taken too.
-  getScheduler().noteProbed(target.id, startedAt);
-  const measurements = results.map(result => measurementFrom(randomUUID(), result));
+export async function probeNow(target: Target, probes: ProbeId[] = [primaryProbeOf(target)]): Promise<ProbedNow> {
+  // One round from each probe asked for, side by side; the first to fail
+  // because its probe agent is down says so, and nothing is kept for any.
+  const rounds = await Promise.all(
+    probes.map(async probe => {
+      const startedAt = Date.now();
+      return { probe, startedAt, results: await runProbes(target, probe) };
+    })
+  );
 
-  for (const measurement of measurements) {
-    await storeMeasurement(measurement);
+  const all: ProbeResult[] = [];
+  const measurements: ProbeMeasurement[] = [];
+  for (const { probe, startedAt, results } of rounds) {
+    // Counts as this interval's reading, so the scheduled one is not taken too.
+    getScheduler().noteProbed(target.id, startedAt, probe);
+    const stored = results.map(result => measurementFrom(randomUUID(), result));
+    for (const measurement of stored) await storeMeasurement(measurement);
+    await recordPairRound(
+      target.id,
+      probe,
+      startedAt,
+      results.flatMap(result => (result.resolvedAddress ? [{ family: result.family, address: result.resolvedAddress }] : []))
+    );
+
+    const resolved = worstOf(results).resolvedAddress;
+    if (resolved && probe === primaryProbeOf(target)) await setResolvedAddress(target.id, resolved);
+    all.push(...results);
+    measurements.push(...stored);
   }
 
-  const result = worstOf(results);
-  if (result.resolvedAddress) {
-    await setResolvedAddress(target.id, result.resolvedAddress);
-  }
-
-  return { result, results, measurements };
+  return { result: worstOf(all), results: all, measurements };
 }

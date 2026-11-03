@@ -29,10 +29,14 @@ import { round } from '../probes/metrics'
 import type { Incident } from '../reports/outages'
 import { parseAddressInput, PROBE_TYPES, targetAddressLabel } from '../probes/config'
 import { ProbeAgentUnavailableError } from '../probe-agents/client'
-import { listProbeAgentSummaries, readProbeAgentChoice } from '../probe-agents/store'
+import { listProbeAgentSummaries } from '../probe-agents/store'
+import { localProbeName, readProbeChoices } from '../probe-agents/probes'
+import { agentIdOf, knownProbeIdsOf, primaryProbeOf, probeIdsOf, sameProbes } from '../targets/probes'
+import { LOCAL_PROBE, type ProbeId } from '@/types/probe-agent'
 import { getScheduler } from '../scheduler'
 import { addTargets, probeNow } from '../targets/actions'
 import { measurementKey, validateTargetDefinition } from '../targets/definition'
+import { probeNames } from '../probe-agents/probes'
 import { ensureTracerouteSchema, getTraceroutes, traceAndStore, traceFamiliesProblem } from '../traceroute/store'
 
 /**
@@ -179,8 +183,9 @@ function namer(all: Target[]) {
 }
 
 /** One target's readings over a period, as a line for each family it is probed over. */
-async function seriesOf(target: Target, label: string, period: Period, timeZone: string): Promise<SeriesEvidence[]> {
-  const readings = await getProbeReadings(target.id, period.start, period.end)
+async function seriesOf(target: Target, label: string, period: Period, timeZone: string, probe: ProbeId = primaryProbeOf(target)): Promise<SeriesEvidence[]> {
+  // One probe's readings: another's are another path's.
+  const readings = await getProbeReadings(target.id, period.start, period.end, { probe })
   const intervalMs = target.interval * 1000
   const options = { timeZone }
 
@@ -213,18 +218,25 @@ async function gather(targets: Target[], all: Target[], period: Period, timeZone
  * probe agent is a ClearPing program on another machine that takes readings
  * from there; nothing to do with AI agents.
  */
-async function probeAgentNamer(): Promise<(target: Target) => string | undefined> {
-  const names = new Map((await listProbeAgentSummaries()).map(agent => [agent.id, agent.name]))
-  return target => (target.probeAgentId ? names.get(target.probeAgentId) ?? 'a removed probe agent' : undefined)
+async function probeAgentNamer(): Promise<(target: Target) => string | string[] | undefined> {
+  const [agents, localName] = await Promise.all([listProbeAgentSummaries(), localProbeName()]);
+  const names = new Map<string, string>([[LOCAL_PROBE, localName], ...agents.map(agent => [agent.id, agent.name] as [string, string])])
+  return target => {
+    const ids = probeIdsOf(target)
+    // With several probes, all of them are named; with one, only a probe agent is.
+    if (ids.length > 1) return ids.map(id => names.get(id) ?? 'a removed probe agent')
+    return ids[0] === LOCAL_PROBE ? undefined : names.get(ids[0]) ?? 'a removed probe agent'
+  }
 }
 
-function describeTarget(target: Target, name: string, probedFrom?: string) {
+function describeTarget(target: Target, name: string, probedFrom?: string | string[]) {
   const address = target.resolvedAddress ?? target.host
   return {
     id: target.id,
     name,
     // Readings from a probe agent show the network as seen from that machine.
-    ...(probedFrom ? { probedFrom: `probe agent ${probedFrom}` } : {}),
+    ...(typeof probedFrom === 'string' ? { probedFrom: `probe agent ${probedFrom}` } : {}),
+    ...(Array.isArray(probedFrom) ? { measuredFrom: probedFrom } : {}),
     address: targetAddressLabel(target),
     ...(target.resolvedAddress && target.resolvedAddress !== target.host ? { resolvesTo: target.resolvedAddress } : {}),
     probe: PROBE_NAME[target.probeType],
@@ -358,7 +370,7 @@ async function resolversOf(target: Target, period: Period) {
 
   return Promise.all(
     families.map(async family => {
-      const rounds = await getResolverRounds(target.id, period.start, period.end, family ?? undefined)
+      const rounds = await getResolverRounds(target.id, period.start, period.end, { family: family ?? undefined })
       return {
         ...(family ? { ipVersion: FAMILY_LABEL[family] } : {}),
         resolvers: resolverSeries(target.id, rounds, whole, resolvers).map(line => ({
@@ -375,6 +387,11 @@ async function resolversOf(target: Target, period: Period) {
 }
 
 // ─── The tools ──────────────────────────────────────────────────────────────
+
+const PROBE_PROPERTY = {
+  type: 'string',
+  description: 'For a target measured from several probes: which one, by name or id. Its first (primary) probe if left out.',
+} as const
 
 const HOW_TO_READ = [
   'Times are local to the time zone given, with its offset from UTC written on the end.',
@@ -424,6 +441,7 @@ const targetHistory: McpTool = {
     type: 'object',
     properties: {
       target: { type: 'string', description: 'The target, by its name, its address or its id.' },
+      probe: PROBE_PROPERTY,
       ...PERIOD_PROPERTIES,
       ...TIMEZONE_PROPERTY,
     },
@@ -436,10 +454,12 @@ const targetHistory: McpTool = {
     const all = await getAllTargets()
     const target = findTarget(all, args.target)
     const name = namer(all)(target)
-    const series = await seriesOf(target, name, period, timeZone)
+    const probe = await probeOfTarget(target, args.probe)
+    const series = await seriesOf(target, name, period, timeZone, probe)
 
     return {
       target: describeTarget(target, name, (await probeAgentNamer())(target)),
+      ...(knownProbeIdsOf(target).length > 1 ? { readingsFrom: (await probeNames([probe])).get(probe) } : {}),
       period: { from: isoIn(period.start.getTime(), timeZone), to: isoIn(period.end.getTime(), timeZone) },
       timeZone,
       howToRead: HOW_TO_READ.slice(0, 4),
@@ -722,10 +742,15 @@ const TARGET_PROPERTIES = {
   },
   group: { type: 'string', description: 'The group to put it in, as a path: "Home/Network". Made if it is not there. An empty string for no group.' },
   interval_seconds: { type: 'number', description: 'How often to probe it, from 10 to 86400 seconds. 300 unless said.' },
+  probes: {
+    type: 'array',
+    items: { type: 'string' },
+    description:
+      'Where to measure it from: each a probe agent by its name or id (list_probe_agents lists them), or "local" for the machine ClearPing runs on. Several measure it from each, kept apart in its history. The first is its primary probe. The local probe unless said.',
+  },
   probe_agent: {
     type: 'string',
-    description:
-      'Where to probe it from: a probe agent by its name or id (list_probe_agents lists them), or "local" for the machine ClearPing runs on. The machine ClearPing runs on unless said.',
+    description: 'One place to measure it from, as probes does for one. Use probes.',
   },
   ip_version: {
     type: 'string',
@@ -741,14 +766,33 @@ const TARGET_PROPERTIES = {
   },
 } as const
 
+/** A list of probes as one string, to group targets that are measured from the same ones. */
+const probes_key = (probes: ProbeId[]) => probes.join('\u0000')
+
 const TARGET_REFERENCE = { type: 'string', description: 'The target, by its name, its address or its id.' } as const
 
-/** The probe agent an assistant named, as an id; null for this server, undefined if it named none. */
-async function probeAgentFrom(raw: unknown, where: string): Promise<string | null | undefined> {
-  const choice = await readProbeAgentChoice(typeof raw === 'string' ? raw.trim() : raw)
-  if (choice.ok) return choice.probeAgentId
+/**
+ * The probes an assistant named, as ids, primary first: `probes`, or the older
+ * `probe_agent`. Undefined if it named none.
+ */
+async function probesFrom(args: Args, where: string): Promise<ProbeId[] | undefined> {
+  const raw = args.probes !== undefined ? args.probes : args.probe_agent !== undefined ? [args.probe_agent] : undefined
+  if (raw === undefined) return undefined
+  const choice = await readProbeChoices(Array.isArray(raw) ? raw.map(entry => (typeof entry === 'string' ? entry.trim() : entry)) : raw)
+  if (choice.ok) return choice.probes
   const known = (await listProbeAgentSummaries()).map(agent => agent.name)
-  throw new ToolError(`${where}: ${choice.error}. ${known.length > 0 ? `There is: ${known.join(', ')}, or "local".` : 'There are no probe agents; leave probe_agent out.'}`)
+  throw new ToolError(`${where}: ${choice.error}. ${known.length > 0 ? `There is: ${known.join(', ')}, or "local".` : 'There are no probe agents; leave probes out.'}`)
+}
+
+/** One of a target's probes, by name or id, for a tool that reads or measures from one; its first when none is named. */
+async function probeOfTarget(target: Target, raw: unknown): Promise<ProbeId> {
+  if (raw === undefined || raw === null || raw === '') return primaryProbeOf(target)
+  const [chosen] = (await probesFrom({ probes: [raw] }, target.name)) ?? []
+  if (!chosen || !knownProbeIdsOf(target).includes(chosen)) {
+    const names = (await probeAgentNamer())(target)
+    throw new ToolError(`${target.name} is not measured from ${String(raw)}. It is measured from ${Array.isArray(names) ? names.join(', ') : names ?? 'the local probe'}.`)
+  }
+  return chosen
 }
 
 /** A target as the app would add it, from what an assistant gave for it. `where` says which one, in an error. */
@@ -814,30 +858,30 @@ const addTargetsTool: McpTool = {
 
     const all = await getAllTargets()
     // The same thing measured from somewhere else is a different target.
-    const placeOf = (agentId: string | null | undefined) => agentId ?? 'local'
-    const monitored = new Map(all.map(target => [`${placeOf(target.probeAgentId)}|${measurementKey(target)}`, target.name]))
-    const definitions: Array<{ definition: TargetDefinition; probeAgentId: string | null }> = []
+    const monitored = new Map<string, string>(all.flatMap(target => probeIdsOf(target).map(probe => [`${probe}|${measurementKey(target)}`, target.name] as const)))
+    const definitions: Array<{ definition: TargetDefinition; probes: ProbeId[] }> = []
     const alreadyMonitored: Array<{ address: string; as: string }> = []
 
     for (const [index, entry] of entries.entries()) {
       const input = isRecord(entry) ? entry : {}
       const where = `Target ${index + 1}${typeof input.address === 'string' ? ` (${input.address})` : ''}`
       const definition = definitionFrom(input, where)
-      const probeAgentId = (await probeAgentFrom(input.probe_agent, where)) ?? null
-      const key = `${placeOf(probeAgentId)}|${measurementKey(definition)}`
-      const as = monitored.get(key)
+      const probes = (await probesFrom(input, where)) ?? [LOCAL_PROBE]
+      // Already measured when every probe asked for measures it.
+      const keys = probes.map(probe => `${probe}|${measurementKey(definition)}`)
+      const as = keys.every(key => monitored.has(key)) ? monitored.get(keys[0]) : undefined
 
       if (as !== undefined) alreadyMonitored.push({ address: String(input.address), as })
       else {
-        monitored.set(key, definition.name)
-        definitions.push({ definition, probeAgentId })
+        for (const key of keys) monitored.set(key, definition.name)
+        definitions.push({ definition, probes })
       }
     }
 
     const created: Target[] = []
-    for (const probeAgentId of new Set(definitions.map(each => each.probeAgentId))) {
-      const these = definitions.filter(each => each.probeAgentId === probeAgentId).map(each => each.definition)
-      created.push(...(await addTargets(these, { probeAgentId })))
+    for (const probes of new Set(definitions.map(each => probes_key(each.probes)))) {
+      const these = definitions.filter(each => probes_key(each.probes) === probes)
+      created.push(...(await addTargets(these.map(each => each.definition), { probes: these[0].probes })))
     }
     const fromOf = await probeAgentNamer()
     return {
@@ -883,8 +927,11 @@ const updateTargetTool: McpTool = {
     if (wanted.interval !== existing.interval) changes.interval = wanted.interval
     if ((wanted.group ?? '') !== normalizeGroupPath(existing.group)) changes.group = wanted.group ?? ''
     if (JSON.stringify(wanted.probeConfig) !== JSON.stringify(existing.probeConfig ?? {})) changes.probeConfig = wanted.probeConfig
-    const probeAgentId = await probeAgentFrom(args.probe_agent, existing.name)
-    if (probeAgentId !== undefined && probeAgentId !== (existing.probeAgentId ?? null)) changes.probeAgentId = probeAgentId
+    const probes = await probesFrom(args, existing.name)
+    if (probes !== undefined && !sameProbes(probes, probeIdsOf(existing))) {
+      changes.probes = probes.map((id, position) => ({ id, position }))
+      changes.probeAgentId = agentIdOf(probes[0])
+    }
 
     const changed = Object.keys(changes)
     if (changed.length === 0) throw new ToolError(`Nothing to change: ${existing.name} is already as asked.`)
@@ -937,14 +984,15 @@ const probeNowTool: McpTool = {
     'Take a reading of a target straight away, outside its schedule, and say how it went. The reading is kept with the rest of its history. Use it after adding a target, or to see whether something is down at this moment.',
   inputSchema: {
     type: 'object',
-    properties: { target: TARGET_REFERENCE, ...TIMEZONE_PROPERTY },
+    properties: { target: TARGET_REFERENCE, probe: PROBE_PROPERTY, ...TIMEZONE_PROPERTY },
     required: ['target'],
     additionalProperties: false,
   },
   run: async args => {
     const timeZone = timeZoneFrom(args)
     const target = findTarget(await getAllTargets(), args.target)
-    const { result, results } = await probeNow(target).catch(error => {
+    const probe = await probeOfTarget(target, args.probe)
+    const { result, results } = await probeNow(target, [probe]).catch(error => {
       if (error instanceof ProbeAgentUnavailableError) {
         throw new ToolError(`${target.name} is probed from probe agent ${error.agentName}, which cannot take a reading now: ${error.message}. Nothing was recorded.`)
       }
@@ -980,6 +1028,7 @@ const traceRouteTool: McpTool = {
     type: 'object',
     properties: {
       target: TARGET_REFERENCE,
+      probe: PROBE_PROPERTY,
       ip_version: {
         type: 'string',
         enum: TRACE_FAMILIES,
@@ -998,7 +1047,8 @@ const traceRouteTool: McpTool = {
     const problem = families && traceFamiliesProblem(target.host, families)
     if (problem) throw new ToolError(`${problem}.`)
     await ensureTracerouteSchema()
-    const traces = await traceAndStore(target, 'manual', families).catch(error => {
+    const probe = await probeOfTarget(target, args.probe)
+    const traces = await traceAndStore(target, 'manual', families, undefined, probe).catch(error => {
       if (error instanceof ProbeAgentUnavailableError) {
         throw new ToolError(`${target.name} is traced from probe agent ${error.agentName}, which cannot be reached now: ${error.message}.`)
       }
@@ -1026,8 +1076,13 @@ const listProbeAgentsTool: McpTool = {
         state: agent.state,
         reachable: agent.state === 'online',
         ...(agent.lastSeenAt ? { lastSeen: isoIn(agent.lastSeenAt, timeZone) } : {}),
-        targets: targets.filter(target => target.probeAgentId === agent.id).map(target => target.name),
+        targets: targets.filter(target => probeIdsOf(target).includes(agent.id)).map(target => target.name),
       })),
+      localProbe: {
+        id: LOCAL_PROBE,
+        name: await localProbeName(),
+        targets: targets.filter(target => probeIdsOf(target).includes(LOCAL_PROBE)).map(target => target.name),
+      },
       note:
         agents.length === 0
           ? 'There are no probe agents: every target is probed from the machine ClearPing runs on. They are added in the app, under Settings, Probe agents.'

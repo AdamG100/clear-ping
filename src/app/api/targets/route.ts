@@ -6,7 +6,10 @@ import { randomUUID } from 'crypto';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
 import { validateTargetDefinition } from '@/lib/targets/definition';
-import { listProbeAgentSummaries, readProbeAgentChoice } from '@/lib/probe-agents/store';
+import { listProbeAgentSummaries } from '@/lib/probe-agents/store';
+import { localProbeName, readRequestedProbes } from '@/lib/probe-agents/probes';
+import { agentIdOf } from '@/lib/targets/probes';
+import { LOCAL_PROBE } from '@/types/probe-agent';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
 
@@ -25,7 +28,8 @@ export async function GET(request: NextRequest) {
         getLatestMeasurementForAllTargets(),
         getGroups(),
         getGroupOrders(),
-        getRecentSeriesForAllTargets(24),
+        // Of one probe while the sidebar is filtered to it; each monitor's primary otherwise.
+        getRecentSeriesForAllTargets(24, searchParams.get('probe') || undefined),
         listProbeAgentSummaries(),
         getNeverAnswered(targets.filter(isClosedPortCheck).map(target => target.id)),
       ]);
@@ -39,6 +43,7 @@ export async function GET(request: NextRequest) {
         series,
         // So each row can say where it is probed from, and whether that is up.
         probeAgents,
+        localProbeName: await localProbeName(),
       });
     }
     
@@ -64,14 +69,16 @@ export async function POST(request: NextRequest) {
     }
     // Where it is probed from belongs to this installation, not to what the
     // target is, so it is read beside the definition rather than in it.
-    const from = await readProbeAgentChoice(body?.probeAgentId);
+    const from = await readRequestedProbes(body);
     if (!from.ok) return NextResponse.json({ error: from.error }, { status: 400 });
 
+    const probes = from.probes ?? [LOCAL_PROBE];
     const target = await createTarget({
       id: randomUUID(),
       ...definition.target,
       status: 'active',
-      probeAgentId: from.probeAgentId ?? null,
+      probeAgentId: agentIdOf(probes[0]),
+      probes: probes.map((id, position) => ({ id, position })),
     });
     const { actor, via } = await actorFor(request);
     await recordActivity(actor, via, 'target.add', `${target.name} (${target.host})`);

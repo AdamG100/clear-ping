@@ -1251,6 +1251,8 @@ const ACTIONS: Record<string, string> = {
   'mcp.set_target_paused': 'paused or resumed a target',
   'mcp.probe_now': 'probed a target',
   'mcp.run_traceroute': 'traced a route',
+  'probe.rename': 'renamed the local probe',
+  'group.probe': 'changed the probes of a group',
   'probe-agent.add': 'added a probe agent',
   'probe-agent.change': 'changed a probe agent',
   'probe-agent.remove': 'removed a probe agent',
@@ -1346,7 +1348,7 @@ const SECTIONS: Section[] = [
   { value: 'sso', label: 'Single sign-on', intro: 'Let people sign in with Authentik or another OpenID Connect provider instead of a ClearPing password.', icon: LogIn, group: 'Security' },
   { value: 'accounts', label: 'Accounts', intro: 'Who can sign in, and what each person can do.', icon: Users, group: 'Security' },
   { value: 'privacy', label: 'Privacy', intro: 'What ClearPing shows on screen, hands to AI assistants, keeps in its records and asks of the internet.', icon: EyeOff, group: 'Security' },
-  { value: 'probe-agents', label: 'Probe agents', intro: 'Take readings from other machines, such as a VPS abroad, as well as from this server. Nothing to do with AI agents.', icon: RadioTower, group: 'Monitoring', adminOnly: true },
+  { value: 'probes', label: 'Probes', intro: 'Where readings are taken from: the local probe, which is this dashboard, and probe agents on other machines, such as a VPS abroad. Nothing to do with AI agents.', icon: RadioTower, group: 'Monitoring', adminOnly: true },
   { value: 'routing', label: 'Routing', intro: 'Watch how the rest of the internet reaches your own IP prefixes in BGP.', icon: Network, group: 'Monitoring', adminOnly: true },
   { value: 'maintenance', label: 'Maintenance', intro: 'Check the database for damage, clear out leftovers and old data, and keep the file tidy.', icon: Wrench, group: 'Monitoring', adminOnly: true },
   { value: 'activity', label: 'Activity', intro: 'Every change, sign-in and failed sign-in, with who did it and how. How long it is kept is under Privacy.', icon: History, group: 'More', adminOnly: true },
@@ -1548,7 +1550,7 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
                 {current.value === 'accounts' && <AccountsTab data={loaded.data} reload={reload} />}
                 {current.value === 'activity' && <ActivityTab />}
                 {current.value === 'maintenance' && <MaintenanceTab />}
-                {current.value === 'probe-agents' && <ProbeAgentsTab onShowTargets={onShowTargetsFrom} />}
+                {current.value === 'probes' && <ProbeAgentsTab onShowTargets={onShowTargetsFrom} />}
                 {current.value === 'routing' && <RoutingTab onOpenRouting={() => onOpenRouting?.()} />}
               </div>
             )}

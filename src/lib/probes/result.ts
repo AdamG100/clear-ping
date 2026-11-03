@@ -101,6 +101,7 @@ export function measurementFrom(id: string, result: ProbeResult): ProbeMeasureme
     errorMessage: result.errorMessage,
     details: result.details,
     family: result.family,
+    probe: result.probe,
   };
 }
 

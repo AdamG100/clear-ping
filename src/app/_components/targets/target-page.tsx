@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { PANE, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
 import { PAGE_CARD } from '../settings/mcp-setup'
 import { BLANK_TARGET, formValuesOf, TargetForm } from './target-dialogs'
+import { agentIdOf } from '@/lib/targets/probes'
 
 /**
  * Adding, duplicating and editing a target, each a page of its own in the
@@ -53,13 +54,14 @@ interface AddTargetPageProps {
   onAddTarget: (target: NewTarget) => void
   onClose: () => void
   probeAgents?: ProbeAgentSummary[]
+  localProbeName?: string
 }
 
 /**
  * Only the address is needed. A copy starts from the same settings, and none
  * of the history is copied.
  */
-export function AddTargetPage({ availableGroups, group = '', template = null, onAddTarget, onClose, probeAgents }: AddTargetPageProps) {
+export function AddTargetPage({ availableGroups, group = '', template = null, onAddTarget, onClose, probeAgents, localProbeName }: AddTargetPageProps) {
   return (
     <PageFrame
       title={template ? `Duplicate ${template.name}` : 'Add a target'}
@@ -76,11 +78,14 @@ export function AddTargetPage({ availableGroups, group = '', template = null, on
         initial={template ? { ...formValuesOf(template), name: `${template.name} copy` } : { ...BLANK_TARGET, group }}
         availableGroups={availableGroups}
         probeAgents={probeAgents}
+        localProbeName={localProbeName}
         submitLabel="Add target"
         onCancel={onClose}
         onSubmit={values =>
           onAddTarget({
             ...values,
+            probes: values.probes.map((id, position) => ({ id, position })),
+            probeAgentId: agentIdOf(values.probes[0]),
             group: values.group || undefined,
             status: 'active',
             createdAt: new Date(),
@@ -100,9 +105,10 @@ interface EditTargetPageProps {
   onSave: (id: string, updates: Partial<Target>) => void
   onClose: () => void
   probeAgents?: ProbeAgentSummary[]
+  localProbeName?: string
 }
 
-export function EditTargetPage({ target, availableGroups, onSave, onClose, probeAgents }: EditTargetPageProps) {
+export function EditTargetPage({ target, availableGroups, onSave, onClose, probeAgents, localProbeName }: EditTargetPageProps) {
   if (!target) {
     return (
       <div className="flex h-full items-center justify-center p-6">
@@ -123,11 +129,12 @@ export function EditTargetPage({ target, availableGroups, onSave, onClose, probe
         initial={formValuesOf(target)}
         availableGroups={availableGroups}
         probeAgents={probeAgents}
+        localProbeName={localProbeName}
         submitLabel="Save changes"
         onCancel={onClose}
         // The group is sent even when empty: that is how choosing "None" takes
         // the target out of its group.
-        onSubmit={values => onSave(target.id, { ...values, updatedAt: new Date() })}
+        onSubmit={values => onSave(target.id, { ...values, probes: values.probes.map((id, position) => ({ id, position })), probeAgentId: agentIdOf(values.probes[0]), updatedAt: new Date() })}
       />
     </PageFrame>
   )

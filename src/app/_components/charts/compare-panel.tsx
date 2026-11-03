@@ -62,6 +62,8 @@ function seriesColor(index: number): string {
 interface LoadedSeries {
   key: string
   targetId: string
+  /** The probe it was measured from, when the comparison asks for more than each monitor's first. */
+  probe?: string
   family: AddressFamily | null
   /** The resolver this line is, when the lines are a DNS target's resolvers. */
   resolver?: string
@@ -100,7 +102,9 @@ function useComparison(
   refreshKey: number | undefined,
   reportError: (title: string, error?: unknown) => void,
   split?: 'resolver',
-  splitFamily?: AddressFamily
+  splitFamily?: AddressFamily,
+  /** 'all' draws a line for each probe of each monitor; a probe id moves every monitor to that probe. */
+  probes?: string
 ) {
   // Which targets, and how often each is probed: everything about them that
   // the result depends on, as a value that only changes when one of those does.
@@ -122,7 +126,7 @@ function useComparison(
     }
 
     const requestId = ++requestIdRef.current
-    const cacheKey = `${owner}|${split ?? ''}${splitFamily ?? ''}${named}|${timeRange}|${zoom ? `${zoom.start}-${zoom.end}` : 'all'}`
+    const cacheKey = `${owner}|${split ?? ''}${splitFamily ?? ''}${named}|${probes ?? ''}|${timeRange}|${zoom ? `${zoom.start}-${zoom.end}` : 'all'}`
     const cached = cacheRef.current.get(cacheKey)
 
     if (cached) {
@@ -142,7 +146,9 @@ function useComparison(
       const period = zoom
         ? `start=${zoom.start}&end=${zoom.end}`
         : `hours=${TIME_RANGE_CONFIG[timeRange].hours}`
-      const by = split ? `&split=${split}${splitFamily ? `&family=${splitFamily}` : ''}` : ''
+      const by =
+        (split ? `&split=${split}${splitFamily ? `&family=${splitFamily}` : ''}` : '') +
+        (probes === 'all' ? '&probes=all' : probes ? `&probe=${encodeURIComponent(probes)}` : '')
       const ids = [...intervals.keys()].slice(0, MAX_COMPARED_TARGETS)
       const response = await fetch(`/api/compare?targets=${ids.join(',')}&${period}${by}&maxPoints=${comparisonPointsPer(ids.length)}`)
       if (!response.ok) {
@@ -157,8 +163,9 @@ function useComparison(
         end: result.end,
         window: zoom,
         series: result.series.map(item => ({
-          key: `${item.targetId}:${item.family ?? 'all'}:${item.resolver ?? ''}`,
+          key: `${item.targetId}:${item.probe ?? ''}:${item.family ?? 'all'}:${item.resolver ?? ''}`,
           targetId: item.targetId,
+          probe: item.probe,
           family: item.family,
           resolver: item.resolver,
           points: buildSeries(item.buckets, intervals.get(item.targetId) ?? 300, result.bucketMs),
@@ -176,7 +183,7 @@ function useComparison(
     } finally {
       if (requestId === requestIdRef.current) setPending(false)
     }
-  }, [owner, timeRange, zoom, reportError, split, splitFamily, named])
+  }, [owner, timeRange, zoom, reportError, split, splitFamily, named, probes])
 
   const loadRef = useRef(load)
   useEffect(() => {
@@ -185,7 +192,7 @@ function useComparison(
 
   useEffect(() => {
     loadRef.current()
-  }, [owner, timeRange, zoom, refreshKey, splitFamily, named])
+  }, [owner, timeRange, zoom, refreshKey, splitFamily, named, probes])
 
   const current = snapshot !== null && snapshot.owner === owner ? snapshot : null
 
@@ -224,11 +231,15 @@ interface ComparePanelProps {
    * What a line is called. Defaults to the target's name, with the address
    * family added for a target that contributes one line per family.
    */
-  nameSeries?: (target: Target, family: AddressFamily | null, resolver?: string) => string
+  nameSeries?: (target: Target, family: AddressFamily | null, resolver?: string, probeName?: string) => string
   /** Draw a DNS target's resolvers as a line each, where it asks several. */
   split?: 'resolver'
   /** With `split`, on a target probed over both families: which one's lookups. */
   splitFamily?: AddressFamily
+  /** 'all': a line for each probe of each monitor. A probe id: every monitor measured from that probe. */
+  probes?: string
+  /** What each probe is called, for the lines' names. */
+  probeNames?: ReadonlyMap<string, string>
   /** What the column of failures is called for these lines. "Loss" unless said. */
   lossLabel?: string
   /** What the figures in the table are figures of, where that needs saying. */
@@ -266,8 +277,8 @@ function hiddenAtFirst(rows: Array<{ line: CompareLine; statistics: TargetStatis
   return new Set(worstFirst.slice(DRAWN_AT_FIRST).map(row => row.line.key))
 }
 
-const defaultName = (target: Target, family: AddressFamily | null, resolver?: string) =>
-  resolver ? `${target.name} · ${resolver}` : family ? `${target.name} · ${FAMILY_LABEL[family]}` : target.name
+const defaultName = (target: Target, family: AddressFamily | null, resolver?: string, probeName?: string) =>
+  [target.name, probeName, resolver ?? (family ? FAMILY_LABEL[family] : undefined)].filter(Boolean).join(' · ')
 
 export function ComparePanel({
   targets,
@@ -281,6 +292,8 @@ export function ComparePanel({
   nameSeries = defaultName,
   split,
   splitFamily,
+  probes,
+  probeNames,
   lossLabel = 'Loss',
   note,
   showAddress = true,
@@ -288,7 +301,7 @@ export function ComparePanel({
   probeAgents,
   reportError,
 }: ComparePanelProps) {
-  const { snapshot, pending, initialLoad } = useComparison(targets, timeRange, zoom, refreshKey, reportError, split, splitFamily)
+  const { snapshot, pending, initialLoad } = useComparison(targets, timeRange, zoom, refreshKey, reportError, split, splitFamily, probes)
   const [highlighted, setHighlighted] = useState<string | null>(null)
   const mask = useMask()
 
@@ -304,13 +317,13 @@ export function ComparePanel({
       // one does not repaint the rest.
       const line: CompareLine = {
         key: series.key,
-        label: mask.text(nameSeries(target, series.family, series.resolver)),
+        label: mask.text(nameSeries(target, series.family, series.resolver, probes === 'all' && series.probe ? probeNames?.get(series.probe) ?? series.probe : undefined)),
         color: seriesColor(index),
         points: series.points,
       }
       return [{ line, target, statistics: series.statistics, now: latestReading(series.points) }]
     })
-  }, [snapshot, targets, nameSeries, mask])
+  }, [snapshot, targets, nameSeries, mask, probes, probeNames])
 
   // Lines taken off the chart from the legend. The rest are rescaled to fill
   // it, so hiding the slow one shows the fast ones in detail. Held for one set
@@ -514,7 +527,7 @@ export function ComparePanel({
                           )}
                           {/* Measured from somewhere else, where the same host
                               can look quite different: the sidebar's badge. */}
-                          <ProbedFrom agent={target.probeAgentId ? agentsById.get(target.probeAgentId) : undefined} />
+                          {probes !== 'all' && <ProbedFrom agent={target.probeAgentId ? agentsById.get(target.probeAgentId) : undefined} />}
                           {showAddress && (
                             <span className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground @4xl/main:inline">
                               <Masked text value={targetAddressLabel(target)} />

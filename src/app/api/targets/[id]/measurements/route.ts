@@ -3,6 +3,9 @@ import { getBucketedMeasurements, getTargetById, getTargetStatistics } from '@/l
 import { probeAgentOutages as outagesOf } from '@/lib/probe-agents/store';
 import { windowFromQuery } from '@/lib/charts/series';
 import { initializeServer } from '@/lib/init';
+import { chosenProbe } from '@/lib/targets/probes';
+import { LOCAL_PROBE } from '@/types/probe-agent';
+import type { AddressFamily } from '@/types/probe';
 
 export async function GET(
   request: NextRequest,
@@ -25,15 +28,19 @@ export async function GET(
     // One side of a target probed over both address families. Anything else
     // is read whole.
     const requestedFamily = Number(searchParams.get('family'));
-    const family = requestedFamily === 4 || requestedFamily === 6 ? requestedFamily : undefined;
+    const family: AddressFamily | undefined = requestedFamily === 4 ? 4 : requestedFamily === 6 ? 6 : undefined;
 
     const target = await getTargetById(id);
+    // The probe asked for with `?probe=`; the primary one when it is not, which
+    // is what every monitor was read from before it could have several.
+    const probe = target ? chosenProbe(target, searchParams.get('probe')) : undefined;
+    const scope = { family, probe };
     const [buckets, statistics, probeAgentOutages] = await Promise.all([
-      getBucketedMeasurements(id, startTime, endTime, bucketMs, family),
-      getTargetStatistics(id, startTime, endTime, family),
-      // When its probe agent could not be reached: the gaps in the readings
+      getBucketedMeasurements(id, startTime, endTime, bucketMs, scope),
+      getTargetStatistics(id, startTime, endTime, scope),
+      // When that probe's agent could not be reached: the gaps in the readings
       // that are the agent's and not the target's.
-      target?.probeAgentId ? outagesOf(target.probeAgentId, window.start, window.end) : [],
+      probe && probe !== LOCAL_PROBE ? outagesOf(probe, window.start, window.end) : [],
     ]);
 
     return NextResponse.json({

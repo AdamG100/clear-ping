@@ -3,6 +3,7 @@ import { getDatabase } from '../db/database';
 import { notificationFor, parseNotifyUrls, withEmbeds } from './delivery';
 import { sendNotification, type DeliveryResult } from './apprise';
 import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
+import { LOCAL_PROBE } from '@/types/probe-agent';
 import {
   ALERT_METRIC_LABELS,
   DEFAULT_TRACE_COOLDOWN_MINUTES,
@@ -105,15 +106,27 @@ async function all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
 // ─── Reading and writing alerts ─────────────────────────────────────────────
 
 export async function getAlerts(): Promise<Alert[]> {
-  const [alerts, states] = await Promise.all([
+  const [alerts, states, breaching] = await Promise.all([
     all<AlertRow>('SELECT * FROM alerts ORDER BY created_at ASC'),
     all<AlertTargetRow>('SELECT * FROM alert_targets'),
+    all<{ alert_id: string; target_id: string; probe: string }>(
+      `SELECT s.alert_id, s.target_id, s.probe FROM alert_probe_states s
+       JOIN target_probes p ON p.target_id = s.target_id AND p.probe = s.probe AND p.removed_at IS NULL
+       WHERE s.in_breach = 1`
+    ),
   ]);
+
+  const holding = new Map<string, string[]>();
+  for (const row of breaching) {
+    const key = `${row.alert_id}|${row.target_id}`;
+    holding.set(key, [...(holding.get(key) ?? []), row.probe]);
+  }
 
   const byAlert = new Map<string, AlertTargetState[]>();
   for (const row of states) {
     const list = byAlert.get(row.alert_id) ?? [];
-    list.push(stateFromRow(row));
+    const probes = row.state === 'firing' ? holding.get(`${row.alert_id}|${row.target_id}`) : undefined;
+    list.push({ ...stateFromRow(row), ...(probes ? { breachingProbes: probes } : {}) });
     byAlert.set(row.alert_id, list);
   }
 
@@ -309,6 +322,7 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
     // the others forget that they are firing.
     for (const targetId of ticked.filter(targetId => !wanted.includes(targetId))) {
       await run('DELETE FROM alert_targets WHERE alert_id = ? AND target_id = ?', [id, targetId]);
+      await run('DELETE FROM alert_probe_states WHERE alert_id = ? AND target_id = ?', [id, targetId]);
     }
     for (const targetId of wanted.filter(targetId => !ticked.includes(targetId))) {
       await run('INSERT OR IGNORE INTO alert_targets (alert_id, target_id) VALUES (?, ?)', [id, targetId]);
@@ -322,6 +336,7 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
     changes.metric !== undefined || changes.threshold !== undefined || changes.consecutiveProbes !== undefined;
   if (conditionChanged || changes.enabled !== undefined) {
     await run('UPDATE alert_targets SET streak = 0 WHERE alert_id = ?', [id]);
+    await run('UPDATE alert_probe_states SET streak = 0 WHERE alert_id = ?', [id]);
   }
 
   return getAlert(id);
@@ -329,6 +344,7 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
 
 export async function deleteAlert(id: string): Promise<boolean> {
   // Removed explicitly as well as by the cascade, as measurements are.
+  await run('DELETE FROM alert_probe_states WHERE alert_id = ?', [id]);
   await run('DELETE FROM alert_targets WHERE alert_id = ?', [id]);
   return (await run('DELETE FROM alerts WHERE id = ?', [id])) > 0;
 }
@@ -429,9 +445,23 @@ async function persistRuleState(
   ]);
 }
 
+interface ProbeStateRow {
+  alert_id: string;
+  probe: string;
+  in_breach: number;
+  streak: number;
+}
+
 /**
  * Evaluate every enabled alert a target is ticked for against one probe result.
  * Returns the transitions that occurred; notification is the caller's job.
+ *
+ * Each probe that measures the target keeps its own state against the alert,
+ * so two probes' readings never run one streak between them: a probe fires
+ * after its own run of breaching readings and clears after its own run of
+ * clean ones. The target fires when any probe is in breach and resolves when
+ * none is. For a target measured from one probe that is exactly what it was
+ * before probes were counted.
  */
 export async function evaluateAlerts(
   target: Pick<Target, 'id' | 'name' | 'host' | 'group'> & { probedFrom?: string },
@@ -439,26 +469,64 @@ export async function evaluateAlerts(
 ): Promise<AlertEvent[]> {
   const rules = (await getAlertRules(target.id)).filter(r => r.enabled);
   const events: AlertEvent[] = [];
+  if (rules.length === 0) return events;
+
   const at = Date.now();
+  const probe = result.probe ?? LOCAL_PROBE;
+  // Only the probes that measure it now count: one taken off, or a probe
+  // agent since removed, cannot hold an alert open.
+  const active = (await all<{ probe: string }>('SELECT probe FROM target_probes WHERE target_id = ? AND removed_at IS NULL', [target.id]))
+    .map(row => row.probe);
+  const states = await all<ProbeStateRow>('SELECT alert_id, probe, in_breach, streak FROM alert_probe_states WHERE target_id = ?', [target.id]);
 
   for (const rule of rules) {
-    const breaching = isBreaching(rule, result);
-    const next = nextRuleState(rule, breaching);
+    const rows = states.filter(row => row.alert_id === rule.id);
+    const mine = rows.find(row => row.probe === probe);
+    const others = rows.filter(row => row.probe !== probe && row.in_breach === 1 && active.includes(row.probe));
+
+    // A probe with no state of its own yet (just added to the monitor) joins
+    // an alert that is already firing as part of what holds it open, if
+    // nothing else does: the alert is not announced as resolved just because
+    // the probe that raised it was replaced.
+    const inheriting = !mine && rule.state === 'firing' && others.length === 0;
+    const was: AlertRule['state'] = mine ? (mine.in_breach === 1 ? 'firing' : 'ok') : inheriting ? 'firing' : 'ok';
+    const streak = mine?.streak ?? 0;
+
+    const breaching = isBreaching({ ...rule, state: was }, result);
+    const next = nextRuleState({ state: was, streak, consecutiveProbes: rule.consecutiveProbes }, breaching);
 
     // Most probes change nothing (a healthy target stays at ok with no
     // streak), and are not written back.
-    if (next.transition || next.streak !== rule.streak || next.state !== rule.state) {
-      await persistRuleState(rule, next, next.transition, at);
+    if (!mine || next.streak !== streak || next.state !== was) {
+      await run(
+        `INSERT INTO alert_probe_states (alert_id, target_id, probe, in_breach, streak) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(alert_id, target_id, probe) DO UPDATE SET in_breach = excluded.in_breach, streak = excluded.streak`,
+        [rule.id, target.id, probe, next.state === 'firing' ? 1 : 0, next.streak]
+      );
     }
 
-    if (next.transition) {
+    const inBreach = [...others.map(row => row.probe), ...(next.state === 'firing' ? [probe] : [])];
+    const state: AlertRule['state'] = inBreach.length > 0 ? 'firing' : 'ok';
+    const transition = state === rule.state ? null : state === 'firing' ? 'firing' : 'resolved';
+    // The target's own streak is what an older image reads: with one probe it
+    // is that probe's, and with several there is no one streak to give.
+    const targetStreak = active.length <= 1 ? next.streak : 0;
+
+    if (transition || state !== rule.state || targetStreak !== rule.streak) {
+      await persistRuleState(rule, { streak: targetStreak, state }, transition, at);
+    }
+
+    if (transition) {
       events.push({
-        rule: { ...rule, state: next.state, streak: next.streak },
+        rule: { ...rule, state, streak: targetStreak },
         targetName: target.name,
         targetHost: target.host,
         targetGroup: target.group || undefined,
         ...(target.probedFrom ? { probedFrom: target.probedFrom } : {}),
-        transition: next.transition,
+        probe,
+        breaching: inBreach,
+        probeCount: Math.max(active.length, 1),
+        transition,
         metric: rule.metric,
         observed: observedValue(rule, result),
         threshold: rule.threshold,

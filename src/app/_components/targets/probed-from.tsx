@@ -5,6 +5,8 @@ import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { inDisplayZone } from '@/lib/time-zone'
 import { cn } from '@/lib/utils'
 import type { ProbeAgentSummary } from '@/types/probe-agent'
+import type { Target } from '@/types/probe'
+import { probeIdsOf } from '@/lib/targets/probes'
 import { PROBE_AGENT_STATE } from '../settings/probe-agent-labels'
 import { useMask } from '../privacy/use-privacy'
 
@@ -29,8 +31,21 @@ const REMOTE_COLOURS = {
  * While the agent cannot be reached the badge says so in the warning colour:
  * the target's readings have stopped because of the agent, not the target.
  */
-export function ProbedFrom({ agent, className }: { agent?: ProbeAgentSummary; className?: string }) {
+export function ProbedFrom({ agent, count = 1, className }: { agent?: ProbeAgentSummary; count?: number; className?: string }) {
   const mask = useMask()
+  // Measured from several probes: how many, not which, since there is no room for names.
+  if (count > 1) {
+    return (
+      <Tooltip content={`Measured from ${count} probes. Open it to see each one.`}>
+        <span className={cn('flex shrink-0', className)}>
+          <span className="sr-only">Measured from {count} probes</span>
+          <Badge size="sm" tone="neutral" icon={<MapPin size={10} strokeWidth={2} aria-hidden />} style={REMOTE_COLOURS} aria-hidden>
+            {count} probes
+          </Badge>
+        </span>
+      </Tooltip>
+    )
+  }
   if (!agent) return null
   const down = agent.state !== 'online' && agent.state !== 'unpaired'
   const machine = [agent.hostname, agent.address].filter((part): part is string => !!part).map(mask.address).join(', ')
@@ -84,15 +99,14 @@ export function agentDown(agent: ProbeAgentSummary): string | undefined {
 /** Which targets the sidebar lists: all of them, this server's, or one probe agent's by its id. */
 export type ProbeFromFilter = 'all' | 'local' | (string & {})
 
-export function matchesProbeFrom(target: { probeAgentId?: string | null }, filter: ProbeFromFilter): boolean {
+export function matchesProbeFrom(target: Pick<Target, 'probes' | 'probeAgentId'>, filter: ProbeFromFilter): boolean {
   if (filter === 'all') return true
-  if (filter === 'local') return !target.probeAgentId
-  return target.probeAgentId === filter
+  return probeIdsOf(target).includes(filter)
 }
 
 /** The sentence for a target's page: where its readings are taken from, and whether that is working. */
 export function probedFromLine(agent: ProbeAgentSummary | undefined): string {
-  if (!agent) return 'Probed from this server'
+  if (!agent) return 'Measured from the local probe'
   const state = PROBE_AGENT_STATE[agent.state].label
   return `Probed from ${agent.name}${agent.hostname ? ` · ${agent.hostname}` : ''} · ${state}`
 }

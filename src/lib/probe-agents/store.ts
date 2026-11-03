@@ -135,7 +135,7 @@ function connectionOf(row: ProbeAgentRow): ProbeAgentConnection {
 }
 
 const WITH_COUNTS = `
-  SELECT probe_agents.*, (SELECT COUNT(*) FROM targets WHERE targets.probe_agent_id = probe_agents.id) AS target_count
+  SELECT probe_agents.*, (SELECT COUNT(*) FROM target_probes WHERE target_probes.probe = probe_agents.id AND target_probes.removed_at IS NULL) AS target_count
   FROM probe_agents`;
 
 export async function listProbeAgents(): Promise<ProbeAgent[]> {
@@ -258,7 +258,7 @@ export async function renewProbeAgentToken(id: string): Promise<string | null> {
 export async function targetsUsingProbeAgent(id: string): Promise<string[]> {
   const rows = await all<{ name: string }>(
     await getDatabase(),
-    'SELECT name FROM targets WHERE probe_agent_id = ? ORDER BY name COLLATE NOCASE',
+    'SELECT t.name FROM target_probes p JOIN targets t ON t.id = p.target_id WHERE p.probe = ? AND p.removed_at IS NULL ORDER BY t.name COLLATE NOCASE',
     [id]
   );
   return rows.map(row => row.name);

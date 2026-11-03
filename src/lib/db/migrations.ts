@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { isIP } from 'net';
 import type sqlite3 from 'sqlite3';
 import { groupWithAncestors, normalizeGroupPath } from '../targets/group-path';
 
@@ -596,6 +597,99 @@ async function bgpMonitoring(database: Database): Promise<void> {
   )`);
 }
 
+/** What is left of tagging old readings with the probe that took them; see probe-tags.ts. */
+export const PROBE_TAGS_KEY = 'upgrade.probe-tags';
+
+/**
+ * A monitor measured from several probes.
+ *
+ * A target had one `probe_agent_id`: none for this server, otherwise the probe
+ * agent it was measured from. It now has a list, in `target_probes`, with the
+ * first as its primary probe. `probe_agent_id` stays and holds that primary
+ * one, so an older image started against this database still measures each
+ * monitor from somewhere sensible.
+ *
+ * Readings and routes say which probe took them. Every row so far was taken
+ * by the probe its target was measured from, so only those of targets on a
+ * probe agent need a tag: the column's default, 'local', is right for the rest
+ * and costs nothing to add. The tagging itself is not done here: one UPDATE
+ * over a long history writes every page of it to the log in one transaction.
+ * It is recorded as work to do, and probe-tags.ts does it in small batches
+ * before the app serves anything.
+ *
+ * An alert's state is kept for each probe, so two probes' readings never run
+ * one streak between them. Each alert starts with the state its target had.
+ */
+async function probesPerMonitor(database: Database): Promise<void> {
+  await run(database, `CREATE TABLE IF NOT EXISTS target_probes (
+    target_id TEXT NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
+    probe TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    last_probe_at INTEGER NOT NULL DEFAULT 0,
+    resolved TEXT,
+    added_at INTEGER NOT NULL,
+    removed_at INTEGER,
+    PRIMARY KEY (target_id, probe)
+  )`);
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_target_probes_probe ON target_probes(probe)');
+
+  const targets = await all<{
+    id: string;
+    probe_agent_id: string | null;
+    last_probe_at: number | null;
+    resolved_address: string | null;
+    created_at: number;
+  }>(database, 'SELECT id, probe_agent_id, last_probe_at, resolved_address, created_at FROM targets');
+  const toTag: Record<string, { agent: string; cursor: number }> = {};
+  for (const target of targets) {
+    const family = target.resolved_address ? isIP(target.resolved_address) : 0;
+    await run(
+      database,
+      `INSERT OR IGNORE INTO target_probes (target_id, probe, position, last_probe_at, resolved, added_at)
+       VALUES (?, ?, 0, ?, ?, ?)`,
+      [
+        target.id,
+        target.probe_agent_id ?? 'local',
+        target.last_probe_at ?? 0,
+        family === 4 || family === 6 ? JSON.stringify({ [family]: target.resolved_address }) : null,
+        target.created_at,
+      ]
+    );
+    if (target.probe_agent_id) toTag[target.id] = { agent: target.probe_agent_id, cursor: 0 };
+  }
+
+  const measurementColumns = await all<{ name: string }>(database, 'PRAGMA table_info(measurements)');
+  if (!measurementColumns.some(column => column.name === 'probe')) {
+    await run(database, "ALTER TABLE measurements ADD COLUMN probe TEXT NOT NULL DEFAULT 'local'");
+  }
+
+  if (await tableExists(database, 'traceroutes')) {
+    const traceColumns = await all<{ name: string }>(database, 'PRAGMA table_info(traceroutes)');
+    if (!traceColumns.some(column => column.name === 'probe')) {
+      await run(database, "ALTER TABLE traceroutes ADD COLUMN probe TEXT NOT NULL DEFAULT 'local'");
+    }
+    await run(database, 'CREATE INDEX IF NOT EXISTS idx_traceroutes_target_probe ON traceroutes(target_id, probe, timestamp DESC)');
+  }
+
+  await run(database, `CREATE TABLE IF NOT EXISTS alert_probe_states (
+    alert_id TEXT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
+    probe TEXT NOT NULL,
+    in_breach INTEGER NOT NULL DEFAULT 0,
+    streak INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (alert_id, target_id, probe)
+  )`);
+  await run(database, `INSERT OR IGNORE INTO alert_probe_states (alert_id, target_id, probe, in_breach, streak)
+    SELECT a.alert_id, a.target_id, COALESCE(t.probe_agent_id, 'local'), CASE WHEN a.state = 'firing' THEN 1 ELSE 0 END, a.streak
+    FROM alert_targets a JOIN targets t ON t.id = a.target_id`);
+
+  // Done once the readings are tagged and their index built: see probe-tags.ts.
+  await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
+    PROBE_TAGS_KEY,
+    JSON.stringify({ migratedAt: Date.now(), targets: toTag, done: false }),
+  ]);
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
@@ -610,6 +704,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'probe agents', up: probeAgents },
   { name: 'bgp monitoring', up: bgpMonitoring },
   { name: 'alert trace retention', up: alertTraceRetention },
+  { name: 'probes per monitor', up: probesPerMonitor },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

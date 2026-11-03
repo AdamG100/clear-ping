@@ -61,6 +61,8 @@ interface TraceroutePanelProps {
   ipVersion?: IpVersion
   /** Changes whenever a new probe lands, so traces taken by an alert show up. */
   refreshKey?: number
+  /** Traced from, and listed for, this probe; the monitor's first when left out. */
+  probe?: string
   /** The account signed in may look but not change anything: routes are shown, not traced or deleted. */
   readOnly?: boolean
   /** The probe agent it is traced from, when that is not this server. */
@@ -418,7 +420,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
 
 // ─── The panel ──────────────────────────────────────────────────────────────
 
-export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, readOnly = false, tracedFrom }: TraceroutePanelProps) {
+export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, probe, readOnly = false, tracedFrom }: TraceroutePanelProps) {
   const { notify, reportError } = useToast()
   const [traces, setTraces] = useState<Traceroute[]>([])
   // How many are kept in all, which can be more than the newest few listed.
@@ -441,7 +443,7 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
   const load = useCallback(async () => {
     const seq = ++loadSeq.current
     try {
-      const response = await fetch(`/api/targets/${targetId}/traceroute`)
+      const response = await fetch(`/api/targets/${targetId}/traceroute${probe ? `?probe=${encodeURIComponent(probe)}` : ''}`)
       if (!response.ok) {
         reportError('Could not load routes', `Server responded ${response.status}`)
         return
@@ -457,7 +459,7 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
     } finally {
       setLoading(false)
     }
-  }, [targetId, reportError])
+  }, [targetId, probe, reportError])
 
   useEffect(() => {
     // The callback is async and awaits its fetch before touching state, so
@@ -484,7 +486,7 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
     setTracing(familiesTraced(host, ipVersion, families, choosable))
     setStartedAt(Date.now())
     try {
-      const response = await fetch(`/api/targets/${targetId}/traceroute`, {
+      const response = await fetch(`/api/targets/${targetId}/traceroute${probe ? `?probe=${encodeURIComponent(probe)}` : ''}`, {
         method: 'POST',
         ...(choosable ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ family: families }) } : {}),
       })

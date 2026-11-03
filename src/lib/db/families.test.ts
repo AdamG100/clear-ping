@@ -104,8 +104,8 @@ describe('a target probed over both families', () => {
   })
 
   it('reports statistics for one family without the other bleeding in', async () => {
-    const v4 = await getTargetStatistics(DUAL, windowStart, windowEnd, 4)
-    const v6 = await getTargetStatistics(DUAL, windowStart, windowEnd, 6)
+    const v4 = await getTargetStatistics(DUAL, windowStart, windowEnd, { family: 4 })
+    const v6 = await getTargetStatistics(DUAL, windowStart, windowEnd, { family: 6 })
 
     expect(v4?.sampleCount).toBe(3)
     expect(v4?.avgLatency).toBeCloseTo(12)
@@ -124,8 +124,8 @@ describe('a target probed over both families', () => {
   })
 
   it('buckets one family at a time', async () => {
-    const v4 = await getBucketedMeasurements(DUAL, windowStart, windowEnd, 60_000, 4)
-    const v6 = await getBucketedMeasurements(DUAL, windowStart, windowEnd, 60_000, 6)
+    const v4 = await getBucketedMeasurements(DUAL, windowStart, windowEnd, 60_000, { family: 4 })
+    const v6 = await getBucketedMeasurements(DUAL, windowStart, windowEnd, 60_000, { family: 6 })
 
     expect(v4.map(bucket => bucket.latency)).toEqual([10, 12, 14])
     expect(v6.map(bucket => bucket.latency)).toEqual([30, 32, null])
@@ -199,7 +199,12 @@ describe('readings stored before the family was recorded', () => {
     }
     expect(await families('legacy-pinned')).toEqual([undefined])
 
-    // The filing happens as the database is opened.
+    // The filing happens as the database is opened, once: a database made
+    // before the family column has never been marked as filed.
+    const database = await getDatabase()
+    await new Promise<void>((resolve, reject) => {
+      database.run("DELETE FROM settings WHERE key = 'upgrade.families-backfilled'", err => (err ? reject(err) : resolve()))
+    })
     await closeDatabase()
     await initDatabase()
 

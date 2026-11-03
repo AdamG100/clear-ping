@@ -9,7 +9,7 @@
  */
 
 /** The sections of Settings, in the order its menu lists them. */
-export const SETTINGS_SECTIONS = ['access', 'sign-in', 'keys', 'sso', 'accounts', 'privacy', 'probe-agents', 'routing', 'activity', 'maintenance', 'assistant'] as const
+export const SETTINGS_SECTIONS = ['access', 'sign-in', 'keys', 'sso', 'accounts', 'privacy', 'probes', 'routing', 'activity', 'maintenance', 'assistant'] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
 /** Where Settings opens when no section is asked for. */
@@ -87,6 +87,8 @@ export function pageFromPath(pathname: string): DashboardPage | null {
   if (first === 'settings') {
     if (!second) return { kind: 'settings', section: DEFAULT_SETTINGS_SECTION }
     if (isSettingsSection(second)) return { kind: 'settings', section: second }
+    // What the section was called before it held the local probe too.
+    if (second === 'probe-agents') return { kind: 'settings', section: 'probes' }
   }
   return null
 }

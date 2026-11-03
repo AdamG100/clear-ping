@@ -277,6 +277,7 @@ export function LossBreakdown({
   zoom,
   hours,
   family,
+  probe,
   refreshKey,
   vocabulary,
 }: {
@@ -285,6 +286,8 @@ export function LossBreakdown({
   zoom: TimeWindow | null
   hours: number
   family: AddressFamily | null
+  /** The probe it is looked at from; the monitor's first when left out. */
+  probe?: string
   /** Changes when a new reading arrives, which is when the analysis is read again. */
   refreshKey?: number
   vocabulary: ProbeVocabulary
@@ -294,6 +297,7 @@ export function LossBreakdown({
 
   const query = new URLSearchParams(zoom ? { start: String(zoom.start), end: String(zoom.end) } : { hours: String(hours) })
   if (family) query.set("family", String(family))
+  if (probe) query.set("probe", probe)
   const key = `${targetId}?${query}`
 
   useEffect(() => {
