@@ -13,6 +13,7 @@ import type {
   TimeWindow,
 } from '@/types/probe'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
+import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { Checkbox } from '@/components/arc/checkbox/checkbox'
 import { SortableDataTable } from '@/components/arc/sortable-data-table/sortable-data-table'
@@ -243,6 +244,8 @@ interface ComparePanelProps {
   drawn?: string
   /** What each probe is called, for the lines' names. */
   probeNames?: ReadonlyMap<string, string>
+  /** In the table, each line's probe as a tag beside the monitor's name: for lines of many monitors and probes. */
+  tagProbes?: boolean
   /** What the column of failures is called for these lines. "Loss" unless said. */
   lossLabel?: string
   /** What the figures in the table are figures of, where that needs saying. */
@@ -296,6 +299,7 @@ export function ComparePanel({
   probes,
   drawn,
   probeNames,
+  tagProbes = false,
   lossLabel = 'Loss',
   note,
   showAddress = true,
@@ -316,15 +320,19 @@ export function ComparePanel({
 
       // Coloured by place among all the lines, not the ones shown, so hiding
       // one does not repaint the rest.
+      const probeName = (probes === 'all' || drawn) && series.probe ? probeNames?.get(series.probe) ?? series.probe : undefined
       const line: CompareLine = {
         key: series.key,
-        label: mask.text(nameSeries(target, series.family, series.resolver, (probes === 'all' || drawn) && series.probe ? probeNames?.get(series.probe) ?? series.probe : undefined)),
+        label: mask.text(nameSeries(target, series.family, series.resolver, probeName)),
         color: seriesColor(index),
         points: series.points,
       }
-      return [{ line, target, statistics: series.statistics, now: latestReading(series.points) }]
+      // With the probe in a tag of its own, the name in the table leaves it out.
+      const tag = tagProbes ? probeName : undefined
+      const name = tag ? mask.text(nameSeries(target, series.family, series.resolver)) : line.label
+      return [{ line, name, tag, target, statistics: series.statistics, now: latestReading(series.points) }]
     })
-  }, [snapshot, targets, nameSeries, mask, probes, drawn, probeNames])
+  }, [snapshot, targets, nameSeries, mask, probes, drawn, probeNames, tagProbes])
 
   // Lines taken off the chart from the legend. The rest are rescaled to fill
   // it, so hiding the slow one shows the fast ones in detail. Held for one set
@@ -465,9 +473,11 @@ export function ComparePanel({
                 caption="The lines on the chart"
                 itemName={{ one: 'line', other: 'lines' }}
                 rowKey="key"
-                rows={rows.map(({ line, target, statistics, now }) => ({
+                rows={rows.map(({ line, name, tag, target, statistics, now }) => ({
                   key: line.key,
                   label: line.label,
+                  name,
+                  tag,
                   now: now ? now.p50Latency ?? now.latency ?? -1 : null,
                   median: statistics?.medianLatency ?? null,
                   avg: statistics?.avgLatency ?? null,
@@ -482,7 +492,7 @@ export function ComparePanel({
                   {
                     key: 'label',
                     label: 'Line',
-                    render: (_, { line, target }) => {
+                    render: (_, { line, name, tag, target }) => {
                       const off = hidden.has(line.key)
                       return (
                         <span
@@ -517,12 +527,17 @@ export function ComparePanel({
                                   off ? 'text-muted-foreground' : 'text-foreground'
                                 )}
                               >
-                                {line.label}
+                                {name}
                               </button>
                             </Tooltip>
                           ) : (
                             <span className={cn('min-w-0 truncate font-medium', off ? 'text-muted-foreground' : 'text-foreground')}>
-                              {line.label}
+                              {name}
+                            </span>
+                          )}
+                          {tag && (
+                            <span className="shrink-0">
+                              <Badge size="sm">{tag}</Badge>
                             </span>
                           )}
                           {showAddress && (

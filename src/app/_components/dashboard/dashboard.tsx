@@ -1538,6 +1538,7 @@ export function Dashboard() {
               // there, the same host can look quite different.
               probes={groupProbeIds.length > 1 ? (groupProbeView === COMPARE_PROBES ? 'all' : groupProbeView) : undefined}
               probeNames={groupProbeNames}
+              tagProbes
               nameSeries={(target, family, _resolver, probeName) => {
                 const from = probeName && probeIdsOf(target).length > 1 ? probeName : undefined
                 return [target.name, family ? FAMILY_LABEL[family] : null, from].filter(Boolean).join(' · ')
