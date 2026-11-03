@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react'
 import { MapPin } from 'lucide-react'
 import { Badge } from '@/components/arc/badge/badge'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
@@ -8,19 +7,6 @@ import type { ProbeAgentSummary } from '@/types/probe-agent'
 import type { Target } from '@/types/probe'
 import { probeIdsOf } from '@/lib/targets/probes'
 import { PROBE_AGENT_STATE } from '../settings/probe-agent-labels'
-import { useMask } from '../privacy/use-privacy'
-
-/**
- * A colour no other badge has: grey and blue say what a target is, green,
- * amber and red how it is doing. Set through the badge's own variables, which
- * a class could not reach past Arc's module.
- */
-const REMOTE_COLOURS = {
-  '--badge-color': 'var(--series-2)',
-  '--badge-foreground': 'color-mix(in oklab, var(--series-2) 55%, var(--foreground))',
-  '--badge-background': 'color-mix(in oklab, var(--series-2) 12%, var(--surface))',
-  '--badge-border': 'color-mix(in oklab, var(--series-2) 30%, var(--border))',
-} as CSSProperties
 
 /**
  * How many probes measure a monitor, in the sidebar, when it is more than one:
@@ -37,45 +23,6 @@ export function ProbeCount({ count, className }: { count: number; className?: st
         {/* The icon and the number only: the row's name needs the room more. */}
         <Badge size="sm" tone="neutral" icon={<MapPin size={10} strokeWidth={2} aria-hidden />} aria-hidden>
           {count}
-        </Badge>
-      </span>
-    </Tooltip>
-  )
-}
-
-/**
- * Where a line in a comparison is probed from: a "Remote" badge, with the
- * probe agent named in its tooltip. A line from the local probe shows nothing.
- *
- * While the agent cannot be reached the badge says so in the warning colour:
- * the readings have stopped because of the agent, not the monitor.
- */
-export function ProbedFrom({ agent, className }: { agent?: ProbeAgentSummary; className?: string }) {
-  const mask = useMask()
-  if (!agent) return null
-  const down = agent.state !== 'online' && agent.state !== 'unpaired'
-  const machine = [agent.hostname, agent.address].filter((part): part is string => !!part).map(mask.address).join(', ')
-
-  return (
-    <Tooltip
-      content={
-        down
-          ? `Measured by ${agent.name}, which is ${PROBE_AGENT_STATE[agent.state].label.toLowerCase()}: no readings are taken until it is back.`
-          : `Measured by ${agent.name}${machine ? ` (${machine})` : ''}. Its readings show the network as seen from there.`
-      }
-    >
-      <span className={cn('flex shrink-0', className)}>
-        {/* One short word, never the name: a name can be any length, and the
-            row has no room to give it. The tooltip and screen readers have it. */}
-        <span className="sr-only">Measured by {agent.name}{down ? ', offline' : ''}</span>
-        <Badge
-          size="sm"
-          tone={down ? 'warning' : 'neutral'}
-          icon={<MapPin size={10} strokeWidth={2} aria-hidden />}
-          style={down ? undefined : REMOTE_COLOURS}
-          aria-hidden
-        >
-          Remote
         </Badge>
       </span>
     </Tooltip>

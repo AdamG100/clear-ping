@@ -22,13 +22,11 @@ import { cn } from '@/lib/utils'
 import { FAMILY_LABEL } from '@/lib/probes/host'
 import { targetAddressLabel } from '@/lib/probes/config'
 import { buildSeries, comparisonPointsPer, MAX_COMPARED_TARGETS } from '@/lib/charts/series'
-import type { ProbeAgentSummary } from '@/types/probe-agent'
 import { formatWindowEdge } from './chart-brush'
 import { CompareTrace, type CompareLine } from './compare-trace'
 import { LossFigure } from './loss-figure'
 import { LossKey } from './loss-key'
 import { TraceSkeleton } from '../dashboard/skeleton'
-import { ProbedFrom } from '../targets/probed-from'
 import { Masked } from '../privacy/masked'
 import { useMask } from '../privacy/use-privacy'
 
@@ -253,8 +251,6 @@ interface ComparePanelProps {
   showAddress?: boolean
   /** When given, a row's name opens that target's own page. */
   onSelectTarget?: (id: string) => void
-  /** The probe agents, so a target probed from one is marked Remote in the table. */
-  probeAgents?: ProbeAgentSummary[]
   reportError: (title: string, error?: unknown) => void
 }
 
@@ -304,7 +300,6 @@ export function ComparePanel({
   note,
   showAddress = true,
   onSelectTarget,
-  probeAgents,
   reportError,
 }: ComparePanelProps) {
   const { snapshot, pending, initialLoad } = useComparison(targets, timeRange, zoom, refreshKey, reportError, split, splitFamily, probes, drawn)
@@ -354,7 +349,6 @@ export function ComparePanel({
     setHidden(next)
   }
 
-  const agentsById = useMemo(() => new Map((probeAgents ?? []).map(agent => [agent.id, agent])), [probeAgents])
 
   const lines = useMemo(() => rows.map(row => row.line).filter(line => !hidden.has(line.key)), [rows, hidden])
   const hiddenCount = rows.length - lines.length
@@ -531,9 +525,6 @@ export function ComparePanel({
                               {line.label}
                             </span>
                           )}
-                          {/* Measured from somewhere else, where the same host
-                              can look quite different: the sidebar's badge. */}
-                          {probes !== 'all' && !drawn && <ProbedFrom agent={target.probeAgentId ? agentsById.get(target.probeAgentId) : undefined} />}
                           {showAddress && (
                             <span className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground @4xl/main:inline">
                               <Masked text value={targetAddressLabel(target)} />

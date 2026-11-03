@@ -1476,7 +1476,6 @@ export function Dashboard() {
                 (groupVocabulary ? `had ${groupVocabulary.lossTitle.toLowerCase()}.` : 'lost packets or failed.')
               }
               onSelectTarget={setSelectedTargetId}
-              probeAgents={probeAgents}
               reportError={reportError}
             />
           </motion.div>
