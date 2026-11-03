@@ -359,12 +359,12 @@ export function ProbeAgentDetails({
           </Facts>
           {missingTools.length > 0 && (
             <Alert tone="warning" title={`No ${missingTools.join(' or ')} on that machine`}>
-              Install it there, or its monitors that need it cannot be probed.
+              Install it there, or the monitors that need it cannot be measured from this probe agent.
             </Alert>
           )}
 
           <Facts title="Monitors">
-            <Fact label="Monitors probed from it">
+            <Fact label="Monitors measured by it">
               {agent.targetCount > 0 && onShowTargets ? (
                 <button type="button" className="text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={onShowTargets}>
                   {agent.targetCount} {agent.targetCount === 1 ? 'monitor' : 'monitors'}
@@ -423,7 +423,7 @@ export function ProbeAgentDetails({
             <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0 max-w-60">
                 <p className="text-sm font-medium">Remove</p>
-                <p className={HINT}>Only once no monitor is probed from it.</p>
+                <p className={HINT}>Only once no monitor is measured by it: untick it under Probes in their settings first.</p>
               </div>
               <ConfirmMorph
                 label="Remove"

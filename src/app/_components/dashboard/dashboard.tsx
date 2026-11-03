@@ -352,9 +352,9 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         return true
       }
       const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
-      reportError('Could not switch where the group is probed from', error)
+      reportError('Could not change which probes measure the group', error)
     } catch (error) {
-      reportError('Could not switch where the group is probed from', error)
+      reportError('Could not change which probes measure the group', error)
     }
     return false
   }, [loadTargets, reportError])
@@ -1543,7 +1543,7 @@ export function Dashboard() {
 
             {selectedOnHold && selectedTarget.status !== 'paused' && (
               <Alert tone="warning" title="No readings are being taken">
-                It is probed from {selectedAgent?.name}, and {selectedOnHold}. The gap this leaves in the chart is the
+                It is measured by {selectedAgent?.name}, and {selectedOnHold}. The gap this leaves in the chart is the
                 probe agent&apos;s, not {selectedTarget.name}&apos;s. Readings start again when it is back.
               </Alert>
             )}

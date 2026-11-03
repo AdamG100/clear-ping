@@ -202,11 +202,11 @@ function explanation(event: AlertEvent): string {
   const probes = event.rule.consecutiveProbes;
 
   if (event.transition === 'firing') {
-    return probes === 1 ? `${condition} on the latest probe.` : `${condition} for ${probes} probes in a row.`;
+    return probes === 1 ? `${condition} on the latest reading.` : `${condition} for ${probes} readings in a row.`;
   }
   return probes === 1
     ? `${condition} no longer holds.`
-    : `${condition} has been clear for ${probes} probes in a row.`;
+    : `${condition} has been clear for ${probes} readings in a row.`;
 }
 
 /** What to send when a probe agent stops answering, or answers again. */
@@ -244,7 +244,7 @@ export function notificationFor(event: AlertEvent, options: NotificationOptions 
     ['Alert', alertTitle(event.rule)],
   ];
   if (event.targetGroup) details.push(['Group', groupLabel(event.targetGroup)]);
-  if (event.probedFrom) details.push(['Probed from', event.probedFrom]);
+  if (event.probedFrom) details.push(['Measured by', event.probedFrom]);
   // Why it fired: each condition as it stood, how many probes agreed, and which.
   if (event.conditions && event.conditions.length > 1) {
     details.push(['Conditions', event.conditions.map(each => `${each.label}: ${each.observed ?? 'no reading'}, ${each.held ? 'held' : 'not held'}`).join('; ')]);

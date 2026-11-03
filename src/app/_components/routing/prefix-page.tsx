@@ -131,7 +131,7 @@ function TargetsInside({ detail, targets, onSelectTarget }: { detail: BgpPrefixD
   if (inside.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        None of your monitors is in {detail.prefix}. Add one, probed from a probe agent outside your network, and its
+        None of your monitors is in {detail.prefix}. Add one, measured by a probe agent outside your network, and its
         latency and traces sit beside the routing here.
       </p>
     )

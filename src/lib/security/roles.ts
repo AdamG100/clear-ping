@@ -23,7 +23,7 @@ export const ROLE_LABEL: Record<Role, string> = { admin: 'Admin', editor: 'Edito
 
 export const ROLE_DETAIL: Record<Role, string> = {
   admin: 'Everything, Settings included: sign-in, keys, single sign-on, accounts, probe agents, Routing and Activity.',
-  editor: 'Adds, changes and deletes targets, groups and alerts, and makes their own keys. No other settings.',
+  editor: 'Adds, changes and deletes monitors, groups and alerts, and makes their own keys. No other settings.',
   viewer: 'Sees everything and changes nothing. Can make their own read-only keys.',
 }
 

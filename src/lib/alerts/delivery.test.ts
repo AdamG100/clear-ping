@@ -149,7 +149,7 @@ describe('notificationFor', () => {
     expect(notificationFor(event(), { zone: 'UTC' })).toEqual({
       title: 'Router: packet loss is too high',
       body:
-        '<p><b>Packet loss above 5%</b> for 3 probes in a row.</p>' +
+        '<p><b>Packet loss above 5%</b> for 3 readings in a row.</p>' +
         '<ul>' +
         '<li><b>Address:</b> 192.0.2.1</li>' +
         '<li><b>Now:</b> 42.5%</li>' +
@@ -165,7 +165,7 @@ describe('notificationFor', () => {
     const notification = notificationFor(event({ transition: 'resolved', observed: 0 }))
 
     expect(notification.title).toBe('Router has recovered')
-    expect(notification.body).toContain('<p><b>Packet loss above 5%</b> has been clear for 3 probes in a row.</p>')
+    expect(notification.body).toContain('<p><b>Packet loss above 5%</b> has been clear for 3 readings in a row.</p>')
     expect(notification.type).toBe('success')
   })
 
@@ -174,7 +174,7 @@ describe('notificationFor', () => {
       event({ metric: 'unreachable', observed: 1 }, { metric: 'unreachable', threshold: 0, consecutiveProbes: 1 })
     )
     expect(notification.title).toBe('Router is not responding')
-    expect(notification.body).toContain('<p><b>Stops responding</b> on the latest probe.</p>')
+    expect(notification.body).toContain('<p><b>Stops responding</b> on the latest reading.</p>')
     expect(notification.body).toContain('<li><b>Now:</b> No reply</li>')
   })
 

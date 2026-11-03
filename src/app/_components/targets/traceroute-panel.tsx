@@ -409,7 +409,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
                 routers: easily read as the monitor's fault, and a DNS monitor's
                 healthy IPv6 line makes it look stranger still. */}
             {traceFamily(trace) === 6 && dead <= 4
-              ? "IPv6 stops inside your own provider's network, so this machine has no working IPv6 path past it. A DNS monitor's IPv6 line is its AAAA lookup, which can be answered over IPv4, so that can look healthy while this does not."
+              ? "IPv6 stops inside your own provider's network, so this probe has no working IPv6 path past it. A DNS monitor's IPv6 line is its AAAA lookup, which can be answered over IPv4, so that can look healthy while this does not."
               : 'The fault is at that hop or just beyond the last one that replied.'}
           </Alert>
         </div>

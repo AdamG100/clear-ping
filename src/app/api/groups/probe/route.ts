@@ -27,7 +27,7 @@ export async function PUT(request: NextRequest) {
     const from = await readRequestedProbes(body);
     if (!from.ok) return NextResponse.json({ error: from.error }, { status: 400 });
     if (from.probes === undefined) {
-      return NextResponse.json({ error: 'probes is a list of probe ids, with "local" for this server' }, { status: 400 });
+      return NextResponse.json({ error: 'probes is a list of probe ids, with "local" for the local probe' }, { status: 400 });
     }
 
     const updated = await setGroupProbes(group, from.probes);
@@ -41,7 +41,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ updated });
   } catch (error) {
     console.error('Error switching a group’s probe:', error);
-    return NextResponse.json({ error: 'Failed to switch where the group is probed from' }, { status: 500 });
+    return NextResponse.json({ error: 'Could not change which probes measure the group' }, { status: 500 });
   }
 }
 

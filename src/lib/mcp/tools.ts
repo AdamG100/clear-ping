@@ -396,7 +396,7 @@ const PROBE_PROPERTY = {
 const HOW_TO_READ = [
   'Times are local to the time zone given, with its offset from UTC written on the end.',
   'An "outage" is a spell in which at least one probe got no reply at all. A "spell of loss" is one in which every probe got a reply but some packets, queries or requests within a probe did not.',
-  'An incident starts at the first probe that was affected, so the fault itself began up to one probe interval earlier. It ends at the first of two healthy probes in a row.',
+  'An incident starts at the first reading that was affected, so the fault itself began up to one interval between readings earlier. It ends at the first of two healthy readings in a row.',
   'uptimePercent is the share of probes that got any reply. lossPercent is the mean loss over every probe, counting a probe with no reply as 100.',
   '"meanwhile" says what every other monitored monitor was doing during an incident. Monitors marked insideLocalNetwork answering while outside ones fail puts the fault beyond the local network.',
 ]
@@ -994,7 +994,7 @@ const probeNowTool: McpTool = {
     const probe = await probeOfTarget(target, args.probe)
     const { result, results } = await probeNow(target, [probe]).catch(error => {
       if (error instanceof ProbeAgentUnavailableError) {
-        throw new ToolError(`${target.name} is probed from probe agent ${error.agentName}, which cannot take a reading now: ${error.message}. Nothing was recorded.`)
+        throw new ToolError(`${target.name} is measured by probe agent ${error.agentName}, which cannot take a reading now: ${error.message}. Nothing was recorded.`)
       }
       throw error
     })
@@ -1062,7 +1062,7 @@ const listProbeAgentsTool: McpTool = {
   name: 'list_probe_agents',
   title: 'List probe agents',
   description:
-    'The probe agents monitors can be probed from. A probe agent is a small ClearPing program on another machine (a server in another country, say) that takes readings from there, so a monitor probed from it shows the network as seen from that machine. Nothing to do with AI agents. Says whether each one can be reached now.',
+    'Every place readings are taken from: the local probe (the machine ClearPing runs on) and each probe agent. A probe agent is a small ClearPing program on another machine (a server in another country, say) that takes readings from there, so a monitor measured by it shows the network as seen from that machine; a monitor can be measured by several probes at once. Probe agents are network probes, not AI agents. Says whether each one can be reached now, and which monitors each probe measures.',
   inputSchema: { type: 'object', properties: { ...TIMEZONE_PROPERTY }, additionalProperties: false },
   run: async args => {
     const timeZone = timeZoneFrom(args)
@@ -1085,8 +1085,8 @@ const listProbeAgentsTool: McpTool = {
       },
       note:
         agents.length === 0
-          ? 'There are no probe agents: every monitor is probed from the machine ClearPing runs on. They are added in the app, under Settings, Probe agents.'
-          : 'Every monitor not listed under a probe agent is probed from the machine ClearPing runs on. While a probe agent cannot be reached, its monitors take no readings, which shows as a gap rather than as an outage.',
+          ? 'There are no probe agents: every monitor is measured by the local probe, the machine ClearPing runs on. They are added in the app, under Settings, Probes.'
+          : 'localProbe lists the monitors measured by the machine ClearPing runs on. While a probe agent cannot be reached it takes no readings, which shows as a gap in its readings rather than as an outage; a monitor\'s other probes carry on.',
     }
   },
 }

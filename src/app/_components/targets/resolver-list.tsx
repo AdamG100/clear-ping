@@ -58,7 +58,7 @@ const unfinished = (row: DnsResolver) => row.protocol !== 'system' && !(row.serv
 
 /** A folded row's second line: how it is asked, and where. */
 function rowSummary(row: DnsResolver): string {
-  if (row.protocol === 'system') return 'Whatever this machine uses for every other lookup'
+  if (row.protocol === 'system') return 'The resolver set up on the probe\'s own machine, the one everything else on it uses'
   return `${DNS_PROTOCOL_NAME[row.protocol]} · ${row.server?.trim() || 'no address yet'}`
 }
 
@@ -177,7 +177,7 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
               </div>
 
               {row.protocol === 'system' ? (
-                <p className="text-xs text-muted-foreground">Whatever this machine uses for every other lookup.</p>
+                <p className="text-xs text-muted-foreground">The resolver set up on the probe&apos;s own machine, the one everything else on it uses.</p>
               ) : (
                 <>
                   <SegmentedField

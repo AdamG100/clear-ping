@@ -248,7 +248,7 @@ function Standing({ status, releases }: { status: VersionStatus | null; releases
           <div className="min-w-0">
             <h2 className="font-medium text-foreground">v{newer} is available</h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              This server runs v{current}. Update it to read what changed: pull the new image and recreate the container.
+              You are running v{current}. Update ClearPing to read what changed: pull the new image and recreate the container.
             </p>
           </div>
         </div>
@@ -264,7 +264,7 @@ function Standing({ status, releases }: { status: VersionStatus | null; releases
       <CircleCheck size={20} strokeWidth={1.75} aria-hidden className={cn('mt-0.5 shrink-0', latest ? 'text-success' : 'text-muted-foreground')} />
       <div className="min-w-0">
         <h2 className="font-medium text-foreground">
-          {status.current.development ? `A development build (v${current})` : latest ? `You are on the latest version, v${current}` : `This server runs v${current}`}
+          {status.current.development ? `A development build (v${current})` : latest ? `You are on the latest version, v${current}` : `You are running v${current}`}
         </h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
           {status.current.development

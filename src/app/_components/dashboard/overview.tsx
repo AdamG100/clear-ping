@@ -126,7 +126,7 @@ function Headline({ now, agentsDown }: { now: ReturnType<typeof standing>; agent
   if (agentsDown.length > 0) {
     return (
       <Alert tone="warning" title={`${plural(agentsDown.length, 'probe agent')} cannot be reached`}>
-        No readings are coming from {nameList(agentsDown.map(agent => agent.name))}, so {plural(now.onHold.length, 'monitor')} probed from
+        No readings are coming from {nameList(agentsDown.map(agent => agent.name))}, so {plural(now.onHold.length, 'monitor')} measured only from
         there {now.onHold.length === 1 ? 'is' : 'are'} on hold.
       </Alert>
     )
@@ -534,11 +534,11 @@ function scopeNote(event: OverviewEvent, fromAgent: string | undefined, localPro
     case 'local':
       return `Likely ${fromAgent ? `${fromAgent}'s` : 'your'} own network: something inside it went down too`
     case 'single':
-      return `Only this monitor: everything else probed from ${from} kept answering`
+      return `Only this monitor: everything else measured by ${from} kept answering`
     case 'beyond':
       return `Out on the internet: ${others > 0 ? `${plural(others, 'other monitor')} went too, ` : ''}while your own network kept answering`
     case 'unclear':
-      return others > 0 ? `Along with ${plural(others, 'other monitor')} probed from ${from}` : null
+      return others > 0 ? `Along with ${plural(others, 'other monitor')} measured by ${from}` : null
   }
 }
 

@@ -127,8 +127,8 @@ export function PrivacyTab({ canChange, onOpenRouting }: { canChange: boolean; o
           <h3 id="privacy-screen" className={SECTION_TITLE}>On screen</h3>
           <p className={HINT}>
             Hidden addresses show as dots: {'203.0.113.10'} becomes <span className="font-mono">{maskAddress('203.0.113.10')}</span>, and{' '}
-            {'vps1.example.net'} becomes <span className="font-mono">{maskAddress('vps1.example.net')}</span>. That covers targets,
-            traceroutes and probe agents, and monitor names that are addresses. Names you gave stay, so monitors can still be told apart.
+            {'vps1.example.net'} becomes <span className="font-mono">{maskAddress('vps1.example.net')}</span>. That covers the addresses of monitors,
+            routes and probe agents, and monitor names that are addresses. Names you gave stay, so monitors can still be told apart.
             Routing&apos;s prefixes and AS numbers are public in BGP, so they stay too.
           </p>
         </div>

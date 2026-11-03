@@ -59,14 +59,14 @@ export function ProbedFrom({ agent, className }: { agent?: ProbeAgentSummary; cl
     <Tooltip
       content={
         down
-          ? `Probed from ${agent.name}, which is ${PROBE_AGENT_STATE[agent.state].label.toLowerCase()}: no readings are taken until it is back.`
-          : `Probed from ${agent.name}${machine ? ` (${machine})` : ''}. Readings show the network as seen from there.`
+          ? `Measured by ${agent.name}, which is ${PROBE_AGENT_STATE[agent.state].label.toLowerCase()}: no readings are taken until it is back.`
+          : `Measured by ${agent.name}${machine ? ` (${machine})` : ''}. Its readings show the network as seen from there.`
       }
     >
       <span className={cn('flex shrink-0', className)}>
         {/* One short word, never the name: a name can be any length, and the
             row has no room to give it. The tooltip and screen readers have it. */}
-        <span className="sr-only">Probed from {agent.name}{down ? ', offline' : ''}</span>
+        <span className="sr-only">Measured by {agent.name}{down ? ', offline' : ''}</span>
         <Badge
           size="sm"
           tone={down ? 'warning' : 'neutral'}

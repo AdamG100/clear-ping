@@ -304,6 +304,14 @@ html[data-view='group'] .skeleton-target-only {
   --border: var(--border-strong);
 }
 
+/* Settings run wide, so their tables show every column; a field is kept to
+   the width of what is typed in it, so a name or an address is not a line
+   across the whole screen. On a phone the field is narrower than this anyway.
+   Beats Arc's unlayered `width: 100%` by being more specific, not by order. */
+.settings-body :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), textarea) {
+  max-width: 40rem;
+}
+
 /* Custom slower ping animation for NetworkStatus indicator */
 .custom-ping {
   animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;

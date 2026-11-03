@@ -257,7 +257,7 @@ const STEPS: Step[] = [
       // still a backup that predates it.
       return {
         status: 'problem',
-        detail: `SQLite reports damage: ${messages.slice(0, 3).join('; ')}. Restore from a backup if probes or the dashboard start failing.`,
+        detail: `SQLite reports damage: ${messages.slice(0, 3).join('; ')}. Restore from a backup if readings or the dashboard start failing.`,
         removed: 0,
       };
     },
@@ -269,7 +269,7 @@ const STEPS: Step[] = [
       const removed = await removeOrphans(db, 'measurements');
       return removed === 0
         ? { status: 'ok', detail: 'None left behind.', removed }
-        : { status: 'fixed', detail: `Removed ${plural(removed, 'measurement')} belonging to deleted monitors.`, removed };
+        : { status: 'fixed', detail: `Removed ${plural(removed, 'reading')} belonging to deleted monitors.`, removed };
     },
   },
   {
@@ -333,19 +333,19 @@ const STEPS: Step[] = [
   },
   {
     id: 'clock',
-    label: 'Monitors marked as probed in the future',
+    label: 'Monitors marked as measured in the future',
     work: async ({ db }) => {
       // A clock that was wrong, then corrected, leaves a last-probe time that
       // is still to come: the target is not probed until it arrives.
       const fixed = await run(db, 'UPDATE targets SET last_probe_at = 0 WHERE last_probe_at > ?', [Date.now() + 5 * 60 * 1000]);
       return fixed === 0
         ? { status: 'ok', detail: 'Every monitor is due when it should be.', removed: 0 }
-        : { status: 'fixed', detail: `${plural(fixed, 'target')} had a last probe time in the future and would not have been probed. They are due now.`, removed: 0 };
+        : { status: 'fixed', detail: `${plural(fixed, 'monitor')} had ${fixed === 1 ? 'its' : 'their'} last reading dated in the future, so no new reading would have been taken until then. They are due now.`, removed: 0 };
     },
   },
   {
     id: 'retention',
-    label: 'Measurements and routes past their retention',
+    label: 'Readings and routes past their retention',
     work: async ({ db }) => {
       const days = Number(process.env.CLEARPING_RETENTION_DAYS ?? 90);
       if (!Number.isFinite(days) || days <= 0) {
@@ -359,7 +359,7 @@ const STEPS: Step[] = [
         ? { status: 'ok', detail: `Nothing is older than ${plural(days, 'day')}.`, removed }
         : {
             status: 'fixed',
-            detail: `Removed ${plural(measurements, 'measurement')} and ${plural(routes, 'saved route')} older than ${plural(days, 'day')}.`,
+            detail: `Removed ${plural(measurements, 'reading')} and ${plural(routes, 'saved route')} older than ${plural(days, 'day')}.`,
             removed,
           };
     },
@@ -402,16 +402,16 @@ const STEPS: Step[] = [
   },
   {
     id: 'scheduler',
-    label: 'Probe scheduler',
+    label: 'Reading scheduler',
     work: async () => {
       const scheduler = getScheduler();
       if (!scheduler.getStatus().isRunning) {
-        return { status: 'skipped', detail: 'Probing is done by a separate prober here; its list refreshes itself.', removed: 0 };
+        return { status: 'skipped', detail: 'Readings are taken by a separate prober process here; it refreshes its own list of monitors.', removed: 0 };
       }
       // So what it is probing is what is in the database, whatever changed it.
       await scheduler.reloadTargets();
       const { targetCount } = scheduler.getStatus();
-      return { status: 'ok', detail: `Reloaded: ${plural(targetCount, 'target')} being probed.`, removed: 0 };
+      return { status: 'ok', detail: `Reloaded: ${plural(targetCount, 'monitor')} being measured.`, removed: 0 };
     },
   },
 ];

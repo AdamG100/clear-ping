@@ -88,7 +88,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (targets.length > 0) {
     return NextResponse.json(
       {
-        error: `${targets.length === 1 ? 'A target is' : `${targets.length} targets are`} probed from ${existing.name}: ${targets.join(', ')}. Move ${targets.length === 1 ? 'it' : 'them'} to another probe agent or to this server, or delete ${targets.length === 1 ? 'it' : 'them'}, first.`,
+        error: `${targets.length === 1 ? 'A monitor is' : `${targets.length} monitors are`} measured by ${existing.name}: ${targets.join(', ')}. Untick ${existing.name} under Probes in ${targets.length === 1 ? 'its' : 'their'} settings, or delete ${targets.length === 1 ? 'it' : 'them'}, first. Their readings from it are kept.`,
         targets,
       },
       { status: 409 }

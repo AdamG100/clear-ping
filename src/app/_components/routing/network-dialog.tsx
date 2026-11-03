@@ -100,7 +100,7 @@ export function NetworkDialog({
           />
           <p className="text-xs text-muted-foreground">
             Its routes show where it shares them with RIPE RIS&apos;s collectors, as many ISPs do. The path your traffic
-            takes is traced to your monitors inside each prefix, from this server and your probe agents. Leave it empty to
+            takes is traced to your monitors inside each prefix, from the local probe and your probe agents. Leave it empty to
             forget it.
           </p>
           {agents.length > 0 && (

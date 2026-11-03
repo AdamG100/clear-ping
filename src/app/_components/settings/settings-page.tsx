@@ -1249,9 +1249,15 @@ const ACTIONS: Record<string, string> = {
   'mcp.add_targets': 'added monitors',
   'mcp.update_target': 'changed a monitor',
   'mcp.set_target_paused': 'paused or resumed a monitor',
-  'mcp.probe_now': 'probed a monitor',
+  'mcp.probe_now': 'took a reading of a monitor',
   'mcp.run_traceroute': 'traced a route',
   'probe.rename': 'renamed the local probe',
+  'probe.place': 'changed where a probe is',
+  'probe.heartbeat': 'changed how long a probe agent may go quiet',
+  'bgp.agents': 'changed the probe agents Routing looks from',
+  'account.role': 'changed a role',
+  'alert.purge-traces': 'deleted the routes an alert saved',
+  'security.cors': 'changed the websites that may call the API',
   'target.merge': 'merged monitors',
   'group.probe': 'changed the probes of a group',
   'probe-agent.add': 'added a probe agent',
@@ -1343,17 +1349,17 @@ interface Section {
 }
 
 const SECTIONS: Section[] = [
-  { value: 'access', label: 'Access', intro: 'Whether people have to sign in to use ClearPing, and whether AI assistants need a key.', icon: ShieldCheck, group: 'Security', adminOnly: true },
-  { value: 'sign-in', label: 'Sign-in', intro: 'Add a second step to signing in, with an authenticator app or a passkey.', icon: Fingerprint, group: 'Security' },
-  { value: 'keys', label: 'Keys', intro: "Let scripts and AI assistants use ClearPing's API and MCP server without signing in.", icon: KeyRound, group: 'Security' },
-  { value: 'sso', label: 'Single sign-on', intro: 'Let people sign in with Authentik or another OpenID Connect provider instead of a ClearPing password.', icon: LogIn, group: 'Security' },
-  { value: 'accounts', label: 'Accounts', intro: 'Who can sign in, and what each person can do.', icon: Users, group: 'Security' },
-  { value: 'privacy', label: 'Privacy', intro: 'What ClearPing shows on screen, hands to AI assistants, keeps in its records and asks of the internet.', icon: EyeOff, group: 'Security' },
-  { value: 'probes', label: 'Probes', intro: 'Where readings are taken from: the local probe, which is this dashboard, and probe agents on other machines, such as a VPS abroad. Nothing to do with AI agents.', icon: RadioTower, group: 'Monitoring', adminOnly: true },
-  { value: 'routing', label: 'Routing', intro: 'Watch how the rest of the internet reaches your own IP prefixes in BGP.', icon: Network, group: 'Monitoring', adminOnly: true },
-  { value: 'maintenance', label: 'Maintenance', intro: 'Check the database for damage, clear out leftovers and old data, and keep the file tidy.', icon: Wrench, group: 'Monitoring', adminOnly: true },
-  { value: 'activity', label: 'Activity', intro: 'Every change, sign-in and failed sign-in, with who did it and how. How long it is kept is under Privacy.', icon: History, group: 'More', adminOnly: true },
-  { value: 'assistant', label: 'AI assistant', intro: 'Connect an assistant such as Claude over MCP, then ask it about your network in plain words.', icon: Bot, group: 'More' },
+  { value: 'access', label: 'Access', intro: 'Whether people must sign in to use the dashboard and its API, and whether AI assistants connecting over MCP need a key.', icon: ShieldCheck, group: 'Security', adminOnly: true },
+  { value: 'sign-in', label: 'Sign-in', intro: 'Your own sign-in: a second step after the password, with an authenticator app (TOTP) or a passkey, and backup codes for when neither is to hand.', icon: Fingerprint, group: 'Security' },
+  { value: 'keys', label: 'Keys', intro: "API keys for scripts and AI assistants: each is sent as a bearer token to ClearPing's API and MCP server, with the access you give it, so nothing has to sign in.", icon: KeyRound, group: 'Security' },
+  { value: 'sso', label: 'Single sign-on', intro: 'Let people sign in through Authentik, or any OpenID Connect provider, instead of with a ClearPing password. An existing account is only ever joined to a provider by its owner, never matched by email.', icon: LogIn, group: 'Security' },
+  { value: 'accounts', label: 'Accounts', intro: 'Everyone who can sign in, and their role: admins change settings, editors manage monitors and alerts, viewers only look.', icon: Users, group: 'Security' },
+  { value: 'privacy', label: 'Privacy', intro: 'What ClearPing shows on screen, gives to AI assistants, keeps in its records, and asks services on the internet about.', icon: EyeOff, group: 'Security' },
+  { value: 'probes', label: 'Probes', intro: 'Where readings are taken from. The local probe is the machine the dashboard runs on; probe agents are small programs you install on other machines, such as a VPS abroad, so a monitor can be measured from several places at once.', icon: RadioTower, group: 'Monitoring', adminOnly: true },
+  { value: 'routing', label: 'Routing', intro: "Watch your own IP prefixes in BGP, as RIPE RIS's route collectors see them: who announces them, the paths networks take to reach them, and when that changes.", icon: Network, group: 'Monitoring', adminOnly: true },
+  { value: 'maintenance', label: 'Maintenance', intro: "Look after the SQLite database ClearPing keeps everything in: check it for damage, remove leftovers and data past its retention, reclaim the space, and see each upgrade it has been through.", icon: Wrench, group: 'Monitoring', adminOnly: true },
+  { value: 'activity', label: 'Activity', intro: 'A record of every change, sign-in and failed sign-in: who did it, when, and whether through the dashboard, a key or an assistant. How long it is kept is set under Privacy.', icon: History, group: 'More', adminOnly: true },
+  { value: 'assistant', label: 'AI assistant', intro: "Connect an AI assistant such as Claude to ClearPing's MCP server, then ask it about your monitors, outages and routes in plain words.", icon: Bot, group: 'More' },
 ]
 
 interface SettingsPageProps {
@@ -1503,7 +1509,7 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
           })}
         </nav>
 
-        <section aria-labelledby="settings-section-title" className="min-w-0 space-y-4 text-foreground">
+        <section aria-labelledby="settings-section-title" className="settings-body min-w-0 space-y-4 text-foreground">
         <header>
           <h2 id="settings-section-title" className="text-lg font-medium text-foreground">{current.label}</h2>
           <p className="mt-0.5 max-w-3xl text-sm text-muted-foreground">{current.intro}</p>

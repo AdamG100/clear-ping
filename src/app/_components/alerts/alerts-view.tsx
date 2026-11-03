@@ -303,7 +303,7 @@ function AlertForm({
           )}
           <NumberField
             id="alert-consecutive"
-            label="For this many probes in a row"
+            label="For this many readings in a row"
             min={1}
             max={100}
             value={consecutiveProbes}
