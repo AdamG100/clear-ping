@@ -1252,6 +1252,7 @@ const ACTIONS: Record<string, string> = {
   'mcp.probe_now': 'probed a target',
   'mcp.run_traceroute': 'traced a route',
   'probe.rename': 'renamed the local probe',
+  'target.merge': 'merged monitors',
   'group.probe': 'changed the probes of a group',
   'probe-agent.add': 'added a probe agent',
   'probe-agent.change': 'changed a probe agent',
