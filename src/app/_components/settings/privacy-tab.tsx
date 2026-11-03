@@ -192,6 +192,13 @@ export function PrivacyTab({ canChange, onOpenRouting }: { canChange: boolean; o
           label="Check for updates"
           detail="Asks GitHub's container registry every 15 minutes whether a newer version is out. Off, ClearPing never contacts it, and the sidebar stops saying when an update is available."
         />
+        <SwitchRow
+          checked={settings.lookUpNetworks}
+          disabled={locked}
+          onChange={on => void change({ lookUpNetworks: on })}
+          label="Look up who runs each address"
+          detail="A monitor's page shows which network holds its address, such as AS64500 and its name, by asking RIPE NCC. It sends only that public address, and never a private one. Off, the page says nothing about who runs it."
+        />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className={`${HINT} min-w-0 max-w-xl`}>
             Routing, while it is on, also connects out: to RIPE for routes and to PeeringDB for internet exchanges. Probes only reach

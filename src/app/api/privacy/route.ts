@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * PUT /api/privacy - Change them
- * Body: { hideAddresses, hideFromAssistants, recordSignInAddresses, keepActivityDays, checkForUpdates }
+ * Body: { hideAddresses, hideFromAssistants, recordSignInAddresses, keepActivityDays, checkForUpdates, lookUpNetworks }
  */
 export async function PUT(request: NextRequest) {
   const user = await requireAdmin(request);

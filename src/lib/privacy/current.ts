@@ -19,6 +19,8 @@ export interface PrivacySettings {
   keepActivityDays: number
   /** ClearPing asks GitHub's container registry whether a newer version is out. */
   checkForUpdates: boolean
+  /** A monitor's page asks RIPE NCC which network holds its address, to say who runs it. */
+  lookUpNetworks: boolean
 }
 
 export const DEFAULT_PRIVACY: PrivacySettings = {
@@ -27,6 +29,7 @@ export const DEFAULT_PRIVACY: PrivacySettings = {
   recordSignInAddresses: true,
   keepActivityDays: 365,
   checkForUpdates: true,
+  lookUpNetworks: true,
 }
 
 export const KEEP_ACTIVITY_CHOICES = [30, 90, 365] as const

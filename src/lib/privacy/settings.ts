@@ -1,5 +1,5 @@
 import { getJsonSetting, setJsonSetting } from '../security/settings-store'
-import { DEFAULT_PRIVACY, holdPrivacy, KEEP_ACTIVITY_CHOICES, type PrivacySettings } from './current'
+import { DEFAULT_PRIVACY, holdPrivacy, KEEP_ACTIVITY_CHOICES, privacyNow, type PrivacySettings } from './current'
 
 export { DEFAULT_PRIVACY, KEEP_ACTIVITY_CHOICES, privacyNow, signInDetail, type HideAddresses, type PrivacySettings } from './current'
 
@@ -39,6 +39,8 @@ export function parsePrivacySettings(input: unknown): { ok: true; settings: Priv
       recordSignInAddresses: body.recordSignInAddresses as boolean,
       keepActivityDays: body.keepActivityDays as number,
       checkForUpdates: body.checkForUpdates as boolean,
+      // Added after the others: a client from before it leaves it as it is.
+      lookUpNetworks: typeof body.lookUpNetworks === 'boolean' ? body.lookUpNetworks : privacyNow().lookUpNetworks,
     },
   }
 }

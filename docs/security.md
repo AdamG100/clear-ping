@@ -320,6 +320,13 @@ applies to everyone.
 - **Check for updates**: on by default. Off, ClearPing never asks GitHub's
   container registry whether a newer version is out (the same as
   `CLEARPING_UPDATE_CHECK=off`).
+- **Look up who runs each address**: on by default. A monitor's page shows which
+  network holds the address it is measured at, such as AS64500 and the name it
+  is registered under (a link to IPinfo), and the internet exchange it is on.
+  That asks RIPE NCC about the one public address, never a private one, and
+  keeps the answer for a day. Off, nothing is asked and the page says nothing
+  about who runs it. While addresses are hidden on screen the link goes to the
+  network, not the address.
 
 How long readings and saved routes are kept is set where ClearPing runs, with
 `CLEARPING_RETENTION_DAYS` (90 days unless set); the page shows it.

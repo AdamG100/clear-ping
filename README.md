@@ -216,8 +216,8 @@ what matters most to what matters least:
 
 **Add monitor** at the bottom of the sidebar opens a page of four numbered
 sections: **Monitor** (the address), **Name** (and its group), **Check** (how
-it is probed, and how often) and **Probe from** (this server or a probe agent,
-shown once you have one). The address box takes a hostname, an IP address,
+it is probed, and how often) and **Probes** (the local probe and any probe
+agents, shown once you have one; tick several to compare them). The address box takes a hostname, an IP address,
 `host:port` or a URL, and chooses the check to match; everything else has a
 default, so an address and Enter is a whole monitor. Fields that must be filled
 in are marked *Required*. A monitor is probed every five minutes unless you

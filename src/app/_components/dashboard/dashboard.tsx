@@ -20,6 +20,7 @@ import { DEFAULT_LOCAL_PROBE_NAME, LOCAL_PROBE } from '@/types/probe-agent'
 import { probeIdsOf } from '@/lib/targets/probes'
 import { probeSummaries } from '../targets/probe-checklist'
 import { COMPARE_PROBES, ProbeSwitch } from '../targets/probe-switch'
+import { NetworkLine, ProbeChips } from '../targets/monitor-network'
 import type { ProbeAgentOutage, ProbeAgentSummary, ProbeId } from '@/types/probe-agent'
 import { TIME_RANGE_CONFIG } from '@/types/probe'
 import { Sidebar, SIDEBAR_FOLD_MS, SIDEBAR_FOLD_PX } from '../sidebar/sidebar'
@@ -51,7 +52,7 @@ import { useDashboardPage } from './use-dashboard-page'
 import { useSignedIn } from './use-signed-in'
 import { DEFAULT_SETTINGS_SECTION, isSettingsSection, pathOf, type DashboardPage } from '@/lib/dashboard-pages'
 import { ProbeDetailsPanel } from '../targets/probe-details'
-import { agentDown, holdReason, probedFromLine, type ProbeFromFilter } from '../targets/probed-from'
+import { agentDown, holdReason, type ProbeFromFilter } from '../targets/probed-from'
 import { TraceroutePanel } from '../targets/traceroute-panel'
 import { CopyAddress } from './copy-address'
 import { ComparePanel } from '../charts/compare-panel'
@@ -62,7 +63,6 @@ import { RoutingPage } from '../routing/routing-page'
 import { useRoutingStatus } from '../routing/use-bgp'
 import { FamilySection } from './family-section'
 import { formatWindowEdge } from '../charts/chart-brush'
-import { MapPin } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -1498,12 +1498,21 @@ export function Dashboard() {
                   {(addressFamily || dualStack) && <Badge size="sm">{dualStack ? 'IPv4 + IPv6' : `IPv${addressFamily}`}</Badge>}
                   {selectedTarget.status === 'paused' && <Badge size="sm" tone="warning">Paused</Badge>}
                 </p>
+                {/* Who runs the address the readings on screen were taken against. */}
+                <div className="mt-1.5">
+                  <NetworkLine
+                    targetId={selectedTarget.id}
+                    probe={multiProbe ? shownProbe : undefined}
+                    family={shownFamily}
+                    refreshKey={selectedTarget.resolvedAddress ?? ''}
+                  />
+                </div>
                 {/* Said only once there is somewhere else it could be from. */}
                 {probeAgents.length > 0 && (
-                  <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <MapPin size={12} strokeWidth={1.75} aria-hidden />
-                    <span>{probedFromLine(selectedAgent)}</span>
-                  </p>
+                  <ProbeChips
+                    className="mt-1.5"
+                    probes={monitorProbeIds.map(id => probeList.find(probe => probe.id === id) ?? { id, name: probeNameOf(id), local: false, state: 'offline' as const })}
+                  />
                 )}
               </div>
               <div className={PANE_ACTIONS}>
