@@ -56,6 +56,8 @@ const VARIANT_TEXT: Record<Variant, string> = {
 interface Figure {
   label: string
   value: string
+  /** The value as digits that turn to the next one, like the headline: shown in place of `value` when given. */
+  spin?: React.ReactNode
   variant?: Variant
   /** For a figure of loss: the share lost, which colours it as loss is coloured everywhere. */
   loss?: number | null
@@ -72,7 +74,7 @@ function Figures({ figures }: { figures: Figure[] }) {
           <dt className="text-xs text-muted-foreground">{figure.label}</dt>
           {/* A missing reading is muted, never styled as though it were good. */}
           <dd className={cn("truncate font-mono text-sm tabular-nums", figure.value === "—" ? "text-faint" : VARIANT_TEXT[figure.variant ?? "default"])}>
-            {figure.value !== "—" && typeof figure.loss === "number" ? <LossFigure loss={figure.loss}>{figure.value}</LossFigure> : figure.value}
+            {figure.value !== "—" && typeof figure.loss === "number" ? <LossFigure loss={figure.loss}>{figure.spin ?? figure.value}</LossFigure> : figure.spin ?? figure.value}
           </dd>
         </div>
       ))}
@@ -325,7 +327,7 @@ function StatCard({ title, icon, main, mainLabel, visual, figures, trend, trendV
             {main.value === null ? (
               <span className="text-faint">—</span>
             ) : (
-              <AnimatedCounter value={main.value} suffix={main.suffix} decimals={main.decimals} />
+              <AnimatedCounter value={main.value} suffix={main.suffix.replace(/^ /, "\u00a0")} decimals={main.decimals} />
             )}
           </div>
           {lastUpdated && <RelativeTime timestamp={lastUpdated} />}
@@ -369,6 +371,38 @@ const pct = (v: number | null | undefined) =>
 /** Where most readings were: "3.0–4.1 ms". */
 const usual = (low: number | null | undefined, high: number | null | undefined) =>
   low === null || low === undefined || high === null || high === undefined ? "—" : `${low.toFixed(1)}–${high.toFixed(1)} ms`
+
+// The same figures as digits that turn, so moving to another probe, another
+// period or the next reading rolls each number to its new value. Nothing for
+// an absent reading, which stays the muted dash.
+const present = (v: number | null | undefined): v is number => v !== null && v !== undefined
+
+/**
+ * Arc's counter sizes itself as a headline from its own variables, which a
+ * class cannot reach past its module: set here to the figure's small mono text.
+ */
+const SMALL_COUNTER = {
+  '--text-3xl': 'var(--text-sm)',
+  '--font-display': 'var(--font-mono)',
+  '--tracking-display': 'normal',
+  color: 'inherit',
+} as React.CSSProperties
+
+function Spin({ children }: { children: React.ReactNode }) {
+  return <span className="inline-flex items-baseline" style={SMALL_COUNTER}>{children}</span>
+}
+
+// The counter sets its suffix apart in a box of its own, which drops a leading
+// space: a no-break space keeps "4.3 ms" from reading "4.3ms".
+const spinMs = (v: number | null | undefined) => (present(v) ? <Spin><AnimatedCounter value={v} decimals={1} suffix={"\u00a0ms"} /></Spin> : undefined)
+const spinPct = (v: number | null | undefined) => (present(v) ? <Spin><AnimatedCounter value={v} decimals={2} suffix="%" /></Spin> : undefined)
+const spinCount = (v: number, unit: string) => <Spin><AnimatedCounter value={v} suffix={unit.replace(/^ /, "\u00a0")} /></Spin>
+const spinUsual = (low: number | null | undefined, high: number | null | undefined) =>
+  present(low) && present(high) ? (
+    <Spin>
+      <AnimatedCounter value={low} decimals={1} />–<AnimatedCounter value={high} decimals={1} suffix={"\u00a0ms"} />
+    </Spin>
+  ) : undefined
 
 export default function StatsCards({
   statistics,
@@ -503,9 +537,9 @@ export default function StatsCards({
           />
         }
         figures={[
-          { label: "Average", value: ms(avgLatency) },
-          { label: "Usually", value: usual(statistics?.latencyP10, statistics?.latencyP90) },
-          { label: "Latest", value: ms(current.latency) },
+          { label: "Average", value: ms(avgLatency), spin: spinMs(avgLatency) },
+          { label: "Usually", value: usual(statistics?.latencyP10, statistics?.latencyP90), spin: spinUsual(statistics?.latencyP10, statistics?.latencyP90) },
+          { label: "Latest", value: ms(current.latency), spin: spinMs(current.latency) },
         ]}
       />
 
@@ -522,9 +556,14 @@ export default function StatsCards({
         lastUpdated={lastUpdated}
         visual={<LossBar bands={statistics?.lossBands ?? []} unit={vocabulary.unit} />}
         figures={[
-          { label: "Worst reading", value: pct(maxPacketLoss), loss: maxPacketLoss },
-          { label: "No reply at all", value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()} readings` : "—", loss: (statistics?.failedProbes ?? 0) > 0 ? 100 : 0 },
-          { label: "Latest", value: pct(current.packetLoss), loss: current.packetLoss },
+          { label: "Worst reading", value: pct(maxPacketLoss), spin: spinPct(maxPacketLoss), loss: maxPacketLoss },
+          {
+            label: "No reply at all",
+            value: hasData ? `${(statistics?.failedProbes ?? 0).toLocaleString()} readings` : "—",
+            spin: hasData ? spinCount(statistics?.failedProbes ?? 0, (statistics?.failedProbes ?? 0) === 1 ? " reading" : " readings") : undefined,
+            loss: (statistics?.failedProbes ?? 0) > 0 ? 100 : 0,
+          },
+          { label: "Latest", value: pct(current.packetLoss), spin: spinPct(current.packetLoss), loss: current.packetLoss },
         ]}
       />
 
@@ -554,9 +593,9 @@ export default function StatsCards({
           />
         }
         figures={[
-          { label: "Median", value: ms(statistics?.medianJitter) },
-          { label: "Usually", value: usual(statistics?.jitterP10, statistics?.jitterP90) },
-          { label: "Latest", value: ms(current.jitter), variant: current.jitter === null || current.jitter <= 50 ? "default" : current.jitter <= 100 ? "warning" : "danger" },
+          { label: "Median", value: ms(statistics?.medianJitter), spin: spinMs(statistics?.medianJitter) },
+          { label: "Usually", value: usual(statistics?.jitterP10, statistics?.jitterP90), spin: spinUsual(statistics?.jitterP10, statistics?.jitterP90) },
+          { label: "Latest", value: ms(current.jitter), spin: spinMs(current.jitter), variant: current.jitter === null || current.jitter <= 50 ? "default" : current.jitter <= 100 ? "warning" : "danger" },
         ]}
       />
     </div>
