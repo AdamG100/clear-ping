@@ -32,5 +32,7 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+      # The route types the pages use, which only a build or this creates.
+      - run: npx next typegen
       - run: npm run typecheck
       - run: npm test
