@@ -16,17 +16,21 @@ export interface DuplicateSet {
   /** What they all measure. */
   key: string;
   monitors: Array<{ id: string; name: string; host: string; group: string; interval: number; probes: ProbeId[] }>;
+  /** Their settings (packet count, port, path…) are not all the same: the kept monitor's are used. */
+  settingsDiffer: boolean;
 }
 
 /**
  * Sets of monitors that measure the same thing from different probes: the
- * same address, method and settings, with no probe in more than one. Two that
+ * same address and method, with no probe in more than one. Settings such as
+ * the packet count may differ (a copy made for a probe agent was often tuned
+ * for it); the set says so, and the kept monitor's are used. Two that
  * share a probe are left alone, since they are not one monitor split in two.
  */
 export function findDuplicateSets(targets: Target[]): DuplicateSet[] {
   const byKey = new Map<string, Target[]>();
   for (const target of targets) {
-    const key = measurementKey(target);
+    const key = sameThingKey(target);
     byKey.set(key, [...(byKey.get(key) ?? []), target]);
   }
 
@@ -51,9 +55,15 @@ export function findDuplicateSets(targets: Target[]): DuplicateSet[] {
         interval: target.interval,
         probes: probeIdsOf(target),
       })),
+      settingsDiffer: new Set(chosen.map(target => measurementKey(target))).size > 1,
     });
   }
   return sets;
+}
+
+/** The address and method, without the settings measurementKey also compares. */
+function sameThingKey(target: Target): string {
+  return measurementKey({ ...target, probeConfig: {} }).split('|').slice(0, 3).join('|');
 }
 
 const BATCH_ROWS = 5000;

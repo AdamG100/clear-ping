@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { setGroupProbes } from '@/lib/db/database';
+import { addProbeToMonitors, setGroupProbes } from '@/lib/db/database';
 import { normalizeGroupPath } from '@/lib/targets/group-path';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
@@ -42,5 +42,37 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     console.error('Error switching a group’s probe:', error);
     return NextResponse.json({ error: 'Failed to switch where the group is probed from' }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/groups/probe - Add a probe to monitors, keeping the probes they have
+ * Body: { probe: string, group?: string } (every monitor when group is left out)
+ *
+ * For a probe agent just set up: measure what is already monitored from there
+ * too. Monitors in groups inside `group` gain it as well. Each monitor's
+ * first probe stays its first.
+ */
+export async function POST(request: NextRequest) {
+  try {
+    await initializeServer();
+
+    const body = await request.json().catch(() => null);
+    const probe = typeof body?.probe === 'string' ? body.probe : '';
+    const group = typeof body?.group === 'string' ? normalizeGroupPath(body.group) : '';
+    const names = await probeNames([probe]);
+    if (!probe || !names.has(probe) || names.get(probe) === 'A removed probe') {
+      return NextResponse.json({ error: 'probe is "local" or the id of a probe agent' }, { status: 400 });
+    }
+
+    const updated = await addProbeToMonitors(probe, { group: group || undefined });
+    await getScheduler().reloadTargets();
+
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'group.probe', `${group || 'every monitor'}: ${names.get(probe)} added to ${updated}`);
+    return NextResponse.json({ updated });
+  } catch (error) {
+    console.error('Error adding a probe to monitors:', error);
+    return NextResponse.json({ error: 'Failed to add the probe to the monitors' }, { status: 500 });
   }
 }

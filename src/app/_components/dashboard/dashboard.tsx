@@ -1273,6 +1273,7 @@ export function Dashboard() {
           >
             <ErrorBoundary label="Overview">
               <OverviewPage
+                onOpenProbeSettings={readOnly ? undefined : openProbeAgentSettings}
                 targets={transformedTargets}
                 latest={latest}
                 probeAgents={probeAgents}

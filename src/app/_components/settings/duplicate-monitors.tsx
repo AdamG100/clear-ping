@@ -38,13 +38,14 @@ export function DuplicateMonitors() {
 
   if (sets.length === 0) return null
 
-  const merge = async (set: DuplicateSet) => {
+  const merge = async (set: DuplicateSet, quiet = false) => {
     const keep = kept[set.key] ?? set.monitors[0].id
     const { ok, body } = await send('/api/targets/merge', 'POST', { keep, merge: set.monitors.map(monitor => monitor.id).filter(id => id !== keep) })
     if (!ok) {
       reportError('Could not merge the monitors', String(body.error ?? 'Try again'))
       throw new Error('Not merged')
     }
+    if (quiet) return
     notify({ tone: 'success', title: 'Monitors merged', detail: 'One monitor, measured from each probe.' })
     await load()
   }
@@ -59,6 +60,23 @@ export function DuplicateMonitors() {
         </p>
       </div>
       <ul className="space-y-3">
+        {sets.length > 1 && (
+          <li className="flex justify-end">
+            <ConfirmMorph
+              label={`Merge all ${sets.length}`}
+              prompt={`Merge ${sets.length} sets, each keeping the monitor chosen?`}
+              confirmLabel="Merge all"
+              doneLabel="Merged"
+              pendingLabel="Merging"
+              tone="neutral"
+              onConfirm={async () => {
+                for (const set of sets) await merge(set, true)
+                notify({ tone: 'success', title: `${sets.length} sets merged`, detail: 'Each is one monitor, measured from each probe.' })
+                await load()
+              }}
+            />
+          </li>
+        )}
         {sets.map(set => {
           const keep = kept[set.key] ?? set.monitors[0].id
           return (
@@ -75,10 +93,13 @@ export function DuplicateMonitors() {
                   </li>
                 ))}
               </ul>
+              {set.settingsDiffer && (
+                <p className="text-xs text-muted-foreground">Their settings are not all the same: the merged monitor keeps those of the one below.</p>
+              )}
               <div className="flex flex-wrap items-end justify-between gap-2">
                 <div className="min-w-0 basis-64">
                   <Select
-                    label="Keep the name, group and interval of"
+                    label="Keep the name, group, interval and settings of"
                     value={keep}
                     onValueChange={value => setKept(current => ({ ...current, [set.key]: value }))}
                     options={set.monitors.map(monitor => ({ value: monitor.id, label: monitor.name }))}

@@ -7,7 +7,7 @@ import type { Target } from '@/types/probe'
 const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clearping-merge-')), 'test.db')
 process.env.CLEARPING_DB_PATH = dbFile
 
-const { initDatabase, closeDatabase, getDatabase, createTarget, getTargetById, getAllTargets, storeMeasurement } = await import('../db/database')
+const { initDatabase, closeDatabase, getDatabase, createTarget, getTargetById, getAllTargets, storeMeasurement, addProbeToMonitors } = await import('../db/database')
 const { findDuplicateSets, mergeMonitors } = await import('./merge')
 
 type Row = Record<string, unknown>
@@ -49,12 +49,45 @@ describe('finding monitors set up once for each probe', () => {
     expect(sets[0].monitors.map(monitor => monitor.id).sort()).toEqual(['home-copy', 'work'])
   })
 
+  it('pairs them when only their settings differ, and says so', () => {
+    const tuned = [
+      { ...ping('x', 'X', '192.0.2.1', 'local'), probeConfig: { packetCount: 20 } },
+      { ...ping('y', 'Y', '192.0.2.1', 'home'), probeConfig: { packetCount: 5 } },
+    ] as unknown as Target[]
+    const [set] = findDuplicateSets(tuned)
+    expect(set.monitors).toHaveLength(2)
+    expect(set.settingsDiffer).toBe(true)
+    expect(findDuplicateSets([tuned[0], { ...tuned[1], probeConfig: { packetCount: 20 } }] as Target[])[0].settingsDiffer).toBe(false)
+  })
+
+  it('does not pair different methods on the same address', () => {
+    const mixed = [ping('x', 'X', '192.0.2.1', 'local'), { ...ping('y', 'Y', '192.0.2.1', 'home'), probeType: 'tcp' }] as unknown as Target[]
+    expect(findDuplicateSets(mixed)).toEqual([])
+  })
+
   it('leaves two that share a probe alone', () => {
     const same = [
       { ...ping('x', 'X', '192.0.2.1', 'local') },
       { ...ping('y', 'Y', '192.0.2.1', 'local') },
     ] as unknown as Target[]
     expect(findDuplicateSets(same)).toEqual([])
+  })
+})
+
+describe('adding a new probe to monitors that exist', () => {
+  it('adds it to a group and the groups inside it, keeping each monitor\'s probes and its first', async () => {
+    await createTarget(ping('lab-a', 'Lab A', '192.0.2.60', 'local', 'Lab'))
+    await createTarget(ping('lab-b', 'Lab B', '192.0.2.61', 'local', 'Lab/Rack 1'))
+    await createTarget(ping('elsewhere', 'Elsewhere', '192.0.2.62', 'local', 'Labs'))
+
+    expect(await addProbeToMonitors('home', { group: 'Lab' })).toBe(2)
+    expect((await getTargetById('lab-a'))!.probes!.map(probe => probe.id)).toEqual(['local', 'home'])
+    expect((await getTargetById('lab-b'))!.probes!.map(probe => probe.id)).toEqual(['local', 'home'])
+    expect((await getTargetById('elsewhere'))!.probes!.map(probe => probe.id)).toEqual(['local'])
+    expect((await getTargetById('lab-a'))!.probeAgentId ?? null).toBeNull()
+
+    // Again: nothing to add.
+    expect(await addProbeToMonitors('home', { group: 'Lab' })).toBe(0)
   })
 })
 

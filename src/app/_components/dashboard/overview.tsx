@@ -7,6 +7,7 @@ import { LOCAL_PROBE, DEFAULT_LOCAL_PROBE_NAME, type ProbeAgentSummary } from '@
 import { probeIdsOf } from '@/lib/targets/probes'
 import type { IncidentKind, OverviewEvent, OverviewReport, OverviewSlice } from '@/types/overview'
 import { Alert } from '@/components/arc/alert/alert'
+import { MergeNotice } from './merge-notice'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { EmptyState } from '@/components/arc/empty-state/empty-state'
@@ -67,6 +68,8 @@ interface OverviewPageProps {
   onAddTarget: () => void
   onOpenRouting: () => void
   onOpenRoutingPrefix: (id: string) => void
+  /** Settings, Probes: where monitors set up once for each probe are merged. */
+  onOpenProbeSettings?: () => void
   reportError: (title: string, error?: unknown) => void
 }
 
@@ -720,6 +723,7 @@ export function OverviewPage({
   onAddTarget,
   onOpenRouting,
   onOpenRoutingPrefix,
+  onOpenProbeSettings,
   reportError,
 }: OverviewPageProps) {
   // The day leaves out the checks that have never answered; so does now.
@@ -764,7 +768,7 @@ export function OverviewPage({
   }
 
   const sourcesLine =
-    probeAgents.length === 0 ? 'probed from this server' : `probed from this server and ${plural(probeAgents.length, 'probe agent')}`
+    probeAgents.length === 0 ? 'measured by the local probe' : `measured by the local probe and ${plural(probeAgents.length, 'probe agent')}`
 
   // Until the targets are in, the page has nothing true to say: its figures
   // would read 0 of 0 and its headline that it waits for the first readings.
@@ -797,6 +801,8 @@ export function OverviewPage({
           <p className="font-mono text-xs text-muted-foreground">Last reading {clock(refreshKey)}</p>
         )}
       </header>
+
+      {!readOnly && onOpenProbeSettings && <MergeNotice onReview={onOpenProbeSettings} />}
 
       <Headline now={now} agentsDown={agentsDown} />
 

@@ -219,8 +219,8 @@ Everywhere a monitor appears, it says where it is probed from:
 - **The sidebar.** A purple *Remote* badge beside the monitor's type, which
   names the agent when you point at it, or *2 probes* for a monitor measured
   from several. Its dot is green while any probe reaches it, with the loss of
-  the worst, and its note names the probes that fail. The **Measured by**
-  filter under the search box lists only the monitors one probe measures.
+  the worst, and its note names the probes that fail. *Show its monitors* on a
+  probe's Overview tile lists only the monitors it measures, until you clear it.
 - **The monitor's page.** A *Probed from …* line under the address. The
   *Route* panel says *traced from …*, because a traceroute also runs from the
   agent.
@@ -237,6 +237,26 @@ Everywhere a monitor appears, it says where it is probed from:
   its chip ([bgp-monitoring.md](bgp-monitoring.md)).
 - **Assistant answers.** Monitors from an agent come back with `probedFrom`,
   and the ISP report says those were measured from another machine.
+
+### Adding a new probe agent to the monitors you have
+
+Once a probe agent is paired, **Add a probe to monitors** under Settings, Probes
+adds it to every monitor, or to a group and the groups inside it, in one go. A
+group's own dialog has the same control for that group. Each monitor keeps the
+probes it already has, and its first probe stays first, so nothing about its
+page or alerts moves. To set a group's probes exactly, tick them under *Measure
+from* in the group's dialog instead.
+
+### Monitors set up once for each probe
+
+Before a monitor could have several probes, watching a host from home and from
+a VPS meant a monitor for each. When monitors watch the same address with the
+same method from different probes, the Overview says so, and Settings, Probes
+offers each set for merging (one at a time, or all at once). You choose which
+one's name, group, interval and settings are kept; their settings, such as the
+packet count, may differ, and the set says when they do. Merging moves every
+reading and route under the kept monitor, each still filed under the probe that
+took it, along with its alerts. Nothing is merged unless you ask.
 
 Changing the probes of a monitor keeps its history. The activity record says
 what they were and what they became, because the readings before and after

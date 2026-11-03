@@ -8,6 +8,7 @@ import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { Input } from '@/components/arc/input/input'
 import { Select } from '@/components/arc/select/select'
 import { ProbeChecklist, probeSummaries } from '../targets/probe-checklist'
+import { AddProbeToMonitors } from '../settings/add-probe-to-monitors'
 import {
   GROUP_SEPARATOR,
   groupLabel,
@@ -242,6 +243,8 @@ function GroupForm({
           </p>
         </div>
       )}
+      {/* Or one more probe, keeping what each monitor has: no need to tick them all again. */}
+      {showProbe && editing && <AddProbeToMonitors group={editing.group} />}
 
       {editing && exists && !problem && (
         <Alert tone="info" title={`${groupLabel(destination)} already exists`}>
