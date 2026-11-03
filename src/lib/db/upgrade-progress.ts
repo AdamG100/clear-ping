@@ -12,7 +12,7 @@
  * proxy can read it without loading SQLite.
  */
 
-export type UpgradeStepStatus = 'running' | 'done';
+export type UpgradeStepStatus = 'running' | 'done' | 'failed';
 
 export interface UpgradeStep {
   id: string;
@@ -89,7 +89,10 @@ export function databaseReady(): void {
 }
 
 export function databaseFailed(message: string): void {
-  Object.assign(store(), { phase: 'failed', error: message });
+  const current = store();
+  // What was under way when it stopped did not finish.
+  for (const step of current.steps) if (step.status === 'running') step.status = 'failed';
+  Object.assign(current, { phase: 'failed', error: message });
 }
 
 /** Opening again in this process (the tests, a closed database): start a fresh record. */

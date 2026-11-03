@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Check, Loader2 } from 'lucide-react'
+import { Check, CircleX, Loader2 } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
+import { Button } from '@/components/arc/button/button'
 import { TextShimmer } from '@/components/arc/text-shimmer/text-shimmer'
 import type { UpgradeProgress } from '@/lib/db/upgrade-progress'
 
@@ -24,6 +25,14 @@ export function UpgradeScreen() {
   const [progress, setProgress] = useState<UpgradeProgress | null>(null)
   const [unreachable, setUnreachable] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [retrying, setRetrying] = useState(false)
+
+  const retry = async () => {
+    setRetrying(true)
+    await fetch('/api/upgrade/retry', { method: 'POST' }).catch(() => null)
+    // The next poll shows it opening again, or why it still cannot.
+    setTimeout(() => setRetrying(false), 1500)
+  }
 
   useEffect(() => {
     let current = true
@@ -51,6 +60,7 @@ export function UpgradeScreen() {
   }, [])
 
   const upgrading = !!progress && progress.steps.length > 0
+  const failed = progress?.phase === 'failed'
   const from = progress?.from
   const to = progress?.to
 
@@ -58,18 +68,23 @@ export function UpgradeScreen() {
     <main className="flex min-h-dvh items-center justify-center bg-background p-4 text-foreground">
       <div className="w-full max-w-lg space-y-5 rounded-2xl border border-border bg-card p-6">
         <div className="space-y-1">
-          <h1 className="text-lg font-medium">{upgrading ? 'Bringing the database up to date' : 'Starting ClearPing'}</h1>
+          <h1 className="text-lg font-medium">{failed ? 'ClearPing could not start' : upgrading ? 'Bringing the database up to date' : 'Starting ClearPing'}</h1>
           <p className="text-sm text-muted-foreground">
-            {upgrading
+            {failed
+              ? 'Its database could not be opened. Fix what is said below, then try again.'
+              : upgrading
               ? `This version of ClearPing needs some changes to the database${from !== undefined && to !== undefined && from < to ? ` (version ${from} to ${to})` : ''}, made once, before anything is shown. Nothing is lost. This page carries on by itself when it is done.`
               : 'Opening the database. This page carries on by itself in a moment.'}
           </p>
         </div>
 
         {progress?.phase === 'failed' && (
-          <Alert tone="danger" title="The database could not be opened">
-            {progress.error ?? 'The container log says why.'} Each change is all or nothing, so fix what it says and restart ClearPing.
-          </Alert>
+          <div className="space-y-3">
+            <Alert tone="danger" title="The database could not be opened">
+              <p className="whitespace-pre-line break-words">{progress.error ?? 'The container log says why.'}</p>
+            </Alert>
+            <Button size="sm" variant="secondary" loading={retrying} onClick={() => void retry()}>Try again</Button>
+          </div>
         )}
         {unreachable && <p className="text-sm text-muted-foreground">Waiting for the server to answer…</p>}
 
@@ -82,11 +97,14 @@ export function UpgradeScreen() {
                   <div className="flex items-start gap-2 text-sm">
                     {step.status === 'done' ? (
                       <Check size={16} strokeWidth={2} className="mt-0.5 shrink-0 text-success" aria-label="Done" />
+                    ) : step.status === 'failed' ? (
+                      <CircleX size={16} strokeWidth={2} className="mt-0.5 shrink-0 text-destructive" aria-label="Stopped" />
                     ) : (
                       <Loader2 size={16} strokeWidth={2} className="mt-0.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="In progress" />
                     )}
                     <span className="min-w-0 flex-1">
                       {step.status === 'running' ? <TextShimmer>{step.label}</TextShimmer> : step.label}
+                      {step.status === 'failed' && <span className="text-muted-foreground">: stopped, nothing changed</span>}
                       {step.detail && <span className="text-muted-foreground">: {step.detail}</span>}
                     </span>
                     {share !== null && step.status === 'running' && (

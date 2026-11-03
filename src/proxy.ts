@@ -103,7 +103,7 @@ export async function proxy(request: NextRequest) {
 }
 
 /** What is answered while the database is opened: the page that says so, what it reads, and the health check. */
-const UPGRADE_PATHS = new Set(['/upgrading', '/api/upgrade', '/api/health'])
+const UPGRADE_PATHS = new Set(['/upgrading', '/api/upgrade', '/api/upgrade/retry', '/api/health'])
 
 export const config = {
   // Everything but the files a signed-out browser still needs: the scripts and

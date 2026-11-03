@@ -399,6 +399,44 @@ function databasePermissionMessage(dbPath: string): string {
   return `Cannot open the database at ${dbPath}: permission denied.${who}${fix}`;
 }
 
+/**
+ * The database or a file beside it that this process may read but not write,
+ * and who owns it: a database restored or copied in by root, say, while the
+ * image runs as uid 1000. SQLite opens such a file and only refuses at the
+ * first write, which for an upgrade is part-way into it.
+ */
+function unwritableFile(dbPath: string): { file: string; owner?: number } | null {
+  for (const file of [path.dirname(dbPath), dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (!fs.existsSync(file)) continue;
+    try {
+      fs.accessSync(file, fs.constants.W_OK);
+    } catch {
+      let owner: number | undefined;
+      try {
+        owner = fs.statSync(file).uid;
+      } catch {}
+      return { file, owner };
+    }
+  }
+  return null;
+}
+
+/** Why the database cannot be written, and the command that fixes it. */
+function databaseReadOnlyMessage(dbPath: string, found = unwritableFile(dbPath)): string {
+  const uid = process.getuid?.();
+  const what = found
+    ? `${found.file}${found.owner !== undefined ? ` belongs to uid ${found.owner}` : ''}${uid !== undefined ? ` and ClearPing runs as uid ${uid}` : ''}`
+    : 'the file system it is on is mounted read-only, or a file beside it belongs to another user';
+  const fix = uid === undefined
+    ? ''
+    : ` On the host, in the directory with the Compose file:\n\n  sudo chown -R ${uid}:${uid} ./data\n\nthen choose Try again, or restart ClearPing.`;
+  return `The database at ${dbPath} can be read but not changed: ${what}. Nothing was changed.${fix}`;
+}
+
+function isReadOnlyError(error: unknown): boolean {
+  return (error as { code?: string }).code === 'SQLITE_READONLY';
+}
+
 function isDatabasePermissionError(error: unknown): boolean {
   const code = (error as { code?: string }).code;
   return code === 'EACCES' || code === 'EPERM' || code === 'SQLITE_CANTOPEN';
@@ -454,6 +492,15 @@ export async function initDatabase(): Promise<Database> {
       const message = databasePermissionMessage(dbPath);
       console.error(`Database: ${message}`);
       throw new Error(message, { cause: error });
+    }
+
+    // Said before anything is tried, rather than as SQLITE_READONLY from
+    // whichever change happens to write first.
+    const unwritable = unwritableFile(dbPath);
+    if (unwritable) {
+      const message = databaseReadOnlyMessage(dbPath, unwritable);
+      console.error(`Database: ${message}`);
+      throw new Error(message);
     }
 
     // Foreign keys are off by default in SQLite, which silently disables the
@@ -661,7 +708,13 @@ export async function initDatabase(): Promise<Database> {
     connection.ready = true;
     databaseReady();
     return connection.db!;
-  })();
+  })().catch(error => {
+    // Read-only though every file looked writable: a read-only mount.
+    if (!isReadOnlyError(error)) throw error;
+    const message = databaseReadOnlyMessage(databasePath());
+    console.error(`Database: ${message}`);
+    throw new Error(message, { cause: error });
+  });
 
   connection.opening = opening;
   // A failed open must not stick, or the next attempt in this process repeats
