@@ -73,8 +73,11 @@ EXPOSE 7380
 
 # Alive and listening is healthy, whatever it answers: /healthz only answers
 # this machine, and with a listen address of its own (a tailnet address, on
-# the host's network) this machine is not where it is listening.
+# the host's network) this machine is not where it is listening. Connecting is
+# enough to say so, and bash can do that: starting a whole Node every half a
+# minute only to ask is a spike of its own, and a probe agent can be a very
+# small machine. The address is read as main.ts reads it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "const l=process.env.CLEARPING_PROBE_AGENT_LISTEN||'';const m=/^\[?(.*?)\]?:(\d+)$/.exec(l);const h=!m||m[1]==='0.0.0.0'||m[1]==='::'?'127.0.0.1':m[1];require('https').get({host:h,port:m?m[2]:7380,path:'/healthz',rejectUnauthorized:false,timeout:4000},r=>process.exit(0)).on('error',()=>process.exit(1))"
+  CMD bash -c 'l=${CLEARPING_PROBE_AGENT_LISTEN:-0.0.0.0:7380}; if [[ $l =~ ^\[(.+)\]:([0-9]+)$ || $l =~ ^([^:]+):([0-9]+)$ ]]; then h=${BASH_REMATCH[1]}; p=${BASH_REMATCH[2]}; elif [[ $l =~ ^[0-9]+$ ]]; then h=0.0.0.0; p=$l; else h=$l; p=7380; fi; [[ $h == 0.0.0.0 || $h == :: ]] && h=127.0.0.1; exec 3<>/dev/tcp/$h/$p'
 
 CMD ["node", "clearping-probe-agent.cjs"]
