@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { decide, FACTOR_SETUP_PAGE, hostAllowed, identify, routeKind, securityPolicy } from '@/lib/security/access'
 import { corsHeaders, corsOrigin, corsPath } from '@/lib/security/cors'
 import { devUserEnabled } from '@/lib/security/dev-user'
+import { databaseOpening, upgradeProgress } from '@/lib/db/upgrade-progress'
 
 /**
  * The one place every page and API request passes through first, and so the
@@ -20,6 +21,21 @@ export async function proxy(request: NextRequest) {
     if (!hostAllowed(request.headers.get('host')) || (forwarded && !hostAllowed(forwarded))) {
       return NextResponse.json({ error: 'This address is not one ClearPing was set up to answer to (CLEARPING_ALLOWED_HOSTS)' }, { status: 421 })
     }
+  }
+
+  // While the database is opened (and after an upgrade, brought up to date)
+  // nothing can be answered: who is signed in is in it too. A page is shown
+  // what is happening instead, and anything else told to try again shortly.
+  if ((databaseOpening() || upgradeProgress().phase === 'failed') && !UPGRADE_PATHS.has(pathname)) {
+    if (routeKind(pathname) === 'page' && request.method === 'GET') {
+      const page = new URL('/upgrading', request.url)
+      if (pathname !== '/') page.searchParams.set('next', pathname + search)
+      return NextResponse.redirect(page, 307)
+    }
+    return NextResponse.json(
+      { error: 'ClearPing is opening its database. Try again in a moment.', upgrading: true },
+      { status: 503, headers: { 'Retry-After': '5' } }
+    )
   }
 
   const open = routeKind(pathname) === 'open'
@@ -85,6 +101,9 @@ export async function proxy(request: NextRequest) {
     }
   )
 }
+
+/** What is answered while the database is opened: the page that says so, what it reads, and the health check. */
+const UPGRADE_PATHS = new Set(['/upgrading', '/api/upgrade', '/api/health'])
 
 export const config = {
   // Everything but the files a signed-out browser still needs: the scripts and

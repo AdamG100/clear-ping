@@ -8,6 +8,7 @@ import { lossBandIndex, PACKET_LOSS_BANDS } from '../charts/packet-loss-colors';
 import { groupWithAncestors, isWithinGroup, normalizeGroupPath, parentGroup, rebaseGroupPath } from '../targets/group-path';
 import { runMigrations } from './migrations';
 import { finishProbeUpgrade, reconcileTargetProbes, settleProbeIndexes } from './probe-tags';
+import { databaseFailed, databaseOpeningAgain, databaseReady, upgradeProgress, type UpgradeRecord } from './upgrade-progress';
 import { LOCAL_PROBE, type ProbeId } from '@/types/probe-agent';
 import { agentIdOf, probeIdsOf, probeOf } from '../targets/probes';
 
@@ -329,11 +330,46 @@ interface StatisticsRow {
  * ran every startup step on its own connection, in parallel with the rest.
  */
 const CONNECTION_KEY = Symbol.for('clearping.database');
-type ConnectionStore = { db: Database | null; opening: Promise<Database> | null };
+type ConnectionStore = { db: Database | null; opening: Promise<Database> | null; ready?: boolean };
 const connection: ConnectionStore = ((globalThis as typeof globalThis & { [CONNECTION_KEY]?: ConnectionStore })[CONNECTION_KEY] ??= {
   db: null,
   opening: null,
 });
+
+/** The last few upgrades, for Settings, Maintenance: when, from which version to which, and what was done. */
+const UPGRADE_HISTORY_KEY = 'upgrade.history';
+const UPGRADE_HISTORY_KEPT = 20;
+
+async function recordUpgrade(database: Database): Promise<void> {
+  const progress = upgradeProgress();
+  if (progress.steps.length === 0) return;
+  const [row] = await allSql<{ value: string }>(database, 'SELECT value FROM settings WHERE key = ?', [UPGRADE_HISTORY_KEY]);
+  let history: UpgradeRecord[] = [];
+  try {
+    history = row ? (JSON.parse(row.value) as UpgradeRecord[]) : [];
+  } catch {
+    history = [];
+  }
+  history.unshift({
+    at: Date.now(),
+    from: progress.from,
+    to: progress.to,
+    tookMs: Date.now() - progress.startedAt,
+    steps: progress.steps.map(step => ({ label: step.label, ...(step.detail ? { detail: step.detail } : {}) })),
+  });
+  await runSql(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [UPGRADE_HISTORY_KEY, JSON.stringify(history.slice(0, UPGRADE_HISTORY_KEPT))]);
+}
+
+/** The upgrades this database has had, newest first. */
+export async function getUpgradeHistory(): Promise<UpgradeRecord[]> {
+  const database = await getDatabase();
+  const [row] = await allSql<{ value: string }>(database, 'SELECT value FROM settings WHERE key = ?', [UPGRADE_HISTORY_KEY]);
+  try {
+    return row ? (JSON.parse(row.value) as UpgradeRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Where the database file is. Configurable so the standalone prober (which may
@@ -396,12 +432,14 @@ function openSqlite(dbPath: string): Promise<Database> {
  * Initialize the SQLite database and create tables
  */
 export async function initDatabase(): Promise<Database> {
-  if (connection.db) return connection.db;
+  // Open but still being brought up to date is not ready: wait for that.
+  if (connection.db && connection.ready) return connection.db;
   
   // Return existing promise if initialization is in progress
   if (connection.opening) return connection.opening;
 
   const opening = (async () => {
+    databaseOpeningAgain();
     const dbPath = databasePath();
 
     const dataDir = path.dirname(dbPath);
@@ -616,17 +654,26 @@ export async function initDatabase(): Promise<Database> {
     await reconcileTargetProbes(connection.db);
     await finishProbeUpgrade(connection.db);
     await settleProbeIndexes(connection.db);
+    await recordUpgrade(connection.db).catch(error => console.warn('Database: could not keep a record of the upgrade:', error));
 
     console.log('Database: Tables and indexes created successfully');
 
+    connection.ready = true;
+    databaseReady();
     return connection.db!;
   })();
 
   connection.opening = opening;
   // A failed open must not stick, or the next attempt in this process repeats
   // it after the folder has been fixed.
-  void opening.catch(() => {
-    if (connection.opening === opening && !connection.db) connection.opening = null;
+  void opening.catch(error => {
+    databaseFailed(error instanceof Error ? error.message : String(error));
+    if (connection.opening === opening && !connection.ready) {
+      connection.opening = null;
+      // Opened but not brought up to date: let it go, and open afresh next time.
+      connection.db?.close(() => {});
+      connection.db = null;
+    }
   });
 
   return opening;
@@ -657,6 +704,7 @@ export async function closeDatabase(): Promise<void> {
   const handle = connection.db;
   connection.db = null;
   connection.opening = null;
+  connection.ready = false;
   if (!handle) return;
 
   await new Promise<void>((resolve, reject) => {
@@ -671,7 +719,7 @@ export async function closeDatabase(): Promise<void> {
  * Get database instance
  */
 export async function getDatabase(): Promise<Database> {
-  if (!connection.db) {
+  if (!connection.db || !connection.ready) {
     return await initDatabase();
   }
   return connection.db;

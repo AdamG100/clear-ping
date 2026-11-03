@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { isIP } from 'net';
 import type sqlite3 from 'sqlite3';
 import { groupWithAncestors, normalizeGroupPath } from '../targets/group-path';
+import { noteVersions, stepDone, stepStarted } from './upgrade-progress';
 
 type Database = sqlite3.Database;
 
@@ -796,8 +797,10 @@ export async function runMigrations(database: Database): Promise<void> {
     return;
   }
 
+  noteVersions(found, SCHEMA_VERSION);
   for (let version = found + 1; version <= SCHEMA_VERSION; version++) {
     const migration = MIGRATIONS[version - 1];
+    stepStarted(`migration-${version}`, `Change ${version} of ${SCHEMA_VERSION}: ${migration.name}`);
 
     await run(database, 'BEGIN IMMEDIATE');
     try {
@@ -809,6 +812,7 @@ export async function runMigrations(database: Database): Promise<void> {
         await run(database, `PRAGMA user_version = ${version}`);
         console.log(`Database: applied migration ${version} (${migration.name})`);
       }
+      stepDone(`migration-${version}`);
       await run(database, 'COMMIT');
     } catch (error) {
       await run(database, 'ROLLBACK').catch(() => {});

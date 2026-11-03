@@ -1,5 +1,6 @@
 import type sqlite3 from 'sqlite3';
 import { PROBE_TAGS_KEY } from './migrations';
+import { stepDone, stepProgress, stepStarted } from './upgrade-progress';
 
 type Database = sqlite3.Database;
 
@@ -68,6 +69,18 @@ async function tagReadings(database: Database, state: TagState): Promise<void> {
   if (ids.length === 0) return;
   console.log(`Database: tagging the readings of ${ids.length} monitor${ids.length === 1 ? '' : 's'} with the probe agent that took them`);
 
+  // How many there are to do, for the page shown meanwhile: one seek per monitor.
+  let total = 0;
+  for (const id of ids) {
+    const [{ count }] = await all<{ count: number }>(
+      database,
+      "SELECT COUNT(*) AS count FROM measurements WHERE target_id = ? AND probe = 'local' AND timestamp > ? AND timestamp <= ?",
+      [id, state.targets[id].cursor, state.migratedAt]
+    );
+    total += count;
+  }
+  stepStarted('tag', `Filing the readings of ${ids.length} monitor${ids.length === 1 ? '' : 's'} under the probe agent that took them`, total);
+
   let tagged = 0;
   for (const id of ids) {
     const work = state.targets[id];
@@ -95,6 +108,7 @@ async function tagReadings(database: Database, state: TagState): Promise<void> {
         work.cursor = last;
         await writeState(database, state);
         await run(database, 'COMMIT');
+        stepProgress('tag', tagged);
       } catch (error) {
         await run(database, 'ROLLBACK').catch(() => {});
         throw error;
@@ -112,6 +126,7 @@ async function tagReadings(database: Database, state: TagState): Promise<void> {
     await writeState(database, state);
   }
   console.log(`Database: tagged ${tagged.toLocaleString('en')} readings with the probe that took them`);
+  stepDone('tag', `${tagged.toLocaleString('en')} readings`);
 }
 
 /**
@@ -177,6 +192,7 @@ export async function finishProbeUpgrade(database: Database): Promise<void> {
   await ensureProbeTimeIndex(database);
   await tagReadings(database, state);
 
+  stepStarted('family-index', 'Building the index of the newest reading from each probe');
   // The newest reading of each probe of each monitor, and of each of its
   // families, is one lookup through this. It replaces the index on family
   // alone, which could not tell one probe's readings from another's.
@@ -186,6 +202,7 @@ export async function finishProbeUpgrade(database: Database): Promise<void> {
      ON measurements(target_id, probe, family, timestamp DESC)`
   );
   await run(database, 'DROP INDEX IF EXISTS idx_measurements_target_family_timestamp');
+  stepDone('family-index');
 
   state.done = true;
   await writeState(database, state);
@@ -205,7 +222,9 @@ async function ensureProbeTimeIndex(database: Database): Promise<void> {
   );
   if (existing) return;
   console.log('Database: building the index of readings by probe and time');
+  stepStarted('probe-index', 'Building the index of readings by probe and time');
   await run(database, 'CREATE INDEX IF NOT EXISTS idx_measurements_target_probe_timestamp ON measurements(target_id, probe, timestamp DESC)');
+  stepDone('probe-index');
 }
 
 /** Raised when the planner's statistics need making again after indexes change. */
@@ -233,7 +252,9 @@ export async function settleProbeIndexes(database: Database): Promise<void> {
   const [stats] = await all<{ value: string }>(database, 'SELECT value FROM settings WHERE key = ?', [PLANNER_STATS_KEY]);
   if (stats?.value === PLANNER_STATS_VERSION) return;
   const started = Date.now();
+  stepStarted('statistics', "Refreshing the database's query statistics");
   await run(database, 'ANALYZE');
+  stepDone('statistics');
   await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [PLANNER_STATS_KEY, PLANNER_STATS_VERSION]);
   console.log(`Database: refreshed the query planner's statistics in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }

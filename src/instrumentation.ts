@@ -24,10 +24,13 @@ export async function register() {
   if (process.env.CLEARPING_EXTERNAL_PROBER === '1') {
     console.log('[Init] External prober configured; in-process scheduler disabled');
     const { initDatabase } = await import('./lib/db/database');
-    await initDatabase();
+    void initDatabase().catch(error => console.error('[Init] Could not open the database:', error));
     return;
   }
 
+  // Not waited for: Next.js answers nothing until this returns, and bringing
+  // an older database up to date can take minutes. Until it is done the
+  // proxy shows a page that says what it is doing (/upgrading).
   const { initializeServer } = await import('./lib/init');
-  await initializeServer();
+  void initializeServer().catch(error => console.error('[Init] Could not start:', error));
 }

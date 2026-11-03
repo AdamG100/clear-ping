@@ -132,7 +132,7 @@ export async function actorFor(request: Request): Promise<{ actor: Actor; via: V
 /** How a path is guarded. */
 export type RouteKind = 'open' | 'api' | 'page'
 
-const OPEN_PATHS = new Set(['/login', '/api/health', '/api/mcp', '/api/mcp/info'])
+const OPEN_PATHS = new Set(['/login', '/api/health', '/api/mcp', '/api/mcp/info', '/upgrading', '/api/upgrade'])
 
 /** Where an account sent to add second factors is let through to: the page that does it, and what it calls. */
 export const FACTOR_SETUP_PAGE = '/security-setup'

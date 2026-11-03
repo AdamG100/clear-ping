@@ -11,6 +11,7 @@ import { Switch } from '@/components/arc/switch/switch'
 import { SegmentedField } from '@/components/segmented-field'
 import { useToast } from '@/components/notifications'
 import type { MaintenanceFrequency, MaintenanceNotify, MaintenanceProgress, MaintenanceReport, MaintenanceSettings, MaintenanceStep } from '@/lib/db/maintenance'
+import { UpgradeHistory } from './upgrade-history'
 import { followMaintenance, onMaintenanceEnd, useMaintenanceRun, type MaintenanceRun, type PlannedStep } from './maintenance-run'
 import { inDisplayZone } from '@/lib/time-zone'
 
@@ -352,6 +353,8 @@ export function MaintenanceTab() {
           </ul>
         </section>
       )}
+
+      <UpgradeHistory sectionTitle={SECTION_TITLE} hint={HINT} />
     </div>
   )
 }

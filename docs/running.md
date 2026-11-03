@@ -209,10 +209,16 @@ source is the same: pull, install, start.
 
 How that works, for when it matters:
 
-- **It happens at start, before anything is probed or served.** The database
-  records which changes it has had (`PRAGMA user_version`), and every change
-  newer than that is applied once, in order. The log says which:
-  `Database: applied migration 2 (shared alerts)`.
+- **It happens at start, before anything is probed.** The database records
+  which changes it has had (`PRAGMA user_version`), and every change newer than
+  that is applied once, in order. The log says which:
+  `Database: applied migration 2 (shared alerts)`. Meanwhile any page you open
+  shows **Bringing the database up to date**, with each change as it is made
+  and how far through the long ones are, and moves on to the page you asked for
+  when it is done. The API answers `503` with `Retry-After` until then, and the
+  health check stays healthy so the container is not restarted part-way.
+  Afterwards, **Settings, Maintenance, Database upgrades** lists each upgrade:
+  when, from which version to which, how long it took and what it did.
 - **Each change is all or nothing.** It runs inside a transaction. If one
   fails, the database is left exactly as it was and the app stops with the
   error, rather than running against a database in a shape it does not expect.
