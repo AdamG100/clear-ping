@@ -15,6 +15,7 @@ const {
   getTargetById,
   setTargetProbes,
   setGroupProbes,
+  changeGroupProbes,
   storeMeasurement,
   getMeasurements,
   getTargetStatistics,
@@ -168,5 +169,20 @@ describe('a group measured from several probes', () => {
     expect(await setGroupProbes('Lab', ['local', 'home'])).toBe(2)
     expect((await getTargetById('g2'))?.probes?.map(probe => probe.id)).toEqual(['local', 'home'])
     expect(await setGroupProbes('Lab', ['local', 'home'])).toBe(0)
+  })
+
+  it('adds and takes off probes, leaving a probe only some monitors have on just those', async () => {
+    await setTargetProbes('g1', ['local', 'home', 'office'])
+    await setTargetProbes('g2', ['home'])
+
+    // Office is on g1 only, and is neither added nor taken off: it stays there.
+    expect(await changeGroupProbes('Lab', { add: ['vps'], remove: ['local'] })).toEqual({ ok: true, updated: 2 })
+    expect((await getTargetById('g1'))?.probes?.filter(probe => !probe.former).map(probe => probe.id)).toEqual(['home', 'office', 'vps'])
+    expect((await getTargetById('g2'))?.probes?.filter(probe => !probe.former).map(probe => probe.id)).toEqual(['home', 'vps'])
+  })
+
+  it('changes nothing when a monitor would be left with no probe, and names it', async () => {
+    expect(await changeGroupProbes('Lab', { add: [], remove: ['home', 'vps'] })).toEqual({ ok: false, emptied: ['B'] })
+    expect((await getTargetById('g1'))?.probes?.filter(probe => !probe.former).map(probe => probe.id)).toEqual(['home', 'office', 'vps'])
   })
 })

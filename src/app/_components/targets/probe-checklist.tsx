@@ -43,12 +43,18 @@ export function ProbeChecklist({
   onChange,
   /** Probes some, but not all, of what is being set have: shown part-ticked. */
   partial = [],
+  /** Whether the first ticked is marked Primary: not where each monitor keeps its own. */
+  showPrimary = true,
+  /** Whether every probe may be unticked, as where a part-ticked one keeps each monitor measured. */
+  allowNone = false,
 }: {
   idPrefix: string
   probes: ProbeSummary[]
   value: ProbeId[]
   onChange: (probes: ProbeId[]) => void
   partial?: ProbeId[]
+  showPrimary?: boolean
+  allowNone?: boolean
 }) {
   const [search, setSearch] = useState('')
   const many = probes.length > SEARCH_AFTER
@@ -63,7 +69,7 @@ export function ProbeChecklist({
   const toggle = (id: ProbeId, on: boolean) => {
     if (on) onChange([...value.filter(probe => probe !== id), id])
     // At least one stays: a monitor measured from nowhere takes no readings.
-    else if (value.length > 1 || partial.length > 0) onChange(value.filter(probe => probe !== id))
+    else if (value.length > 1 || partial.length > 0 || allowNone) onChange(value.filter(probe => probe !== id))
   }
 
   return (
@@ -90,7 +96,7 @@ export function ProbeChecklist({
                 description={probe.local ? 'Where this dashboard runs' : probe.hostname ?? probe.address}
               />
               <span className="flex shrink-0 items-center gap-1.5">
-                {checked && value.length > 1 && value[0] === probe.id && <Badge size="sm" tone="info">Primary</Badge>}
+                {showPrimary && checked && value.length > 1 && value[0] === probe.id && <Badge size="sm" tone="info">Primary</Badge>}
                 {probe.state !== 'online' && <Badge size="sm" tone={state.tone}>{state.label}</Badge>}
               </span>
             </li>

@@ -384,7 +384,7 @@ interface SidebarProps {
   /** What the local probe is called. */
   localProbeName?: string
   /** Measure every target in a group from the same probes. Resolves to whether that happened. */
-  onSetGroupProbe?: (group: string, probes: string[]) => Promise<boolean>
+  onSetGroupProbe?: (group: string, change: { add: string[]; remove: string[] }) => Promise<boolean>
 }
 
 // ─── Target Row ─────────────────────────────────────────────────────────────

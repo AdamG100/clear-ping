@@ -8,7 +8,6 @@ import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { Input } from '@/components/arc/input/input'
 import { Select } from '@/components/arc/select/select'
 import { ProbeChecklist, probeSummaries } from '../targets/probe-checklist'
-import { AddProbeToMonitors } from '../settings/add-probe-to-monitors'
 import {
   GROUP_SEPARATOR,
   groupLabel,
@@ -57,8 +56,8 @@ interface GroupDialogProps {
   onCreate: (group: string) => void
   onMove: (from: string, to: string) => void
   onDelete: (group: string) => void
-  /** Measure every target in the group from these probes. Resolves to whether that happened. */
-  onSetProbe?: (group: string, probes: ProbeId[]) => Promise<boolean>
+  /** Add and take off probes across the group, leaving each monitor's others. Resolves to whether that happened. */
+  onSetProbe?: (group: string, change: { add: ProbeId[]; remove: ProbeId[] }) => Promise<boolean>
 }
 
 /**
@@ -132,13 +131,21 @@ function GroupForm({
   const [attempted, setAttempted] = useState(false)
   const [savingProbe, setSavingProbe] = useState(false)
 
-  // The probes every target has start ticked, and those only some have show
-  // part-ticked; nothing changes until a box is touched.
+  // Each probe is ticked (every monitor here has it), unticked (none has it)
+  // or part-ticked (only some have it). Saving gives a ticked probe to every
+  // monitor and takes an unticked one off every monitor; one left part-ticked
+  // stays on just the monitors that have it. Nothing changes until a box is
+  // touched, and each monitor keeps its other probes, primary first.
   const everyProbe = [...new Set(memberProbes.flat())]
   const shared = everyProbe.filter(id => memberProbes.every(list => list.includes(id)))
   const someHave = everyProbe.filter(id => !shared.includes(id))
-  const [probes, setProbes] = useState<ProbeId[]>(shared.length > 0 ? shared : memberProbes.length === 0 ? [LOCAL_PROBE] : [])
-  const [touched, setTouched] = useState(false)
+  const [ticked, setTicked] = useState<ProbeId[]>(shared)
+  const [partial, setPartial] = useState<ProbeId[]>(someHave)
+  const add = ticked.filter(id => !shared.includes(id))
+  const remove = everyProbe.filter(id => !ticked.includes(id) && !partial.includes(id))
+  const touched = add.length > 0 || remove.length > 0
+  // A monitor left with no probe at all: nothing ticked, and every probe it has unticked.
+  const leftWithout = ticked.length > 0 ? 0 : memberProbes.filter(list => list.every(id => remove.includes(id))).length
   const showProbe = !!editing && memberProbes.length > 0 && (probeAgents.length > 0 || everyProbe.some(id => id !== LOCAL_PROBE))
   const summaries = probeSummaries(probeAgents, localProbeName)
   // A probe the targets have but that is no longer listed (a removed probe agent).
@@ -183,9 +190,10 @@ function GroupForm({
         }
         // The probe is switched on the group's current path, before a rename
         // moves the targets out from under it.
-        if (touched && probes.length > 0 && editing && onSetProbe) {
+        if (touched && editing && onSetProbe) {
+          if (leftWithout > 0) return
           setSavingProbe(true)
-          const switched = await onSetProbe(editing.group, probes)
+          const switched = await onSetProbe(editing.group, { add, remove })
           setSavingProbe(false)
           if (!switched) return
         }
@@ -228,23 +236,37 @@ function GroupForm({
 
       {showProbe && (
         <div className="space-y-2">
-          <p className="text-sm font-medium text-foreground">Measure from</p>
+          <p className="text-sm font-medium text-foreground">Probes</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            For the {plural(memberProbes.length, 'monitor')} in this group, and in groups inside it. Tick a probe to measure
+            every one of them from it, untick it to stop. {someHave.length > 0 ? 'Part-ticked is a probe only some of them have; left that way, it stays on just those. ' : ''}
+            Each monitor keeps its other probes, and readings already taken stay in its history.
+          </p>
           <ProbeChecklist
             idPrefix="group-probes"
             probes={summaries}
-            value={probes}
-            partial={touched ? [] : someHave}
-            onChange={next => { setTouched(true); setProbes(next) }}
+            value={ticked}
+            partial={partial}
+            showPrimary={false}
+            allowNone
+            onChange={next => {
+              // A part-ticked probe that is clicked is decided: ticked now, and unticked if clicked again.
+              setPartial(current => current.filter(id => !next.includes(id)))
+              setTicked(next)
+            }}
           />
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            {someHave.length > 0 && !touched ? 'These monitors are not all measured from the same probes; a part-ticked probe is one only some have. ' : ''}
-            Sets the probes of {plural(memberProbes.length, 'monitor')} in this group, including any group inside it, in one go.
-            Readings already taken stay in their history.
-          </p>
+          {leftWithout > 0 && (
+            <p className="text-xs text-destructive">
+              {plural(leftWithout, 'monitor')} would be left with no probe. Keep at least one of {leftWithout === 1 ? 'its' : 'their'} probes ticked.
+            </p>
+          )}
+          {touched && (
+            <Button type="button" size="sm" variant="ghost" onClick={() => { setTicked(shared); setPartial(someHave) }}>
+              Leave the probes as they are
+            </Button>
+          )}
         </div>
       )}
-      {/* Or one more probe, keeping what each monitor has: no need to tick them all again. */}
-      {showProbe && editing && <AddProbeToMonitors group={editing.group} />}
 
       {editing && exists && !problem && (
         <Alert tone="info" title={`${groupLabel(destination)} already exists`}>

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addProbeToMonitors, setGroupProbes } from '@/lib/db/database';
+import { addProbeToMonitors, changeGroupProbes, setGroupProbes } from '@/lib/db/database';
 import { normalizeGroupPath } from '@/lib/targets/group-path';
 import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
-import { probeNames, readRequestedProbes } from '@/lib/probe-agents/probes';
+import { probeNames, readProbeChoices, readRequestedProbes } from '@/lib/probe-agents/probes';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
 
@@ -41,6 +41,54 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ updated });
   } catch (error) {
     console.error('Error switching a group’s probe:', error);
+    return NextResponse.json({ error: 'Could not change which probes measure the group' }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/groups/probe - Add and take off probes across a group, leaving the rest
+ * Body: { group: string, add?: string[], remove?: string[] }
+ *
+ * What the group dialog saves. Each monitor in the group, and in groups inside
+ * it, gains the probes in `add` and loses those in `remove`; any other probe
+ * it has stays, so a probe only some of them have is not lost by changing
+ * another. Refused, with the monitors named, if any would be left with no
+ * probe at all.
+ */
+export async function PATCH(request: NextRequest) {
+  try {
+    await initializeServer();
+
+    const body = await request.json().catch(() => null);
+    const group = normalizeGroupPath(typeof body?.group === 'string' ? body.group : '');
+    if (!group) return NextResponse.json({ error: 'Which group to change is required' }, { status: 400 });
+
+    const read = async (raw: unknown) => (raw === undefined || (Array.isArray(raw) && raw.length === 0) ? { ok: true as const, probes: [] } : readProbeChoices(raw));
+    const [add, remove] = await Promise.all([read(body.add), read(body.remove)]);
+    if (!add.ok) return NextResponse.json({ error: add.error }, { status: 400 });
+    if (!remove.ok) return NextResponse.json({ error: remove.error }, { status: 400 });
+    if (add.probes.length === 0 && remove.probes.length === 0) return NextResponse.json({ updated: 0 });
+
+    const changed = await changeGroupProbes(group, { add: add.probes, remove: remove.probes });
+    if (!changed.ok) {
+      const names = changed.emptied.slice(0, 5).join(', ') + (changed.emptied.length > 5 ? ` and ${changed.emptied.length - 5} more` : '');
+      return NextResponse.json(
+        { error: `That would leave ${names} with no probe to measure ${changed.emptied.length === 1 ? 'it' : 'them'}. Keep at least one of ${changed.emptied.length === 1 ? 'its' : 'their'} probes ticked.`, emptied: changed.emptied },
+        { status: 409 }
+      );
+    }
+    await getScheduler().reloadTargets();
+
+    const names = await probeNames([...add.probes, ...remove.probes]);
+    const said = [
+      add.probes.length > 0 && `added ${add.probes.map(probe => names.get(probe)).join(', ')}`,
+      remove.probes.length > 0 && `took off ${remove.probes.map(probe => names.get(probe)).join(', ')}`,
+    ].filter(Boolean).join(', ');
+    const { actor, via } = await actorFor(request);
+    await recordActivity(actor, via, 'group.probe', `${group}: ${said} (${changed.updated} changed)`);
+    return NextResponse.json({ updated: changed.updated });
+  } catch (error) {
+    console.error('Error changing a group’s probes:', error);
     return NextResponse.json({ error: 'Could not change which probes measure the group' }, { status: 500 });
   }
 }

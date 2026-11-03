@@ -342,13 +342,13 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     [changeGroups]
   )
 
-  /** Measure every target in a group, including the groups inside it, from the same probes. */
-  const setGroupProbe = useCallback(async (group: string, probes: ProbeId[]): Promise<boolean> => {
+  /** Add and take off probes across a group, including the groups inside it, leaving each monitor's other probes. */
+  const setGroupProbe = useCallback(async (group: string, change: { add: ProbeId[]; remove: ProbeId[] }): Promise<boolean> => {
     try {
       const response = await fetch('/api/groups/probe', {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group, probes }),
+        body: JSON.stringify({ group, ...change }),
       })
       if (response.ok) {
         await loadTargets()

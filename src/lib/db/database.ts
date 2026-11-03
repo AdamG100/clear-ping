@@ -1691,6 +1691,50 @@ export async function setGroupProbes(group: string, probes: ProbeId[]): Promise<
 }
 
 /**
+ * Change some probes of every monitor in a group, and in the groups inside it,
+ * leaving the rest of each one's probes as they are: `add` go on every monitor
+ * that lacks them (last, so no monitor's primary probe changes), `remove` come
+ * off every monitor that has them. A probe in neither is left alone, so one
+ * that only some of the monitors have stays on just those.
+ *
+ * All or nothing: if any monitor would be left with no probe, nothing changes
+ * and those monitors are named, since one measured from nowhere takes no
+ * readings.
+ */
+export async function changeGroupProbes(
+  group: string,
+  change: { add: ProbeId[]; remove: ProbeId[] }
+): Promise<{ ok: true; updated: number } | { ok: false; emptied: string[] }> {
+  const database = await getDatabase();
+  const source = normalizeGroupPath(group);
+  if (!source) return { ok: true, updated: 0 };
+  const remove = new Set(change.remove.filter(probe => !change.add.includes(probe)));
+
+  const [rows, listed] = await Promise.all([
+    allSql<{ id: string; name: string; probe_agent_id: string | null; group_name: string | null }>(
+      database,
+      'SELECT id, name, probe_agent_id, group_name FROM targets'
+    ),
+    loadProbes(database),
+  ]);
+  const planned: { id: string; probes: ProbeId[] }[] = [];
+  const emptied: string[] = [];
+  for (const row of rows) {
+    if (!row.group_name || !isWithinGroup(row.group_name, source)) continue;
+    const now = probeIdsOf({ probes: listed.get(row.id), probeAgentId: row.probe_agent_id });
+    const kept = now.filter(probe => !remove.has(probe));
+    const next = [...kept, ...change.add.filter(probe => !kept.includes(probe))];
+    if (next.length === 0) emptied.push(row.name);
+    else if (next.length !== now.length || next.some((probe, index) => probe !== now[index])) planned.push({ id: row.id, probes: next });
+  }
+  if (emptied.length > 0) return { ok: false, emptied };
+
+  let updated = 0;
+  for (const { id, probes } of planned) if (await setTargetProbes(id, probes)) updated++;
+  return { ok: true, updated };
+}
+
+/**
  * Add a probe to monitors, keeping the probes each already has (it goes last,
  * so no monitor's primary probe changes): every monitor, or those in `group`
  * and the groups inside it. Returns how many monitors gained it.
