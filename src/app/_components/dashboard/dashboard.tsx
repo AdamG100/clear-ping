@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { startTransition, useState, useMemo, useCallback, useEffect, useRef, useSyncExternalStore, useTransition } from 'react'
 import type {
   AddressFamily,
   FamilyReading,
@@ -439,8 +439,13 @@ function useTargetMeasurements(
   const [cache] = useState(() => new Map<string, RangeSnapshot>())
   // A family is its own series, so it owns its snapshot the way a target does:
   // IPv4's history must not sit under the IPv6 tab while IPv6 loads.
-  const owner = targetId ? `${targetId}:${family ?? 'all'}:${probe ?? ''}` : null
-  const cacheKey = `${owner}:${timeRange}:${zoom ? `${zoom.start}-${zoom.end}` : 'all'}`
+  const ownerFor = useCallback((forProbe: string | undefined) => (targetId ? `${targetId}:${family ?? 'all'}:${forProbe ?? ''}` : null), [targetId, family])
+  const keyFor = useCallback(
+    (forProbe: string | undefined) => `${ownerFor(forProbe)}:${timeRange}:${zoom ? `${zoom.start}-${zoom.end}` : 'all'}`,
+    [ownerFor, timeRange, zoom]
+  )
+  const owner = ownerFor(probe)
+  const cacheKey = keyFor(probe)
 
   // What is on screen: what was last loaded for this target and family, or
   // failing that, what has been loaded before for exactly this view.
@@ -451,6 +456,50 @@ function useTargetMeasurements(
   // Only the newest request may write state: switching ranges quickly can
   // otherwise land a slow earlier response on top of a fast later one.
   const requestIdRef = useRef(0)
+
+  /** One view's readings from the server, cached; null when it could not be read. */
+  const fetchView = useCallback(async (forProbe: string | undefined): Promise<RangeSnapshot | null> => {
+    const period = zoom
+      ? `start=${zoom.start}&end=${zoom.end}`
+      : `hours=${TIME_RANGE_CONFIG[timeRange].hours}`
+    const query = `${period}${family ? `&family=${family}` : ''}${forProbe ? `&probe=${encodeURIComponent(forProbe)}` : ''}`
+    const response = await fetch(`/api/targets/${targetId}/measurements?${query}`)
+    if (!response.ok) throw new Error(`Server responded ${response.status}`)
+
+    const result = await response.json()
+    const buckets: BucketedMeasurement[] = Array.isArray(result.buckets) ? result.buckets : []
+    const next: RangeSnapshot = {
+      points: buildSeries(buckets, probeIntervalSeconds, result.bucketMs ?? 60_000),
+      statistics: result.statistics
+        ? {
+            ...result.statistics,
+            lastProbe: result.statistics.lastProbe ? new Date(result.statistics.lastProbe) : null,
+          }
+        : null,
+      window: zoom,
+      span: typeof result.start === 'number' && typeof result.end === 'number' ? { start: result.start, end: result.end } : null,
+      outages: Array.isArray(result.probeAgentOutages) ? result.probeAgentOutages : [],
+    }
+
+    // Bounded: oldest entries drop out so a long session cannot grow the
+    // cache without limit.
+    if (cache.size >= 40) {
+      cache.delete(cache.keys().next().value!)
+    }
+    cache.set(keyFor(forProbe), next)
+    return next
+  }, [targetId, family, timeRange, zoom, cache, keyFor, probeIntervalSeconds])
+
+  // Readings asked for before they are shown, so switching to them shows them
+  // at once: another probe's, when the pointer reaches its tab or once this
+  // view has loaded. Each is asked for once at a time.
+  const prefetching = useRef(new Set<string>())
+  const prefetch = useCallback((forProbe: string) => {
+    const key = keyFor(forProbe)
+    if (!targetId || cache.has(key) || prefetching.current.has(key)) return
+    prefetching.current.add(key)
+    void fetchView(forProbe).catch(() => null).finally(() => prefetching.current.delete(key))
+  }, [targetId, cache, keyFor, fetchView])
 
   const loadMeasurements = useCallback(async () => {
     if (!targetId || !owner) {
@@ -471,45 +520,20 @@ function useTargetMeasurements(
     }
 
     try {
-      const period = zoom
-        ? `start=${zoom.start}&end=${zoom.end}`
-        : `hours=${TIME_RANGE_CONFIG[timeRange].hours}`
-      const query = `${period}${family ? `&family=${family}` : ''}${probe ? `&probe=${encodeURIComponent(probe)}` : ''}`
-      const response = await fetch(`/api/targets/${targetId}/measurements?${query}`)
-      if (!response.ok) {
-        reportError('Could not load measurements', `Server responded ${response.status}`)
-        return
-      }
-
-      const result = await response.json()
-      const buckets: BucketedMeasurement[] = Array.isArray(result.buckets) ? result.buckets : []
-
-      const next: RangeSnapshot = {
-        points: buildSeries(buckets, probeIntervalSeconds, result.bucketMs ?? 60_000),
-        statistics: result.statistics
-          ? {
-              ...result.statistics,
-              lastProbe: result.statistics.lastProbe ? new Date(result.statistics.lastProbe) : null,
-            }
-          : null,
-        window: zoom,
-        span: typeof result.start === 'number' && typeof result.end === 'number' ? { start: result.start, end: result.end } : null,
-        outages: Array.isArray(result.probeAgentOutages) ? result.probeAgentOutages : [],
-      }
-
-      // Bounded: oldest entries drop out so a long session cannot grow the
-      // cache without limit.
-      if (cache.size >= 40) {
-        cache.delete(cache.keys().next().value!)
-      }
-      cache.set(cacheKey, next)
-      if (requestId === requestIdRef.current) setSnapshot({ ...next, owner })
+      const next = await fetchView(probe)
+      if (!next) return
+      // The same readings as those on screen, as a refresh right after a switch
+      // usually brings: a chart redrawn for nothing is what would be felt.
+      if (cached && JSON.stringify(cached) === JSON.stringify(next)) return
+      // Drawn as a transition: a chart's worth of new readings is a big render,
+      // and the page stays answering while it is done in slices.
+      if (requestId === requestIdRef.current) startTransition(() => setSnapshot({ ...next, owner }))
     } catch (error) {
       reportError('Could not load measurements', error)
     } finally {
       if (requestId === requestIdRef.current) setPending(false)
     }
-  }, [targetId, owner, family, probe, timeRange, zoom, cache, cacheKey, probeIntervalSeconds, reportError])
+  }, [targetId, owner, probe, cache, cacheKey, fetchView, reportError])
 
   const loadMeasurementsRef = useRef(loadMeasurements)
   useEffect(() => {
@@ -532,6 +556,7 @@ function useTargetMeasurements(
     /** True only before the first result for the current target has arrived. */
     initialLoad: !isForCurrentTarget,
     reload: loadMeasurements,
+    prefetch,
   }
 }
 
@@ -715,6 +740,10 @@ export function Dashboard() {
   const [familyView, setFamilyView] = useState<FamilyView>('both')
   // Which of a monitor's probes is on screen, kept for the monitor it was chosen on.
   const [probeChoice, setProbeChoice] = useState<{ targetId: string | null; view: string }>({ targetId: null, view: '' })
+  // The probe tab pressed, shown pressed at once while the page redraws for it
+  // in a transition: the redraw is the slow part, and the tab should not wait.
+  const [probeTabPressed, setProbeTabPressed] = useState<string | null>(null)
+  const [switchingProbe, startProbeSwitch] = useTransition()
 
   // Remembered for the tab, not for good: a reload stays on what was being
   // looked at, and opening ClearPing afresh starts at the overview.
@@ -912,8 +941,17 @@ export function Dashboard() {
   // A comparison loads its own data, so the single-series fetch stands down.
   const singleSeriesTargetId = groupTargets || comparingFamilies || comparingProbes ? null : selectedTargetId
 
-  const { points, statistics, window: shownWindow, span: shownSpan, outages: agentOutages, pending, reload, initialLoad } =
+  const { points, statistics, window: shownWindow, span: shownSpan, outages: agentOutages, pending, reload, initialLoad, prefetch } =
     useTargetMeasurements(singleSeriesTargetId, timeRange, selectedTarget?.interval ?? 300, reportError, zoom, shownFamily, multiProbe ? shownProbe : undefined)
+
+  // The monitor's other probes are read as soon as this one is on screen, so a
+  // tab pressed (or tapped, where nothing is pointed at first) shows its
+  // readings at once instead of waiting on the server and redrawing twice.
+  const otherProbes = multiProbe ? monitorProbeIds.filter(id => id !== shownProbe).join(',') : ''
+  useEffect(() => {
+    if (pending || initialLoad || !otherProbes) return
+    for (const id of otherProbes.split(',')) prefetch(id)
+  }, [pending, initialLoad, otherProbes, prefetch])
 
   const handleTimeRangeChange = useCallback((range: TimeRange) => {
     setTimeRange(range)
@@ -1557,8 +1595,12 @@ export function Dashboard() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <ProbeSwitch
                   probes={monitorProbeIds.map(id => probeList.find(probe => probe.id === id) ?? { id, name: probeNameOf(id), local: false, state: 'offline' as const })}
-                  value={comparingProbes ? COMPARE_PROBES : shownProbe}
-                  onChange={view => { setProbeChoice({ targetId: selectedTargetId, view }); setZoom(null) }}
+                  value={switchingProbe && probeTabPressed ? probeTabPressed : comparingProbes ? COMPARE_PROBES : shownProbe}
+                  onChange={view => {
+                    setProbeTabPressed(view)
+                    startProbeSwitch(() => { setProbeChoice({ targetId: selectedTargetId, view }); setZoom(null) })
+                  }}
+                  onIntent={view => { if (view !== COMPARE_PROBES) prefetch(view) }}
                 />
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.p

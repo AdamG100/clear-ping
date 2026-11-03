@@ -1118,7 +1118,14 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
 
 // ─── Main Sidebar Component ─────────────────────────────────────────────────
 
-export function Sidebar({
+/**
+ * Drawn again only when what it is given changes: the page around it redraws
+ * for things the sidebar does not show (a probe tab, a chart's zoom), and
+ * redrawing every monitor row each time was most of what made those slow.
+ */
+export const Sidebar = memo(SidebarView)
+
+function SidebarView({
   open = false,
   onClose,
   onCollapse,

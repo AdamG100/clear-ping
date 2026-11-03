@@ -19,11 +19,14 @@ export function ProbeSwitch({
   probes,
   value,
   onChange,
+  onIntent,
 }: {
   probes: ProbeSummary[]
   /** A probe's id, or COMPARE_PROBES. */
   value: ProbeId
   onChange: (value: ProbeId) => void
+  /** The pointer or focus reached a probe's tab: a moment to start loading its readings. */
+  onIntent?: (value: ProbeId) => void
 }) {
   const options = [
     { value: COMPARE_PROBES, label: 'Compare' },
@@ -32,5 +35,5 @@ export function ProbeSwitch({
   if (probes.length > BUTTONS_UP_TO) {
     return <Select label="Measured from" value={value} onValueChange={onChange} options={options} />
   }
-  return <SegmentedControl label="Measured from" value={value} onValueChange={onChange} options={options} />
+  return <SegmentedControl label="Measured from" value={value} onValueChange={onChange} onOptionIntent={onIntent} options={options} />
 }
