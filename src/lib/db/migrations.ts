@@ -712,6 +712,7 @@ async function alertRules(database: Database): Promise<void> {
     ['probe_policy', "TEXT NOT NULL DEFAULT 'any'"],
     ['probe_quorum', 'INTEGER NOT NULL DEFAULT 1'],
     ['probes', 'TEXT'],
+    ['probe_agent_offline', 'INTEGER NOT NULL DEFAULT 0'],
   ] as const) {
     if (!has(name)) await run(database, `ALTER TABLE alerts ADD COLUMN ${name} ${definition}`);
   }

@@ -17,7 +17,7 @@ import { createProbeAgentServer, type ProbeAgentWork } from '../../../probe-agen
 const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clearping-agents-')), 'test.db')
 process.env.CLEARPING_DB_PATH = dbFile
 
-const { initDatabase, closeDatabase, createTarget } = await import('../db/database')
+const { initDatabase, closeDatabase, createTarget, getDatabase } = await import('../db/database')
 const agents = await import('./store')
 const { checkProbeAgent, connectProbeAgent, ProbeAgentUnavailableError, runProbes } = await import('./client')
 const { listActivity } = await import('../security/settings-store')
@@ -146,7 +146,15 @@ describe('taking readings through a probe agent', () => {
 
     await stopAgents()
     const gone = (await agents.getProbeAgentConnection(probeAgent.id))!
-    expect(await checkProbeAgent(gone)).toBe('offline')
+    // Silent for less than the time it is given: still counted as working, and no outage.
+    expect(await checkProbeAgent(gone)).toBe('online')
+    expect(await agents.currentOutageStart(probeAgent.id)).toBeNull()
+    // Silent for longer than that: offline.
+    const database = await getDatabase()
+    await new Promise<void>((resolve, reject) =>
+      database.run('UPDATE probe_agents SET last_seen_at = ? WHERE id = ?', [Date.now() - 10 * 60_000, probeAgent.id], error => (error ? reject(error) : resolve()))
+    )
+    expect(await checkProbeAgent((await agents.getProbeAgentConnection(probeAgent.id))!)).toBe('offline')
     expect(await agents.currentOutageStart(probeAgent.id)).not.toBeNull()
 
     vi.mocked(work.probe).mockClear()

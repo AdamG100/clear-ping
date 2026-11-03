@@ -35,16 +35,18 @@ export interface RuleOptions {
   probes: ProbeId[] | null
   groups: string[]
   probeScope: ProbeId[]
+  /** Also tell the alert's notification URLs when a probe agent goes offline or is back. */
+  probeAgentOffline: boolean
 }
 
 export const NO_OPTIONS: RuleOptions = {
   extra: [], combine: 'any', combineCount: 2, byMinutes: false, minutes: 5, clearAfter: 0, clearThreshold: null, window: 1,
-  policy: 'any', policyCount: 2, policyPercent: 60, probes: null, groups: [], probeScope: [],
+  policy: 'any', policyCount: 2, policyPercent: 60, probes: null, groups: [], probeScope: [], probeAgentOffline: false,
 }
 
 /** The options an existing alert has, as the form keeps them. */
 export function optionsOf(alert: {
-  conditions?: AlertCondition[]; combine?: AlertCombine; forMinutes?: number; clearAfter?: number; policy?: ProbePolicy; probes?: ProbeId[] | null; scope?: AlertScopeEntry[]
+  conditions?: AlertCondition[]; combine?: AlertCombine; forMinutes?: number; clearAfter?: number; policy?: ProbePolicy; probes?: ProbeId[] | null; scope?: AlertScopeEntry[]; probeAgentOffline?: boolean
 }): RuleOptions {
   const [first, ...extra] = alert.conditions ?? []
   const combine = alert.combine
@@ -64,6 +66,7 @@ export function optionsOf(alert: {
     probes: alert.probes ?? null,
     groups: (alert.scope ?? []).filter(entry => entry.kind === 'group').map(entry => entry.ref),
     probeScope: (alert.scope ?? []).filter(entry => entry.kind === 'probe').map(entry => entry.ref),
+    probeAgentOffline: alert.probeAgentOffline === true,
   }
 }
 
@@ -77,7 +80,7 @@ export function ruleFields(
   options: RuleOptions,
   first: { metric: AlertMetric; threshold: number }
 ): {
-  conditions?: AlertCondition[]; combine?: AlertCombine; forMinutes: number | null; clearAfter: number | null; policy: ProbePolicy; probes: ProbeId[] | null; scope: AlertScopeEntry[]
+  conditions?: AlertCondition[]; combine?: AlertCombine; forMinutes: number | null; clearAfter: number | null; policy: ProbePolicy; probes: ProbeId[] | null; scope: AlertScopeEntry[]; probeAgentOffline: boolean
 } {
   const head: AlertCondition = { ...first, ...(options.clearThreshold !== null ? { clearThreshold: options.clearThreshold } : {}), ...(options.window > 1 ? { window: options.window } : {}) }
   const conditions = [head, ...options.extra]
@@ -92,6 +95,7 @@ export function ruleFields(
       : options.policy === 'share' ? { kind: 'share', percent: options.policyPercent }
       : { kind: options.policy },
     probes: options.probes,
+    probeAgentOffline: options.probeAgentOffline,
     scope: [
       ...options.groups.map(ref => ({ kind: 'group' as const, ref })),
       ...options.probeScope.map(ref => ({ kind: 'probe' as const, ref })),
@@ -238,6 +242,14 @@ export function RuleOptionsPanel({
             <Checkbox key={probe.id} label={probe.name} checked={options.probeScope.includes(probe.id)} onCheckedChange={on => set({ probeScope: toggle(options.probeScope, probe.id, on === true) })} />
           ))}
         </fieldset>
+      )}
+      {several && (
+        <Checkbox
+          label="Also tell these URLs when a probe agent goes offline"
+          description="And when it is back. How long a probe agent may be silent is set under Settings, Probes."
+          checked={options.probeAgentOffline}
+          onCheckedChange={on => set({ probeAgentOffline: on === true })}
+        />
       )}
       {groups.length === 0 && !several && (
         <p className="text-xs text-muted-foreground">There are no groups or probe agents to add yet.</p>

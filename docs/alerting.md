@@ -233,6 +233,12 @@ not reporting were in breach. So a quorum never fires and clears in turn, and
 the dashboard losing its own connection, which silences every probe agent at
 once, does not fire an alert that needs every probe to agree.
 
+**Probe agents going offline.** With a probe agent, an alert's More options
+has *Also tell these URLs when a probe agent goes offline*. That alert's
+notification URLs then get a message when a probe agent has been silent for
+longer than the time set under Settings, Probes, and another when it is back.
+In the API it is `probeAgentOffline` on `POST` and `PATCH /api/alerts`.
+
 **History.** The clock button on an alert's card lists each time a monitor fired
 or cleared: the conditions as they stood, with their values, and each probe's
 part in it.

@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { getDatabase } from '../db/database';
-import { describeCondition, notificationFor, parseNotifyUrls, withEmbeds } from './delivery';
+import { describeCondition, notificationFor, parseNotifyUrls, probeAgentNotification, withEmbeds } from './delivery';
 import { sendNotification, type DeliveryResult } from './apprise';
 import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
 import { LOCAL_PROBE, type ProbeAgentState } from '@/types/probe-agent';
@@ -39,6 +39,7 @@ interface AlertRow {
   consecutive_probes: number;
   notify_urls: string | null;
   trace_on_fire: number;
+  probe_agent_offline?: number;
   trace_cooldown_minutes: number;
   trace_keep_count: number;
   trace_keep_days: number;
@@ -109,6 +110,7 @@ function settingsFromRow(row: AlertRow): AlertSettings & { id: string; enabled: 
     consecutiveProbes: row.consecutive_probes,
     notifyUrls: parseUrls(row.notify_urls),
     traceOnFire: row.trace_on_fire === 1,
+    probeAgentOffline: row.probe_agent_offline === 1,
     traceCooldownMinutes: row.trace_cooldown_minutes,
     traceKeepCount: row.trace_keep_count ?? DEFAULT_TRACE_KEEP_COUNT,
     traceKeepDays: row.trace_keep_days ?? DEFAULT_TRACE_KEEP_DAYS,
@@ -300,6 +302,11 @@ export function parseAlertInput(
     input.notifyUrls = notifyUrls;
   }
 
+  if (given('probeAgentOffline')) {
+    if (typeof body.probeAgentOffline !== 'boolean') return fail('probeAgentOffline must be a boolean');
+    input.probeAgentOffline = body.probeAgentOffline;
+  }
+
   if (given('traceOnFire')) {
     if (typeof body.traceOnFire !== 'boolean') return fail('traceOnFire must be a boolean');
     input.traceOnFire = body.traceOnFire;
@@ -393,8 +400,8 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
   await run(
     `INSERT INTO alerts
       (id, name, metric, threshold, consecutive_probes, notify_urls, trace_on_fire, trace_cooldown_minutes, trace_keep_count, trace_keep_days, enabled, created_at,
-       conditions, combine, for_minutes, clear_after, probe_policy, probe_quorum, probes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       conditions, combine, for_minutes, clear_after, probe_policy, probe_quorum, probes, probe_agent_offline)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.name ?? '',
@@ -414,6 +421,7 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
       input.clearAfter || null,
       ...policyColumns(input.policy),
       input.probes ? JSON.stringify(input.probes) : null,
+      input.probeAgentOffline ? 1 : 0,
     ]
   );
 
@@ -476,6 +484,7 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
   if (changes.consecutiveProbes !== undefined) set('consecutive_probes', changes.consecutiveProbes);
   if (changes.notifyUrls !== undefined) set('notify_urls', JSON.stringify(changes.notifyUrls));
   if (changes.traceOnFire !== undefined) set('trace_on_fire', changes.traceOnFire ? 1 : 0);
+  if (changes.probeAgentOffline !== undefined) set('probe_agent_offline', changes.probeAgentOffline ? 1 : 0);
   if (changes.traceCooldownMinutes !== undefined) set('trace_cooldown_minutes', changes.traceCooldownMinutes);
   if (changes.traceKeepCount !== undefined) set('trace_keep_count', changes.traceKeepCount);
   if (changes.traceKeepDays !== undefined) set('trace_keep_days', changes.traceKeepDays);
@@ -789,6 +798,23 @@ export async function deliverAlert(event: AlertEvent, options: { test?: boolean 
     return await sendNotification(urls.map(withEmbeds), notificationFor(event, options));
   } catch (error) {
     return { ok: false, detail: `Could not run Apprise: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+/**
+ * Tell the notification URLs of every enabled alert that asked, once each, that
+ * a probe agent has gone offline or is back. Failures are logged and swallowed,
+ * as an alert's are.
+ */
+export async function dispatchProbeAgentChange(name: string, change: { kind: 'offline'; reason: string } | { kind: 'online' }): Promise<void> {
+  const rows = await all<{ notify_urls: string | null }>('SELECT notify_urls FROM alerts WHERE enabled = 1 AND probe_agent_offline = 1');
+  const urls = [...new Set(rows.flatMap(row => parseUrls(row.notify_urls)))];
+  if (urls.length === 0) return;
+  try {
+    const result = await sendNotification(urls.map(withEmbeds), probeAgentNotification(name, change));
+    if (!result.ok) console.error(`[ProbeAgents] Could not send the ${change.kind} notice for ${name}: ${result.detail}`);
+  } catch (error) {
+    console.error(`[ProbeAgents] Could not send the ${change.kind} notice for ${name}:`, error);
   }
 }
 

@@ -554,6 +554,8 @@ export interface AlertSettings extends AlertRuleSettings {
   traceKeepCount: number;
   /** Delete routes this alert took once they are older than this many days. */
   traceKeepDays: number;
+  /** Also send this alert's notification URLs a message when a probe agent goes offline, and when it is back. */
+  probeAgentOffline?: boolean;
 }
 
 /** Alerts that can trace the route when they fire: the ones a path being broken or congested explains. */

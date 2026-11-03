@@ -4,6 +4,7 @@ import {
   alertTitle,
   describeCondition,
   notificationFor,
+  probeAgentNotification,
   notifyUrlLabel,
   parseNotifyUrls,
   redactNotifyUrl,
@@ -219,5 +220,21 @@ describe('restoreRedacted', () => {
 
   it('takes a URL that was typed as it is, and keeps one that is already whole', () => {
     expect(restoreRedacted(['tgram://new/token', real[0]], real)).toEqual(['tgram://new/token', real[0]])
+  })
+})
+
+describe('probeAgentNotification', () => {
+  it('says which probe agent is offline and why, as a failure', () => {
+    const note = probeAgentNotification('Home', { kind: 'offline', reason: 'Connection refused' })
+    expect(note.title).toBe('Probe agent Home is offline')
+    expect(note.type).toBe('failure')
+    expect(note.body).toContain('Connection refused')
+  })
+
+  it('says it is back, as a success, and keeps a name from pinging a channel', () => {
+    const note = probeAgentNotification('@everyone', { kind: 'online' })
+    expect(note.type).toBe('success')
+    expect(note.title).toContain('is back')
+    expect(note.title).not.toContain('@everyone')
   })
 })

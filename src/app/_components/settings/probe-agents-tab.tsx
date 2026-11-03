@@ -30,6 +30,7 @@ import { CopyField } from './mcp-setup'
 import { PROBE_AGENT_EXPOSURE, PROBE_AGENT_STATE } from './probe-agent-labels'
 import { DuplicateMonitors } from './duplicate-monitors'
 import { LocalProbe } from './local-probe'
+import { ProbeHeartbeat } from './probe-heartbeat'
 import { addressOf, ago, ExposureNote, HINT, ICON, isOutdated, OutcomeAlert, OutdatedBadge, ProbeAgentDetails, send, uninstallCommands, when, type Outcome } from './probe-agent-details'
 import { Masked } from '../privacy/masked'
 
@@ -284,6 +285,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
   return (
     <div className="space-y-5 text-foreground">
       <LocalProbe />
+      <ProbeHeartbeat />
       <DuplicateMonitors />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className={`${HINT} min-w-0 max-w-xl pt-1`}>

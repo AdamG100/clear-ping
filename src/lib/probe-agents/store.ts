@@ -286,6 +286,16 @@ export async function unpinProbeAgentCertificate(id: string): Promise<void> {
   );
 }
 
+/** Send the alerts that asked a probe agent's change. Loaded when needed: alerts import this file. */
+async function tellAlerts(name: string, change: { kind: 'offline'; reason: string } | { kind: 'online' }): Promise<void> {
+  try {
+    const { dispatchProbeAgentChange } = await import('../alerts/store');
+    await dispatchProbeAgentChange(name, change);
+  } catch (error) {
+    console.error('[ProbeAgents] Could not tell the alerts:', error);
+  }
+}
+
 /**
  * Note how a probe agent is now, and if that is a change, say so: in the
  * activity record, and by opening or closing an outage. An outage is a
@@ -297,7 +307,7 @@ export async function setProbeAgentState(
   id: string,
   state: ProbeAgentState,
   details: { error?: string; info?: ProbeAgentInfo; offeredFingerprint?: string } = {}
-): Promise<void> {
+): Promise<ProbeAgentState> {
   const database = await getDatabase();
   const now = Date.now();
   const { info } = details;
@@ -318,18 +328,26 @@ export async function setProbeAgentState(
   }
   await run(database, `UPDATE probe_agents SET ${sets.join(', ')} WHERE id = ?`, [...values, id]);
 
-  const [before] = await all<{ name: string; state: ProbeAgentState }>(
+  const [before] = await all<{ name: string; state: ProbeAgentState; last_seen_at: number | null }>(
     database,
-    'SELECT name, state FROM probe_agents WHERE id = ?',
+    'SELECT name, state, last_seen_at FROM probe_agents WHERE id = ?',
     [id]
   );
-  if (!before) return;
+  if (!before) return state;
+  // Not answering is only "offline" once it has gone on for the time set in
+  // Settings: until then it is still counted as working, so one dropped check
+  // does not start a notification. The other states (a certificate or token it
+  // will not accept, a different version) are not a missed heartbeat and apply at once.
+  if (state === 'offline' && before.state === 'online' && before.last_seen_at !== null) {
+    const { offlineAfterMinutes } = await import('./heartbeat');
+    if (now - before.last_seen_at < (await offlineAfterMinutes()) * 60_000) return before.state;
+  }
   const changed = await run(database, 'UPDATE probe_agents SET state = ? WHERE id = ? AND state = ?', [
     state,
     id,
     before.state,
   ]);
-  if (changed === 0 || before.state === state) return;
+  if (changed === 0 || before.state === state) return changed === 0 ? ((await all<{ state: ProbeAgentState }>(database, 'SELECT state FROM probe_agents WHERE id = ?', [id]))[0]?.state ?? state) : state;
 
   if (before.state === 'online' && isProbeAgentDown(state)) {
     await run(database, 'INSERT INTO probe_agent_outages (id, probe_agent_id, started_at, reason) VALUES (?, ?, ?, ?)', [
@@ -339,14 +357,19 @@ export async function setProbeAgentState(
       details.error ?? state,
     ]);
     await recordSecurityActivity(CLEARPING, 'dashboard', 'probe-agent.offline', `${before.name}: ${details.error ?? state}`);
+    void tellAlerts(before.name, { kind: 'offline', reason: details.error ?? state });
   } else if (state === 'online') {
     const closed = await run(
       database,
       'UPDATE probe_agent_outages SET ended_at = ? WHERE probe_agent_id = ? AND ended_at IS NULL',
       [now, id]
     );
-    if (closed > 0) await recordSecurityActivity(CLEARPING, 'dashboard', 'probe-agent.online', before.name);
+    if (closed > 0) {
+      await recordSecurityActivity(CLEARPING, 'dashboard', 'probe-agent.online', before.name);
+      void tellAlerts(before.name, { kind: 'online' });
+    }
   }
+  return state;
 }
 
 /** The outages of a probe agent that overlap a stretch of time, oldest first. */

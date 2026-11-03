@@ -275,13 +275,12 @@ async function info(agent: ProbeAgentConnection): Promise<ProbeAgentInfo> {
 export async function checkProbeAgent(agent: ProbeAgentConnection): Promise<ProbeAgentState> {
   try {
     const reported = await info(agent);
-    await setProbeAgentState(agent.id, 'online', { info: reported });
-    return 'online';
+    return await setProbeAgentState(agent.id, 'online', { info: reported });
   } catch (error) {
     const failure = await unavailable(agent, error);
     const state = failure.state ?? agent.state;
-    await setProbeAgentState(agent.id, state, { error: failure.message, offeredFingerprint: failure.offeredFingerprint });
-    return state;
+    // The state it is kept in: still online while it is within its time to answer.
+    return await setProbeAgentState(agent.id, state, { error: failure.message, offeredFingerprint: failure.offeredFingerprint });
   }
 }
 

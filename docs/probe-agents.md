@@ -246,8 +246,12 @@ them earlier.
 
 ## When it cannot be reached
 
-The dashboard asks each probe agent how it is once a minute. If an agent
-can't be reached:
+The dashboard asks each probe agent how it is once a minute: that is its
+heartbeat. One that has not answered for **3 minutes** is marked offline (change
+it under Settings, Probes, *Offline after*, from 1 to 60 minutes), so a single
+missed answer changes nothing. A certificate or token it will not accept, or a
+different version, is not a missed heartbeat and shows at once. If an agent is
+offline:
 
 - **No readings are taken for its monitors.** A dead agent never shows up as
   your monitors being down, so it never sets off their alerts either.
@@ -257,6 +261,10 @@ can't be reached:
 - On the chart, the time it was down is shaded *Probe agent offline: no
   readings*.
 - The activity record notes when it was lost and when it came back.
+- **You can be told.** Tick *Also tell these URLs when a probe agent goes
+  offline* under More options on an alert (shown once you have a probe agent),
+  and that alert's notification URLs get a message when any probe agent goes
+  offline, and another when it is back.
 - **Measure now** and **Trace now** say the agent can't be reached, and record
   nothing.
 

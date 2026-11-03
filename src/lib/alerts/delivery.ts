@@ -209,6 +209,29 @@ function explanation(event: AlertEvent): string {
     : `${condition} has been clear for ${probes} probes in a row.`;
 }
 
+/** What to send when a probe agent stops answering, or answers again. */
+export function probeAgentNotification(
+  name: string,
+  change: { kind: 'offline'; reason: string } | { kind: 'online' },
+  options: NotificationOptions = {}
+): AlertNotification {
+  const offline = change.kind === 'offline';
+  const details: Array<[string, string]> = [
+    ['Probe agent', name],
+    ['When', formatMoment(new Date(), options.zone ?? displayTimeZone())],
+  ];
+  if (offline) details.push(['Why', change.reason]);
+  return {
+    title: clip(defuse(`${options.test ? 'Test: ' : ''}${offline ? `Probe agent ${name} is offline` : `Probe agent ${name} is back`}`), TITLE_MAX),
+    body:
+      `<p>${offline
+        ? 'The dashboard has had no answer from this probe agent for longer than the time set under Settings, Probes. Monitors that use it have no readings from it until it is back.'
+        : 'This probe agent is answering again, and readings from it have started again.'}</p>` +
+      `<ul>${details.map(([key, value]) => `<li><b>${key}:</b> ${html(value)}</li>`).join('')}</ul>`,
+    type: offline ? 'failure' : 'success',
+  };
+}
+
 /** What to send for an alert firing or clearing on one target. */
 export function notificationFor(event: AlertEvent, options: NotificationOptions = {}): AlertNotification {
   const details = [
