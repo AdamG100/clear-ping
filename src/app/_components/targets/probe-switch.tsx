@@ -20,8 +20,11 @@ export function ProbeSwitch({
   value,
   onChange,
   onIntent,
+  compareLabel = 'Compare',
 }: {
   probes: ProbeSummary[]
+  /** What the choice of every probe at once is called. */
+  compareLabel?: string
   /** A probe's id, or COMPARE_PROBES. */
   value: ProbeId
   onChange: (value: ProbeId) => void
@@ -29,7 +32,7 @@ export function ProbeSwitch({
   onIntent?: (value: ProbeId) => void
 }) {
   const options = [
-    { value: COMPARE_PROBES, label: 'Compare' },
+    { value: COMPARE_PROBES, label: compareLabel },
     ...probes.map(probe => ({ value: probe.id, label: probe.name })),
   ]
   if (probes.length > BUTTONS_UP_TO) {

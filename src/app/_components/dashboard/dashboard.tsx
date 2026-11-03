@@ -938,6 +938,18 @@ export function Dashboard() {
     return ids.map(id => byId.get(id)).filter((target): target is Target => !!target)
   }, [selectedGroup, targets, groupOrders])
 
+  // Every probe any monitor in the group is measured from, the local probe first,
+  // and which of them the group's chart shows: all of them on one chart unless
+  // one is picked. Kept for the group it was picked on.
+  const groupProbeIds = useMemo(() => {
+    if (!groupTargets) return []
+    const used = new Set(groupTargets.flatMap(target => probeIdsOf(target)))
+    return probeList.filter(probe => used.has(probe.id)).map(probe => probe.id)
+  }, [groupTargets, probeList])
+  const [groupProbeChoice, setGroupProbeChoice] = useState<{ group: string | null; view: string }>({ group: null, view: COMPARE_PROBES })
+  const groupProbeView = groupProbeChoice.group === selectedGroup && groupProbeIds.includes(groupProbeChoice.view) ? groupProbeChoice.view : COMPARE_PROBES
+  const groupProbeNames = useMemo(() => new Map(probeList.map(probe => [probe.id, probe.name])), [probeList])
+
   // A comparison loads its own data, so the single-series fetch stands down.
   const singleSeriesTargetId = groupTargets || comparingFamilies || comparingProbes ? null : selectedTargetId
 
@@ -1486,7 +1498,7 @@ export function Dashboard() {
                 <h1 className={PANE_TITLE}>{groupLabel(selectedGroup ?? '')}</h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                   <span>
-                    {groupTargets.length} monitor{groupTargets.length === 1 ? '' : 's'} on one chart
+                    {groupTargets.length} monitor{groupTargets.length === 1 ? '' : 's'} on one chart{groupProbeIds.length > 1 ? `, from ${groupProbeIds.length} probes` : ''}
                   </span>
                   <Badge size="sm">Group</Badge>
                 </p>
@@ -1496,6 +1508,25 @@ export function Dashboard() {
               </div>
             </header>
 
+            {groupProbeIds.length > 1 && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <ProbeSwitch
+                  probes={groupProbeIds.map(id => probeList.find(probe => probe.id === id)!)}
+                  value={groupProbeView}
+                  compareLabel="All probes"
+                  onChange={view => { setGroupProbeChoice({ group: selectedGroup, view }); setZoom(null) }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {groupProbeView === COMPARE_PROBES
+                    ? 'Each monitor from every probe that measures it, so a fault seen from one place stands out from one seen from all of them.'
+                    : (() => {
+                        const without = groupTargets.filter(target => !probeIdsOf(target).includes(groupProbeView)).length
+                        return `Only readings from ${groupProbeNames.get(groupProbeView)}${without > 0 ? `. ${without} monitor${without === 1 ? ' is' : 's are'} not measured from it, and not shown` : ''}.`
+                      })()}
+                </p>
+              </div>
+            )}
+
             <ComparePanel
               targets={groupTargets}
               timeRange={timeRange}
@@ -1503,15 +1534,18 @@ export function Dashboard() {
               onZoom={handleZoom}
               onResetZoom={handleResetZoom}
               refreshKey={groupRefreshKey}
-              // A line measured from a probe agent says so: from there, the
-              // same host can look quite different.
-              nameSeries={(target, family) => {
-                const from = target.probeAgentId ? probeAgents.find(agent => agent.id === target.probeAgentId)?.name : undefined
+              // With several probes, a line says which it is from: from
+              // there, the same host can look quite different.
+              probes={groupProbeIds.length > 1 ? (groupProbeView === COMPARE_PROBES ? 'all' : groupProbeView) : undefined}
+              probeNames={groupProbeNames}
+              nameSeries={(target, family, _resolver, probeName) => {
+                const from = probeName && probeIdsOf(target).length > 1 ? probeName : undefined
                 return [target.name, family ? FAMILY_LABEL[family] : null, from].filter(Boolean).join(' · ')
               }}
               title={`${groupVocabulary?.latencyTitle ?? 'Median latency'}, compared`}
               description={
-                'One line per monitor, on a shared scale. The strips underneath mark when each one ' +
+                (groupProbeIds.length > 1 && groupProbeView === COMPARE_PROBES ? 'One line per monitor and probe' : 'One line per monitor') +
+                ', on a shared scale. The strips underneath mark when each one ' +
                 (groupVocabulary ? `had ${groupVocabulary.lossTitle.toLowerCase()}.` : 'lost packets or failed.')
               }
               onSelectTarget={setSelectedTargetId}
