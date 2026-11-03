@@ -99,7 +99,7 @@ export function ProbeChips({ probes, className }: { probes: ProbeSummary[]; clas
       {probes.map(probe => {
         const state = PROBE_AGENT_STATE[probe.state]
         const working = probe.state === 'online'
-        const host = probe.local ? 'Where this dashboard runs' : mask.address(probe.hostname ?? probe.address ?? '')
+        const host = probe.local ? 'Local heartbeat: runs with the dashboard, so it is always on' : mask.address(probe.hostname ?? probe.address ?? '')
         return (
           <li key={probe.id}>
             <Tooltip content={`${probe.name}: ${state.label.toLowerCase()}. ${host}`}>

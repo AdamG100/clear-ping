@@ -22,7 +22,6 @@ import { Button } from '@/components/arc/button/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/arc/popover/popover'
 import { ScrollArea } from '@/components/arc/scroll-area/scroll-area'
 import { SearchField } from '@/components/arc/search-field/search-field'
-import { Select } from '@/components/arc/select/select'
 import { matchesProbeFrom, ProbedFrom, type ProbeFromFilter } from '../targets/probed-from'
 import { ThemeSwitch } from '@/components/arc/theme-switch/theme-switch'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
@@ -1556,22 +1555,20 @@ export function Sidebar({
             <SearchField label="Search monitors" placeholder="Search name or address" value={searchQuery} onValueChange={setSearchQuery} />
           </div>
         )}
-        {/* Each choice says the whole of what it means, so the label, like the
-            search's, is for a screen reader. */}
-        {agentsInUse.length > 0 && onProbeFromChange && (
-          <div className="[&_label]:sr-only">
-            <Select
-              id="sidebar-probe-from"
-              label="Measured by"
-              value={fromFilter}
-              onValueChange={value => onProbeFromChange(value)}
-              options={[
-                { value: 'all', label: 'Measured by any probe' },
-                { value: 'local', label: `Measured by ${localProbeName ?? DEFAULT_LOCAL_PROBE_NAME}` },
-                ...agentsInUse.map(agent => ({ value: agent.id, label: `Measured by ${agent.name}` })),
-              ]}
-            />
-          </div>
+        {/* No dropdown: a list is narrowed to one probe from the Overview or
+            Settings, and this says so and puts it back. */}
+        {fromFilter !== 'all' && onProbeFromChange && (
+          <button
+            type="button"
+            onClick={() => onProbeFromChange('all')}
+            aria-label="Show monitors from every probe"
+            className="inline-flex w-fit max-w-full cursor-pointer items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-muted/40"
+          >
+            <span className="truncate">
+              Measured by {fromFilter === 'local' ? localProbeName ?? DEFAULT_LOCAL_PROBE_NAME : agentsInUse.find(agent => agent.id === fromFilter)?.name}
+            </span>
+            <X size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-muted-foreground" />
+          </button>
         )}
 
         {/* How the targets stand, just over their list. As tall while loading
