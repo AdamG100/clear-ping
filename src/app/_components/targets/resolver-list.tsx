@@ -242,7 +242,7 @@ export function ResolverList({ idPrefix, resolvers, onChange }: ResolverListProp
             Add {bigThree.map(provider => provider.name).join(', ').replace(/, ([^,]*)$/, ' and $1')}
           </Button>
         )}
-        {full && <span className="text-xs text-muted-foreground">{MAX_DNS_RESOLVERS} is the most one target can ask.</span>}
+        {full && <span className="text-xs text-muted-foreground">{MAX_DNS_RESOLVERS} is the most one monitor can ask.</span>}
       </div>
 
       <p className="text-xs leading-relaxed text-muted-foreground">

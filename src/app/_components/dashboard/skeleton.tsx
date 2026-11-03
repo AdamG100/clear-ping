@@ -217,7 +217,7 @@ export function OverviewSkeleton() {
 export function SidebarSkeleton() {
   return (
     <div className="space-y-2" role="status" aria-busy="true">
-      <span className="sr-only">Loading the targets</span>
+      <span className="sr-only">Loading the monitors</span>
       {[5, 3].map((rows, group) => (
         <div key={group} className="rounded-xl border border-sidebar-group-border bg-sidebar-group" aria-hidden="true">
           <div className="flex h-12 items-center gap-2 px-3">

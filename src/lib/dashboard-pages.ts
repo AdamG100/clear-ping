@@ -49,9 +49,10 @@ function decodeSegment(segment: string): string {
 /**
  * The page at an address, or null for the dashboard itself (a target or a group).
  *
- * Adding a target is /targets/new, /targets/new/in/<group> to start in a group
- * (the group's own path, so /targets/new/in/Home/Network) and
- * /targets/new/copy/<id> to duplicate one. Editing is /targets/<id>/edit.
+ * Adding a monitor is /monitors/new, /monitors/new/in/<group> to start in a group
+ * (the group's own path, so /monitors/new/in/Home/Network) and
+ * /monitors/new/copy/<id> to duplicate one. Editing is /monitors/<id>/edit.
+ * The same under /targets, which is what they were called, still reads.
  * Alerts are the same: /alerts/new, and /alerts/<id>/edit.
  */
 export function pageFromPath(pathname: string): DashboardPage | null {
@@ -63,7 +64,8 @@ export function pageFromPath(pathname: string): DashboardPage | null {
     return null
   }
 
-  if (first === 'targets' && second) {
+  // Monitors were called targets, and their pages still open at the old address.
+  if ((first === 'monitors' || first === 'targets') && second) {
     if (second === 'new') {
       if (rest.length === 0) return { kind: 'target-new' }
       const [how, ...value] = rest
@@ -101,17 +103,17 @@ export function pathOf(page: DashboardPage | null): string {
     const section = isSettingsSection(page.section) ? page.section : DEFAULT_SETTINGS_SECTION
     return section === DEFAULT_SETTINGS_SECTION ? '/settings' : `/settings/${section}`
   }
-  if (page.kind === 'target-edit') return `/targets/${encodeURIComponent(page.id)}/edit`
+  if (page.kind === 'target-edit') return `/monitors/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'routing-prefix') return `/routing/${encodeURIComponent(page.id)}`
   if (page.kind === 'alert-new') return '/alerts/new'
   if (page.kind === 'alert-edit') return `/alerts/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'target-new') {
-    if (typeof page.from === 'string' && page.from) return `/targets/new/copy/${encodeURIComponent(page.from)}`
+    if (typeof page.from === 'string' && page.from) return `/monitors/new/copy/${encodeURIComponent(page.from)}`
     // Only a group given as a path: anything else (a click event, say) is not one.
     if (typeof page.group === 'string' && page.group) {
-      return `/targets/new/in/${page.group.split('/').map(encodeURIComponent).join('/')}`
+      return `/monitors/new/in/${page.group.split('/').map(encodeURIComponent).join('/')}`
     }
-    return '/targets/new'
+    return '/monitors/new'
   }
   return `/${page.kind}`
 }

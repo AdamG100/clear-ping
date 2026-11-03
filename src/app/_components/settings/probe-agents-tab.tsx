@@ -343,7 +343,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
                 <CodeBlock code={commands.docker} filename="On the probe agent's machine" language="bash" />
                 <p className={HINT}>
                   Its certificate is kept in the volume, so it stays the same when the container is replaced. For IPv6
-                  targets, run it with <span className="font-mono">--network host</span> in place of{' '}
+                  monitors, run it with <span className="font-mono">--network host</span> in place of{' '}
                   <span className="font-mono">-p</span>, and set{' '}
                   <span className="font-mono">CLEARPING_PROBE_AGENT_LISTEN</span> to the address to listen on.
                 </p>
@@ -403,14 +403,14 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
       <section className={PANEL} aria-labelledby="probe-agents-list">
         <div className="space-y-1">
           <p id="probe-agents-list" className={SECTION_TITLE}>All probe agents</p>
-          <p className={HINT}>Choose one in a target&apos;s settings to take that target&apos;s readings from there.</p>
+          <p className={HINT}>Choose one in a monitor&apos;s settings to take that monitor&apos;s readings from there.</p>
         </div>
 
         {agents.length === 0 ? (
           <EmptyState
             icon={<RadioTower size={24} strokeWidth={1.75} />}
             title="No probe agents yet"
-            description="Every target is probed from this server. Add a probe agent to take readings from somewhere else too."
+            description="Every monitor is probed from this server. Add a probe agent to take readings from somewhere else too."
           />
         ) : (
           <>
@@ -490,7 +490,7 @@ export function ProbeAgentsTab({ onShowTargets }: { onShowTargets?: (probeAgentI
                   },
                   {
                     key: 'targetCount',
-                    label: 'Targets',
+                    label: 'Monitors',
                     numeric: true,
                     render: (_, { agent }) =>
                       agent.targetCount > 0 && onShowTargets ? (

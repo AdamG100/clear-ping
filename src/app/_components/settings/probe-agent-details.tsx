@@ -228,7 +228,7 @@ function EditForm({ agent, onDone, onCancel }: { agent: ProbeAgent; onDone: () =
       {moved && typed.ok && <ExposureNote exposure={exposureOfAddress(typed.value)} />}
       <p className={HINT}>
         Its certificate stays trusted: it is the same probe agent, reached another way, and has to prove it with the
-        same certificate. Its targets keep their history.
+        same certificate. Its monitors keep their history.
       </p>
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel}>
@@ -359,15 +359,15 @@ export function ProbeAgentDetails({
           </Facts>
           {missingTools.length > 0 && (
             <Alert tone="warning" title={`No ${missingTools.join(' or ')} on that machine`}>
-              Install it there, or its targets that need it cannot be probed.
+              Install it there, or its monitors that need it cannot be probed.
             </Alert>
           )}
 
-          <Facts title="Targets">
-            <Fact label="Targets probed from it">
+          <Facts title="Monitors">
+            <Fact label="Monitors probed from it">
               {agent.targetCount > 0 && onShowTargets ? (
                 <button type="button" className="text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={onShowTargets}>
-                  {agent.targetCount} {agent.targetCount === 1 ? 'target' : 'targets'}
+                  {agent.targetCount} {agent.targetCount === 1 ? 'monitor' : 'monitors'}
                 </button>
               ) : (
                 <span className="text-muted-foreground">None yet</span>
@@ -423,7 +423,7 @@ export function ProbeAgentDetails({
             <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0 max-w-60">
                 <p className="text-sm font-medium">Remove</p>
-                <p className={HINT}>Only once no target is probed from it.</p>
+                <p className={HINT}>Only once no monitor is probed from it.</p>
               </div>
               <ConfirmMorph
                 label="Remove"

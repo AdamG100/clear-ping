@@ -2,15 +2,15 @@
 
 ## Overview
 
-ClearPing includes an automatic probe scheduler that works similarly to **Smokeping**. The scheduler automatically probes all active targets at their configured intervals, capturing measurements and storing them for visualization on the graphs.
+ClearPing includes an automatic probe scheduler that works similarly to **Smokeping**. The scheduler automatically probes all active monitors at their configured intervals, capturing measurements and storing them for visualization on the graphs.
 
 ## How It Works
 
 ### Automatic Probing
 
-- When you create a target, you specify a **probe interval** (in seconds)
-- The scheduler checks every 10 seconds for targets that need to be probed
-- When a target's interval has elapsed, the scheduler automatically:
+- When you create a monitor, you specify a **probe interval** (in seconds)
+- The scheduler checks every 10 seconds for monitors that need to be probed
+- When a monitor's interval has elapsed, the scheduler automatically:
   1. Executes a probe (ICMP ping or DNS query)
   2. Captures the latency and packet loss
   3. Stores the measurement in the database
@@ -18,17 +18,17 @@ ClearPing includes an automatic probe scheduler that works similarly to **Smokep
 
 ### Example
 
-If you set a target to probe every **300 seconds (5 minutes)**:
-- The target will be probed automatically every 5 minutes
+If you set a monitor to probe every **300 seconds (5 minutes)**:
+- The monitor will be probed automatically every 5 minutes
 - Each probe sends 20 ICMP packets (configurable)
 - The results are averaged and stored
 - The graphs automatically update with new data
 
 ## Configuration
 
-### Target Intervals
+### Monitor Intervals
 
-When creating or editing a target, you can set the probe interval:
+When creating or editing a monitor, you can set the probe interval:
 
 ```typescript
 {
@@ -55,12 +55,12 @@ timeout** per packet. The defaults live in [src/lib/probes/ping.ts](../src/lib/p
 const DEFAULTS = { count: 20, timeout: 1000, interval: 10 };
 ```
 
-## What Each Kind of Target Measures
+## What Each Kind of Monitor Measures
 
-The sidebar labels every target `IP`, `DOMAIN`, `TCP`, `GAME`, `HTTP` or `DNS`. The label is
+The sidebar labels every monitor `IP`, `DOMAIN`, `TCP`, `GAME`, `HTTP` or `DNS`. The label is
 derived from the address and the probe method, and each kind is measured differently:
 
-| Target | Example | What a probe does |
+| Monitor | Example | What a probe does |
 |--------|---------|-------------------|
 | **IP** | `1.1.1.1`, `2606:4700:4700::1111` | Pings the address directly with ICMP echo requests. |
 | **Domain** | `example.com` | Resolves the name once, then sends every packet of that probe to the one address it returned. |
@@ -72,7 +72,7 @@ derived from the address and the probe method, and each kind is measured differe
 
 The address box accepts a URL, `host:port` or `udp://host:port` and picks the method to match. Whatever
 the method, the host is resolved once per probe and the resolved address is shown
-next to the target, so the IPv4/IPv6 setting below applies to all of them.
+next to the monitor, so the IPv4/IPv6 setting below applies to all of them.
 
 ### TCP
 
@@ -97,7 +97,7 @@ queries that got no answer. Pick the game the server runs:
 
 Minecraft Java's is the game's own server list ping: each query connects, reads
 the server's status and times a ping, which is the figure the game's multiplayer
-screen shows. The name that is sent with it is the target's, so a proxy that
+screen shows. The name that is sent with it is the monitor's, so a proxy that
 picks a server by name picks the right one.
 
 For a Steam game, use the server's **query port**. For many games it is the game port, but not for
@@ -125,12 +125,12 @@ the server is running, which only someone in the match can see.
   or the server's own limit would show as loss.
 - **Not every server answers.** One whose firewall drops everything, closed ports
   included, as Google Cloud's does, can't be measured this way. Until it has
-  answered once, its target is grey with "Can't measure" rather than offline,
+  answered once, its monitor is grey with "Can't measure" rather than offline,
   its page says why, and it raises no alerts. Once it has answered, silence is
   an outage again. Check first: `mtr --udp <address>`
   gets the same reply, so it shows the server's address as its last hop when
   this will work, and `???` there when it won't. To watch the way to a server
-  like that, add the last hop that does answer as a ping target: it is usually
+  like that, add the last hop that does answer as a ping monitor: it is usually
   where your traffic enters the host's network.
 
 To watch the network to one of them:
@@ -173,13 +173,13 @@ An alert can be set on the certificate running out (see [alerting.md](./alerting
 
 ### DNS settings
 
-A **server** target can be told what to ask: the name to look up and the
+A **server** monitor can be told what to ask: the name to look up and the
 record type (A, AAAA, CNAME, MX, NS, TXT). Left empty, a well-known public
 resolver is asked for its own operator's domain (1.1.1.1 `cloudflare.com`,
 8.8.8.8 `google.com`, 9.9.9.9 `quad9.net`, and OpenDNS and AdGuard likewise),
 and any other server for `google.com`, a name every resolver has to hand.
 
-A **name** target can be told who to ask. Left alone it uses the system resolver.
+A **name** monitor can be told who to ask. Left alone it uses the system resolver.
 Given a list of resolvers, it asks every one of them on each probe:
 
 - **Add resolver** adds a row. Each row is who to ask (Cloudflare, Google, Quad9,
@@ -198,7 +198,7 @@ Given a list of resolvers, it asks every one of them on each probe:
   once, over different protocols, to compare them.
 - With a list, the **record type** can be chosen too, since the resolvers are
   asked directly: the name's address, or its CNAME, MX, NS or TXT record. Which
-  address is the target's **IP version**, as for every other probe: A unless it
+  address is the monitor's **IP version**, as for every other probe: A unless it
   is set to *IPv6 only*, which asks for AAAA, or to *Both*, which asks for each
   and charts them as two lines. A record that is not an address has no IP
   version, so the setting is not offered for one.
@@ -206,7 +206,7 @@ Given a list of resolvers, it asks every one of them on each probe:
   that asks for an address and has to come off one that asks for anything else.
 - Up to eight resolvers. Five queries go to each, all of them at the same moment.
 
-The target's page then shows the latest probe resolver by resolver:
+The monitor's page then shows the latest probe resolver by resolver:
 
 | Column | What it is |
 |---|---|
@@ -221,7 +221,7 @@ resolver, and a strip for each marks the probes in which it failed to answer. In
 its table, *Failed* is the share of the queries sent to that resolver that got no
 usable answer, and *Uptime* the share of probes in which it answered at least one.
 
-A target set to **Both** IP versions looks the name up twice a probe, the A
+A monitor set to **Both** IP versions looks the name up twice a probe, the A
 record and the AAAA record, and everything above is there once for each: the
 comparison chart at the top has one line for IPv4 and one for IPv6, each of them
 all the resolvers together. Below it each family has a section of its own, IPv4
@@ -238,7 +238,7 @@ once per probe and every query sent down it, as a browser or an operating system
 does, so the query time is the query's and the handshake is reported separately.
 DoH is spoken over HTTP/2 where the resolver offers it, which some insist on.
 
-Either kind of DNS target can be given an **expected answer**. A reply then only
+Either kind of DNS monitor can be given an **expected answer**. A reply then only
 counts if it includes that value, which turns "does this server answer" into "does
 my record still point where it should". TXT records match on a substring, so
 `v=spf1` matches an SPF record; everything else must match a whole record. With a
@@ -254,21 +254,21 @@ Why a domain is resolved by the prober rather than handed to `ping`:
   recorded as `DNS resolution failed …`, not as 100% packet loss with a generic
   error.
 - **The address is visible.** The address the last probe measured is stored on the
-  target and shown next to its name.
+  monitor and shown next to its name.
 
-For DNS targets, "packet loss" is the share of queries that went unanswered. A
+For DNS monitors, "packet loss" is the share of queries that went unanswered. A
 server replying "no such name" has still answered, so that counts as a success
-when the target is a server; when the target is a name, failing to resolve is the
-failure being watched for. A name target with no resolvers of its own goes through
+when the monitor is a server; when the monitor is a name, failing to resolve is the
+failure being watched for. A name monitor with no resolvers of its own goes through
 the operating system's resolver, cache included, so it measures what applications
 on this machine experience rather than one upstream server.
 
 ### IPv4 and IPv6
 
-An IP target uses the family of its address. Bracketed (`[2001:db8::1]`) and
+An IP monitor uses the family of its address. Bracketed (`[2001:db8::1]`) and
 scoped link-local (`fe80::1%eth0`) forms are accepted.
 
-A target named by a hostname has an **IP version** setting, whatever it is probed
+A monitor named by a hostname has an **IP version** setting, whatever it is probed
 with (ping, TCP, UDP, HTTP or DNS):
 
 | Setting | What is probed |
@@ -283,24 +283,24 @@ A name with no record of a pinned family reports
 
 **Both** is for watching the two paths to one host side by side. Every round runs
 the probe once over IPv4 and once over IPv6 and stores a reading for each. The
-target's page opens on a chart with one line per family and has tabs for the full
-readings of either one. In the sidebar the target counts as reachable if either
-family answers, but its status dot takes the colour of the worse one, so a target
+monitor's page opens on a chart with one line per family and has tabs for the full
+readings of either one. In the sidebar the monitor counts as reachable if either
+family answers, but its status dot takes the colour of the worse one, so a monitor
 whose IPv6 has gone while IPv4 carries on does not look healthy. The alerts it is
 ticked for are judged on the worse of the two readings in each round, and a
 traceroute is taken over each family.
 
 Each measurement records the family it was taken over (`measurements.family`, 4 or
 6). Readings stored before that column existed are filed, the next time the
-database is opened, under the family their target is probed over, so switching an
-existing target to *Both* keeps its history on the right line.
+database is opened, under the family their monitor is probed over, so switching an
+existing monitor to *Both* keeps its history on the right line.
 
 On macOS, IPv6 pings go through `ping6`, which has no per-packet timeout flag; a
 lost packet there is bounded by the prober's own process timeout instead.
 
 ## Groups
 
-Targets are arranged into groups in the sidebar, and a group can sit inside
+Monitors are arranged into groups in the sidebar, and a group can sit inside
 another to any depth: `Home`, with `Network` inside it, with `Wireless` inside
 that.
 
@@ -309,29 +309,29 @@ that.
   does the same with that group already chosen, which is how a group is put
   inside another. A new group starts empty, and says so until something is in
   it.
-- **Making one along with a target.** The group box in the add and edit forms
+- **Making one along with a monitor.** The group box in the add and edit forms
   lists every group, and **New group…** at the bottom of it takes a name and
   the group to put it inside.
-- **Moving targets.** Drag a target by its handle onto any group, at any depth,
+- **Moving monitors.** Drag a monitor by its handle onto any group, at any depth,
   or onto *Ungrouped* to take it out of its group. An empty group also offers
-  to add a target straight into it.
+  to add a monitor straight into it.
 - **Renaming and moving groups.** The pencil on a group's header renames it or
   puts it inside another group. Everything in it goes with it. Giving it the
   name of a group that already exists merges the two.
-- **Deleting one.** In the same dialog. Only the group goes: its targets, and
+- **Deleting one.** In the same dialog. Only the group goes: its monitors, and
   the groups inside it, move up to the group it sat in, or to the top level,
   and keep their history. A group with anything in it asks first.
 - **Ordering.** Drag a group by its handle to reorder it among the groups beside
   it.
 - **Collapsing.** A collapsed group shows one trace for everything in it: the
-  mean latency of its targets, marked wherever any of them lost packets. Paused
-  targets are left out of it.
+  mean latency of its monitors, marked wherever any of them lost packets. Paused
+  monitors are left out of it.
 
 A group lasts until it is deleted, whether or not anything is in it. It used to
-exist only through its targets, and vanished when the last one was moved out;
+exist only through its monitors, and vanished when the last one was moved out;
 the groups in a database from before that changed are all kept when it is
 upgraded. A group with nothing in it is left off the collapsed sidebar's rail
-and out of the lists of targets to tick, where it would be a row with nothing
+and out of the lists of monitors to tick, where it would be a row with nothing
 to choose.
 
 A group is stored as its path, with a `/` between a group and the one inside
@@ -340,49 +340,49 @@ typed, but the API takes them: `Home/Network` is `Network` inside `Home`.
 Groups made before nesting existed whose names had a `/` in them become a group
 inside a group when the database is upgraded.
 
-## Comparing Targets
+## Comparing Monitors
 
-Every group in the sidebar with two or more targets has a Compare button on its
+Every group in the sidebar with two or more monitors has a Compare button on its
 header. It puts the whole group, including the groups inside it, on one chart,
-the way a Smokeping multi-host graph does: one median line per target on a shared
+the way a Smokeping multi-host graph does: one median line per monitor on a shared
 time axis and latency scale, so it is plain whether a slowdown hit one of them or
 all of them. Put four resolvers in a group and that is a query-time comparison of
 the four.
 
-- Under the lines there is a **loss strip per target**, in the same order as the
+- Under the lines there is a **loss strip per monitor**, in the same order as the
   legend, marking when each one lost packets (or failed requests, or queries).
 - The **legend is a table**: for each line its latest reading and its median,
   average, minimum, maximum, loss and uptime over the period shown. Pointing at a
-  row picks its line out; clicking the name opens that target's own page.
-- Dragging across the chart zooms in, as on a single target's chart.
-- A target set to *Both* IP versions contributes two lines, one per family.
+  row picks its line out; clicking the name opens that monitor's own page.
+- Dragging across the chart zooms in, as on a single monitor's chart.
+- A monitor set to *Both* IP versions contributes two lines, one per family.
 - **Spikes stay on the chart.** A spike to 1000 ms among 20 ms readings would
   either run off the top or press every other line flat along the bottom. The
   chart gives spikes a narrow band along the top with a squeezed scale of its
   own: the highest is labelled in ms on the left, a dashed line marks where the
   scale changes, and the usual readings keep most of the height. A single
-  target's own chart does the same (*scale squeezed above 22 ms*).
+  monitor's own chart does the same (*scale squeezed above 22 ms*).
 
 ![A day of latency with one spike to 940 ms in a band along the top](screenshots/spikes.jpg)
 
 Only the median is drawn. The latency spread that surrounds it on a single
-target's chart would bury a dozen overlapping lines, and is one click away.
+monitor's chart would bury a dozen overlapping lines, and is one click away.
 
 Groups can mix probe types, but a 400 ms HTTP check and a 2 ms ping share one
 scale, so the ping will be a flat line at the bottom. Group like with like.
 
 ## Traceroute
 
-The chart shows that packets were lost; a traceroute shows where. Each target has a
+The chart shows that packets were lost; a traceroute shows where. Each monitor has a
 **Route** panel listing its recent traces. An open trace is drawn as the path
 it took: each hop a numbered stop on a line, with its name, address, loss and
-latency beside it, the target itself marked at the end, and the line broken
+latency beside it, the monitor itself marked at the end, and the line broken
 from the point where replies stopped.
 
 - **Trace route** runs one on demand.
 - One is taken **automatically when a packet-loss or unreachable alert fires**, which
   is the only time the route through a failure can be captured. This needs an alert
-  rule on the target; without one nothing triggers it.
+  rule on the monitor; without one nothing triggers it.
 
 Hop names come from reverse DNS and are looked up after the trace is stored, so the
 route appears at once and the names fill in over the following seconds.
@@ -397,15 +397,15 @@ not traceroute's usual UDP: most servers, and the firewalls in front of them,
 never answer UDP sent to a closed port, so a UDP trace stops one hop short of a
 host that answers every ping. Where ICMP cannot be sent without root (Docker
 allows it by default; a host whose `net.ipv4.ping_group_range` does not), the
-trace falls back to UDP, and a trace that ends at the hop before the target may
+trace falls back to UDP, and a trace that ends at the hop before the monitor may
 then mean nothing more than that. On Linux the three probes of one hop are sent
 together and the next hop waits for them, rather than sixteen at once, so that a
-target that limits how fast it answers pings does not show loss at the last hop
+monitor that limits how fast it answers pings does not show loss at the last hop
 that it does not have.
 
 Traces are kept for the same retention period as measurements, and can
 be deleted sooner: the bin on a trace deletes that one, and **Delete older**
-deletes all but the newest (the newest over each address family, for a target
+deletes all but the newest (the newest over each address family, for a monitor
 traced over both). Either takes a second press to confirm, since a trace taken
 while something was broken cannot be taken again once it has mended. The panel
 lists the newest ten and says how many are kept in all.
@@ -458,8 +458,8 @@ GET /api/scheduler/status
 
 Returns information about:
 - Whether the scheduler is running
-- Number of active targets
-- Next probe time for each target
+- Number of active monitors
+- Next probe time for each monitor
 - Current probing status
 
 #### Start Scheduler Manually
@@ -472,10 +472,10 @@ Manually starts the scheduler (useful if it was stopped).
 ### Monitoring
 
 `GET /api/scheduler/status` reports whether the scheduler is running, how many
-targets it has scheduled, and when each is next due.
+monitors it has scheduled, and when each is next due.
 
 For being told when something breaks rather than having to look, make an alert
-on the Alerts screen and tick the targets it should watch. See
+on the Alerts screen and tick the monitors it should watch. See
 [alerting.md](./alerting.md).
 
 ## Data Storage
@@ -504,7 +504,7 @@ Per-probe settings (port, URL path, expected status, DNS query) are stored as JS
 `targets.probe_config`, so a probe that needs a new setting does not need a new
 column.
 
-A target's group is stored as a path in `targets.group_name`, such as
+A monitor's group is stored as a path in `targets.group_name`, such as
 `Home/Network`; the tree in the sidebar is read off those paths.
 
 The schema is brought up to date automatically whenever the database is opened by
@@ -518,14 +518,14 @@ next to it first as `clearping.db.before-probe-types-<timestamp>.bak`. Once you 
 satisfied with the upgrade that file can be deleted.
 
 `PRAGMA foreign_keys = ON` is set at startup — without it SQLite ignores the
-`ON DELETE CASCADE` above and deleting a target leaves its measurements behind.
+`ON DELETE CASCADE` above and deleting a monitor leaves its measurements behind.
 
 ### Data Retention
 
 The scheduler runs retention at startup and every six hours, keeping 90 days by
 default. Set `CLEARPING_RETENTION_DAYS` to change it, or `0` to keep everything.
 
-This matters more than it sounds: six targets on a five-minute interval produce
+This matters more than it sounds: six monitors on a five-minute interval produce
 roughly 630,000 rows a year.
 
 ## Performance Considerations
@@ -534,17 +534,17 @@ roughly 630,000 rows a year.
 
 - Each probe sends 20 ICMP packets (a fully unreachable host takes ~20 seconds,
   since every packet must wait out its timeout)
-- Ping targets due in the same tick are probed concurrently, up to 8 at a time
-- A target already being probed is skipped rather than probed twice
+- Ping monitors due in the same tick are probed concurrently, up to 8 at a time
+- A monitor already being probed is skipped rather than probed twice
 - Database writes are batched for efficiency
 - The scheduler uses minimal CPU when idle
 
 ### Scalability
 
 The current implementation can handle:
-- ✅ Up to 50 targets without issues
+- ✅ Up to 50 monitors without issues
 - ✅ Intervals as low as 60 seconds
-- ⚠️ For 100+ targets, consider adjusting the check interval
+- ⚠️ For 100+ monitors, consider adjusting the check interval
 
 ### Best Practices
 
@@ -568,7 +568,7 @@ curl -X POST http://localhost:3000/api/scheduler/start
 
 ### No Measurements Appearing
 
-1. Check target status (must be "active")
+1. Check monitor status (must be "active")
 2. Verify the interval has elapsed since last probe
 3. Check server logs for errors
 4. Ensure proper network connectivity
@@ -579,7 +579,7 @@ If you're seeing unexpected packet loss:
 1. Reduce probe frequency (increase interval)
 2. Decrease ping count from 20 to 10
 3. Check network conditions
-4. Verify target host is accessible
+4. Verify monitor host is accessible
 
 ## Comparison to Smokeping
 
@@ -588,7 +588,7 @@ If you're seeing unexpected packet loss:
 | Default Interval | 300s | 300s |
 | Pings per Probe | 20 | 20 |
 | Probe Types | ICMP, TCP, UDP (game servers), HTTP(S), DNS | ICMP, DNS, HTTP, etc. |
-| IPv4 / IPv6 | Per target: either, or both side by side | Separate probes (FPing, FPing6) |
+| IPv4 / IPv6 | Per monitor: either, or both side by side | Separate probes (FPing, FPing6) |
 | Multi-host graphs | Any sidebar group | Configured per graph |
 | Storage | SQLite | RRD files |
 | UI | React/Next.js | CGI/Perl |
@@ -624,7 +624,7 @@ scripts/prober.ts      The scheduler as a process of its own (npm run probe)
 
 Potential improvements:
 - [ ] Web UI for configuring probe intervals
-- [ ] Multiple probe schedules per target
+- [ ] Multiple probe schedules per monitor
 - [x] Distributed probing from multiple locations ([probe agents](probe-agents.md))
 - [ ] Export data to Prometheus/Grafana
 - [ ] RRD-style data aggregation for long-term storage

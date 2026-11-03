@@ -78,18 +78,23 @@ There is nothing else to install or run: it is part of the app.
 
 ## What an assistant can do
 
+A monitor is called a *target* in the tools and their arguments, which have not
+changed: `list_targets`, `add_targets`, `target`. A monitor measured from
+several probes takes `probes` (a list of probe names or ids, with `local`),
+and the tools that read or measure take a `probe` to say which of them.
+
 As it comes, it can read and only read: no tool adds, changes, pauses or probes
-a target, and nothing is sent anywhere. Alerts are left out altogether, since
+a monitor, and nothing is sent anywhere. Alerts are left out altogether, since
 where an alert is sent is usually a URL with a password in it.
 
 | Tool | What it returns |
 |---|---|
-| `list_targets` | Every target: its address, probe, group, whether it is inside the local network, and how its latest probe went |
+| `list_targets` | Every monitor: its address, probe, group, whether it is inside the local network, and how its latest probe went |
 | `build_isp_report` | The evidence for a report to an ISP, in one call (below) |
-| `get_incidents` | Every outage and spell of loss in a period, across targets, with what the other targets were doing meanwhile |
-| `get_target_history` | One target in depth: its figures, its incidents, the gaps in monitoring, and how it did at each hour of the day |
+| `get_incidents` | Every outage and spell of loss in a period, across monitors, with what the other monitors were doing meanwhile |
+| `get_target_history` | One monitor in depth: its figures, its incidents, the gaps in monitoring, and how it did at each hour of the day |
 | `get_traceroutes` | Saved routes hop by hop, with the hop at which replies stopped |
-| `get_dns_resolvers` | For a DNS target that asks several resolvers: how each did, and what each last answered |
+| `get_dns_resolvers` | For a DNS monitor that asks several resolvers: how each did, and what each last answered |
 
 Each takes a period (`hours`, `days`, or `start` and `end`) and a `timezone`
 to write times in, which is the time zone of the machine ClearPing runs on
@@ -109,22 +114,22 @@ Give an assistant a **read and write** key (Settings → Keys, see
 
 | Tool | What it does |
 |---|---|
-| `add_targets` | Starts monitoring new targets, up to 50 at once |
-| `update_target` | Changes a target's name, group, interval, address, probe or settings |
-| `set_target_paused` | Stops probing a target, or starts again |
+| `add_targets` | Starts monitoring new monitors, up to 50 at once |
+| `update_target` | Changes a monitor's name, group, interval, address, probe or settings |
+| `set_target_paused` | Stops probing a monitor, or starts again |
 | `probe_now` | Takes a reading straight away |
-| `run_traceroute` | Traces the route to a target now and saves it; `ip_version` traces a name over `ipv4`, `ipv6` or `both` |
+| `run_traceroute` | Traces the route to a monitor now and saves it; `ip_version` traces a name over `ipv4`, `ipv6` or `both` |
 
-> Add my router, my ISP's gateway and 1.1.1.1 as ping targets, in a group
+> Add my router, my ISP's gateway and 1.1.1.1 as ping monitors, in a group
 > called Network.
 
-A target needs only an address, read the way the form in the app reads it: a
+A monitor needs only an address, read the way the form in the app reads it: a
 URL is a web page to load, `host:port` a port to connect to, anything else a
 ping. Everything added goes through the same check as that form, a list with a
-mistake in it is turned away whole, and a target already monitored the same way
+mistake in it is turned away whole, and a monitor already monitored the same way
 is passed over and reported, not added twice.
 
-Two things are left out on purpose. Nothing here **deletes**: a target's whole
+Two things are left out on purpose. Nothing here **deletes**: a monitor's whole
 history goes with it and does not come back, so that stays a button for a
 person to press. Pausing is the way an assistant stops something being
 monitored. And **alerts** cannot be seen or changed.
@@ -139,18 +144,18 @@ to one is recorded under the key's name in Settings → Activity.
 `build_isp_report` covers the last seven days unless told otherwise, and
 returns:
 
-- **How each target did**: probes taken, uptime, loss, latency, and how many
+- **How each monitor did**: probes taken, uptime, loss, latency, and how many
   outages and for how long in all.
 - **Every outage**, with the time of the first probe that failed and of the
   probe that found it working again, why the probes failed, and **what the
-  other targets were doing meanwhile**.
+  other monitors were doing meanwhile**.
 - **The worst spells of packet loss**, and a count of the rest.
-- **The period by hour of day**, for the targets that had the most trouble. A
+- **The period by hour of day**, for the monitors that had the most trouble. A
   line that is fine all morning and drops packets every evening shows here.
 - **The traceroutes** saved in the period, those taken automatically as an
   alert fired first: the route through a failure, and the hop where replies
   stopped.
-- **How each resolver did**, for DNS targets that ask several.
+- **How each resolver did**, for DNS monitors that ask several.
 - **When ClearPing itself was not running**, and what else the data cannot
   show.
 
@@ -163,7 +168,7 @@ two probes in a row are healthy.
 
 The report is as good as what is monitored. The strongest evidence an ISP can
 be given is contrast: your router answering throughout while their gateway and
-everything past it did not. That takes a target at each step:
+everything past it did not. That takes a monitor at each step:
 
 - **your router**, by its address on your network (`192.168.1.1`);
 - **the ISP's gateway**, the first hop past the router in a traceroute;
@@ -172,7 +177,7 @@ everything past it did not. That takes a target at each step:
 With the router in the list the report can say the fault was beyond your
 network. Without anything inside the local network it says, plainly, that the
 data cannot tell a fault in the building from one outside it. A loss alert on
-the outside targets is worth having too: a traceroute is saved automatically
+the outside monitors is worth having too: a traceroute is saved automatically
 when it fires, and that is the only time the route through a failure can be
 captured.
 
@@ -184,7 +189,7 @@ caveats in, and to say so if the period shows no real problem.
 With **Hide addresses from AI assistants** on, under Settings → Privacy,
 everything ClearPing gives an assistant has its IP addresses and host names
 hidden: `203.0.113.10` becomes `•••.•••.•••.10`. What an assistant is given
-goes on to whoever runs it, and this keeps your addresses out of it. Targets
+goes on to whoever runs it, and this keeps your addresses out of it. Monitors
 keep their names, so the assistant can still say which one went down and why.
 
 ## Keys
@@ -261,7 +266,7 @@ API**; it then has to send a key, like any assistant (see
 
 The levels, in short: an assistant with no key reads, unless **Require a key
 for AI assistants** is on; with a read-only key it reads; with a read and write
-key it also changes targets. Nothing deletes. To keep your readings from
+key it also changes monitors. Nothing deletes. To keep your readings from
 assistants altogether, turn that switch on and only give keys to the ones you
 trust, or hide addresses from them under Settings → Privacy.
 

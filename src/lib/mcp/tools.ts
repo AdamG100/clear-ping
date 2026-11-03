@@ -89,9 +89,9 @@ const WHICH_PROPERTIES = {
   targets: {
     type: 'array',
     items: { type: 'string' },
-    description: 'Only these targets, each by its name, its address or its id. Every target, if left out.',
+    description: 'Only these monitors, each by its name, its address or its id. Every monitor, if left out.',
   },
-  group: { type: 'string', description: 'Only the targets in this group, and in the groups inside it: "Home/Network".' },
+  group: { type: 'string', description: 'Only the monitors in this group, and in the groups inside it: "Home/Network".' },
 } as const
 
 function numberArg(args: Args, name: string): number | undefined {
@@ -138,7 +138,7 @@ function timeZoneFrom(args: Args): string {
 
 function findTarget(all: Target[], reference: unknown): Target {
   const wanted = typeof reference === 'string' ? reference.trim() : ''
-  if (!wanted) throw new ToolError('Say which target, by its name, its address or its id.')
+  if (!wanted) throw new ToolError('Say which monitor, by its name, its address or its id.')
   const lower = wanted.toLowerCase()
 
   const exact =
@@ -154,8 +154,8 @@ function findTarget(all: Target[], reference: unknown): Target {
   const names = (partial.length > 1 ? partial : all).map(target => target.name).slice(0, 40).join(', ')
   throw new ToolError(
     partial.length > 1
-      ? `More than one target is called something like "${wanted}": ${names}. Say which.`
-      : `There is no target called "${wanted}". There is: ${names || 'none yet'}.`
+      ? `More than one monitor is called something like "${wanted}": ${names}. Say which.`
+      : `There is no monitor called "${wanted}". There is: ${names || 'none yet'}.`
   )
 }
 
@@ -168,7 +168,7 @@ function targetsFrom(all: Target[], args: Args): Target[] {
   if (typeof args.group === 'string' && args.group.trim()) {
     const group = normalizeGroupPath(args.group)
     chosen = chosen.filter(target => isWithinGroup(normalizeGroupPath(target.group), group))
-    if (chosen.length === 0) throw new ToolError(`No target is in a group called "${args.group}".`)
+    if (chosen.length === 0) throw new ToolError(`No monitor is in a group called "${args.group}".`)
   }
   return chosen
 }
@@ -390,7 +390,7 @@ async function resolversOf(target: Target, period: Period) {
 
 const PROBE_PROPERTY = {
   type: 'string',
-  description: 'For a target measured from several probes: which one, by name or id. Its first (primary) probe if left out.',
+  description: 'For a monitor measured from several probes: which one, by name or id. Its first (primary) probe if left out.',
 } as const
 
 const HOW_TO_READ = [
@@ -398,14 +398,14 @@ const HOW_TO_READ = [
   'An "outage" is a spell in which at least one probe got no reply at all. A "spell of loss" is one in which every probe got a reply but some packets, queries or requests within a probe did not.',
   'An incident starts at the first probe that was affected, so the fault itself began up to one probe interval earlier. It ends at the first of two healthy probes in a row.',
   'uptimePercent is the share of probes that got any reply. lossPercent is the mean loss over every probe, counting a probe with no reply as 100.',
-  '"meanwhile" says what every other monitored target was doing during an incident. Targets marked insideLocalNetwork answering while outside ones fail puts the fault beyond the local network.',
+  '"meanwhile" says what every other monitored monitor was doing during an incident. Monitors marked insideLocalNetwork answering while outside ones fail puts the fault beyond the local network.',
 ]
 
 const listTargets: McpTool = {
   name: 'list_targets',
-  title: 'List monitored targets',
+  title: 'List monitored monitors',
   description:
-    'Every target ClearPing monitors: what it is, how it is probed, which group it is in, whether it is inside the local network, and how its latest probe went. Start here to learn the names the other tools take.',
+    'Every monitor ClearPing monitors: what it is, how it is probed, which group it is in, whether it is inside the local network, and how its latest probe went. Start here to learn the names the other tools take.',
   inputSchema: { type: 'object', properties: { ...TIMEZONE_PROPERTY }, additionalProperties: false },
   run: async args => {
     const timeZone = timeZoneFrom(args)
@@ -434,13 +434,13 @@ const listTargets: McpTool = {
 
 const targetHistory: McpTool = {
   name: 'get_target_history',
-  title: 'One target over a period',
+  title: 'One monitor over a period',
   description:
-    'How one target did over a period: uptime, loss and latency figures, every outage and spell of loss with its times, the gaps in which it was not being monitored, and how it did at each hour of the day. The last 24 hours unless a period is given.',
+    'How one monitor did over a period: uptime, loss and latency figures, every outage and spell of loss with its times, the gaps in which it was not being monitored, and how it did at each hour of the day. The last 24 hours unless a period is given.',
   inputSchema: {
     type: 'object',
     properties: {
-      target: { type: 'string', description: 'The target, by its name, its address or its id.' },
+      target: { type: 'string', description: 'The monitor, by its name, its address or its id.' },
       probe: PROBE_PROPERTY,
       ...PERIOD_PROPERTIES,
       ...TIMEZONE_PROPERTY,
@@ -482,9 +482,9 @@ const targetHistory: McpTool = {
 
 const incidents: McpTool = {
   name: 'get_incidents',
-  title: 'Outages and loss, across targets',
+  title: 'Outages and loss, across monitors',
   description:
-    'Every outage and spell of loss in a period, across all targets or some of them, oldest first, each with when it started and ended, how long it lasted, why the probes failed, and what the other targets were doing meanwhile. The last 24 hours unless a period is given.',
+    'Every outage and spell of loss in a period, across all monitors or some of them, oldest first, each with when it started and ended, how long it lasted, why the probes failed, and what the other monitors were doing meanwhile. The last 24 hours unless a period is given.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -523,11 +523,11 @@ const traceroutes: McpTool = {
   name: 'get_traceroutes',
   title: 'Saved traceroutes',
   description:
-    'The routes ClearPing has traced to a target, or to all of them, hop by hop. The ones marked automatic were traced at the moment an alert set to trace fired, so they show the route through a failure and the hop at which replies stopped. The last 30 days unless a period is given.',
+    'The routes ClearPing has traced to a monitor, or to all of them, hop by hop. The ones marked automatic were traced at the moment an alert set to trace fired, so they show the route through a failure and the hop at which replies stopped. The last 30 days unless a period is given.',
   inputSchema: {
     type: 'object',
     properties: {
-      target: { type: 'string', description: 'The target, by its name, its address or its id. Every target, if left out.' },
+      target: { type: 'string', description: 'The monitor, by its name, its address or its id. Every monitor, if left out.' },
       ...PERIOD_PROPERTIES,
       limit: { type: 'number', description: 'The most routes to return, 10 unless said.' },
       ...TIMEZONE_PROPERTY,
@@ -553,13 +553,13 @@ const traceroutes: McpTool = {
 
 const dnsResolvers: McpTool = {
   name: 'get_dns_resolvers',
-  title: 'A DNS target, resolver by resolver',
+  title: 'A DNS monitor, resolver by resolver',
   description:
-    'For a DNS target that asks several resolvers: how each one did over a period (query time, share of queries that failed) and what each answered in the latest probe. Shows whether one resolver is slow or failing while the others are not. The last 24 hours unless a period is given.',
+    'For a DNS monitor that asks several resolvers: how each one did over a period (query time, share of queries that failed) and what each answered in the latest probe. Shows whether one resolver is slow or failing while the others are not. The last 24 hours unless a period is given.',
   inputSchema: {
     type: 'object',
     properties: {
-      target: { type: 'string', description: 'The DNS target, by its name, its address or its id.' },
+      target: { type: 'string', description: 'The DNS monitor, by its name, its address or its id.' },
       ...PERIOD_PROPERTIES,
       ...TIMEZONE_PROPERTY,
     },
@@ -574,7 +574,7 @@ const dnsResolvers: McpTool = {
 
     const overPeriod = await resolversOf(target, period)
     if (overPeriod.length === 0) {
-      throw new ToolError(`${target.name} is not a DNS target with a list of resolvers. Use get_target_history for it.`)
+      throw new ToolError(`${target.name} is not a DNS monitor with a list of resolvers. Use get_target_history for it.`)
     }
 
     const latest = (await getLatestMeasurementForAllTargets())[target.id]
@@ -611,7 +611,7 @@ const ispReport: McpTool = {
   name: 'build_isp_report',
   title: 'Evidence for an ISP report',
   description:
-    'Everything needed to write up a connection problem for an internet provider, in one call: how every target did over the period, each outage with its times and what else was failing or working meanwhile, the worst spells of packet loss, how the worst-affected targets did by hour of day, the traceroutes taken during failures, how each DNS resolver did, and what the data cannot show. The last 7 days unless a period is given. Use this for any request to gather logs, evidence or a report of connection issues.',
+    'Everything needed to write up a connection problem for an internet provider, in one call: how every monitor did over the period, each outage with its times and what else was failing or working meanwhile, the worst spells of packet loss, how the worst-affected monitors did by hour of day, the traceroutes taken during failures, how each DNS resolver did, and what the data cannot show. The last 7 days unless a period is given. Use this for any request to gather logs, evidence or a report of connection issues.',
   inputSchema: {
     type: 'object',
     properties: { ...PERIOD_PROPERTIES, ...WHICH_PROPERTIES, ...TIMEZONE_PROPERTY },
@@ -665,9 +665,9 @@ const ispReport: McpTool = {
       },
       timeZone,
       measuredBy:
-        'ClearPing, a network monitor running on one machine at the customer\'s premises. It probes each target on a fixed schedule and records every result.' +
+        'ClearPing, a network monitor running on one machine at the customer\'s premises. It probes each monitor on a fixed schedule and records every result.' +
         (remote
-          ? ' Targets with probedFrom were measured from another machine, by a ClearPing probe agent there, and show the network as seen from that machine, not from the premises.'
+          ? ' Monitors with probedFrom were measured from another machine, by a ClearPing probe agent there, and show the network as seen from that machine, not from the premises.'
           : ''),
       howToRead: HOW_TO_READ,
       totals: {
@@ -689,7 +689,7 @@ const ispReport: McpTool = {
         worst: loss.lines,
       },
       byHourOfDay: {
-        howToRead: 'The whole period folded into one day, for the targets with the most trouble. One line an hour: probes taken, probes with no reply, mean loss, median latency.',
+        howToRead: 'The whole period folded into one day, for the monitors with the most trouble. One line an hour: probes taken, probes with no reply, mean loss, median latency.',
         targets: worst.map(each => ({ target: each.label, hours: each.hours.map(hourLine) })),
       },
       traceroutes: routes.lines,
@@ -697,16 +697,16 @@ const ispReport: McpTool = {
       dnsResolvers: dns,
       monitorNotRunning: silences,
       caveats: [
-        'Every probe is taken from one machine. A fault in that machine or its own connection to the local network looks the same as a fault further out, unless a target inside the local network kept answering.',
+        'Every probe is taken from one machine. A fault in that machine or its own connection to the local network looks the same as a fault further out, unless a monitor inside the local network kept answering.',
         local.length > 0
           ? `Inside the local network: ${local.map(nameOf).join(', ')}. If these answered during an incident, the local network was working.`
-          : 'No target inside the local network (a router or gateway on a private address) is monitored, so this data cannot by itself show whether a failure was in the local network or beyond it.',
+          : 'No monitor inside the local network (a router or gateway on a private address) is monitored, so this data cannot by itself show whether a failure was in the local network or beyond it.',
         ...(silences.length > 0
           ? ['During the stretches under monitorNotRunning nothing was probed. No reading there is not evidence either way.']
           : []),
         ...(unmeasured.length > 0 ? [`No readings in this period for: ${shortList(unmeasured.map(each => each.label)).join(', ')}.`] : []),
         ...(routes.total === 0
-          ? ['No traceroute was saved in this period, so there is no hop-by-hop evidence of where a failure was. One is saved automatically when an alert set to trace the route fires on a target.']
+          ? ['No traceroute was saved in this period, so there is no hop-by-hop evidence of where a failure was. One is saved automatically when an alert set to trace the route fires on a monitor.']
           : []),
       ],
     }
@@ -769,7 +769,7 @@ const TARGET_PROPERTIES = {
 /** A list of probes as one string, to group targets that are measured from the same ones. */
 const probes_key = (probes: ProbeId[]) => probes.join('\u0000')
 
-const TARGET_REFERENCE = { type: 'string', description: 'The target, by its name, its address or its id.' } as const
+const TARGET_REFERENCE = { type: 'string', description: 'The monitor, by its name, its address or its id.' } as const
 
 /**
  * The probes an assistant named, as ids, primary first: `probes`, or the older
@@ -824,11 +824,11 @@ function definitionFrom(input: Args, where: string, existing?: Target): TargetDe
 
 const addTargetsTool: McpTool = {
   name: 'add_targets',
-  title: 'Add targets',
+  title: 'Add monitors',
   writes: true,
   description:
-    `Start monitoring one or more new targets, up to ${MAX_ADDED_AT_ONCE} at once. Each needs only an address: a hostname, an IP address, host:port or a URL. ` +
-    'All of them are checked before any is added, and none is added if one is wrong. A target that is already monitored the same way is passed over and reported, not added twice. ' +
+    `Start monitoring one or more new monitors, up to ${MAX_ADDED_AT_ONCE} at once. Each needs only an address: a hostname, an IP address, host:port or a URL. ` +
+    'All of them are checked before any is added, and none is added if one is wrong. A monitor that is already monitored the same way is passed over and reported, not added twice. ' +
     'Say what you are going to add before calling this.',
   inputSchema: {
     type: 'object',
@@ -853,8 +853,8 @@ const addTargetsTool: McpTool = {
   },
   run: async args => {
     const entries = args.targets
-    if (!Array.isArray(entries) || entries.length === 0) throw new ToolError('Give the targets to add, as a list.')
-    if (entries.length > MAX_ADDED_AT_ONCE) throw new ToolError(`At most ${MAX_ADDED_AT_ONCE} targets can be added at once.`)
+    if (!Array.isArray(entries) || entries.length === 0) throw new ToolError('Give the monitors to add, as a list.')
+    if (entries.length > MAX_ADDED_AT_ONCE) throw new ToolError(`At most ${MAX_ADDED_AT_ONCE} monitors can be added at once.`)
 
     const all = await getAllTargets()
     // The same thing measured from somewhere else is a different target.
@@ -864,7 +864,7 @@ const addTargetsTool: McpTool = {
 
     for (const [index, entry] of entries.entries()) {
       const input = isRecord(entry) ? entry : {}
-      const where = `Target ${index + 1}${typeof input.address === 'string' ? ` (${input.address})` : ''}`
+      const where = `Monitor ${index + 1}${typeof input.address === 'string' ? ` (${input.address})` : ''}`
       const definition = definitionFrom(input, where)
       const probes = (await probesFrom(input, where)) ?? [LOCAL_PROBE]
       // Already measured when every probe asked for measures it.
@@ -897,10 +897,10 @@ const addTargetsTool: McpTool = {
 
 const updateTargetTool: McpTool = {
   name: 'update_target',
-  title: 'Change a target',
+  title: 'Change a monitor',
   writes: true,
   description:
-    'Change a target: its name, group, how often it is probed, its address, how it is checked or that probe\'s settings. Only what is given is changed, and settings given are added to the ones it has. ' +
+    'Change a monitor: its name, group, how often it is probed, its address, how it is checked or that probe\'s settings. Only what is given is changed, and settings given are added to the ones it has. ' +
     'Its history is kept; changing the address or the probe means the readings from then on measure something else. Say what you are going to change before calling this.',
   inputSchema: {
     type: 'object',
@@ -946,10 +946,10 @@ const updateTargetTool: McpTool = {
 
 const pauseTargetTool: McpTool = {
   name: 'set_target_paused',
-  title: 'Pause or resume a target',
+  title: 'Pause or resume a monitor',
   writes: true,
   description:
-    'Stop probing a target, or start again. A paused target keeps everything it has recorded and is counted as neither online nor offline. This is how to stop monitoring something: nothing here deletes a target.',
+    'Stop probing a monitor, or start again. A paused monitor keeps everything it has recorded and is counted as neither online nor offline. This is how to stop monitoring something: nothing here deletes a monitor.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -978,10 +978,10 @@ const pauseTargetTool: McpTool = {
 
 const probeNowTool: McpTool = {
   name: 'probe_now',
-  title: 'Probe a target now',
+  title: 'Probe a monitor now',
   writes: true,
   description:
-    'Take a reading of a target straight away, outside its schedule, and say how it went. The reading is kept with the rest of its history. Use it after adding a target, or to see whether something is down at this moment.',
+    'Take a reading of a monitor straight away, outside its schedule, and say how it went. The reading is kept with the rest of its history. Use it after adding a monitor, or to see whether something is down at this moment.',
   inputSchema: {
     type: 'object',
     properties: { target: TARGET_REFERENCE, probe: PROBE_PROPERTY, ...TIMEZONE_PROPERTY },
@@ -1020,10 +1020,10 @@ const probeNowTool: McpTool = {
 
 const traceRouteTool: McpTool = {
   name: 'run_traceroute',
-  title: 'Trace the route to a target now',
+  title: 'Trace the route to a monitor now',
   writes: true,
   description:
-    'Trace the route to a target now, hop by hop, and save it with its other routes. Takes a few seconds for a path that works and up to a minute and a half for one that goes nowhere. Use it while something is failing: the route through a failure can only be traced while it lasts.',
+    'Trace the route to a monitor now, hop by hop, and save it with its other routes. Takes a few seconds for a path that works and up to a minute and a half for one that goes nowhere. Use it while something is failing: the route through a failure can only be traced while it lasts.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -1032,7 +1032,7 @@ const traceRouteTool: McpTool = {
       ip_version: {
         type: 'string',
         enum: TRACE_FAMILIES,
-        description: 'For a hostname: trace over "ipv4", "ipv6", or "both" in turn. Left out, the families the target is probed over.',
+        description: 'For a hostname: trace over "ipv4", "ipv6", or "both" in turn. Left out, the families the monitor is probed over.',
       },
       ...TIMEZONE_PROPERTY,
     },
@@ -1062,7 +1062,7 @@ const listProbeAgentsTool: McpTool = {
   name: 'list_probe_agents',
   title: 'List probe agents',
   description:
-    'The probe agents targets can be probed from. A probe agent is a small ClearPing program on another machine (a server in another country, say) that takes readings from there, so a target probed from it shows the network as seen from that machine. Nothing to do with AI agents. Says whether each one can be reached now.',
+    'The probe agents monitors can be probed from. A probe agent is a small ClearPing program on another machine (a server in another country, say) that takes readings from there, so a monitor probed from it shows the network as seen from that machine. Nothing to do with AI agents. Says whether each one can be reached now.',
   inputSchema: { type: 'object', properties: { ...TIMEZONE_PROPERTY }, additionalProperties: false },
   run: async args => {
     const timeZone = timeZoneFrom(args)
@@ -1085,8 +1085,8 @@ const listProbeAgentsTool: McpTool = {
       },
       note:
         agents.length === 0
-          ? 'There are no probe agents: every target is probed from the machine ClearPing runs on. They are added in the app, under Settings, Probe agents.'
-          : 'Every target not listed under a probe agent is probed from the machine ClearPing runs on. While a probe agent cannot be reached, its targets take no readings, which shows as a gap rather than as an outage.',
+          ? 'There are no probe agents: every monitor is probed from the machine ClearPing runs on. They are added in the app, under Settings, Probe agents.'
+          : 'Every monitor not listed under a probe agent is probed from the machine ClearPing runs on. While a probe agent cannot be reached, its monitors take no readings, which shows as a gap rather than as an outage.',
     }
   },
 }
@@ -1114,10 +1114,10 @@ const ispReportPrompt: McpPrompt = {
       '',
       'The report should have, in this order:',
       '1. A summary of a few sentences: what is wrong, how often, and how bad, with the period covered.',
-      '2. How it was measured, in two or three sentences, from "measuredBy" and the list of targets.',
-      '3. A table of the outages: start, end, duration, what was affected, and what kept working at the same time. Several targets failing over the same minutes is one outage, not several. Give times with their UTC offset. Then the spells of packet loss: how many, the worst of them, and when in the day they fall.',
-      '4. What points at the provider, and what does not: use "meanwhile", the targets inside the local network, the traceroutes and the hour-of-day figures. Say plainly where the evidence is strong and where it is not.',
-      '5. A table of each target\'s uptime, loss and latency over the period.',
+      '2. How it was measured, in two or three sentences, from "measuredBy" and the list of monitors.',
+      '3. A table of the outages: start, end, duration, what was affected, and what kept working at the same time. Several monitors failing over the same minutes is one outage, not several. Give times with their UTC offset. Then the spells of packet loss: how many, the worst of them, and when in the day they fall.',
+      '4. What points at the provider, and what does not: use "meanwhile", the monitors inside the local network, the traceroutes and the hour-of-day figures. Say plainly where the evidence is strong and where it is not.',
+      '5. A table of each monitor\'s uptime, loss and latency over the period.',
       '6. What the data cannot show, from "caveats". Keep these in: an engineer who finds an overstated claim will discount the rest.',
       '7. What I am asking the provider to do.',
       '',
@@ -1138,9 +1138,9 @@ export const clearPingMcp: McpServer = {
     'ClearPing is a self-hosted network monitor: it probes hosts on a schedule (ping, TCP, game servers, HTTP, DNS) and keeps every result. ' +
     'These tools read that history. ' +
     'For a request to gather logs or evidence of connection problems, or to report them to an ISP, call build_isp_report and write from what it returns. ' +
-    'Use list_targets to learn what is monitored, get_target_history for one target in depth, get_incidents for outages across targets, ' +
-    'get_traceroutes for the route to a target, and get_dns_resolvers to compare the resolvers of a DNS target. ' +
-    'A target with probedFrom is measured by a probe agent, a ClearPing program on another machine, and shows the network as seen from there; list_probe_agents lists them. ' +
+    'Use list_targets to learn what is monitored, get_target_history for one monitor in depth, get_incidents for outages across monitors, ' +
+    'get_traceroutes for the route to a monitor, and get_dns_resolvers to compare the resolvers of a DNS monitor. ' +
+    'A monitor with probedFrom is measured by a probe agent, a ClearPing program on another machine, and shows the network as seen from there; list_probe_agents lists them. ' +
     'Report only figures the tools return, with their times and UTC offsets, and pass on the caveats they give.',
   writeInstructions:
     'This connection sent the token, so it can also change things: add_targets, update_target, set_target_paused, probe_now and run_traceroute. ' +

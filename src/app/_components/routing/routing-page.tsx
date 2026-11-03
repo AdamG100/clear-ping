@@ -166,7 +166,7 @@ function AddPrefixDialog({
     event.preventDefault()
     if (busy) return
     if (words.length === 0) {
-      setProblem('Give an IP address or a prefix, or tick a target')
+      setProblem('Give an IP address or a prefix, or tick a monitor')
       return
     }
     setBusy(true)
@@ -243,17 +243,17 @@ function AddPrefixDialog({
           <ResourcePreview resource={words.length === 1 ? words[0] : ''} />
           <Input
             label="Label"
-            placeholder={words.length > 1 ? 'Each ticked target is labelled with its name' : 'Game servers, Johannesburg'}
+            placeholder={words.length > 1 ? 'Each ticked monitor is labelled with its name' : 'Game servers, Johannesburg'}
             value={label}
             onChange={event => setLabel(event.target.value)}
           />
           {choices.length > 0 && (
             // Disabled while watching, so what is ticked cannot change under it.
             <fieldset className="space-y-2" disabled={busy}>
-              <legend className="text-sm font-medium">Or tick your targets</legend>
+              <legend className="text-sm font-medium">Or tick your monitors</legend>
               <p className="text-xs text-muted-foreground">
-                Ticking a target puts its address in the box above, and unticking takes it out. Each is labelled with the
-                target&apos;s name; a label given is used when there is only one.
+                Ticking a monitor puts its address in the box above, and unticking takes it out. Each is labelled with the
+                monitor&apos;s name; a label given is used when there is only one.
               </p>
               <TargetChecklist
                 targets={choices.map(({ target, address }) => ({ ...target, host: address }))}
@@ -267,7 +267,7 @@ function AddPrefixDialog({
           )}
           {coveredCount > 0 && (
             <p className="text-xs text-muted-foreground">
-              {coveredCount === usable.length ? 'Every one of your targets is' : `${coveredCount} of your targets ${coveredCount === 1 ? 'is' : 'are'}`} in
+              {coveredCount === usable.length ? 'Every one of your monitors is' : `${coveredCount} of your monitors ${coveredCount === 1 ? 'is' : 'are'}`} in
               a prefix already watched, so {coveredCount === 1 ? 'it is' : 'they are'} not listed.
             </p>
           )}

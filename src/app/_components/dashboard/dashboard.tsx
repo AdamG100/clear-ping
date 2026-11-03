@@ -139,10 +139,10 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
           setGroupOrders(data.groupOrders)
         }
       } else {
-        reportError('Could not load targets', `Server responded ${response.status}`)
+        reportError('Could not load monitors', `Server responded ${response.status}`)
       }
     } catch (error) {
-      reportError('Could not load targets', error)
+      reportError('Could not load monitors', error)
     } finally {
       setIsLoaded(true)
     }
@@ -179,9 +179,9 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         return created as Target
       }
       const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
-      reportError('Could not add target', error)
+      reportError('Could not add monitor', error)
     } catch (error) {
-      reportError('Could not add target', error)
+      reportError('Could not add monitor', error)
     }
     return null
   }, [loadTargets, reportError])
@@ -198,9 +198,9 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         return true
       }
       const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
-      reportError('Could not import the targets', error)
+      reportError('Could not import the monitors', error)
     } catch (error) {
-      reportError('Could not import the targets', error)
+      reportError('Could not import the monitors', error)
     }
     return false
   }, [loadTargets, reportError])
@@ -249,7 +249,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         })
         if (!response.ok) {
           const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
-          reportError('Could not delete the targets', error)
+          reportError('Could not delete the monitors', error)
           failed = true
           break
         }
@@ -262,7 +262,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         onProgress?.(Math.min(start + DELETE_BATCH, ids.length), ids.length)
       }
     } catch (error) {
-      reportError('Could not delete the targets', error)
+      reportError('Could not delete the monitors', error)
       failed = true
     }
     // Whatever was deleted before a failure is gone, so the list is shown as it is.
@@ -300,7 +300,7 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         body: JSON.stringify({ targets: updates }),
       })
     } catch (error) {
-      reportError('Could not save target order', error)
+      reportError('Could not save monitor order', error)
     }
   }, [reportError])
 
@@ -591,7 +591,7 @@ function TargetAlerts({
     <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-3xl border border-border bg-card px-4 py-4 @2xl/main:px-6">
       <h2 className="text-sm font-medium text-foreground">Alerts</h2>
       {watching.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No alert is watching this target.</p>
+        <p className="text-xs text-muted-foreground">No alert is watching this monitor.</p>
       ) : (
         <ul className="flex flex-wrap gap-2">
           {watching.map(alert => {
@@ -947,14 +947,14 @@ export function Dashboard() {
       const response = await fetch(`/api/targets/${selectedTargetId}/probe${asked}`, { method: 'POST' })
       if (!response.ok) {
         const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
-        reportError('Probe failed', error)
+        reportError('Reading failed', error)
         return
       }
 
       const { result } = await response.json()
       notify({
         tone: result?.success ? 'success' : 'error',
-        title: result?.success ? 'Probe complete' : 'Probe failed',
+        title: result?.success ? 'Reading taken' : 'Reading failed',
         detail: result?.success
           ? vocabulary.summarize(result.latency, result.packetLoss ?? 0)
           : result?.errorMessage,
@@ -963,7 +963,7 @@ export function Dashboard() {
       // measurement is already stored by the time we reload.
       await Promise.all([reload(), reloadTargets()])
     } catch (error) {
-      reportError('Probe failed', error)
+      reportError('Reading failed', error)
     } finally {
       setProbing(false)
     }
@@ -994,7 +994,7 @@ export function Dashboard() {
       if (added) {
         notify({
           tone: 'success',
-          title: `Imported ${definitions.length} target${definitions.length === 1 ? '' : 's'}`,
+          title: `Imported ${definitions.length} monitor${definitions.length === 1 ? '' : 's'}`,
           detail: 'Their first readings will be in shortly.',
         })
       }
@@ -1008,7 +1008,7 @@ export function Dashboard() {
       // One at a time: a second would be competing with the first for the
       // database, and the progress shown is the one's.
       if (deleteJob) {
-        reportError('Targets are already being deleted', 'Wait for that to finish first.')
+        reportError('Monitors are already being deleted', 'Wait for that to finish first.')
         return false
       }
 
@@ -1016,7 +1016,7 @@ export function Dashboard() {
       const single = ids.length === 1 && groups.length === 0 ? targets.find(target => target.id === ids[0]) : undefined
       const title = single
         ? `Deleting ${single.name}`
-        : ids.length > 0 ? `Deleting ${ids.length} target${ids.length === 1 ? '' : 's'}` : 'Deleting groups'
+        : ids.length > 0 ? `Deleting ${ids.length} monitor${ids.length === 1 ? '' : 's'}` : 'Deleting groups'
       const job = { title, ids: new Set(ids) }
       setDeleteJob({ ...job, done: 0, total: ids.length })
       void deleteTargets(ids, groups, (done, total) => setDeleteJob({ ...job, done, total })).then(deleted => {
@@ -1383,10 +1383,10 @@ export function Dashboard() {
             exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
             transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
           >
-            <ErrorBoundary label="Target">
+            <ErrorBoundary label="Monitors">
               {readOnly ? (
                 <div className="flex h-full items-center justify-center p-6">
-                  <EmptyState title="This account can look but not change" description="Ask an admin or editor to add or change targets." />
+                  <EmptyState title="This account can look but not change" description="Ask an admin or editor to add or change monitors." />
                 </div>
               ) : !isLoaded ? (
                 <PaneSkeleton />
@@ -1428,7 +1428,7 @@ export function Dashboard() {
                 <h1 className={PANE_TITLE}>{groupLabel(selectedGroup ?? '')}</h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                   <span>
-                    {groupTargets.length} target{groupTargets.length === 1 ? '' : 's'} on one chart
+                    {groupTargets.length} monitor{groupTargets.length === 1 ? '' : 's'} on one chart
                   </span>
                   <Badge size="sm">Group</Badge>
                 </p>
@@ -1453,7 +1453,7 @@ export function Dashboard() {
               }}
               title={`${groupVocabulary?.latencyTitle ?? 'Median latency'}, compared`}
               description={
-                'One line per target, on a shared scale. The strips underneath mark when each one ' +
+                'One line per monitor, on a shared scale. The strips underneath mark when each one ' +
                 (groupVocabulary ? `had ${groupVocabulary.lossTitle.toLowerCase()}.` : 'lost packets or failed.')
               }
               onSelectTarget={setSelectedTargetId}
@@ -1511,7 +1511,7 @@ export function Dashboard() {
                 {!readOnly && (
                   <span className={PANE_ACTION}>
                     <Button variant="secondary" size="sm" className="w-full" onClick={handleProbe} loading={probing}>
-                      Probe now
+                      Measure now
                     </Button>
                   </span>
                 )}
@@ -1617,7 +1617,7 @@ export function Dashboard() {
                           `a point is the median of the ${targetResolvers.length * DNS_QUERIES_PER_PROBE} queries one probe sends for that record` +
                           `${comparesResolvers ? `, ${DNS_QUERIES_PER_PROBE} to each resolver. Open a family below to see its resolvers one by one` : ''}. ` +
                           'The strips underneath mark when some of those queries failed.'
-                        : `The same target over each address family, on a shared scale. The strips underneath mark when each one had ${vocabulary.lossTitle.toLowerCase()}.`
+                        : `The same monitor over each address family, on a shared scale. The strips underneath mark when each one had ${vocabulary.lossTitle.toLowerCase()}.`
                     }
                     lossLabel={selectedTarget.probeType === 'dns' ? 'Failed' : undefined}
                     note={
@@ -1810,7 +1810,7 @@ export function Dashboard() {
                       <p className="max-w-sm text-xs text-muted-foreground">
                         {zoom
                           ? 'No probe ran in the period you selected. Reset the zoom to return to the full range.'
-                          : `Probes run every ${selectedTarget.interval}s. Use Probe now to take a reading immediately, or pick a wider time range.`}
+                          : `Probes run every ${selectedTarget.interval}s. Use Measure now to take a reading immediately, or pick a wider time range.`}
                       </p>
                     </div>
                   )}

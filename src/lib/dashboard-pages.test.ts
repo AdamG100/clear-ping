@@ -56,11 +56,17 @@ describe('the pages for making and editing an alert', () => {
 
 describe('the pages for adding and editing a target', () => {
   it('reads each from its address', () => {
+    expect(pageFromPath('/monitors/new')).toEqual({ kind: 'target-new' })
+    expect(pageFromPath('/monitors/new/in/Home/Network')).toEqual({ kind: 'target-new', group: 'Home/Network' })
+    expect(pageFromPath('/monitors/new/in/Cool%20Ideas/Lab')).toEqual({ kind: 'target-new', group: 'Cool Ideas/Lab' })
+    expect(pageFromPath('/monitors/new/copy/abc-123')).toEqual({ kind: 'target-new', from: 'abc-123' })
+    expect(pageFromPath('/monitors/abc-123/edit')).toEqual({ kind: 'target-edit', id: 'abc-123' })
+  })
+
+  it('still reads the addresses they had when they were called targets', () => {
     expect(pageFromPath('/targets/new')).toEqual({ kind: 'target-new' })
-    expect(pageFromPath('/targets/new/in/Home/Network')).toEqual({ kind: 'target-new', group: 'Home/Network' })
-    expect(pageFromPath('/targets/new/in/Cool%20Ideas/Lab')).toEqual({ kind: 'target-new', group: 'Cool Ideas/Lab' })
-    expect(pageFromPath('/targets/new/copy/abc-123')).toEqual({ kind: 'target-new', from: 'abc-123' })
     expect(pageFromPath('/targets/abc-123/edit')).toEqual({ kind: 'target-edit', id: 'abc-123' })
+    expect(pageFromPath('/settings/probe-agents')).toEqual({ kind: 'settings', section: 'probes' })
   })
 
   it('gives each an address that reads back as the same page', () => {
@@ -74,13 +80,13 @@ describe('the pages for adding and editing a target', () => {
   })
 
   it('takes nothing it does not know for one', () => {
-    for (const path of ['/targets', '/targets/abc', '/targets/abc/edit/x', '/targets/new/in', '/targets/new/copy', '/targets/new/copy/a/b', '/targets/new/other']) {
+    for (const path of ['/monitors', '/monitors/abc', '/monitors/abc/edit/x', '/monitors/new/in', '/monitors/new/copy', '/monitors/new/copy/a/b', '/monitors/new/other', '/targets']) {
       expect(pageFromPath(path)).toBeNull()
     }
   })
 
   it('never puts something that is not a group into an address', () => {
     const event = { type: 'click' } as unknown as string
-    expect(pathOf({ kind: 'target-new', group: event })).toBe('/targets/new')
+    expect(pathOf({ kind: 'target-new', group: event })).toBe('/monitors/new')
   })
 })

@@ -131,7 +131,7 @@ function TargetsInside({ detail, targets, onSelectTarget }: { detail: BgpPrefixD
   if (inside.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        None of your targets is in {detail.prefix}. Add one, probed from a probe agent outside your network, and its
+        None of your monitors is in {detail.prefix}. Add one, probed from a probe agent outside your network, and its
         latency and traces sit beside the routing here.
       </p>
     )
@@ -519,7 +519,7 @@ export function PrefixPage({
             <p className="text-sm text-muted-foreground">Nothing has changed since it was added.</p>
           )}
         </Panel>
-        <Panel title="Your targets in this prefix">
+        <Panel title="Your monitors in this prefix">
           <TargetsInside detail={detail} targets={targets} onSelectTarget={onSelectTarget} />
         </Panel>
       </div>

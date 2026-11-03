@@ -877,8 +877,8 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
                 <div className="sm:col-span-2">
                   <FieldHint>
                     {newGroupPath
-                      ? <>The target goes in <span className="font-medium text-foreground">{groupLabel(newGroupPath)}</span>, a new group made when you save.</>
-                      : 'Name the group, and it is made when you save the target.'}
+                      ? <>The monitor goes in <span className="font-medium text-foreground">{groupLabel(newGroupPath)}</span>, a new group made when you save.</>
+                      : 'Name the group, and it is made when you save the monitor.'}
                   </FieldHint>
                 </div>
               </div>
@@ -992,7 +992,7 @@ interface DeleteTargetDialogProps {
 export function DeleteTargetDialog({ target, onCancel, onConfirm, onPause }: DeleteTargetDialogProps) {
   return (
     <Dialog open={target !== null} onOpenChange={open => { if (!open) onCancel() }}>
-      <DialogContent title="Delete this target?" description="It cannot be undone.">
+      <DialogContent title="Delete this monitor?" description="It cannot be undone.">
         {target && (
           <div className="space-y-4 text-foreground">
             {/* Which one, plainly: the name, what it is and where it is. */}
@@ -1030,7 +1030,7 @@ export function DeleteTargetDialog({ target, onCancel, onConfirm, onPause }: Del
               </Button>
               <Button type="button" variant="danger" onClick={() => onConfirm(target.id)}>
                 <Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />
-                Delete target
+                Delete monitor
               </Button>
             </div>
           </div>

@@ -37,10 +37,10 @@ route to that address followed). As it is typed, the dialog says which
 announced prefix that is and who announces it, with the announced prefixes it
 is part of and those inside it: an address in a provider's space belongs to
 one of its announcements, and which one is not always plain. The box takes several,
-separated by commas. Below it, your existing targets with a public address can
+separated by commas. Below it, your existing monitors with a public address can
 be ticked: ticking one puts its address in the box and unticking takes it out,
 so the box always says what will be watched. Each is labelled with the
-target's name unless a label is given, and a target whose address a watched
+monitor's name unless a label is given, and a monitor whose address a watched
 prefix already holds is shown as already watched. ClearPing
 then:
 
@@ -132,7 +132,7 @@ wait again.
     Johannesburg: 5 changes in 24 hours", with the ways it went between), and
     the card and the section are marked Flapping.
   - **Its traffic:** the latest round of traceroutes from there, one to each
-    of your targets inside the prefix (or, with none, to an address in it), as
+    of your monitors inside the prefix (or, with none, to an address in it), as
     one entry saying the exchange they crossed ("Crosses JINX to all 4 addresses", or
     "Crosses NAPAfrica IX Johannesburg to 3 addresses; crosses JINX to 1");
     open it for each address and its hops. A hop on an exchange is named with
@@ -155,7 +155,7 @@ wait again.
     route of yours changes, when **Trace now** is pressed, and when the newest
     trace is over six hours old; unasked, not more than once in 15 minutes,
     however often the routes change. These traces are kept with the prefix, not in
-    the targets' traceroute history. A probe agent that is offline is skipped.
+    the monitors' traceroute history. A probe agent that is offline is skipped.
 - **At the exchanges:** the exchanges anywhere in the world on the way to the
   prefix from your own networks: along your ISPs' routes (where they share
   them with RIS) and the way your traceroutes went, from this server and each
@@ -204,7 +204,7 @@ wait again.
     upstream, the origin), and the route that peer has now, if any.
 - **What changed:** changes in how the prefix stands, and in your network's
   route, over two weeks.
-- **Your targets in this prefix:** ClearPing targets whose address is in it,
+- **Your monitors in this prefix:** ClearPing monitors whose address is in it,
   with their latest readings.
 - **Collector peers:** every peer and its route, by exchange. Search by
   network, AS number, address or exchange. Filter to those directly connected,

@@ -64,7 +64,7 @@ function AlertState({ enabled, firing, watching }: { enabled: boolean; firing: n
   )
   if (firing > 0) return <Badge tone="danger" icon={dot(true)}>Firing on {firing}</Badge>
   if (enabled) {
-    return <Badge tone="success" icon={dot(false)}>On · watching {watching} target{watching === 1 ? '' : 's'}</Badge>
+    return <Badge tone="success" icon={dot(false)}>On · watching {watching} monitor{watching === 1 ? '' : 's'}</Badge>
   }
   return <Badge icon={<BellOff size={12} strokeWidth={2} aria-hidden />}>Muted: not checked or sent</Badge>
 }
@@ -191,7 +191,7 @@ function AlertForm({
       (!Number.isInteger(traceKeepDays) || traceKeepDays < 1 || traceKeepDays > MAX_TRACE_KEEP_DAYS) &&
       `Keep routes for between 1 and ${MAX_TRACE_KEEP_DAYS} days.`,
     !urls && 'Each notification URL must be an Apprise URL, such as discord://… or mailto://…, on a line of its own.',
-    selected.size === 0 && 'Tick at least one target for the alert to watch.',
+    selected.size === 0 && 'Tick at least one monitor for the alert to watch.',
   ].filter((problem): problem is string => !!problem)
 
   const watch = (next: AlertMetric) => {
@@ -288,7 +288,7 @@ function AlertForm({
         </div>
         {metric === 'certExpiry' && (
           <p className="text-xs text-muted-foreground">
-            Only HTTPS targets have a certificate to watch. On anything else this alert never fires.
+            Only HTTPS monitors have a certificate to watch. On anything else this alert never fires.
           </p>
         )}
       </fieldset>
@@ -300,7 +300,7 @@ function AlertForm({
           <Checkbox
             id="alert-trace"
             label="Trace the route"
-            description="Records the path to the target hop by hop at the moment it goes wrong, which is usually the only time the broken route can be seen. It appears under Route on the target, ready to copy or share."
+            description="Records the path to the monitor hop by hop at the moment it goes wrong, which is usually the only time the broken route can be seen. It appears under Route on the monitor, ready to copy or share."
             checked={traceOnFire}
             onCheckedChange={checked => {
               setTraceOnFire(checked === true)
@@ -321,7 +321,7 @@ function AlertForm({
                   onValueChange={setTraceCooldownMinutes}
                 />
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Before the same target is traced again. A link that keeps dropping out fires again and again, and one trace
+                  Before the same monitor is traced again. A link that keeps dropping out fires again and again, and one trace
                   per spell of trouble is enough to show where; more only adds load to a path that is already struggling.
                 </p>
               </div>
@@ -346,7 +346,7 @@ function AlertForm({
                 />
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                For each target, only this many of the newest routes this alert took are kept, and any older than that many
+                For each monitor, only this many of the newest routes this alert took are kept, and any older than that many
                 days are deleted. Saving a smaller number deletes the extra ones straight away. A route traced by hand is
                 kept for the usual time, and so is one taken by a different alert.
               </p>
@@ -405,9 +405,9 @@ function AlertForm({
 
       {/* Targets */}
       <fieldset className="space-y-3">
-        <legend className={`${SECTION_TITLE} pb-2`}>On these targets</legend>
+        <legend className={`${SECTION_TITLE} pb-2`}>On these monitors</legend>
         {targets.length === 0 ? (
-          <p className="text-xs text-muted-foreground">There are no targets yet. Add one from the sidebar first.</p>
+          <p className="text-xs text-muted-foreground">There are no monitors yet. Add one from the sidebar first.</p>
         ) : (
           <TargetChecklist targets={targets} groupOrders={groupOrders} selected={selected} onChange={setSelected} />
         )}
@@ -607,7 +607,7 @@ export function AlertsView({
     return (
       <PageFrame
         title={editing === 'new' ? 'New alert' : `Edit ${alertTitle(editing)}`}
-        description="One condition, watched on every target you tick. Each target fires and clears on its own."
+        description="One condition, watched on every monitor you tick. Each monitor fires and clears on its own."
         onBack={onCloseEditor}
       >
         <AlertForm
@@ -648,7 +648,7 @@ export function AlertsView({
         <EmptyState
           icon={<Bell size={24} strokeWidth={1.75} />}
           title="No alerts yet"
-          description="An alert watches the targets you tick for one condition, such as not answering, and tells you wherever you choose when it fires and when it clears."
+          description="An alert watches the monitors you tick for one condition, such as not answering, and tells you wherever you choose when it fires and when it clears."
           action={
             readOnly ? undefined : (
               <Button onClick={() => onOpenEditor('new')}>

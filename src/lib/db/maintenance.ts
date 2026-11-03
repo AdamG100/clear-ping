@@ -264,27 +264,27 @@ const STEPS: Step[] = [
   },
   {
     id: 'measurements',
-    label: 'History of targets that no longer exist',
+    label: 'History of monitors that no longer exist',
     work: async ({ db }) => {
       const removed = await removeOrphans(db, 'measurements');
       return removed === 0
         ? { status: 'ok', detail: 'None left behind.', removed }
-        : { status: 'fixed', detail: `Removed ${plural(removed, 'measurement')} belonging to deleted targets.`, removed };
+        : { status: 'fixed', detail: `Removed ${plural(removed, 'measurement')} belonging to deleted monitors.`, removed };
     },
   },
   {
     id: 'traceroutes',
-    label: 'Saved routes of targets that no longer exist',
+    label: 'Saved routes of monitors that no longer exist',
     work: async ({ db }) => {
       const removed = await removeOrphans(db, 'traceroutes');
       return removed === 0
         ? { status: 'ok', detail: 'None left behind.', removed }
-        : { status: 'fixed', detail: `Removed ${plural(removed, 'saved route')} belonging to deleted targets.`, removed };
+        : { status: 'fixed', detail: `Removed ${plural(removed, 'saved route')} belonging to deleted monitors.`, removed };
     },
   },
   {
     id: 'alerts',
-    label: 'Alert ticks for targets or alerts that no longer exist',
+    label: 'Alert ticks for monitors or alerts that no longer exist',
     work: async ({ db }) => {
       const removed = await run(
         db,
@@ -292,7 +292,7 @@ const STEPS: Step[] = [
          WHERE target_id NOT IN (SELECT id FROM targets) OR alert_id NOT IN (SELECT id FROM alerts)`
       );
       return removed === 0
-        ? { status: 'ok', detail: 'Every tick points at an alert and a target.', removed }
+        ? { status: 'ok', detail: 'Every tick points at an alert and a monitor.', removed }
         : { status: 'fixed', detail: `Removed ${plural(removed, 'tick')} that pointed at nothing.`, removed };
     },
   },
@@ -333,13 +333,13 @@ const STEPS: Step[] = [
   },
   {
     id: 'clock',
-    label: 'Targets marked as probed in the future',
+    label: 'Monitors marked as probed in the future',
     work: async ({ db }) => {
       // A clock that was wrong, then corrected, leaves a last-probe time that
       // is still to come: the target is not probed until it arrives.
       const fixed = await run(db, 'UPDATE targets SET last_probe_at = 0 WHERE last_probe_at > ?', [Date.now() + 5 * 60 * 1000]);
       return fixed === 0
-        ? { status: 'ok', detail: 'Every target is due when it should be.', removed: 0 }
+        ? { status: 'ok', detail: 'Every monitor is due when it should be.', removed: 0 }
         : { status: 'fixed', detail: `${plural(fixed, 'target')} had a last probe time in the future and would not have been probed. They are due now.`, removed: 0 };
     },
   },

@@ -173,11 +173,11 @@ export async function decodeShare(text: string): Promise<ShareDecoding> {
 
   if (!Array.isArray(packed)) return { ok: false, error: NOT_A_LINK }
   if (packed.length > MAX_SHARED_TARGETS) {
-    return { ok: false, error: `A share link holds at most ${MAX_SHARED_TARGETS} targets.` }
+    return { ok: false, error: `A share link holds at most ${MAX_SHARED_TARGETS} monitors.` }
   }
 
   const targets = packed.map(unpack).filter((target): target is TargetDefinition => target !== null)
-  if (targets.length === 0) return { ok: false, error: 'There are no targets in that share link.' }
+  if (targets.length === 0) return { ok: false, error: 'There are no monitors in that share link.' }
 
   return { ok: true, targets, skipped: packed.length - targets.length }
 }
@@ -210,7 +210,7 @@ export function exportTargets(targets: TargetDefinition[], now = new Date()): { 
   }
 }
 
-const NOT_A_FILE = 'That is not a ClearPing export of targets.'
+const NOT_A_FILE = 'That is not a ClearPing export of monitors.'
 
 /**
  * Read the targets out of an exported file. Never throws. Takes the file as
@@ -238,13 +238,13 @@ export function readTargetFile(text: string): ShareDecoding {
   }
   if (!Array.isArray(entries)) return { ok: false, error: NOT_A_FILE }
   if (entries.length > MAX_SHARED_TARGETS) {
-    return { ok: false, error: `At most ${MAX_SHARED_TARGETS} targets can be imported at once.` }
+    return { ok: false, error: `At most ${MAX_SHARED_TARGETS} monitors can be imported at once.` }
   }
 
   const targets = entries
     .map(entry => validateTargetDefinition(entry))
     .flatMap(checked => (checked.ok ? [checked.target] : []))
-  if (targets.length === 0) return { ok: false, error: 'There are no targets in that file.' }
+  if (targets.length === 0) return { ok: false, error: 'There are no monitors in that file.' }
 
   return { ok: true, targets, skipped: entries.length - targets.length }
 }

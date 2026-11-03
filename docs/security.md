@@ -62,9 +62,9 @@ Accounts** (or by Authentik groups; see below):
 
 | | Admin | Editor | Viewer |
 |---|---|---|---|
-| See targets, charts, routes, incidents | yes | yes | yes |
+| See monitors, charts, routes, incidents | yes | yes | yes |
 | See alerts | yes | yes | yes, without the tokens in where they are sent |
-| Add, change, pause and delete targets and groups; probe; trace | yes | yes | no |
+| Add, change, pause and delete monitors and groups; probe; trace | yes | yes | no |
 | Make, change and delete alerts | yes | yes | no |
 | Create keys | any | of its own | of its own, read only |
 | Revoke keys | any | its own | its own |
@@ -80,8 +80,8 @@ Accounts** (or by Authentik groups; see below):
   So there is always an admin.
 - A change of role takes effect at once, on the next request, without
   signing in again.
-- A viewer's dashboard leaves out what it may not do (Add target, editing,
-  Probe now, Trace route, the alerts' buttons), and the server refuses it
+- A viewer's dashboard leaves out what it may not do (Add monitor, editing,
+  Measure now, Trace route, the alerts' buttons), and the server refuses it
   anyway.
 - Roles are about a ClearPing that asks for sign-in. With sign-in off,
   anyone who can reach it can change anything without signing in, as before.
@@ -251,7 +251,7 @@ from ClearPing's routes like the rest of sign-in.
 
 - Give each script or assistant **its own key**. Then one can be revoked
   without touching the others, and the activity record names which one did
-  what: *GPT added targets* rather than *someone did*.
+  what: *GPT added monitors* rather than *someone did*.
 - A key is shown **once**, when it is made, and only a hash of it is kept.
   Lost, it is revoked and replaced.
 - When you make one, choose how long it lasts: 1 day, 7 days, 30 days, 90
@@ -277,7 +277,7 @@ revocable without a restart, named in the record. Move to them and unset it.
 
 **Settings → Activity** lists, newest first:
 
-- targets added, imported, changed, paused, resumed and deleted;
+- monitors added, imported, changed, paused, resumed and deleted;
 - groups made, renamed and deleted; alerts made, changed and deleted;
 - every change an assistant made over MCP, with what it was asked to do;
 - keys made, re-rolled and revoked, accounts added and removed, roles changed (and by
@@ -302,8 +302,8 @@ applies to everyone.
 - **Hide addresses on screen**: off, from viewers (and anyone using ClearPing
   without signing in), or from everyone. IP addresses and host names show as
   dots, keeping just enough to tell them apart: `203.0.113.10` is
-  `•••.•••.•••.10`, `vps1.example.net` is `v•••.•••.net`. It covers targets,
-  traceroutes and probe agents, and target names that are addresses. Routing's
+  `•••.•••.•••.10`, `vps1.example.net` is `v•••.•••.net`. It covers monitors,
+  traceroutes and probe agents, and monitor names that are addresses. Routing's
   prefixes and AS numbers are public in BGP, so they stay. This changes what is
   shown, not what is sent: anyone signed in can still read addresses through
   the API.
@@ -311,7 +311,7 @@ applies to everyone.
   sharing a screen or taking screenshots. Anyone can turn it on for themselves.
 - **Hide addresses from AI assistants**: everything ClearPing gives an
   assistant over MCP has its addresses hidden, so they never reach whoever runs
-  the assistant. The assistant can still name, compare and explain targets.
+  the assistant. The assistant can still name, compare and explain monitors.
 - **Record sign-in addresses**: on by default. Off, sign-ins and failed
   sign-ins in Activity no longer say the IP address they came from. The server
   log keeps failed sign-ins' addresses either way, to spot someone guessing

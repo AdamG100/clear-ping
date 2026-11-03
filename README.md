@@ -6,7 +6,7 @@ from probe agents elsewhere, keeps the history in a single SQLite file, and
 draws latency as a spread rather than a single line, so a path that is merely
 slow looks different from one that is unstable.
 
-![A target's page: latency spread and packet loss over the last hour](docs/screenshots/target.jpg)
+![A monitor's page: latency spread and packet loss over the last hour](docs/screenshots/target.jpg)
 
 ## What it does
 
@@ -19,10 +19,10 @@ slow looks different from one that is unstable.
   Duty, it times the server's "port unreachable" replies to closed ports
   instead.
 - **Probe from anywhere.** A probe agent is a small program on another
-  machine, such as a VPS in another country, that takes a target's readings
+  machine, such as a VPS in another country, that takes a monitor's readings
   from there. The dashboard connects to it over an encrypted, pinned link,
   through a tailnet or the internet.
-- **One DNS lookup, several resolvers.** A DNS target can ask Cloudflare,
+- **One DNS lookup, several resolvers.** A DNS monitor can ask Cloudflare,
   Google, Quad9 or any resolver of your own on every probe, over plain DNS,
   DNS over TLS or DNS over HTTPS, and shows what each answered and how fast.
 - **Latency as a distribution.** Each probe sends several packets; the chart
@@ -32,31 +32,31 @@ slow looks different from one that is unstable.
   spike to a second among 20 ms readings does not flatten the rest: it gets a
   narrow band along the top, with its height in ms.
 - **An overview.** Where ClearPing opens: what is wrong right now, how the
-  last 24 hours went, and every target that had trouble, with where the fault
-  probably lay (only that target, your own network, or out on the internet) and
-  who went down with it. Each problem is one click from its target.
+  last 24 hours went, and every monitor that had trouble, with where the fault
+  probably lay (only that monitor, your own network, or out on the internet) and
+  who went down with it. Each problem is one click from its monitor.
 - **Routing.** Watch your own IP prefixes in BGP, as RIPE RIS's route
   collectors see them, and be told when the way the world reaches them changes:
   a new upstream, routes withdrawn, a prefix taken off an exchange onto
   transit, or another network announcing it. Traceroutes into the prefix, from
   here and from each probe agent, name the exchange the traffic crosses.
-- **Packet loss analysis.** When a target loses packets, a folded panel under
+- **Packet loss analysis.** When a monitor loses packets, a folded panel under
   the figures says what kind of loss it is (sporadic, bursts or sustained),
-  the hour of day it peaks at, and which other targets lost packets at the
+  the hour of day it peaks at, and which other monitors lost packets at the
   same time, with the likely source: your local network, your connection or
-  ISP, or the target's own path.
+  ISP, or the monitor's own path.
 - **IPv4 and IPv6.** A hostname can be probed over either family, or over both
   at once and charted as two lines.
-- **Nested groups.** Arrange targets into groups inside groups, drag targets
+- **Nested groups.** Arrange monitors into groups inside groups, drag monitors
   between them, and collapse a group to one trace for everything in it.
-- **Comparison charts.** Put every target in a group on one chart to see
+- **Comparison charts.** Put every monitor in a group on one chart to see
   whether a slowdown hit one of them or all of them.
-- **Share links and files.** Tick some targets, or all of them, and get a link
+- **Share links and files.** Tick some monitors, or all of them, and get a link
   that holds them, or download them as a JSON file. Someone else pastes the
   link, or chooses the file, in their ClearPing and picks which to add. Neither
   needs the two ClearPings to reach each other, so it works between home
   networks; the file doubles as a backup of what you monitor.
-- **Alerts.** One screen for all of them: make an alert, tick the targets it
+- **Alerts.** One screen for all of them: make an alert, tick the monitors it
   watches, and send it to any service [Apprise](https://github.com/caronc/apprise)
   can notify: Discord, Slack, Telegram, email, ntfy, a webhook and over a
   hundred more.
@@ -64,7 +64,7 @@ slow looks different from one that is unstable.
   trace fires (with a wait between traces), which is the only time the route
   through a failure can be captured. Copy one as text or save it as a web page
   to share.
-- **Certificate expiry.** HTTPS targets record when their certificate runs
+- **Certificate expiry.** HTTPS monitors record when their certificate runs
   out, and an alert can watch for it.
 - **Accounts and roles.** Admins, editors and viewers; authenticator apps and
   passkeys; single sign-on with Authentik, set up step by step; and keys for
@@ -94,12 +94,12 @@ Everything in these is generated demo data.
 The overview, where ClearPing opens: what is wrong now, the last 24 hours, and
 each problem with where the fault probably lay:
 
-![The overview, with one target not answering and one losing packets](docs/screenshots/overview.jpg)
+![The overview, with one monitor not answering and one losing packets](docs/screenshots/overview.jpg)
 
 A group on one chart over a day, with the evening slowdown on every line, and
 Cloudflare as seen from a probe agent in Oslo:
 
-![Four internet targets compared on one chart over 24 hours](docs/screenshots/group-comparison.jpg)
+![Four internet monitors compared on one chart over 24 hours](docs/screenshots/group-comparison.jpg)
 
 A spike far above the usual readings gets a band of its own along the top of
 the chart, so it neither runs off the page nor flattens everything else:
@@ -110,27 +110,27 @@ A game server: how fast it answers its query, and what it says about itself:
 
 ![A CS2 server's page, with its name, players, map and version](docs/screenshots/game-server.jpg)
 
-Adding a target: the address is all that is needed, and the check (here a DNS
+Adding a monitor: the address is all that is needed, and the check (here a DNS
 lookup through several resolvers) and where it is probed from can be chosen:
 
-![The add target page, in four numbered sections](docs/screenshots/add-target.jpg)
+![The add monitor page, in four numbered sections](docs/screenshots/add-target.jpg)
 
 Probe agents, and how each is doing:
 
 ![The probe agents page, with two online and one offline](docs/screenshots/probe-agents.jpg)
 
-Alerts, each watching the targets ticked for it:
+Alerts, each watching the monitors ticked for it:
 
 ![The alerts screen, with one alert firing](docs/screenshots/alerts.jpg)
 
 An alert being edited: the condition, tracing the route when it fires, where
-it is sent, and the targets:
+it is sent, and the monitors:
 
 ![The alert editor](docs/screenshots/alert-editor.jpg)
 
-Sharing: tick the targets to send, and get a link that holds them:
+Sharing: tick the monitors to send, and get a link that holds them:
 
-![The share dialog, with a link made for nine of fifteen targets](docs/screenshots/share.jpg)
+![The share dialog, with a link made for nine of fifteen monitors](docs/screenshots/share.jpg)
 
 Accounts: a new one gets a link to choose its own password:
 
@@ -195,51 +195,51 @@ rely on, build it and run the prober as its own process; see
 **Overview**, at the top of the sidebar, is where ClearPing opens. It runs from
 what matters most to what matters least:
 
-- **What is wrong now**, if anything, and four figures: how many targets are
+- **What is wrong now**, if anything, and four figures: how many monitors are
   answering, how many were up all day, the outages in the last 24 hours, and
   the alerts firing.
 - **The last 24 hours** as a strip of quarter hours, green when everything
   answered, amber when something lost packets and red when something stopped
   answering. Click a red or amber stretch to see only who had trouble then.
-- **Problems in the last 24 hours**: every target that had trouble, whether it
+- **Problems in the last 24 hours**: every monitor that had trouble, whether it
   stopped answering or lost packets, for how long, and whether it is still
-  going on. Targets that failed together are one event, and each says where
-  the fault probably lay: only that target, your own network (something inside
+  going on. Monitors that failed together are one event, and each says where
+  the fault probably lay: only that monitor, your own network (something inside
   it went down too), or out on the internet (your own network kept answering).
   A probe agent that could not be reached has a row of its own, listing its
-  targets. Filter by *Not answering* or *Losing packets*, and click a target to
+  monitors. Filter by *Not answering* or *Losing packets*, and click a monitor to
   go straight to it.
 - **Your groups** and **where readings are taken from** (this server and each
   probe agent, and how each is doing), and a **Routing** panel while that is on.
 
-### Targets
+### Monitors
 
-**Add target** at the bottom of the sidebar opens a page of four numbered
-sections: **Target** (the address), **Name** (and its group), **Check** (how
+**Add monitor** at the bottom of the sidebar opens a page of four numbered
+sections: **Monitor** (the address), **Name** (and its group), **Check** (how
 it is probed, and how often) and **Probe from** (this server or a probe agent,
 shown once you have one). The address box takes a hostname, an IP address,
 `host:port` or a URL, and chooses the check to match; everything else has a
-default, so an address and Enter is a whole target. Fields that must be filled
-in are marked *Required*. A target is probed every five minutes unless you
+default, so an address and Enter is a whole monitor. Fields that must be filled
+in are marked *Required*. A monitor is probed every five minutes unless you
 change its interval.
 
 The sidebar, from the top: the name and version, with the theme and collapse
 buttons; **Overview** and **Routing**; a search over names and addresses, and a
-**Probed from** filter for one probe agent's targets or this server's; how
-many targets are online, offline and paused; then the targets in their groups.
-At the foot are **Add target**, **Alerts** (with how many are firing), the
-button for deleting several targets, sharing, and Settings. When a newer
+**Probed from** filter for one probe agent's monitors or this server's; how
+many monitors are online, offline and paused; then the monitors in their groups.
+At the foot are **Add monitor**, **Alerts** (with how many are firing), the
+button for deleting several monitors, sharing, and Settings. When a newer
 version of ClearPing is out, a notice at the top says which and opens its
 patch notes.
 
-Each row shows the target's state, its address and a trace of its recent
+Each row shows the monitor's state, its address and a trace of its recent
 readings. Its badges say what it is (IP, DNS, TCP, HTTP, Game), and a purple
 *Remote* badge marks one probed from a probe agent. The ⋯ button at the end of
 the row copies the address, pauses, edits, duplicates or deletes it.
 
-**Duplicate** opens the add form already filled in from that target, for the
+**Duplicate** opens the add form already filled in from that monitor, for the
 second port on a host or the same check against the next server along. Change
-what is different and add it: it is a new target with no history, placed under
+what is different and add it: it is a new monitor with no history, placed under
 the one it was copied from.
 
 On a wide screen the button at the top of the sidebar collapses it to a rail
@@ -251,13 +251,13 @@ is remembered. On a phone or a narrow window the sidebar is a drawer, opened
 by the ☰ button at the top left. Tapping a chart shows the reading at that point, and dragging
 sideways across it zooms in.
 
-To clear out several targets at once, use the delete button at the foot of the
+To clear out several monitors at once, use the delete button at the foot of the
 sidebar, beside Share and Settings. Tick the ones to go, singly or a whole
 group at a time (a group ticked with everything in it is deleted too, empty
 groups included), search to find them, and delete them together. Nothing
-starts ticked and the button asks twice: a target's whole history goes with it.
+starts ticked and the button asks twice: a monitor's whole history goes with it.
 
-A **paused** target is not probed. Its row and its status light go grey, its
+A **paused** monitor is not probed. Its row and its status light go grey, its
 page stops passing judgement on readings nobody has taken since, and it is
 counted as paused rather than as online or offline. Its history is kept.
 
@@ -268,34 +268,34 @@ belongs inside another, pick which. It starts empty, ready to be filled.
 
 - The folder button on a group's header makes a new group inside that one.
   Groups nest to any depth.
-- Drag a target by its handle onto any group, at any depth. An empty group also
-  offers to add a target straight into it.
-- A target's group can be chosen when it is added or edited too. **New group…**
+- Drag a monitor by its handle onto any group, at any depth. An empty group also
+  offers to add a monitor straight into it.
+- A monitor's group can be chosen when it is added or edited too. **New group…**
   in that list makes one on the spot.
 - Drag a group by its handle to reorder it among its neighbours.
 - The pencil on a group's header renames it, moves it inside another group
   taking everything in it along, or deletes it. Deleting a group keeps what was
-  in it: its targets and the groups inside it move up a level.
+  in it: its monitors and the groups inside it move up a level.
 - Collapse a group and it shows one trace for the whole group: the mean
-  latency of its targets, marked wherever any of them lost packets.
-- **Compare** on a group's header puts all its targets, including those in the
+  latency of its monitors, marked wherever any of them lost packets.
+- **Compare** on a group's header puts all its monitors, including those in the
   groups inside it, on one chart.
 
 A group stays until it is deleted, whether or not anything is in it.
 
 ### Sharing
 
-The share button beside **Add target** makes a link out of your targets, for
+The share button beside **Add monitor** makes a link out of your monitors, for
 someone else's ClearPing to import.
 
-- **Share**: tick the targets to send, single ones or whole groups (they all
+- **Share**: tick the monitors to send, single ones or whole groups (they all
   start ticked), and create the link.
 - **Import**: paste a link. You are shown what is in it and choose what to add.
-  Targets you already monitor are marked and start unticked.
+  Monitors you already monitor are marked and start unticked.
 
 The link is the list itself. Nothing is stored for it and the two
 installations never talk to each other, so it works between machines that
-cannot reach one another. It carries each target's name, address, probe
+cannot reach one another. It carries each monitor's name, address, probe
 settings, interval and group. It carries none of their history and no alerts,
 whose notification URLs usually have a password in them. Anyone who has the
 link can read what is in it, so send it as you would the list.
@@ -311,8 +311,8 @@ many are firing.
 
 An alert is a condition (stops responding, loss above a threshold, latency,
 jitter, or a certificate about to expire), a number of probes in a row it must
-hold for, somewhere to send it, and the targets it watches. Tick single targets
-or whole groups. Each ticked target fires and clears on its own.
+hold for, somewhere to send it, and the monitors it watches. Tick single monitors
+or whole groups. Each ticked monitor fires and clears on its own.
 
 Where it is sent is a list of [Apprise](https://github.com/caronc/apprise) URLs
 on the alert, one for each service to notify:
@@ -385,7 +385,7 @@ long Activity is kept (30 days, 90 days or a year) and whether ClearPing checks
 for updates. See [docs/security.md](docs/security.md#privacy).
 
 **Maintenance** checks the database file, clears out history, saved routes and
-alert ticks that belong to targets or alerts that no longer exist, drops
+alert ticks that belong to monitors or alerts that no longer exist, drops
 readings past their retention, tidies the database and checks the probe
 scheduler. **Run now** shows each step as it runs, and carries on in the
 background if you leave the page. It also runs by itself, every Sunday at
@@ -409,20 +409,20 @@ its configuration file, which the dialog writes out for you; see
 Then ask it in your own words:
 
 - *Gather the logs from the last week so I can report this to my ISP, as a PDF.*
-- *Which targets had outages yesterday, and what kept working while they were down?*
+- *Which monitors had outages yesterday, and what kept working while they were down?*
 - *Is my connection worse in the evenings?*
 
-As it comes it can only read: nothing an assistant does changes a target or
+As it comes it can only read: nothing an assistant does changes a monitor or
 sends anything, and alerts are never shown to it. Give an assistant a key of
 its own that may read and write (Settings → Keys) and it can also add
-targets, change them, pause them and probe one now (*add my router and 1.1.1.1
-as ping targets, in a group called Network*), though never delete one; what it
+monitors, change them, pause them and probe one now (*add my router and 1.1.1.1
+as ping monitors, in a group called Network*), though never delete one; what it
 changes is recorded under its key's name. A key is only taken over HTTPS or
 from ClearPing's own network, never in the clear across the internet. What it
 can be asked, what the report contains and how the token works are in
 [docs/mcp.md](docs/mcp.md).
 
-A report is as good as what is monitored. Add your router as a target as well
+A report is as good as what is monitored. Add your router as a monitor as well
 as addresses beyond it, and the data can show whether a fault was inside your
 network or outside it.
 
@@ -432,7 +432,7 @@ A probe agent is a small program on another machine, such as a VPS in another
 country, that takes readings from there for your dashboard. It is not an AI
 agent. Add one under **Settings → Probe agents**, start it with the Docker
 command or the Linux install line shown there, and choose it under **Probe
-from** on any target. That target's readings then show the network as seen
+from** on any monitor. That monitor's readings then show the network as seen
 from that machine, on the same dashboard as everything else, marked *Remote*
 in the sidebar.
 
@@ -440,13 +440,13 @@ The page counts how many are online and how many need attention, and lists
 each in a searchable table: its address and port, whether it is reached over a
 tailnet, a private network or the internet, its version, status and when it was
 last seen. **Details** on one
-has its machine, certificate and targets, and tests its connection, renames it
+has its machine, certificate and monitors, and tests its connection, renames it
 or changes its address, makes it a new token or removes it.
 
 The dashboard connects to the agent, encrypted and pinned to the agent's own
 certificate, with a token for each agent. Over a tailnet such as Tailscale, no
-port has to be opened anywhere. While an agent can't be reached its targets
-take no readings, so a dead agent never shows up as targets being down. See
+port has to be opened anywhere. While an agent can't be reached its monitors
+take no readings, so a dead agent never shows up as monitors being down. See
 [docs/probe-agents.md](docs/probe-agents.md).
 
 ### Accounts
@@ -509,7 +509,11 @@ All optional. With Docker, pass them with `-e`.
 
 ## API
 
-Everything the interface does goes through these.
+Everything the interface does goes through these. What the dashboard calls a
+monitor is a *target* here, in the JSON and in the assistant tools, so that
+nothing written against them breaks. A monitor measured from several probes has
+`probes` (a list of probe ids, with `local` for the dashboard's own), and
+`probeAgentId` is its first.
 
 Who may call it is set under Settings → Access. With sign-in on, every call
 needs a signed-in account or a key, sent as `Authorization: Bearer <key>` (or
@@ -524,32 +528,33 @@ in its place and stops the old one at once. See
 
 | | |
 |---|---|
-| `GET /api/targets` | Every target; `?packetLoss=true` adds latest readings, recent traces, the groups and their order |
-| `POST /api/targets` | Add a target |
+| `GET /api/targets` | Every monitor; `?packetLoss=true` adds latest readings, recent traces, the groups and their order |
+| `POST /api/targets` | Add a monitor |
 | `POST /api/targets/import` | Add several at once (`{ targets: [...] }`); all are checked first, and none is added if one is wrong |
 | `DELETE /api/targets` | Delete several at once (`{ ids: [...] }`), each with its history |
 | `GET`, `PATCH`, `DELETE /api/targets/:id` | Read, change (including pause and group) or delete one |
-| `POST /api/targets/:id/probe` | Probe it now |
+| `POST /api/targets/:id/probe` | Measure it now (`?probe=` from one probe, `?probes=all` from every one) |
+| `GET /api/targets/merge`, `POST /api/targets/merge` | Monitors set up once for each probe, and putting them together (`{ keep, merge: [...] }`) |
 | `GET /api/targets/:id/measurements` | Its readings, bucketed for a chart (`?hours=` or `?start=&end=`) |
-| `GET /api/targets/:id/loss` | Its packet loss analysis over the same period: pattern, hour of day, other targets that lost packets at the same time, likely source (`&tz=` for the hours) |
+| `GET /api/targets/:id/loss` | Its packet loss analysis over the same period: pattern, hour of day, other monitors that lost packets at the same time, likely source (`&tz=` for the hours) |
 | `GET`, `POST /api/targets/:id/traceroute` | Its saved routes; trace it now, over `{"family": "ipv4" \| "ipv6" \| "both"}` if given |
 | `DELETE /api/targets/:id/traceroute` | Delete one saved route (`?trace=id`) or all but the newest (`?older=1`) |
-| `PUT /api/targets/reorder` | Save the order of targets or of groups |
+| `PUT /api/targets/reorder` | Save the order of monitors or of groups |
 | `POST /api/groups` | Make a group (`{ group }`, a path such as `Home/Network`) |
 | `PUT /api/groups` | Rename a group or move it inside another (`{ from, to }`) |
 | `DELETE /api/groups` | Delete a group (`{ group }`); what was in it moves up a level |
-| `GET /api/compare` | The same period of several targets (`?targets=id,id`); `&split=resolver` gives a DNS target's resolvers a line each (`&family=4` or `6` for one side of a target on both) |
+| `GET /api/compare` | The same period of several monitors (`?targets=id,id`); `&split=resolver` gives a DNS monitor's resolvers a line each (`&family=4` or `6` for one side of a monitor on both) |
 | `GET`, `POST /api/alerts` | Every alert; make one |
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
-| `GET /api/probe-agents` | The probe agents targets can be probed from, and whether each can be reached. A target's `probeAgentId` says which it uses (`null` for this server), and is set the same way in `POST` and `PATCH /api/targets` |
+| `GET /api/probe-agents` | The probe agents monitors can be probed from, and whether each can be reached. A monitor's `probeAgentId` says which it uses (`null` for this server), and is set the same way in `POST` and `PATCH /api/targets` |
 | `/api/security/probe-agents/…` | Add, change and remove probe agents, connect to one (`…/:id/connect`) and make it a new token (`…/:id/token`); admins only ([docs/probe-agents.md](docs/probe-agents.md)) |
 | `GET /api/bgp` | BGP monitoring: whether it is on, the connection to RIS Live, and every watched prefix with how it stands ([docs/bgp-monitoring.md](docs/bgp-monitoring.md)) |
 | `POST`, `PUT /api/bgp` | Watch a prefix (`{ resource, label? }`, a prefix or an IP address); turn monitoring on or off (`{ enabled }`, admins only); set your own network (`{ homeAsns: [64500] }`) |
 | `GET /api/bgp/lookup?resource=` | What watching an address or prefix would watch: the announced prefix that holds it, who announces it, and the announced prefixes around it |
 | `GET`, `POST`, `PATCH`, `DELETE /api/bgp/:id` | One watched prefix in full, with every update and how your network reaches it; trace into it now from this server and each probe agent (`POST`); rename it (`{ label }`) or take how it is carried now as normal (`{ acceptNormal: true }`); stop watching it |
-| `GET /api/overview` | The last 24 hours for the Overview: each target's uptime, the events with where each fault lay, and how many targets had trouble in each quarter of an hour |
-| `GET /api/scheduler/status` | Whether the scheduler is running and when each target is next due |
+| `GET /api/overview` | The last 24 hours for the Overview: each monitor's uptime, the events with where each fault lay, and how many monitors had trouble in each quarter of an hour |
+| `GET /api/scheduler/status` | Whether the scheduler is running and when each monitor is next due |
 | `GET /api/health` | Whether the server is up; open even with sign-in on |
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](docs/security.md)) |
 | `POST /api/auth/password-reset` | A forgotten password: the primary account's code from the server log, or the code in a password link ([docs/security.md](docs/security.md#forgotten-password)) |
@@ -592,7 +597,7 @@ SQLite.
 - [docs/running.md](docs/running.md): running it, Docker, installing it as an app, maintenance, patch notes, upgrading, configuration
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of probe measures, groups, comparisons, traceroute
 - [docs/alerting.md](docs/alerting.md): alerts, and sending them with Apprise
-- [docs/probe-agents.md](docs/probe-agents.md): probing targets from other machines, over a tailnet or the internet
+- [docs/probe-agents.md](docs/probe-agents.md): probing monitors from other machines, over a tailnet or the internet
 - [docs/bgp-monitoring.md](docs/bgp-monitoring.md): watching your own prefixes in BGP, as RIPE RIS's route collectors see them
 - [docs/mcp.md](docs/mcp.md): connecting an AI assistant, and the report for an ISP
 - [docs/security.md](docs/security.md): sign-in, roles, single sign-on with Authentik, keys for scripts and assistants, and the activity record

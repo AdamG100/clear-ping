@@ -235,7 +235,7 @@ export function validateProbeConfig(probeType: ProbeType, host: string, raw: unk
 
     case 'tcp': {
       if (!isPort(input.port)) {
-        return { ok: false, error: 'A TCP target needs a port between 1 and 65535' }
+        return { ok: false, error: 'A TCP monitor needs a port between 1 and 65535' }
       }
       return { ok: true, config: { port: input.port } }
     }

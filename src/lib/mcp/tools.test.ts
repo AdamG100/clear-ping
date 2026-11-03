@@ -202,7 +202,7 @@ describe('build_isp_report', () => {
     // Without the router in it, there is nothing to tell inside from outside by.
     const outside = await data('build_isp_report', { group: 'Outside' })
     expect(outside.totals.targetsMonitored).toBe(2)
-    expect(outside.caveats.join(' ')).toContain('No target inside the local network')
+    expect(outside.caveats.join(' ')).toContain('No monitor inside the local network')
     expect(outside.outages[0].meanwhile.unaffected).toEqual([])
   })
 
@@ -244,15 +244,15 @@ describe('a request that cannot be answered', () => {
   it('says what is wrong in words that can be acted on', async () => {
     const unknown = await call('get_target_history', { target: 'Routr2' })
     expect(unknown.isError).toBe(true)
-    expect(unknown.text).toBe('There is no target called "Routr2". There is: Internet, Router, Website.')
+    expect(unknown.text).toBe('There is no monitor called "Routr2". There is: Internet, Router, Website.')
 
-    expect((await call('get_target_history', {})).text).toContain('Say which target')
+    expect((await call('get_target_history', {})).text).toContain('Say which monitor')
     expect((await call('get_incidents', { hours: -3 })).text).toBe('hours must be a number greater than zero.')
     expect((await call('get_incidents', { start: 'last tuesday' })).text).toContain('start is not a date-time')
     expect((await call('get_incidents', { days: 900 })).text).toBe('A period can be at most 366 days.')
     expect((await call('list_targets', { timezone: 'Mars/Olympus' })).text).toContain('not a time zone')
-    expect((await call('build_isp_report', { group: 'Nowhere' })).text).toBe('No target is in a group called "Nowhere".')
-    expect((await call('get_dns_resolvers', { target: 'Router' })).text).toContain('not a DNS target with a list of resolvers')
+    expect((await call('build_isp_report', { group: 'Nowhere' })).text).toBe('No monitor is in a group called "Nowhere".')
+    expect((await call('get_dns_resolvers', { target: 'Router' })).text).toContain('not a DNS monitor with a list of resolvers')
   })
 })
 
@@ -343,11 +343,11 @@ describe('changing things, for a connection that sent the token', () => {
     const refused = await write('add_targets', { targets: [{ address: '192.0.2.88' }, { address: 'db.internal', probe: 'tcp' }] })
 
     expect(refused.isError).toBe(true)
-    expect(refused.text).toBe('Target 2 (db.internal): A TCP target needs a port between 1 and 65535.')
+    expect(refused.text).toBe('Monitor 2 (db.internal): A TCP monitor needs a port between 1 and 65535.')
     expect(await getAllTargets()).toHaveLength(before)
 
     expect((await write('add_targets', { targets: [] })).text).toContain('as a list')
-    expect((await write('add_targets', { targets: [{ name: 'No address' }] })).text).toBe('Target 1: give its address.')
+    expect((await write('add_targets', { targets: [{ name: 'No address' }] })).text).toBe('Monitor 1: give its address.')
     expect((await write('add_targets', { targets: Array.from({ length: 51 }, (_, index) => ({ address: `198.51.100.${index}` })) })).text).toContain('At most 50')
   })
 

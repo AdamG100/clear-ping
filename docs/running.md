@@ -80,7 +80,7 @@ matches the machine. 32-bit ARM is not supported.
 - **Keep the volume.** The database is at `/data/clearping.db`. Without `-v`,
   the measurement history is lost when the container is removed.
 - **IPv6 needs IPv6 in the container.** Docker's default network is IPv4 only,
-  so IPv6 targets, and the IPv6 half of a target set to *Both*, fail there.
+  so IPv6 monitors, and the IPv6 half of a monitor set to *Both*, fail there.
   Either enable IPv6 for the Docker network, or on Linux run the container with
   `--network host`.
 - **Latency is measured from inside the container.** With the default bridge
@@ -243,7 +243,7 @@ order and clears out what no longer belongs.
 
 ![The maintenance settings, with the steps of a run and its schedule](screenshots/maintenance.jpg)
 
-Deleting a target takes its history, alert ticks and saved routes with it
+Deleting a monitor takes its history, alert ticks and saved routes with it
 through the database's own cascades. Those only work while foreign keys are on,
 and a database can have been through a time when they were not: a migration
 that rebuilt a table, an older ClearPing, a copy restored from a backup, or a
@@ -252,13 +252,13 @@ point at nothing, which are never shown and slow the queries that step over
 them. A run goes through these steps, in order:
 
 1. **Check the database file** for damage.
-2. **History of targets that no longer exist**: removed.
-3. **Saved routes of targets that no longer exist**: removed.
-4. **Alert ticks for targets or alerts that no longer exist**: removed.
-5. **Groups and their saved order**: a group a target is in is restored if it
+2. **History of monitors that no longer exist**: removed.
+3. **Saved routes of monitors that no longer exist**: removed.
+4. **Alert ticks for monitors or alerts that no longer exist**: removed.
+5. **Groups and their saved order**: a group a monitor is in is restored if it
    went missing, and the saved position of a group that is gone is dropped.
-6. **Targets marked as probed in the future**: a clock that was wrong and then
-   corrected leaves a last-probe time that is still to come, and the target is
+6. **Monitors marked as probed in the future**: a clock that was wrong and then
+   corrected leaves a last-probe time that is still to come, and the monitor is
    not probed until it arrives. They are made due now.
 7. **Measurements and routes past their retention**
    (`CLEARPING_RETENTION_DAYS`).

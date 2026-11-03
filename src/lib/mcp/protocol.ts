@@ -90,7 +90,7 @@ export interface McpServer {
 
 /** What it takes for a connection to be allowed to change anything. */
 export const WRITES_NEED =
-  'An assistant can add and change targets only with a key that may change things: one is made in ClearPing\'s Settings → Keys, by an account that may change things, and sent as "Authorization: Bearer <key>".'
+  'An assistant can add and change monitors only with a key that may change things: one is made in ClearPing\'s Settings → Keys, by an account that may change things, and sent as "Authorization: Bearer <key>".'
 
 const answer = (id: JsonRpcId | null, result: unknown): JsonRpcResponse => ({ jsonrpc: '2.0', id, result })
 const refuse = (id: JsonRpcId | null, code: number, message: string): JsonRpcResponse => ({

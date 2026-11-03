@@ -468,7 +468,7 @@ function TargetRow({
         }
       }}
       className={cn(
-        'relative w-full text-left px-2 py-2 rounded-md transition-colors group/target cursor-pointer',
+        'relative w-full text-left px-2 py-2 rounded-md transition-colors group/monitor cursor-pointer',
         'hover:bg-sidebar-row-hover',
         // The selected row is simply the one that is lit. The highlight used
         // to be one shared element that slid from the old row to the new one,
@@ -496,7 +496,7 @@ function TargetRow({
             // it is simply shown.
             floating
               ? 'text-muted-foreground/70'
-              : 'text-muted-foreground/0 group-hover/target:text-muted-foreground/40 hover:text-muted-foreground/70! touch:text-muted-foreground/40'
+              : 'text-muted-foreground/0 group-hover/monitor:text-muted-foreground/40 hover:text-muted-foreground/70! touch:text-muted-foreground/40'
           )}
           aria-label={`Drag to reorder ${target.name}`}
           onClick={e => e.stopPropagation()}
@@ -980,12 +980,12 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
               two. A chip the height of the header's text, not one of Arc's
               buttons: the smallest of those is a pill as tall as a target's row. */}
           {onCompare && memberIds.length > 1 && (
-            <Tooltip content="Show every target in this group on one chart" side="right">
+            <Tooltip content="Show every monitor in this group on one chart" side="right">
               <button
                 type="button"
                 onClick={() => onCompare(group)}
                 aria-pressed={isCompared}
-                aria-label={`Compare the targets in ${name} on one chart`}
+                aria-label={`Compare the monitors in ${name} on one chart`}
                 className={cn(
                   'ml-1 flex shrink-0 cursor-pointer items-center rounded-full border px-1.5 py-1 leading-none transition-colors touch:px-2 touch:py-2',
                   isCompared
@@ -1022,7 +1022,7 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
             >
               {/* To the right, out over the page: above, it covered the
                   header of the very group it describes. */}
-              <Tooltip side="right" content={`${name}: mean latency across its ${memberIds.length} target${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}>
+              <Tooltip side="right" content={`${name}: mean latency across its ${memberIds.length} monitor${memberIds.length === 1 ? '' : 's'}, marked wherever any of them lost packets`}>
                 <div className="px-2 pb-2">
                   <Sparkline points={groupTrace} width={240} height={22} stretch />
                 </div>
@@ -1083,7 +1083,7 @@ function TargetGroup({ group, parent, depth, ...tree }: GroupTreeProps & { group
                       'Drop here'
                     ) : (
                       <>
-                        Empty. Drag a target here, or
+                        Empty. Drag a monitor here, or
                         <Button type="button" variant="ghost" size="sm" onClick={() => onAddTargetTo(group)}>
                           add one
                         </Button>
@@ -1500,7 +1500,7 @@ export function Sidebar({
           <div className="ml-auto flex shrink-0 items-center gap-0.5">
             <ThemeSwitch theme={theme} variant="rise" iconOnly onThemeChange={next => setTheme(next)} />
             <span className="lg:hidden">
-              <Button ref={closeRef} type="button" variant="secondary" size="sm" style={HEADER_BUTTON} onClick={onClose} aria-label="Close targets">
+              <Button ref={closeRef} type="button" variant="secondary" size="sm" style={HEADER_BUTTON} onClick={onClose} aria-label="Close monitors">
                 <X {...ICON} />
               </Button>
             </span>
@@ -1552,7 +1552,7 @@ export function Sidebar({
             it dropped down the moment the targets arrived. */}
         {(loading || targets.length > 0) && (
           <div className="[&_label]:sr-only">
-            <SearchField label="Search targets" placeholder="Search name or address" value={searchQuery} onValueChange={setSearchQuery} />
+            <SearchField label="Search monitors" placeholder="Search name or address" value={searchQuery} onValueChange={setSearchQuery} />
           </div>
         )}
         {/* Each choice says the whole of what it means, so the label, like the
@@ -1609,14 +1609,14 @@ export function Sidebar({
             rows, so where they do not all fit (a phone, a phone on its side)
             it ran off the bottom of the screen, took the buttons under it
             along, and had nothing to scroll. */}
-        <ScrollArea label="Targets" className="min-h-0 flex-1" viewportStyle={{ overscrollBehavior: 'contain' }}>
+        <ScrollArea label="Monitors" className="min-h-0 flex-1" viewportStyle={{ overscrollBehavior: 'contain' }}>
           <nav
             ref={listRef}
             // While a row is in the air the list must not react to the pointer
             // passing over it: no hover highlights trailing the drag, and no
             // click landing on whatever happens to be underneath on release.
             className={cn('p-2', drag.active && 'pointer-events-none')}
-            aria-label="Targets"
+            aria-label="Monitors"
           >
             <SearchResults query={searchQuery.trim().toLowerCase()}>
             {loading ? (
@@ -1691,7 +1691,7 @@ export function Sidebar({
                   </div>
                 ))}
                 {searchResults.length === 0 && (
-                  <p className="text-center text-sm text-muted-foreground py-8">No targets found</p>
+                  <p className="text-center text-sm text-muted-foreground py-8">No monitors found</p>
                 )}
               </div>
             ) : (
@@ -1762,7 +1762,7 @@ export function Sidebar({
         {!readOnly && (
           <Button className="w-full" size="sm" onClick={() => onOpenAddTarget()} suppressHydrationWarning>
             <Plus {...ICON} />
-            Add target
+            Add monitor
           </Button>
         )}
         <div className="sidebar-controls flex gap-2">
@@ -1784,24 +1784,24 @@ export function Sidebar({
           )}
           {/* One target is deleted from its own row. This is for clearing out
               several. It is always there, only greyed out until there are
-              several: arriving with the targets, it squeezed the buttons
+              several: arriving with the monitors, it squeezed the buttons
               beside it a moment after the page was drawn. */}
           {!readOnly && (
-            <Tooltip content={targets.length > 1 ? 'Delete several targets' : 'Delete several targets, once there are several'}>
+            <Tooltip content={targets.length > 1 ? 'Delete several monitors' : 'Delete several monitors, once there are several'}>
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={() => setIsBulkDeleteOpen(true)}
                 disabled={targets.length < 2}
-                aria-label="Delete several targets"
+                aria-label="Delete several monitors"
                 suppressHydrationWarning
               >
                 <ListX {...ICON} />
               </Button>
             </Tooltip>
           )}
-          <Tooltip content="Share or import targets">
-            <Button variant="secondary" size="sm" onClick={() => setIsShareOpen(true)} aria-label="Share or import targets" suppressHydrationWarning>
+          <Tooltip content="Share or import monitors">
+            <Button variant="secondary" size="sm" onClick={() => setIsShareOpen(true)} aria-label="Share or import monitors" suppressHydrationWarning>
               <Share2 {...ICON} />
             </Button>
           </Tooltip>
@@ -1846,7 +1846,7 @@ export function Sidebar({
       />
 
       {/* Arriving by a share link opens it at the import, but not before the
-          targets have loaded: until then it cannot say which of the incoming
+          monitors have loaded: until then it cannot say which of the incoming
           ones are already here. */}
       <ShareDialog
         open={isShareOpen || (incomingShareCode !== null && !loading)}

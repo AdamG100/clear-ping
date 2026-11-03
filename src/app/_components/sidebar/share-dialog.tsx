@@ -46,7 +46,7 @@ const HINT = 'text-xs leading-relaxed text-muted-foreground'
 const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
 
 function plural(count: number): string {
-  return `${count} target${count === 1 ? '' : 's'}`
+  return `${count} monitor${count === 1 ? '' : 's'}`
 }
 
 // ─── Share ──────────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
   const [link, setLink] = useState<string | null>(null)
 
   if (targets.length === 0) {
-    return <p className={HINT}>There are no targets to share yet. Add one from the sidebar first.</p>
+    return <p className={HINT}>There are no monitors to share yet. Add one from the sidebar first.</p>
   }
 
   const tooMany = selected.size > MAX_SHARED_TARGETS
@@ -118,7 +118,7 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
           <div className="flex flex-col gap-2">
             <Button type="button" onClick={createLink} disabled={selected.size === 0 || tooMany}>
               <Share2 {...ICON} />
-              {selected.size === 0 ? 'Tick the targets to share' : `Create a share link for ${plural(selected.size)}`}
+              {selected.size === 0 ? 'Tick the monitors to share' : `Create a share link for ${plural(selected.size)}`}
             </Button>
             <Button type="button" variant="secondary" onClick={downloadFile} disabled={selected.size === 0 || tooMany}>
               <FileDown {...ICON} />
@@ -126,12 +126,12 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
             </Button>
           </div>
           {tooMany ? (
-            <Alert tone="warning" title={`At most ${MAX_SHARED_TARGETS} targets`}>
+            <Alert tone="warning" title={`At most ${MAX_SHARED_TARGETS} monitors`}>
               A link or file holds at most {MAX_SHARED_TARGETS} targets. Untick some, or share them in two.
             </Alert>
           ) : (
             <p className={HINT}>
-              The link, or the file, is the list itself: each target&apos;s name, address, probe settings, interval and
+              The link, or the file, is the list itself: each monitor&apos;s name, address, probe settings, interval and
               group. Their history and alerts are not included. Neither needs the two ClearPings to reach
               each other: a link is pasted into the other one, a file chosen there under Import.
             </p>
@@ -202,10 +202,10 @@ function ImportPreview({ decoding, existing, onImport }: ImportProps & { decodin
       <div className="space-y-2">
         <Button type="button" className="w-full" onClick={importTicked} loading={importing} disabled={selected.size === 0}>
           <Download {...ICON} />
-          {selected.size === 0 ? 'Tick the targets to import' : `Import ${plural(selected.size)}`}
+          {selected.size === 0 ? 'Tick the monitors to import' : `Import ${plural(selected.size)}`}
         </Button>
         <p className={HINT}>
-          Each is added as a new target, in the group it was shared from, and probing starts straight away. Nothing
+          Each is added as a new monitor, in the group it was shared from, and probing starts straight away. Nothing
           already here is changed.
         </p>
       </div>
@@ -231,7 +231,7 @@ function ImportPanel({ initialText, existing, onImport }: ImportProps & { initia
       return
     }
     if (chosen.size > MAX_IMPORT_FILE_BYTES) {
-      setFileError(`${chosen.name} is too big to be an export of targets.`)
+      setFileError(`${chosen.name} is too big to be an export of monitors.`)
       return
     }
     setFile({ name: chosen.name, text: await chosen.text() })
@@ -334,8 +334,8 @@ export function ShareDialog({ open, onOpenChange, ...body }: ShareDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title="Share targets"
-        description="Send the targets you monitor to someone else's ClearPing as a link or a file, or add the ones they sent you."
+        title="Share monitors"
+        description="Send the monitors you monitor to someone else's ClearPing as a link or a file, or add the ones they sent you."
       >
         {/* Inside the dialog's content, which is unmounted on close, so every
             opening starts with everything ticked and nothing pasted. */}

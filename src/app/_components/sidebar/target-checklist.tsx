@@ -136,7 +136,7 @@ export function TargetChecklist({
     <div className="space-y-2">
       {searchable && (
         <SearchField
-          label="Search targets"
+          label="Search monitors"
           placeholder="Search name, address or group"
           value={search}
           onValueChange={setSearch}
@@ -158,7 +158,7 @@ export function TargetChecklist({
       </div>
 
       <div className="rounded-2xl border border-border bg-background">
-        <ScrollArea maxHeight={maxHeight} label="Targets to tick">
+        <ScrollArea maxHeight={maxHeight} label="Monitors to tick">
           <SearchResults query={query} className="p-1">
             {visibleGroups.length === 0 && (
               <p className="px-3 py-6 text-center text-sm text-muted-foreground">Nothing matches &ldquo;{search.trim()}&rdquo;.</p>
@@ -185,7 +185,7 @@ export function TargetChecklist({
                       id={groupId}
                       checked={all ? true : some ? 'indeterminate' : false}
                       onCheckedChange={next => setGroup(group, next === true)}
-                      aria-label={whole ? `The group ${groupName(group)} and everything in it` : `Every target in ${groupName(group)}`}
+                      aria-label={whole ? `The group ${groupName(group)} and everything in it` : `Every monitor in ${groupName(group)}`}
                     />
                     <label htmlFor={groupId} className="min-w-0 flex-1 cursor-pointer truncate text-sm font-medium text-foreground">
                       {groupName(group)}

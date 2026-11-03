@@ -77,8 +77,8 @@ export function GroupDialog({ task, ...form }: GroupDialogProps) {
         title={creating ? 'New group' : 'Edit group'}
         description={
           creating
-            ? 'Somewhere to keep targets that belong together. It can sit inside another group, and start out empty.'
-            : 'Rename the group or move it inside another. Its targets and any groups inside it move too.'
+            ? 'Somewhere to keep monitors that belong together. It can sit inside another group, and start out empty.'
+            : 'Rename the group or move it inside another. Its monitors and any groups inside it move too.'
         }
       >
         {/* Keyed so a different group opens with its own values. */}
@@ -163,7 +163,7 @@ function GroupForm({
 
   // What deleting the group would move, and where to.
   const contents = editing
-    ? [editing.targets > 0 && plural(editing.targets, 'target'), editing.groups > 0 && plural(editing.groups, 'group')]
+    ? [editing.targets > 0 && plural(editing.targets, 'monitor'), editing.groups > 0 && plural(editing.groups, 'group')]
         .filter((part): part is string => !!part)
         .join(' and ')
     : ''
@@ -236,8 +236,8 @@ function GroupForm({
             onChange={next => { setTouched(true); setProbes(next) }}
           />
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {someHave.length > 0 && !touched ? 'These targets are not all measured from the same probes; a part-ticked probe is one only some have. ' : ''}
-            Sets the probes of {plural(memberProbes.length, 'target')} in this group, including any group inside it, in one go.
+            {someHave.length > 0 && !touched ? 'These monitors are not all measured from the same probes; a part-ticked probe is one only some have. ' : ''}
+            Sets the probes of {plural(memberProbes.length, 'monitor')} in this group, including any group inside it, in one go.
             Readings already taken stay in their history.
           </p>
         </div>

@@ -64,10 +64,10 @@ interface AddTargetPageProps {
 export function AddTargetPage({ availableGroups, group = '', template = null, onAddTarget, onClose, probeAgents, localProbeName }: AddTargetPageProps) {
   return (
     <PageFrame
-      title={template ? `Duplicate ${template.name}` : 'Add a target'}
+      title={template ? `Duplicate ${template.name}` : 'Add a monitor'}
       description={
         template
-          ? 'A new target that starts with the same settings. Change what is different about this one. None of the history is copied.'
+          ? 'A new monitor that starts with the same settings. Change what is different about this one. None of the history is copied.'
           : 'Only the address is needed. Everything else starts with a sensible default.'
       }
       onBack={onClose}
@@ -79,7 +79,7 @@ export function AddTargetPage({ availableGroups, group = '', template = null, on
         availableGroups={availableGroups}
         probeAgents={probeAgents}
         localProbeName={localProbeName}
-        submitLabel="Add target"
+        submitLabel="Add monitor"
         onCancel={onClose}
         onSubmit={values =>
           onAddTarget({
@@ -113,7 +113,7 @@ export function EditTargetPage({ target, availableGroups, onSave, onClose, probe
     return (
       <div className="flex h-full items-center justify-center p-6">
         <EmptyState
-          title="That target is not here"
+          title="That monitor is not here"
           description="It may have been deleted. Pick another from the sidebar."
           action={<Button type="button" onClick={onClose}>Back to the dashboard</Button>}
         />

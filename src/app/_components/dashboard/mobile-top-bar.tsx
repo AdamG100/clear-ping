@@ -37,7 +37,7 @@ export function MobileTopBar({ sidebarOpen, onOpenSidebar, overviewOpen, onOpenO
           onClick={onOpenSidebar}
           aria-expanded={sidebarOpen}
           aria-controls="sidebar"
-          aria-label="Open targets"
+          aria-label="Open monitors"
         >
           <Menu {...ICON} />
         </Button>

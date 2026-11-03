@@ -115,7 +115,7 @@ const clock = (time: number) => new Date(time).toLocaleTimeString(undefined, inD
 function Headline({ now, agentsDown }: { now: ReturnType<typeof standing>; agentsDown: ProbeAgentSummary[] }) {
   if (now.down.length > 0) {
     return (
-      <Alert tone="danger" title={`${plural(now.down.length, 'target')} not answering`}>
+      <Alert tone="danger" title={`${plural(now.down.length, 'monitor')} not answering`}>
         Every probe to {now.down.length === 1 ? 'it' : 'them'} is going unanswered. Click one below to see why.
       </Alert>
     )
@@ -123,7 +123,7 @@ function Headline({ now, agentsDown }: { now: ReturnType<typeof standing>; agent
   if (agentsDown.length > 0) {
     return (
       <Alert tone="warning" title={`${plural(agentsDown.length, 'probe agent')} cannot be reached`}>
-        No readings are coming from {nameList(agentsDown.map(agent => agent.name))}, so {plural(now.onHold.length, 'target')} probed from
+        No readings are coming from {nameList(agentsDown.map(agent => agent.name))}, so {plural(now.onHold.length, 'monitor')} probed from
         there {now.onHold.length === 1 ? 'is' : 'are'} on hold.
       </Alert>
     )
@@ -136,11 +136,11 @@ function Headline({ now, agentsDown }: { now: ReturnType<typeof standing>; agent
     )
   }
   if (now.answering.length === 0) {
-    return <Alert tone="info" title="Waiting for the first readings">New targets are probed straight away, so this fills in within a minute.</Alert>
+    return <Alert tone="info" title="Waiting for the first readings">New monitors are probed straight away, so this fills in within a minute.</Alert>
   }
   return (
     <Alert tone="success" title="Everything is answering">
-      All {plural(now.answering.length, 'target')} answered every probe last time round.
+      All {plural(now.answering.length, 'monitor')} answered every probe last time round.
     </Alert>
   )
 }
@@ -299,7 +299,7 @@ function Day({
   const troubled = slices.filter(slice => slice.down > 0).length
   // "All day" only of a day that was watched all through.
   const watched = slices.filter(slice => slice.watched > 0).length
-  const quiet = watched === slices.length ? 'Every target answered all day' : 'Every target answered whenever it was probed'
+  const quiet = watched === slices.length ? 'Every monitor answered all day' : 'Every monitor answered whenever it was probed'
   // A label every six hours, on the hour, on the clock times are shown by.
   const zone = displayTimeZone()
   const ticks = slices
@@ -349,7 +349,7 @@ function Day({
           {troubled === 0 ? quiet : `Something stopped answering for ${humanDuration(troubled * sliceMs)} in all. Click a red or amber stretch to see what.`}
         </p>
       </div>
-      <div className="mt-4 flex h-8 @xl/main:h-10 @xl/main:gap-px" role="group" aria-label={`The last 24 hours in quarters of an hour. ${troubled} had a target not answering.`}>
+      <div className="mt-4 flex h-8 @xl/main:h-10 @xl/main:gap-px" role="group" aria-label={`The last 24 hours in quarters of an hour. ${troubled} had a monitor not answering.`}>
         {slices.map(each => {
           const trouble = each.down > 0 || each.lossy > 0
           const style = { background: sliceColour(each) }
@@ -434,9 +434,9 @@ function Day({
         {shown.length === 0 && agentRows.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
             {slice && slice.lossy > 0
-              ? 'Only brief packet loss then, too short to list. The target charts show it.'
+              ? 'Only brief packet loss then, too short to list. The monitor charts show it.'
               : slice
-                ? 'Every target answered then.'
+                ? 'Every monitor answered then.'
                 : report.briefLossSpells > 0
                   ? `No outages and no lasting loss. Just ${plural(report.briefLossSpells, 'brief blip')} of packet loss.`
                   : 'No outages and no lasting loss.'}
@@ -457,7 +457,7 @@ function Day({
                       {agent.ongoing && <Badge size="sm" tone="danger">Now</Badge>}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      Could not be reached, so its targets took no readings. Click to list them.
+                      Could not be reached, so its monitors took no readings. Click to list them.
                     </span>
                   </span>
                   <span className="shrink-0 text-right font-mono text-xs text-muted-foreground">
@@ -529,11 +529,11 @@ function scopeNote(event: OverviewEvent, fromAgent: string | undefined): string 
     case 'local':
       return `Likely ${fromAgent ? `${fromAgent}'s` : 'your'} own network: something inside it went down too`
     case 'single':
-      return `Only this target: everything else probed from ${from} kept answering`
+      return `Only this monitor: everything else probed from ${from} kept answering`
     case 'beyond':
-      return `Out on the internet: ${others > 0 ? `${plural(others, 'other target')} went too, ` : ''}while your own network kept answering`
+      return `Out on the internet: ${others > 0 ? `${plural(others, 'other monitor')} went too, ` : ''}while your own network kept answering`
     case 'unclear':
-      return others > 0 ? `Along with ${plural(others, 'other target')} probed from ${from}` : null
+      return others > 0 ? `Along with ${plural(others, 'other monitor')} probed from ${from}` : null
   }
 }
 
@@ -589,7 +589,7 @@ function Network({
     <section className={PANEL} aria-labelledby="overview-network">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="overview-network" className="text-sm font-medium">Your groups</h2>
-        <ul className="flex flex-wrap gap-1.5" aria-label="Targets by kind of probe">
+        <ul className="flex flex-wrap gap-1.5" aria-label="Monitors by kind of probe">
           {kinds.map(([method, count]) => (
             <li key={method}>
               <Badge size="sm">{method} {count}</Badge>
@@ -655,7 +655,7 @@ function ProbeAgents({
         type="button"
         onClick={() => onShowTargetsFrom(key)}
         className={cn(TILE, 'w-full')}
-        aria-label={`${name}: show its targets in the sidebar`}
+        aria-label={`${name}: show its monitors in the sidebar`}
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="shrink-0 text-muted-foreground">{icon}</span>
@@ -663,7 +663,7 @@ function ProbeAgents({
           {badge}
         </span>
         <span className="truncate text-xs text-muted-foreground">
-          {members.length === 0 ? 'No targets' : `${plural(members.length, 'target')}: ${describeGroupHealth(summarizeGroupHealth(members))}`}
+          {members.length === 0 ? 'No monitors' : `${plural(members.length, 'monitor')}: ${describeGroupHealth(summarizeGroupHealth(members))}`}
         </span>
         {lines.filter(Boolean).map(line => (
           <span key={line} className="truncate text-xs text-muted-foreground"><Masked text value={line} /></span>
@@ -756,8 +756,8 @@ export function OverviewPage({
         <EmptyState
           icon={<ChartLine size={24} strokeWidth={1.75} />}
           title="Nothing is being watched yet"
-          description="Add a target to start measuring its latency and packet loss. The overview fills in from its first readings."
-          action={readOnly ? undefined : <Button onClick={onAddTarget}><Plus {...ICON} />Add target</Button>}
+          description="Add a monitor to start measuring its latency and packet loss. The overview fills in from its first readings."
+          action={readOnly ? undefined : <Button onClick={onAddTarget}><Plus {...ICON} />Add monitor</Button>}
         />
       </div>
     )
@@ -789,7 +789,7 @@ export function OverviewPage({
         <div className="min-w-0">
           <h1 className={PANE_TITLE}>Overview</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {plural(targets.length, 'target')} {sourcesLine}
+            {plural(targets.length, 'monitor')} {sourcesLine}
             {now.paused > 0 ? `, ${now.paused} paused` : ''}
           </p>
         </div>

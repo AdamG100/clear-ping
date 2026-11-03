@@ -167,7 +167,7 @@ describe('decodeShare', () => {
   it('refuses more targets than a link may hold', async () => {
     const tooMany = Array.from({ length: MAX_SHARED_TARGETS + 1 }, (_, index) => ({ h: `host-${index}.example.com` }))
     const decoded = await decodeShare(await codeFor(tooMany))
-    expect(decoded).toEqual({ ok: false, error: `A share link holds at most ${MAX_SHARED_TARGETS} targets.` })
+    expect(decoded).toEqual({ ok: false, error: `A share link holds at most ${MAX_SHARED_TARGETS} monitors.` })
   })
 
   it('gives up on a link that unpacks to far more than a link holds', async () => {

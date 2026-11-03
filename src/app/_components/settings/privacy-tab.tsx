@@ -128,7 +128,7 @@ export function PrivacyTab({ canChange, onOpenRouting }: { canChange: boolean; o
           <p className={HINT}>
             Hidden addresses show as dots: {'203.0.113.10'} becomes <span className="font-mono">{maskAddress('203.0.113.10')}</span>, and{' '}
             {'vps1.example.net'} becomes <span className="font-mono">{maskAddress('vps1.example.net')}</span>. That covers targets,
-            traceroutes and probe agents, and target names that are addresses. Names you gave stay, so targets can still be told apart.
+            traceroutes and probe agents, and monitor names that are addresses. Names you gave stay, so monitors can still be told apart.
             Routing&apos;s prefixes and AS numbers are public in BGP, so they stay too.
           </p>
         </div>
@@ -153,7 +153,7 @@ export function PrivacyTab({ canChange, onOpenRouting }: { canChange: boolean; o
           disabled={locked}
           onChange={on => void change({ hideFromAssistants: on })}
           label="Hide addresses from AI assistants"
-          detail="Everything ClearPing gives an assistant over MCP has its addresses hidden, so they never reach the company that runs it. The assistant can still name, compare and explain your targets."
+          detail="Everything ClearPing gives an assistant over MCP has its addresses hidden, so they never reach the company that runs it. The assistant can still name, compare and explain your monitors."
         />
       </section>
 
@@ -195,7 +195,7 @@ export function PrivacyTab({ canChange, onOpenRouting }: { canChange: boolean; o
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className={`${HINT} min-w-0 max-w-xl`}>
             Routing, while it is on, also connects out: to RIPE for routes and to PeeringDB for internet exchanges. Probes only reach
-            the targets you add.
+            the monitors you add.
           </p>
           {onOpenRouting && (
             <Button type="button" size="sm" variant="secondary" onClick={onOpenRouting}>

@@ -3,11 +3,11 @@
 A probe agent is a small program that takes readings from another machine. It
 has nothing to do with AI agents or the assistant.
 
-One ClearPing dashboard runs everything: the targets, the charts, the alerts.
-Most targets are probed from the machine the dashboard runs on. A probe agent
-lets a target be probed from somewhere else instead. For example, the dashboard
+One ClearPing dashboard runs everything: the monitors, the charts, the alerts.
+Most monitors are probed from the machine the dashboard runs on. A probe agent
+lets a monitor be probed from somewhere else instead. For example, the dashboard
 can run at home while a probe agent on a VPS in Germany measures some of the
-targets. Those readings show the network as seen from Germany, and they sit on
+monitors. Those readings show the network as seen from Germany, and they sit on
 the same dashboard beside everything else.
 
 - [How it works](#how-it-works)
@@ -69,10 +69,10 @@ every probe agent in a table you can search by name, address or machine and
 filter by status: its name (with the name the machine gives itself under it), its
 IP and port, how it is reached (**Tailnet**, **Private network** or
 **Internet**), its version, its status, when it was last seen and how many
-targets it probes. **Details** on a row has everything else about it: its machine, version, certificate
-and targets, and the buttons to test the connection, rename it or change
+monitors it probes. **Details** on a row has everything else about it: its machine, version, certificate
+and monitors, and the buttons to test the connection, rename it or change
 where it is reached, make a new token or remove it. A renamed or moved probe
-agent keeps its pinned certificate, and its targets keep their history.
+agent keeps its pinned certificate, and its monitors keep their history.
 
 A lost token can't be shown again. **New token** in its details makes
 another, and the old one stops working straight away. Restart the agent with
@@ -136,7 +136,7 @@ To keep it in a folder instead (`-v ./data:/data`), create the folder and give
 it to uid 1000 first, which the container runs as, or it stops with
 "permission denied": `mkdir -p data && sudo chown 1000:1000 data`.
 
-For IPv6 targets, Docker's default network has no IPv6. Run the container with
+For IPv6 monitors, Docker's default network has no IPv6. Run the container with
 `--network host` instead of `-p …`, and set `CLEARPING_PROBE_AGENT_LISTEN` to
 the address and port to listen on.
 
@@ -214,28 +214,28 @@ Taking a probe off a monitor keeps its readings, which stay in the history
 until they age out; putting it back picks them up again. A probe agent cannot
 be removed while a monitor is measured from it.
 
-Everywhere a target appears, it says where it is probed from:
+Everywhere a monitor appears, it says where it is probed from:
 
-- **The sidebar.** A purple *Remote* badge beside the target's type, which
+- **The sidebar.** A purple *Remote* badge beside the monitor's type, which
   names the agent when you point at it, or *2 probes* for a monitor measured
   from several. Its dot is green while any probe reaches it, with the loss of
   the worst, and its note names the probes that fail. The **Measured by**
   filter under the search box lists only the monitors one probe measures.
-- **The target's page.** A *Probed from …* line under the address. The
+- **The monitor's page.** A *Probed from …* line under the address. The
   *Route* panel says *traced from …*, because a traceroute also runs from the
   agent.
-- **Group comparisons.** Each line from an agent is named *Target · Agent*.
+- **Group comparisons.** Each line from an agent is named *Monitor · Agent*.
 - **Alerts.** *Cloudflare DNS is not responding (from Germany VPS)*, with a
   *Probed from* line in the details.
 - **The Overview.** *Where readings are taken from* has a tile for this server
-  and each probe agent, with how it is doing and how many targets it probes. A
+  and each probe agent, with how it is doing and how many monitors it probes. A
   probe agent that could not be reached has a row in the day's problems, listing
-  its targets, and a fault among its targets is judged by what else it was
+  its monitors, and a fault among its monitors is judged by what else it was
   probing ([overview.md](overview.md)).
 - **Routing.** Each probe agent traces into a watched prefix from where it is,
   and its network is picked out across the page, unless you leave it out with
   its chip ([bgp-monitoring.md](bgp-monitoring.md)).
-- **Assistant answers.** Targets from an agent come back with `probedFrom`,
+- **Assistant answers.** Monitors from an agent come back with `probedFrom`,
   and the ISP report says those were measured from another machine.
 
 Changing the probes of a monitor keeps its history. The activity record says
@@ -249,15 +249,15 @@ them earlier.
 The dashboard asks each probe agent how it is once a minute. If an agent
 can't be reached:
 
-- **No readings are taken for its targets.** A dead agent never shows up as
-  your targets being down, so it never sets off their alerts either.
-- Its targets show a grey status dot that says *No readings: probe agent … is
+- **No readings are taken for its monitors.** A dead agent never shows up as
+  your monitors being down, so it never sets off their alerts either.
+- Its monitors show a grey status dot that says *No readings: probe agent … is
   offline*. Their *Remote* badge turns amber, and their page says no readings
   are being taken.
 - On the chart, the time it was down is shaded *Probe agent offline: no
   readings*.
 - The activity record notes when it was lost and when it came back.
-- **Probe now** and **Trace now** say the agent can't be reached, and record
+- **Measure now** and **Trace now** say the agent can't be reached, and record
   nothing.
 
 Readings start again on the first check after it is back.

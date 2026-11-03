@@ -46,7 +46,7 @@ const PATTERN: Record<Exclude<LossPattern, "none">, { label: string; color: stri
 const SOURCE: Record<LossSource, string | null> = {
   local: "Likely source: your local network",
   shared: "Likely source: your connection or ISP",
-  "own-path": "Likely source: this target's path",
+  "own-path": "Likely source: this monitor's path",
   unknown: null,
 }
 
@@ -228,17 +228,17 @@ function verdict(analysis: LossAnalysis, unit: string): ReactNode {
         ? <>{lead("Likely source: your connection or ISP.")} {names(sharing)} lost {unit} at the same time, and nothing on your local network did.</>
         : <>{lead(`Shared with ${names(sharing)}.`)} The fault is on the part of the path they have in common. Add a target for your router to tell your own network from your ISP.</>
     case "own-path":
-      return <>{lead("Likely source: this target's path.")} No other target lost {unit} at the same time more often than chance, so the fault is past the point where the paths split.</>
+      return <>{lead("Likely source: this monitor's path.")} No other monitor lost {unit} at the same time more often than chance, so the fault is past the point where the paths split.</>
     default:
       return analysis.sameMoments.length === 0
-        ? <>No other targets to compare with. Add your router and a public address such as 1.1.1.1 to locate the fault.</>
-        : <>Not enough loss to correlate with other targets yet.</>
+        ? <>No other monitors to compare with. Add your router and a public address such as 1.1.1.1 to locate the fault.</>
+        : <>Not enough loss to correlate with other monitors yet.</>
   }
 }
 
 function CorrelationTile({ analysis, unit }: { analysis: LossAnalysis; unit: string }) {
   return (
-    <Tile icon={<Network size={15} strokeWidth={1.75} />} title="Other targets at the same time">
+    <Tile icon={<Network size={15} strokeWidth={1.75} />} title="Other monitors at the same time">
       {analysis.sameMoments.length > 0 && (
         <ul className="space-y-2.5">
           {analysis.sameMoments.map(each => (

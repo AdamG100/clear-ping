@@ -14,7 +14,11 @@ const nextConfig: NextConfig = {
   // Addresses that were renamed keep working, for bookmarks and for the
   // browser's history.
   async redirects() {
-    return [{ source: "/settings/probe-agents", destination: "/settings/probes", permanent: true }];
+    return [
+      { source: "/settings/probe-agents", destination: "/settings/probes", permanent: true },
+      // Monitors were called targets.
+      { source: "/targets/:path*", destination: "/monitors/:path*", permanent: true },
+    ];
   },
 
   async headers() {

@@ -29,7 +29,7 @@ function plural(count: number, noun: string): string {
 
 /** "3 targets", "a group", "3 targets and 2 groups". */
 function describe(targets: number, groups: number): string {
-  return [targets > 0 ? plural(targets, 'target') : '', groups > 0 ? plural(groups, 'group') : '']
+  return [targets > 0 ? plural(targets, 'monitor') : '', groups > 0 ? plural(groups, 'group') : '']
     .filter(Boolean)
     .join(' and ')
 }
@@ -92,11 +92,11 @@ function DeleteTargetsBody({ targets, groupOrders, groups, onDelete, onClose }: 
 
       {nothing ? (
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Ticking a group deletes the group too, with everything in it. To stop probing a target but keep what it has
+          Ticking a group deletes the group too, with everything in it. To stop probing a monitor but keep what it has
           recorded, pause it instead.
         </p>
       ) : (
-        <Alert tone="danger" title={everything ? 'Every target there is' : `${what} will be deleted`}>
+        <Alert tone="danger" title={everything ? 'Every monitor there is' : `${what} will be deleted`}>
           {chosen.length > 0
             ? `Their measurement history, alert rules and saved routes go with them, and so does any group left empty. This cannot be undone.`
             : `${going.all === 1 ? 'It has' : 'They have'} nothing in ${going.all === 1 ? 'it' : 'them'}, so nothing else goes.`}
@@ -142,8 +142,8 @@ export function DeleteTargetsDialog({ open, onOpenChange, ...body }: DeleteTarge
       {/* Wider than Arc's dialog: a name, its address and the delete button's
           question all need the room, and at 440px the button was cut off. */}
       <DialogContent
-        title="Delete targets"
-        description="Search, then tick targets one by one or a whole group at a time."
+        title="Delete monitors"
+        description="Search, then tick monitors one by one or a whole group at a time."
         style={{ width: 'min(calc(100vw - 2rem), 600px)' }}
       >
         {/* Inside the dialog's content, which is unmounted on close, so every

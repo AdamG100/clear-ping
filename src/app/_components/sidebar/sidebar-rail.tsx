@@ -205,8 +205,8 @@ export function SidebarRail({
             </span>
           </Beside>
         )}
-        <Beside name="Share or import targets">
-          <Button type="button" variant="ghost" size="sm" onClick={onShare} aria-label="Share or import targets">
+        <Beside name="Share or import monitors">
+          <Button type="button" variant="ghost" size="sm" onClick={onShare} aria-label="Share or import monitors">
             <Share2 {...ICON} />
           </Button>
         </Beside>
@@ -216,8 +216,8 @@ export function SidebarRail({
           </Button>
         </Beside>
         {onAddTarget && (
-          <Beside name="Add target">
-            <Button type="button" size="sm" onClick={onAddTarget} aria-label="Add target">
+          <Beside name="Add monitor">
+            <Button type="button" size="sm" onClick={onAddTarget} aria-label="Add monitor">
               <Plus {...ICON} />
             </Button>
           </Beside>

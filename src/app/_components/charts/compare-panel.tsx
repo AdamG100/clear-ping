@@ -393,7 +393,7 @@ export function ComparePanel({
             <p className="max-w-sm text-xs text-muted-foreground">
               {zoom
                 ? 'No probe ran in the period you selected. Reset the zoom to return to the full range.'
-                : 'Lines appear here as soon as these targets have been probed. Pick a wider time range to look further back.'}
+                : 'Lines appear here as soon as these monitors have been probed. Pick a wider time range to look further back.'}
             </p>
           </div>
         ) : (
