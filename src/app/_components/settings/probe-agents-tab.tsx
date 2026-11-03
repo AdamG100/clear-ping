@@ -68,6 +68,16 @@ interface Made {
   renewed: boolean
 }
 
+/** The page in parts, each a tab: the probes themselves, where they are, the monitors they measure, and going offline. */
+type Part = 'probes' | 'locations' | 'monitors' | 'offline'
+
+const PARTS: { value: Part; label: string }[] = [
+  { value: 'probes', label: 'Probes' },
+  { value: 'locations', label: 'Locations' },
+  { value: 'monitors', label: 'Monitors' },
+  { value: 'offline', label: 'Going offline' },
+]
+
 type Way = 'docker' | 'compose' | 'linux'
 
 const WAYS: { value: Way; label: string }[] = [
@@ -183,6 +193,7 @@ export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTarge
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [detailsId, setDetailsId] = useState<string | null>(null)
+  const [part, setPart] = useState<Part>('probes')
 
   const load = useCallback(async () => {
     const { ok, body } = await send('/api/security/probe-agents', 'GET')
@@ -284,8 +295,8 @@ export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTarge
   })
   const rows = shown.map(agent => ({ ...agent, agent }))
 
-  return (
-    <div className="space-y-5 text-foreground">
+  const probesPart = (
+    <div className="space-y-5">
       <LocalProbe
         version={loaded.dashboardVersion}
         oldestCheck={oldestCheck && (
@@ -295,14 +306,12 @@ export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTarge
         )}
         onRenamed={onProbesChanged}
       />
-      <ProbeHeartbeat />
-      <ProbePlaces />
-      <DuplicateMonitors />
-      <AddProbeToMonitors />
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className={`${HINT} min-w-0 max-w-xl pt-1`}>
-          Install a probe agent on another machine, add it here, then tick it under Probes in a monitor&apos;s settings.
-          Its readings are then taken from there, beside those of any other probe the monitor has.
+        <p className={`${HINT} min-w-0 max-w-2xl pt-1`}>
+          A probe agent is a small ClearPing program you install on another machine, such as a VPS in another country or a
+          box at a branch office. The dashboard connects to it over HTTPS, checks its certificate and token, and asks it to
+          take readings from where it is. Add it here, start it with the commands shown, then tick it under Probes in a
+          monitor&apos;s settings: that monitor is then measured from there as well as from its other probes.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="secondary" loading={refreshing} onClick={() => void refresh()}>
@@ -446,7 +455,7 @@ export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTarge
                   {
                     key: 'address',
                     label: 'IP and port',
-                    render: (_, { agent }) => <span className="break-all font-mono text-xs"><Masked value={addressOf(agent)} /></span>,
+                    render: (_, { agent }) => <span className="whitespace-nowrap font-mono text-xs"><Masked value={addressOf(agent)} /></span>,
                   },
                   {
                     key: 'exposure',
@@ -459,8 +468,9 @@ export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTarge
                     key: 'version',
                     label: 'Version',
                     render: (_, { agent }) => (
-                      <span className="inline-flex items-center gap-2">
-                        <span className={cn('font-mono text-xs', agent.version ? 'text-foreground' : 'text-muted-foreground')}>
+                      // The version, then whether it is behind, under it where the column is narrow: never broken a digit to a line.
+                      <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className={cn('whitespace-nowrap font-mono text-xs', agent.version ? 'text-foreground' : 'text-muted-foreground')}>
                           {agent.version ?? '—'}
                         </span>
                         {isOutdated(agent, loaded.dashboardVersion) && <OutdatedBadge />}
@@ -478,7 +488,7 @@ export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTarge
                     key: 'lastSeenAt',
                     label: 'Last seen',
                     render: (_, { agent }) => (
-                      <span className="text-xs text-muted-foreground" title={agent.lastSeenAt ? when(agent.lastSeenAt) : undefined}>
+                      <span className="whitespace-nowrap text-xs text-muted-foreground" title={agent.lastSeenAt ? when(agent.lastSeenAt) : undefined}>
                         {ago(agent.lastSeenAt, now)}
                       </span>
                     ),
@@ -513,6 +523,37 @@ export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTarge
           </>
         )}
       </section>
+    </div>
+  )
+
+  return (
+    <div className="space-y-5 text-foreground">
+      {/* With no probe agent, the local probe is the only one: nothing to
+          locate, merge or watch for going offline, so no tabs either. */}
+      {agents.length === 0 ? probesPart : (
+        <Tabs value={part} onValueChange={value => setPart(value as Part)}>
+          <TabsList aria-label="Probe settings">
+            {PARTS.map(option => (
+              <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>
+            ))}
+          </TabsList>
+          <TabsContent value="probes">
+            <div className="pt-2 text-foreground">{probesPart}</div>
+          </TabsContent>
+          <TabsContent value="locations">
+            <div className="pt-2 text-foreground"><ProbePlaces /></div>
+          </TabsContent>
+          <TabsContent value="monitors">
+            <div className="space-y-5 pt-2 text-foreground">
+              <AddProbeToMonitors />
+              <DuplicateMonitors />
+            </div>
+          </TabsContent>
+          <TabsContent value="offline">
+            <div className="pt-2 text-foreground"><ProbeHeartbeat /></div>
+          </TabsContent>
+        </Tabs>
+      )}
 
       <Dialog open={adding} onOpenChange={open => { if (!open) closeAdding() }}>
         <DialogContent

@@ -1428,9 +1428,11 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
   const current = sections.find(item => item.value === section) ?? sections[0]
 
   return (
-    // Settings read best at the width of a form, not of a monitor: the whole
-    // page, header and all, is kept to it, so the header lines up with the rest.
-    <div className={cn(PANE, 'max-w-6xl')}>
+    // Wide enough for the tables in it (probe agents, accounts, activity) to
+    // show every column without scrolling on a desktop; the text in it keeps
+    // its own measure, so prose does not run the whole width. The whole page,
+    // header and all, is kept to it, so the header lines up with the rest.
+    <div className={cn(PANE, 'max-w-[96rem]')}>
       <header className={PANE_HEADER}>
         <div className="min-w-0">
           <h1 className={PANE_TITLE}>Settings</h1>
