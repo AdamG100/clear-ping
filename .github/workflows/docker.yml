@@ -12,6 +12,9 @@ name: Docker image
 #                     and install script on it
 #   tag v1.2.3        ghcr.io/<owner>/<repo>:1.2.3 and :1.2
 #
+# When nothing that goes into the images has changed (docs, tests, workflows)
+# nothing is built or released, and the commits go out with the next release.
+#
 # Every build of main is a deployment with a version number of its own: one
 # more than the last release, as a patch unless a commit since then asks for a
 # minor or major one with a trailer in its message, `Release: minor` or
@@ -30,6 +33,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      force:
+        description: Build even if nothing that goes into the images has changed
+        type: boolean
+        default: true
 
 concurrency:
   group: docker-${{ github.ref }}
@@ -52,6 +60,7 @@ jobs:
       built_at: ${{ steps.number.outputs.built_at }}
       image: ${{ steps.number.outputs.image }}
       release: ${{ steps.number.outputs.release }}
+      build: ${{ steps.changes.outputs.build }}
 
     steps:
       # Every tag, to count on from, and the commits since, for their trailers.
@@ -60,6 +69,31 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      # Compares a pull request with main, and main with its last release, so a
+      # build that was cancelled or failed is not forgotten by the next push.
+      # What is listed here cannot change an image; anything else builds.
+      - name: Look for changes to the images
+        id: changes
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          base=
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base=HEAD^1
+          elif [[ "$GITHUB_REF" != refs/tags/v* ]] && [ "$FORCE" != true ]; then
+            base=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          fi
+
+          build=true
+          if [ -n "$base" ]; then
+            files=$(git diff --name-only "$base" HEAD)
+            if [ -z "$files" ] || ! grep -qvE '^(docs/|\.github/|\.claude/|src/lib/__fixtures__/)|\.md$|\.test\.ts$|^(\.nvmrc|\.gitignore|\.env\.example|eslint\.config\.mjs|vitest\.config\.mts|compose[^/]*\.example\.yaml)$' <<< "$files"; then
+              build=false
+              echo "Nothing to build: no change to what goes into the images since $base."
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
 
       - name: Number the build
         id: number
@@ -117,6 +151,7 @@ jobs:
   build:
     name: Build (${{ matrix.arch }})
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -353,6 +388,7 @@ jobs:
   probe-agent:
     name: Probe agent (${{ matrix.arch }})
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false

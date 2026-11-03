@@ -1,0 +1,95 @@
+name: Auto-merge
+
+# Merges a pull request into main, which releases it, once everything has passed
+# on the commit at its head:
+#
+#   the owner's pull requests     Docker image, Checks and Security review.
+#                                 Drafts wait, so a draft is how to hold one back.
+#   Dependabot's Node updates     Docker image and Checks.
+#
+# Anything else stays open for a person, as does a pull request that changes a
+# workflow: GitHub does not let this job's token do that, so the job fails and
+# the merge is done by hand.
+#
+# It runs from main's copy of this file with nothing checked out, so nothing in
+# the pull request runs with this job's token. A merge made with that token
+# starts no workflow of its own, so the release is asked for at the end. It only
+# builds if something that goes into the images has changed (docker.yml).
+
+on:
+  workflow_run:
+    workflows: [Docker image, Checks, Security review]
+    types: [completed]
+
+# The workflows can finish together, and only one of these should merge.
+concurrency:
+  group: auto-merge-${{ github.event.workflow_run.head_branch }}
+
+jobs:
+  merge:
+    name: Merge and release
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write # To start the Docker image workflow.
+
+    steps:
+      - name: Merge and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          TESTED: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          passed() {
+            [ "$(gh run list --workflow "$1" --commit "$TESTED" --event pull_request --limit 1 \
+              --json conclusion --jq '.[0].conclusion')" = success ]
+          }
+          leave() {
+            echo "Leaving $BRANCH open: $1."
+            exit 0
+          }
+
+          pr=$(gh pr view "$BRANCH" --json author,baseRefName,headRefOid,isDraft,state,title)
+          field() { jq -r "$1" <<< "$pr"; }
+
+          [ "$(field .state)" = OPEN ] || leave "it is not open"
+          [ "$(field .baseRefName)" = main ] || leave "it is not for main"
+          [ "$(field .isDraft)" = false ] || leave "it is a draft"
+          [ "$(field .headRefOid)" = "$TESTED" ] || leave "it has a newer commit than this run tested"
+
+          # Whichever workflow finishes last gets past these. The Security
+          # review is not checked for Dependabot, whose pull requests skip it.
+          passed docker.yml || leave "the Docker image has not passed yet"
+          passed checks.yml || leave "the checks have not passed yet"
+
+          author=$(field .author.login)
+          if [ "$author" = "$OWNER" ]; then
+            passed security.yml || leave "the security review has not passed yet"
+            # Kept as separate commits, because the patch notes and the version
+            # number are read from each one (scripts/release-notes.mjs).
+            gh pr merge "$BRANCH" --merge --delete-branch --match-head-commit "$TESTED"
+          elif [ "$author" = app/dependabot ] && [[ "$BRANCH" == dependabot/docker/* ]]; then
+            # The subject and body are the patch notes, so not Dependabot's own.
+            # A title without a version is a rebuild of the same Node, which
+            # moves only the digest.
+            version=$(field .title | sed -nE 's/.* to ([0-9]+\.[0-9]+\.[0-9]+)-.*/\1/p')
+            if [ -n "$version" ]; then
+              subject="Update Node.js to $version"
+            else
+              subject="Update the Node.js base image"
+            fi
+            gh pr merge "$BRANCH" --squash --delete-branch --match-head-commit "$TESTED" \
+              --subject "$subject" \
+              --body "The dashboard, the probe agent and its standalone binaries are built on it."
+          else
+            leave "$author's pull requests are not merged automatically"
+          fi
+
+          gh workflow run docker.yml --ref main -f force=false

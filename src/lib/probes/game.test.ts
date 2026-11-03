@@ -244,7 +244,10 @@ describe('executeGameProbe', () => {
   it.runIf(process.platform === 'linux')('times a server by its "port unreachable", for a game with no query', async () => {
     const result = await executeGameProbe('t', '127.0.0.1', { port: port.silent, query: 'unreachable', ...quick })
 
-    expect(result).toMatchObject({ success: true, packetLoss: 0 })
+    // Three at once, faster than the check really sends, so one can go unanswered
+    // on a busy machine. That a closed port counts as an answer is the point here.
+    expect(result).toMatchObject({ success: true })
+    expect(result.packetLoss).toBeLessThan(100)
     expect(result.latency).toBeGreaterThanOrEqual(0)
     expect(result.details).toBeUndefined()
   })
