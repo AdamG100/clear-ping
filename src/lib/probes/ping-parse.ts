@@ -98,6 +98,60 @@ export function pingArgs(
   }
 }
 
+/**
+ * The argv for a whole round from one `ping`, on Linux. `-W` waits for an answer
+ * after the last packet has gone. Never `-w`: with a deadline, `-c` means that
+ * many replies rather than that many packets, and a lossy path would be sent
+ * more than it was meant to get. `-n` so a reply is never looked up by name.
+ */
+export function pingRoundArgs(host: string, count: number, spacingMs: number, timeoutMs: number, family?: AddressFamily): string[] {
+  const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
+  return ['-n', '-c', String(count), '-i', String(spacingMs / 1000), '-W', String(timeoutSeconds), ...(family ? [`-${family}`] : []), host]
+}
+
+export interface ParsedPingRound {
+  /** Packets that went out, or null when `ping` never got as far as saying. */
+  sent: number | null
+  /** The time of each packet answered, in the order they were sent. */
+  latencies: number[]
+  /** A human-readable reason, when the output offers one. */
+  error?: string
+}
+
+const ROUND_REPLY = /icmp_seq=(\d+).*?\btime=(\d+(?:\.\d+)?)\s*ms/i
+const ROUND_SUMMARY = /(\d+)\s+packets transmitted/i
+
+/**
+ * Parse what one `ping` printed for a whole round. A duplicate of a reply is one
+ * packet answered, not two, and an answer later than the timeout is a lost
+ * packet, as it is when each packet is sent on its own.
+ */
+export function parsePingRound(stdout: string, timeoutMs: number, fallbackError?: string): ParsedPingRound {
+  const answered = new Map<number, number>()
+  for (const line of (stdout ?? '').split(/\r?\n/)) {
+    const match = ROUND_REPLY.exec(line)
+    if (!match) continue
+    const sequence = Number(match[1])
+    const latency = parseFloat(match[2])
+    if (!answered.has(sequence) && Number.isFinite(latency) && latency <= timeoutMs) answered.set(sequence, latency)
+  }
+  const summary = ROUND_SUMMARY.exec(stdout ?? '')
+  return {
+    sent: summary ? Number(summary[1]) : null,
+    latencies: [...answered].sort((a, b) => a[0] - b[0]).map(([, latency]) => latency),
+    error: firstFailureLine(stdout ?? '') ?? fallbackError,
+  }
+}
+
+/**
+ * Whether this `ping` turned the round's flags down: an older one will not send
+ * this fast without root, and BusyBox's does not know them all. Not the same as
+ * failing to reach anything, which says nothing about the program.
+ */
+export function pingRefusedRound(stderr: string): boolean {
+  return /minimal interval|cannot flood|too small|invalid (?:option|argument|-)|unrecognized option|usage:/i.test(stderr ?? '')
+}
+
 /** The binary to run. Only macOS still ships IPv6 ping as a separate program. */
 export function pingCommand(
   platform: PingPlatform = process.platform as PingPlatform,

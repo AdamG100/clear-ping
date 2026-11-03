@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidPingHost, parsePingOutput, pingArgs, pingCommand } from './ping-parse'
+import { isValidPingHost, parsePingOutput, parsePingRound, pingArgs, pingCommand, pingRefusedRound, pingRoundArgs } from './ping-parse'
 import * as fixture from '../__fixtures__/ping-output'
 
 describe('parsePingOutput', () => {
@@ -136,4 +136,67 @@ describe('isValidPingHost', () => {
     '',
     'a b',
   ])('rejects %j', host => expect(isValidPingHost(host)).toBe(false))
+})
+
+describe('pingRoundArgs', () => {
+  it('asks for the packets, their spacing and a timeout in seconds', () => {
+    expect(pingRoundArgs('192.0.2.1', 20, 50, 1000, 4)).toEqual(['-n', '-c', '20', '-i', '0.05', '-W', '1', '-4', '192.0.2.1'])
+  })
+
+  it('never sets a deadline, which would send more than it was asked to on a lossy path', () => {
+    expect(pingRoundArgs('192.0.2.1', 20, 50, 1000)).not.toContain('-w')
+  })
+
+  it('keeps the host last, where it cannot be read as a flag', () => {
+    expect(pingRoundArgs('2001:db8::1', 5, 50, 1500, 6).at(-1)).toBe('2001:db8::1')
+    expect(pingRoundArgs('2001:db8::1', 5, 50, 1500, 6)).toEqual(expect.arrayContaining(['-6', '-W', '2']))
+  })
+})
+
+describe('parsePingRound', () => {
+  it('reads every reply in the order they were sent', () => {
+    expect(parsePingRound(fixture.LINUX_ROUND, 1000)).toEqual({ sent: 4, latencies: [10, 12, 13, 15] })
+  })
+
+  it('counts a reply that arrives twice once, at its first time', () => {
+    expect(parsePingRound(fixture.LINUX_ROUND_WITH_LOSS, 1000)).toEqual({ sent: 4, latencies: [10, 12] })
+  })
+
+  it('puts replies back in the order they were sent, which jitter is worked out from', () => {
+    const output = '64 bytes from 192.0.2.1: icmp_seq=2 ttl=57 time=5.0 ms\n64 bytes from 192.0.2.1: icmp_seq=1 ttl=57 time=90.0 ms'
+    expect(parsePingRound(output, 1000).latencies).toEqual([90, 5])
+  })
+
+  it('counts an answer later than the timeout as lost', () => {
+    const output = '64 bytes from 192.0.2.1: icmp_seq=1 ttl=57 time=1200 ms\n1 packets transmitted, 1 received, 0% packet loss, time 0ms'
+    expect(parsePingRound(output, 1000)).toMatchObject({ sent: 1, latencies: [] })
+  })
+
+  it('does not take an unreachable line for a reply, and keeps it as the reason', () => {
+    const round = parsePingRound(fixture.LINUX_ROUND_UNREACHABLE, 1000)
+    expect(round.latencies).toEqual([])
+    expect(round.error).toMatch(/unreachable/i)
+  })
+
+  it('says it does not know what went out when ping never got as far as saying', () => {
+    expect(parsePingRound('', 1000, 'ping: connect: Network is unreachable')).toEqual({
+      sent: null,
+      latencies: [],
+      error: 'ping: connect: Network is unreachable',
+    })
+  })
+})
+
+describe('pingRefusedRound', () => {
+  it.each([
+    'ping: cannot flood; minimal interval allowed for user is 200ms',
+    "ping: invalid option -- 'n'",
+    'ping: option value too small: 0.05',
+    'Usage: ping [OPTIONS] HOST',
+  ])('takes %j as this ping not doing rounds', stderr => expect(pingRefusedRound(stderr)).toBe(true))
+
+  it.each(['', 'ping: connect: Network is unreachable', 'ping: sendmsg: Operation not permitted', 'Command failed: ping'])(
+    'takes %j as nothing to do with rounds',
+    stderr => expect(pingRefusedRound(stderr)).toBe(false)
+  )
 })

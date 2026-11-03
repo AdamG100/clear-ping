@@ -2,7 +2,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ProbeIpVersion, ProbeResult } from '@/types/probe';
 import { classifyHost, normalizeHost, type AddressFamily } from './host';
-import { parsePingOutput, pingArgs, pingCommand } from './ping-parse';
+import { logReading } from './log';
+import { parsePingOutput, parsePingRound, pingArgs, pingCommand, pingRefusedRound, pingRoundArgs, type ParsedPingRound } from './ping-parse';
 import { failedProbe, summarizeProbe } from './result';
 import { resolveHost } from './resolve';
 
@@ -13,8 +14,7 @@ export { isValidPingHost } from './ping-parse';
 /**
  * ICMP ping probe.
  *
- * A probe sends `count` echo requests to a host, one at a time, spaced by
- * `interval` ms, and reports:
+ * A probe sends `count` echo requests to a host and reports:
  *
  *   packetLoss = (sent - received) / sent * 100
  *   latency    = mean RTT of the received packets
@@ -26,6 +26,12 @@ export { isValidPingHost } from './ping-parse';
  *
  * Design notes:
  *
+ * - On Linux one `ping` sends every packet of a round, spaced ROUND_SPACING_MS
+ *   apart whether or not the one before has been answered. Starting a program
+ *   for each packet was most of what a reading cost: twenty a reading, thirty
+ *   monitors a minute, is ten programs a second, every second. Elsewhere, and
+ *   where `ping` will not send that fast without root, each packet is still
+ *   sent by a `ping` of its own, one after the other.
  * - Every packet in a probe uses the *same* timeout. A per-attempt backoff
  *   would make packets later in the run more forgiving than earlier ones, so
  *   the resulting loss percentage would depend on packet ordering rather than
@@ -47,7 +53,7 @@ export interface PingOptions {
   count?: number;
   /** Per-packet reply timeout, in milliseconds. */
   timeout?: number;
-  /** Delay between consecutive packets, in milliseconds. */
+  /** Delay between consecutive packets, in milliseconds. Otherwise ROUND_SPACING_MS when one `ping` sends them all, and DEFAULTS.interval after each answer when not. */
   interval?: number;
   /** Hard ceiling on the whole probe, in milliseconds. */
   maxDuration?: number;
@@ -60,6 +66,34 @@ const DEFAULTS = {
   timeout: 1000,
   interval: 10,
 } as const;
+
+/**
+ * How far apart the packets of a round go. About what a healthy path gets when
+ * each waits for the answer to the one before, so a round takes about a second
+ * and does not look like a flood to a router limiting how often it answers.
+ */
+const ROUND_SPACING_MS = 50;
+
+/** Set once this machine's `ping` has turned the round's flags down: it will again. */
+let roundsRefused = false;
+
+/** Send every packet of a round from one `ping`. Null when this `ping` will not, and they have to go one at a time. */
+async function sendRound(address: string, family: AddressFamily, count: number, spacingMs: number, timeoutMs: number): Promise<ParsedPingRound | null> {
+  try {
+    const { stdout } = await execFileAsync(pingCommand(undefined, family), pingRoundArgs(address, count, spacingMs, timeoutMs, family), {
+      timeout: count * spacingMs + timeoutMs + 2000,
+    });
+    return parsePingRound(stdout, timeoutMs);
+  } catch (error) {
+    // A non-zero exit is ordinary packet loss; the useful output is on stdout.
+    const e = error as { stdout?: string; stderr?: string; message?: string };
+    if (pingRefusedRound(e.stderr ?? '')) {
+      roundsRefused = true;
+      return null;
+    }
+    return parsePingRound(e.stdout ?? '', timeoutMs, (e.stderr || e.message || 'ping failed').trim());
+  }
+}
 
 /** Send one echo request and parse the reply. */
 async function sendPacket(address: string, family: AddressFamily, timeoutMs: number) {
@@ -95,6 +129,7 @@ export async function executePing(
   const count = Math.max(1, Math.floor(options.count ?? DEFAULTS.count));
   const timeout = Math.max(100, Math.floor(options.timeout ?? DEFAULTS.timeout));
   const interval = Math.max(0, Math.floor(options.interval ?? DEFAULTS.interval));
+  const spacing = Math.max(2, Math.floor(options.interval ?? ROUND_SPACING_MS));
   const maxDuration = options.maxDuration ?? count * (timeout + interval) + 2000;
 
   const timestamp = new Date();
@@ -131,7 +166,16 @@ export async function executePing(
   const latencies: number[] = [];
   let lastError: string | undefined;
 
-  for (let i = 0; i < count; i++) {
+  const round = process.platform === 'linux' && !roundsRefused ? await sendRound(address, family, count, spacing, timeout) : null;
+  if (round) {
+    // Only what is known to have gone out counts, should `ping` have been stopped part-way.
+    sent = round.sent ?? (round.latencies.length > 0 ? round.latencies.length : count);
+    received = round.latencies.length;
+    latencies.push(...round.latencies);
+    lastError = round.error;
+  }
+
+  for (let i = 0; !round && i < count; i++) {
     if (Date.now() >= deadline) {
       console.warn(`[Ping] ${label}: deadline reached after ${sent}/${count} packets`);
       break;
@@ -167,7 +211,8 @@ export async function executePing(
     resolvedAddress,
   });
 
-  console.log(
+  logReading(
+    result,
     `[Ping] ${label}: sent=${sent} received=${received} loss=${result.packetLoss}% ` +
     `avg=${result.latency ?? '-'}ms jitter=${result.jitter ?? '-'}ms`
   );
