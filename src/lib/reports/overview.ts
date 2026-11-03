@@ -1,12 +1,13 @@
 import type { AddressFamily, Target } from '@/types/probe'
 import type { ProbeAgentOutage } from '@/types/probe-agent'
 import type { OverviewEvent, OverviewEventScope, OverviewReport, OverviewSlice, OverviewTarget } from '@/types/overview'
-import { getAllTargets, getNeverAnswered, getProbeReadings } from '../db/database'
+import { getAllTargets, getNeverAnswered } from '../db/database'
 import { isMeaningfulLoss } from '../charts/packet-loss-colors'
 import { isClosedPortCheck } from '../probes/config'
 import { classifyHost, FAMILY_LABEL, isDualStack, isLocalHost, isPrivateAddress } from '../probes/host'
 import { listProbeAgentSummaries, probeAgentOutages } from '../probe-agents/store'
 import { agentIdOf, probeIdsOf } from '../targets/probes'
+import { readDay } from './day-readings'
 import { anyBetween, summarizeReadings } from './evidence'
 import { findIncidents, type Incident, type ProbeReading } from './outages'
 
@@ -264,10 +265,7 @@ export async function readOverview(hours = 24, now = Date.now()): Promise<Overvi
     }))
   );
 
-  const readings = new Map<string, Reading[]>()
-  for (const pair of pairs) {
-    readings.set(pair.id, await getProbeReadings(pair.monitor, new Date(start), new Date(now), { probe: pair.probe }))
-  }
+  const readings = await readDay(pairs.map(pair => ({ key: pair.id, monitor: pair.monitor, probe: pair.probe })), start, now)
 
   const outages = await Promise.all(agents.map(async agent => [agent.id, await probeAgentOutages(agent.id, start, now)] as const))
 
