@@ -23,7 +23,7 @@ import type { ProbeId } from '@/types/probe-agent';
  * pass, which this brings on.
  */
 export async function addTargets(
-  definitions: TargetDefinition[],
+  definitions: (TargetDefinition & { probes?: ProbeId[] })[],
   options: { probeAgentId?: string | null; probes?: ProbeId[] } = {}
 ): Promise<Target[]> {
   const existing = await getAllTargets();
@@ -32,15 +32,17 @@ export async function addTargets(
   // Where they are measured from: the probes named, or the one probe agent an older caller names.
   const probes = options.probes?.length ? options.probes : [probeOf(options.probeAgentId)];
   const created: Target[] = [];
-  for (const definition of definitions) {
+  for (const { probes: own, ...definition } of definitions) {
+    // A monitor that names its own probes, as one imported from a file does, keeps them.
+    const these = own?.length ? own : probes;
     created.push(
       await createTarget({
         id: randomUUID(),
         ...definition,
         status: 'active',
         sortOrder: sortOrder++,
-        probeAgentId: agentIdOf(probes[0]),
-        probes: probes.map((id, position) => ({ id, position })),
+        probeAgentId: agentIdOf(these[0]),
+        probes: these.map((id, position) => ({ id, position })),
       })
     );
   }

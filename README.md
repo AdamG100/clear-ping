@@ -304,6 +304,15 @@ Opening a link in a browser brings up the import on the ClearPing the link was
 made on, which is what you want when both of you use the same one. For a
 different one, paste it under Import there.
 
+A downloaded file (`clearping-monitors-<date>.json`) holds the same, and also
+names the probes that measure each monitor, as `"probes": ["local", "Home"]`.
+Importing it puts each monitor on the probes with those names there: `local`,
+or the local probe's own name, for the local probe, and a probe agent by its
+name, ignoring case. A monitor whose probes are all unknown there is measured by
+the local probe, and the import says which names it did not find. The file is
+plain JSON, so it can be reorganised by hand before it is imported: change a
+`group`, or the `probes`, and import it.
+
 ### Alerts
 
 **Alerts** at the bottom of the sidebar opens the alerts screen, and shows how
@@ -530,7 +539,7 @@ in its place and stops the old one at once. See
 |---|---|
 | `GET /api/targets` | Every monitor; `?packetLoss=true` adds latest readings, recent traces, the groups and their order |
 | `POST /api/targets` | Add a monitor |
-| `POST /api/targets/import` | Add several at once (`{ targets: [...] }`); all are checked first, and none is added if one is wrong |
+| `POST /api/targets/import` | Add several at once (`{ targets: [...] }`, each optionally with `probes`: probe names); all are checked first, and none is added if one is wrong. Answers `missingProbes`, the names no probe here has |
 | `DELETE /api/targets` | Delete several at once (`{ ids: [...] }`), each with its history |
 | `GET`, `PATCH`, `DELETE /api/targets/:id` | Read, change (including pause and group) or delete one |
 | `POST /api/targets/:id/probe` | Measure it now (`?probe=` from one probe, `?probes=all` from every one) |

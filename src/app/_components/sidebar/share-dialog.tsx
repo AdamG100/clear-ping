@@ -11,6 +11,9 @@ import { Textarea } from '@/components/arc/textarea/textarea'
 import { useToast } from '@/components/notifications'
 import { buildSidebarLayout, groupsInOrder } from '@/lib/targets/sidebar-layout'
 import { definitionOf, measurementKey } from '@/lib/targets/definition'
+import { probeIdsOf } from '@/lib/targets/probes'
+import type { ProbeAgentSummary } from '@/types/probe-agent'
+import { probeSummaries } from '../targets/probe-checklist'
 import {
   MAX_IMPORT_FILE_BYTES,
   MAX_SHARED_TARGETS,
@@ -18,11 +21,12 @@ import {
   encodeShare,
   exportTargets,
   shareLinkFor,
+  type ExportedTarget,
   type ShareDecoding,
 } from '@/lib/targets/share'
 import { CopyField } from '../settings/mcp-setup'
 import { TargetChecklist, type ChecklistTarget } from './target-checklist'
-import type { GroupOrder, Target, TargetDefinition } from '@/types/probe'
+import type { GroupOrder, Target } from '@/types/probe'
 
 /**
  * Sending targets to another ClearPing, and taking in the ones it sent.
@@ -51,7 +55,7 @@ function plural(count: number): string {
 
 // ─── Share ──────────────────────────────────────────────────────────────────
 
-function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: GroupOrder[] }) {
+function SharePanel({ targets, groupOrders, probeName }: { targets: Target[]; groupOrders: GroupOrder[]; probeName: (id: string) => string }) {
   const { reportError } = useToast()
   const [selected, setSelected] = useState(() => new Set(targets.map(target => target.id)))
   const [link, setLink] = useState<string | null>(null)
@@ -63,7 +67,7 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
   const tooMany = selected.size > MAX_SHARED_TARGETS
 
   /** The ticked targets in the order the sidebar lists them, which is the order they arrive in. */
-  const chosen = () => {
+  const chosenTargets = () => {
     const layout = buildSidebarLayout(targets, groupOrders)
     const byId = new Map(targets.map(target => [target.id, target]))
     return groupsInOrder(layout)
@@ -71,11 +75,14 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
       .filter(id => selected.has(id))
       .map(id => byId.get(id))
       .filter((target): target is Target => !!target)
-      .map(definitionOf)
   }
+  const chosen = () => chosenTargets().map(definitionOf)
 
   const downloadFile = () => {
-    const { fileName, text } = exportTargets(chosen())
+    // A file names each monitor's probes, so importing it back puts them on the same ones.
+    const { fileName, text } = exportTargets(
+      chosenTargets().map((target): ExportedTarget => ({ ...definitionOf(target), probes: probeIdsOf(target).map(probeName) }))
+    )
     const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
     const anchor = document.createElement('a')
     anchor.href = url
@@ -131,9 +138,11 @@ function SharePanel({ targets, groupOrders }: { targets: Target[]; groupOrders: 
             </Alert>
           ) : (
             <p className={HINT}>
-              The link, or the file, is the list itself: each monitor&apos;s name, address, probe settings, interval and
-              group. Their history and alerts are not included. Neither needs the two ClearPings to reach
-              each other: a link is pasted into the other one, a file chosen there under Import.
+              The link, or the file, is the list itself: each monitor&apos;s name, address, method and its settings,
+              interval and group. The file also names the probes that measure each one, so importing it puts each
+              monitor back on the probes of the same name. Their history and alerts are not included. Neither needs
+              the two ClearPings to reach each other: a link is pasted into the other one, a file chosen there under
+              Import.
             </p>
           )}
         </div>
@@ -148,7 +157,7 @@ interface ImportProps {
   /** The targets already here, to say which of the incoming ones are not new. */
   existing: Target[]
   /** Add the targets. Resolves to whether they were added. */
-  onImport: (targets: TargetDefinition[]) => Promise<boolean>
+  onImport: (targets: ExportedTarget[]) => Promise<boolean>
 }
 
 /** What a pasted link holds, once it has been read: the targets to pick from, or why not. */
@@ -205,8 +214,11 @@ function ImportPreview({ decoding, existing, onImport }: ImportProps & { decodin
           {selected.size === 0 ? 'Tick the monitors to import' : `Import ${plural(selected.size)}`}
         </Button>
         <p className={HINT}>
-          Each is added as a new monitor, in the group it was shared from, and probing starts straight away. Nothing
-          already here is changed.
+          Each is added as a new monitor, in the group it was shared from, and measuring starts straight away.
+          {decoded.targets.some(target => target.probes?.length)
+            ? ' Each goes on the probes here with the names the file gives it; one whose probes are not found here is measured by the local probe.'
+            : ' Each is measured by the local probe; add probe agents to them afterwards under Settings → Probes → Monitors.'}{' '}
+          Nothing already here is changed.
         </p>
       </div>
     </div>
@@ -291,9 +303,14 @@ interface ShareDialogProps extends ImportProps {
   incomingCode: string | null
   /** False for an account that may only look: it can share what is here, but not add to it. */
   canImport?: boolean
+  /** The probe agents here, and what the local probe is called, for naming each monitor's probes in a file. */
+  probeAgents?: ProbeAgentSummary[]
+  localProbeName?: string
 }
 
-function ShareDialogBody({ existing, groupOrders, incomingCode, onImport, canImport = true }: Omit<ShareDialogProps, 'open' | 'onOpenChange'>) {
+function ShareDialogBody({ existing, groupOrders, incomingCode, onImport, canImport = true, probeAgents = [], localProbeName }: Omit<ShareDialogProps, 'open' | 'onOpenChange'>) {
+  const names = useMemo(() => new Map(probeSummaries(probeAgents, localProbeName).map(probe => [probe.id, probe.name])), [probeAgents, localProbeName])
+  const probeName = (id: string) => names.get(id) ?? id
   // Someone who followed a link came to import it, and with no targets yet
   // importing is all there is to do.
   const [chosenTab, setTab] = useState<Tab>(incomingCode || existing.length === 0 ? 'import' : 'share')
@@ -316,7 +333,7 @@ function ShareDialogBody({ existing, groupOrders, incomingCode, onImport, canImp
       )}
       <TabsContent value="share" forceMount>
         <div hidden={tab !== 'share'} className="text-foreground">
-          <SharePanel targets={existing} groupOrders={groupOrders} />
+          <SharePanel targets={existing} groupOrders={groupOrders} probeName={probeName} />
         </div>
       </TabsContent>
       {canImport && (

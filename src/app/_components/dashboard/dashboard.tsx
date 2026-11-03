@@ -186,7 +186,8 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     return null
   }, [loadTargets, reportError])
 
-  const importTargets = useCallback(async (definitions: TargetDefinition[]): Promise<boolean> => {
+  // Resolves to the probe names the file gave that no probe here has, once imported; false if not imported.
+  const importTargets = useCallback(async (definitions: TargetDefinition[]): Promise<{ missingProbes: string[] } | false> => {
     try {
       const response = await fetch('/api/targets/import', {
         method: 'POST',
@@ -194,8 +195,9 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
         body: JSON.stringify({ targets: definitions }),
       })
       if (response.ok) {
+        const body = await response.json().catch(() => ({}))
         await loadTargets()
-        return true
+        return { missingProbes: Array.isArray(body.missingProbes) ? body.missingProbes : [] }
       }
       const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
       reportError('Could not import the monitors', error)
@@ -1003,13 +1005,16 @@ export function Dashboard() {
     async (definitions: TargetDefinition[]) => {
       const added = await importTargets(definitions)
       if (added) {
+        const missing = added.missingProbes
         notify({
-          tone: 'success',
+          tone: missing.length > 0 ? 'warning' : 'success',
           title: `Imported ${definitions.length} monitor${definitions.length === 1 ? '' : 's'}`,
-          detail: 'Their first readings will be in shortly.',
+          detail: missing.length > 0
+            ? `No probe here is called ${missing.join(', ')}. Monitors the file put only there are measured by the local probe; add the right probe to them under Settings → Probes → Monitors.`
+            : 'Their first readings will be in shortly.',
         })
       }
-      return added
+      return !!added
     },
     [importTargets, notify]
   )

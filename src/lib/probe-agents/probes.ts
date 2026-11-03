@@ -42,6 +42,26 @@ export async function listProbes(): Promise<ProbeSummary[]> {
   ];
 }
 
+/**
+ * The probes here that have these names, as an imported file names them: the
+ * local probe by its name or as "local", a probe agent by its name, either
+ * ignoring case. Names nothing here has are left out, and the names left out
+ * are said, so the import can tell whoever made it.
+ */
+export async function probesNamed(names: string[], probes?: ProbeSummary[]): Promise<{ probes: ProbeId[]; missing: string[] }> {
+  const all = probes ?? (await listProbes());
+  const byName = new Map(all.map(probe => [probe.name.trim().toLowerCase(), probe.id]));
+  const found: ProbeId[] = [];
+  const missing: string[] = [];
+  for (const name of names) {
+    const key = name.trim().toLowerCase();
+    const id = key === LOCAL_PROBE ? LOCAL_PROBE : byName.get(key);
+    if (id) found.push(id);
+    else missing.push(name);
+  }
+  return { probes: [...new Set(found)], missing };
+}
+
 /** What each of some probes is called. One that is gone is named for what it was. */
 export async function probeNames(ids: ProbeId[]): Promise<Map<ProbeId, string>> {
   const known = new Map((await listProbes()).map(probe => [probe.id, probe.name]));

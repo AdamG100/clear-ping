@@ -1852,6 +1852,8 @@ export function Sidebar({
         groupOrders={groupOrders}
         incomingCode={incomingShareCode}
         canImport={!readOnly}
+        probeAgents={probeAgents}
+        localProbeName={localProbeName}
         onImport={async imported => {
           const added = await onImportTargets(imported)
           if (added) closeShareDialog()

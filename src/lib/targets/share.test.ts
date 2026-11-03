@@ -86,9 +86,20 @@ describe('share links', () => {
 describe('exported files', () => {
   it('bring every kind of target back exactly as it was exported, under a dated name', () => {
     const { fileName, text } = exportTargets(TARGETS, new Date('2026-10-14T12:00:00Z'))
-    expect(fileName).toBe('clearping-targets-2026-10-14.json')
+    expect(fileName).toBe('clearping-monitors-2026-10-14.json')
     expect(JSON.parse(text)).toMatchObject({ kind: 'clearping-targets', version: 1 })
     expect(readTargetFile(text)).toEqual({ ok: true, targets: TARGETS, skipped: 0 })
+  })
+
+  it('name the probes that measure each monitor, and bring the names back', () => {
+    const withProbes = [{ ...TARGETS[0], probes: ['Local probe', 'Home'] }, TARGETS[1]]
+    const { text } = exportTargets(withProbes)
+    expect(readTargetFile(text)).toEqual({ ok: true, targets: withProbes, skipped: 0 })
+  })
+
+  it('keep only probe names that could be names', () => {
+    const text = JSON.stringify({ kind: 'clearping-targets', version: 1, targets: [{ ...TARGETS[0], probes: [' Home ', 7, '', 'Home', null] }, { ...TARGETS[1], probes: 'Home' }] })
+    expect(readTargetFile(text)).toMatchObject({ ok: true, targets: [{ ...TARGETS[0], probes: ['Home'] }, TARGETS[1]] })
   })
 
   it('take a bare list of targets too, as someone editing one by hand might leave it', () => {

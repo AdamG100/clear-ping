@@ -140,10 +140,34 @@ export function extractShareCode(text: string): string | null {
   return CODE_PATTERN.exec(text ?? '')?.[0] ?? null
 }
 
+/**
+ * A monitor in an exported file: what it is, and the probes that measure it by
+ * name. By name, not id, as an id means nothing on another ClearPing, or on
+ * this one once its database has been started again: importing matches each
+ * name to a probe there, and a monitor whose probes none match is measured by
+ * the local probe. A share link leaves probes out.
+ */
+export type ExportedTarget = TargetDefinition & { probes?: string[] }
+
+/** Most probe names one monitor in a file may carry; more than anyone has. */
+const MAX_PROBE_NAMES = 50
+
+/** The probe names an entry in a file carries, if it carries any that could be names. */
+function probeNamesOf(entry: unknown): string[] | undefined {
+  const raw = (entry as { probes?: unknown } | null)?.probes
+  if (!Array.isArray(raw)) return undefined
+  const names = raw
+    .filter((name): name is string => typeof name === 'string')
+    .map(name => name.trim())
+    .filter(name => name.length > 0 && name.length <= 100)
+    .slice(0, MAX_PROBE_NAMES)
+  return names.length > 0 ? [...new Set(names)] : undefined
+}
+
 export type ShareDecoding =
   | {
       ok: true
-      targets: TargetDefinition[]
+      targets: ExportedTarget[]
       /** Entries that were not targets this ClearPing could add, and were left out. */
       skipped: number
     }
@@ -198,14 +222,18 @@ export interface TargetExport {
   kind: typeof EXPORT_KIND
   version: 1
   exportedAt: string
-  targets: TargetDefinition[]
+  targets: ExportedTarget[]
 }
 
-/** The file for these targets: its name, and what goes in it. */
-export function exportTargets(targets: TargetDefinition[], now = new Date()): { fileName: string; text: string } {
+/**
+ * The file for these monitors: its name, and what goes in it. The name says
+ * monitors; the `kind` inside stays `clearping-targets`, which is what every
+ * ClearPing, older ones too, looks for when importing.
+ */
+export function exportTargets(targets: ExportedTarget[], now = new Date()): { fileName: string; text: string } {
   const file: TargetExport = { kind: EXPORT_KIND, version: 1, exportedAt: now.toISOString(), targets }
   return {
-    fileName: `clearping-targets-${now.toISOString().slice(0, 10)}.json`,
+    fileName: `clearping-monitors-${now.toISOString().slice(0, 10)}.json`,
     text: JSON.stringify(file, null, 2) + '\n',
   }
 }
@@ -241,9 +269,12 @@ export function readTargetFile(text: string): ShareDecoding {
     return { ok: false, error: `At most ${MAX_SHARED_TARGETS} monitors can be imported at once.` }
   }
 
-  const targets = entries
-    .map(entry => validateTargetDefinition(entry))
-    .flatMap(checked => (checked.ok ? [checked.target] : []))
+  const targets = entries.flatMap((entry): ExportedTarget[] => {
+    const checked = validateTargetDefinition(entry)
+    if (!checked.ok) return []
+    const probes = probeNamesOf(entry)
+    return [probes ? { ...checked.target, probes } : checked.target]
+  })
   if (targets.length === 0) return { ok: false, error: 'There are no monitors in that file.' }
 
   return { ok: true, targets, skipped: entries.length - targets.length }
