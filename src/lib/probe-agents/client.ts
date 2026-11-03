@@ -5,6 +5,7 @@ import tls from 'tls';
 import type { ProbeIpVersion, ProbeResult, Target, Traceroute } from '@/types/probe';
 import { LOCAL_PROBE, type ProbeAgentExposure, type ProbeAgentState, type ProbeId } from '@/types/probe-agent';
 import { executeProbes, type ProbeTarget } from '../probes/probe';
+import { configForProbe } from '../targets/resolver-probes';
 import { primaryProbeOf } from '../targets/probes';
 import { exposureOfAddress, isTailnetAddress } from './exposure';
 import {
@@ -369,7 +370,9 @@ export async function runProbes(
   target: ProbeTarget & Pick<Target, 'probeAgentId' | 'probes'>,
   probe: ProbeId = primaryProbeOf(target)
 ): Promise<ProbeResult[]> {
-  if (probe === LOCAL_PROBE) return (await executeProbes(target)).map(result => ({ ...result, probe }));
+  // Without the resolvers this probe does not ask, and with no word of them to a probe agent.
+  const probeConfig = configForProbe(target.probeConfig, probe);
+  if (probe === LOCAL_PROBE) return (await executeProbes({ ...target, probeConfig })).map(result => ({ ...result, probe }));
 
   const agent = await getProbeAgentConnection(probe);
   if (!agent) throw new ProbeAgentUnavailableError('(removed)', 'Its probe agent no longer exists');
@@ -381,7 +384,7 @@ export async function runProbes(
       agent,
       'POST',
       '/v1/probe',
-      { target: { id: target.id, host: target.host, probeType: target.probeType, ipVersion: target.ipVersion, probeConfig: target.probeConfig } },
+      { target: { id: target.id, host: target.host, probeType: target.probeType, ipVersion: target.ipVersion, probeConfig } },
       PROBE_TIMEOUT_MS
     );
     const revived = reviveResults(body);

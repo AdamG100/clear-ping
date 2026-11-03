@@ -49,6 +49,11 @@ export interface DnsResolver {
    * for one that is called by its provider or by where it is.
    */
   name?: string;
+  /**
+   * The probes that do not ask it, for one that only answers inside its own
+   * network. Taken out before a probe is asked, so a probe agent never sees it.
+   */
+  notFrom?: string[];
 }
 
 /** How one resolver answered in one probe of a target that asks several. */

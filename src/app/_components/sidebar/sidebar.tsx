@@ -33,6 +33,7 @@ import { addressFamilyFor, isDualStack } from '@/lib/probes/host'
 import { targetAddressLabel } from '@/lib/probes/config'
 import { probeIdsOf } from '@/lib/targets/probes'
 import { DEFAULT_LOCAL_PROBE_NAME } from '@/types/probe-agent'
+import type { ResolverProbeChange } from '@/lib/targets/resolver-probes'
 import { MAX_GROUP_PATH_LENGTH, groupLabel, groupName, groupWithAncestors, isWithinGroup, joinGroupPath, parentGroup, rebaseGroupPath } from '@/lib/targets/group-path'
 import { combineSeries } from '@/lib/charts/group-series'
 import {
@@ -385,6 +386,7 @@ interface SidebarProps {
   localProbeName?: string
   /** Measure every target in a group from the same probes. Resolves to whether that happened. */
   onSetGroupProbe?: (group: string, change: { add: string[]; remove: string[] }) => Promise<boolean>
+  onSetGroupResolvers?: (group: string, changes: ResolverProbeChange[]) => Promise<boolean>
 }
 
 // ─── Target Row ─────────────────────────────────────────────────────────────
@@ -1169,6 +1171,7 @@ function SidebarView({
   probeAgents = [],
   localProbeName,
   onSetGroupProbe,
+  onSetGroupResolvers,
 }: SidebarProps) {
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
@@ -1835,6 +1838,8 @@ function SidebarView({
         groups={availableGroups}
         probeAgents={probeAgents}
         localProbeName={localProbeName}
+        memberTargets={groupTask?.kind === 'edit' ? targets.filter(target => !!target.group && isWithinGroup(target.group, groupTask.group)) : []}
+        onSetResolvers={onSetGroupResolvers}
         memberProbes={
           groupTask?.kind === 'edit'
             ? targets

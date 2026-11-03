@@ -8,6 +8,9 @@ import { Dialog, DialogContent } from '@/components/arc/dialog/dialog'
 import { Input } from '@/components/arc/input/input'
 import { Select } from '@/components/arc/select/select'
 import { ProbeChecklist, probeSummaries } from '../targets/probe-checklist'
+import { GroupResolvers } from './group-resolvers'
+import type { ResolverProbeChange } from '@/lib/targets/resolver-probes'
+import type { Target } from '@/types/probe'
 import {
   GROUP_SEPARATOR,
   groupLabel,
@@ -52,6 +55,10 @@ interface GroupDialogProps {
    * inside it included. Empty when nothing in it is a target.
    */
   memberProbes?: ProbeId[][]
+  /** The monitors in the group being edited, groups inside it included: for which probes ask their resolvers. */
+  memberTargets?: Target[]
+  /** Change which probes ask which resolvers across the group. Resolves to whether that happened. */
+  onSetResolvers?: (group: string, changes: ResolverProbeChange[]) => Promise<boolean>
   onCancel: () => void
   onCreate: (group: string) => void
   onMove: (from: string, to: string) => void
@@ -117,6 +124,8 @@ function GroupForm({
   probeAgents = [],
   localProbeName,
   memberProbes = [],
+  memberTargets = [],
+  onSetResolvers,
   onCancel,
   onCreate,
   onMove,
@@ -130,6 +139,7 @@ function GroupForm({
   // has just opened is not a mistake yet.
   const [attempted, setAttempted] = useState(false)
   const [savingProbe, setSavingProbe] = useState(false)
+  const [resolverChanges, setResolverChanges] = useState<ResolverProbeChange[]>([])
 
   // Each probe is ticked (every monitor here has it), unticked (none has it)
   // or part-ticked (only some have it). Saving gives a ticked probe to every
@@ -196,6 +206,12 @@ function GroupForm({
           const switched = await onSetProbe(editing.group, { add, remove })
           setSavingProbe(false)
           if (!switched) return
+        }
+        if (resolverChanges.length > 0 && editing && onSetResolvers) {
+          setSavingProbe(true)
+          const changed = await onSetResolvers(editing.group, resolverChanges)
+          setSavingProbe(false)
+          if (!changed) return
         }
         if (!editing) onCreate(destination)
         else if (destination !== editing.group) onMove(editing.group, destination)
@@ -266,6 +282,10 @@ function GroupForm({
             </Button>
           )}
         </div>
+      )}
+
+      {showProbe && editing && onSetResolvers && (
+        <GroupResolvers targets={memberTargets} probes={summaries} changes={resolverChanges} onChange={setResolverChanges} />
       )}
 
       {editing && exists && !problem && (

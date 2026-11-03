@@ -1260,6 +1260,7 @@ const ACTIONS: Record<string, string> = {
   'security.cors': 'changed the websites that may call the API',
   'target.merge': 'merged monitors',
   'group.probe': 'changed the probes of a group',
+  'group.resolvers': 'changed which probes ask which resolvers in a group',
   'probe-agent.add': 'added a probe agent',
   'probe-agent.change': 'changed a probe agent',
   'probe-agent.remove': 'removed a probe agent',

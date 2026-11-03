@@ -241,11 +241,28 @@ Everywhere a monitor appears, it says where it is probed from:
 ### Adding a new probe agent to the monitors you have
 
 Once a probe agent is paired, **Add a probe to monitors** under Settings, Probes
-adds it to every monitor, or to a group and the groups inside it, in one go. A
-group's own dialog has the same control for that group. Each monitor keeps the
-probes it already has, and its first probe stays first, so nothing about its
-page or alerts moves. To set a group's probes exactly, tick them under *Measure
-from* in the group's dialog instead.
+→ Monitors adds it to every monitor, or to a group and the groups inside it, in
+one go. Each monitor keeps the probes it already has, and its first probe stays
+first, so nothing about its page or alerts moves.
+
+A group's own dialog (*Rename, move or delete*) does this for that group under
+**Probes**. Tick a probe to measure every monitor in the group from it, untick it
+to stop. A part-ticked probe is one only some of the monitors have, and left that
+way it stays on just those.
+
+### A resolver only some probes should ask
+
+Some DNS resolvers only answer inside their own network, such as a provider's for
+its own customers, so from any other probe they would show as failing. Under
+**Resolvers** in a group's dialog, each resolver its DNS monitors ask has a tick
+for each probe: untick one and that probe stops asking that resolver, for every
+monitor in the group and the groups inside it. Every probe has to keep at least
+one resolver to ask, and saving says which monitors would not.
+
+Readings already taken stay in the history. The probe agent needs no update: the
+dashboard leaves the resolver out of what it asks for. In an exported file these
+choices are kept by probe id, so they only carry over when importing into the
+same ClearPing; on another one, set them again.
 
 ### Monitors set up once for each probe
 

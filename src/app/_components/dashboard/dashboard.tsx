@@ -17,6 +17,7 @@ import type {
   TimeWindow,
 } from '@/types/probe'
 import { DEFAULT_LOCAL_PROBE_NAME, LOCAL_PROBE } from '@/types/probe-agent'
+import type { ResolverProbeChange } from '@/lib/targets/resolver-probes'
 import { probeIdsOf } from '@/lib/targets/probes'
 import { probeSummaries } from '../targets/probe-checklist'
 import { COMPARE_PROBES, ProbeSwitch } from '../targets/probe-switch'
@@ -362,7 +363,27 @@ function useTargets(reportError: (title: string, error?: unknown) => void) {
     return false
   }, [loadTargets, reportError])
 
-  return { targets, latest, series, groups, groupOrders, probeAgents, localProbeName, createGroup, deleteGroup, setGroupProbe, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
+  /** Change which probes ask which resolvers, for every DNS monitor in a group. */
+  const setGroupResolvers = useCallback(async (group: string, changes: ResolverProbeChange[]): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/groups/resolvers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group, changes }),
+      })
+      if (response.ok) {
+        await loadTargets()
+        return true
+      }
+      const { error } = await response.json().catch(() => ({ error: `Server responded ${response.status}` }))
+      reportError('Could not change which probes ask which resolvers', error)
+    } catch (error) {
+      reportError('Could not change which probes ask which resolvers', error)
+    }
+    return false
+  }, [loadTargets, reportError])
+
+  return { targets, latest, series, groups, groupOrders, probeAgents, localProbeName, createGroup, deleteGroup, setGroupProbe, setGroupResolvers, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets: loadTargets }
 }
 
 function useAlerts(reportError: (title: string, error?: unknown) => void) {
@@ -672,7 +693,7 @@ function useRemembered(key: string): string | null {
 
 export function Dashboard() {
   const { notify, reportError } = useToast()
-  const { targets, latest, series, groups, groupOrders, probeAgents, localProbeName, createGroup, deleteGroup, setGroupProbe, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
+  const { targets, latest, series, groups, groupOrders, probeAgents, localProbeName, createGroup, deleteGroup, setGroupProbe, setGroupResolvers, addTarget, importTargets, updateTarget, deleteTargets, reorderGroups, reorderTargets, moveGroup, isLoaded, reloadTargets } = useTargets(reportError)
   // The sidebar's "probed from" filter: every target, this server's, or one probe agent's.
   const [probeFrom, setProbeFrom] = useState<ProbeFromFilter>('all')
   const { alerts, loaded: alertsLoaded, reload: reloadAlerts } = useAlerts(reportError)
@@ -1285,6 +1306,7 @@ export function Dashboard() {
         probeAgents={probeAgents}
         localProbeName={localProbeName}
         onSetGroupProbe={readOnly ? undefined : setGroupProbe}
+        onSetGroupResolvers={readOnly ? undefined : setGroupResolvers}
       />
 
       {/* Behind an open drawer the page cannot be used, by pointer or by

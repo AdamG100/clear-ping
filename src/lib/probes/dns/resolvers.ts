@@ -114,6 +114,9 @@ export function parseDohServer(server: string): URL | null {
 export type ResolverValidation = { ok: true; resolver: DnsResolver } | { ok: false; error: string }
 
 /** Check one resolver, and write its address the one way it is stored. */
+/** More probes than anyone has, so a hand-edited file cannot make a resolver's list any length. */
+const MAX_NOT_FROM = 100
+
 export function validateResolver(raw: unknown): ResolverValidation {
   const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const protocol = input.protocol
@@ -129,11 +132,16 @@ export function validateResolver(raw: unknown): ResolverValidation {
   if (name.length > MAX_RESOLVER_NAME_LENGTH) {
     return { ok: false, error: `A resolver's name must be ${MAX_RESOLVER_NAME_LENGTH} characters or fewer` }
   }
-  const named = name ? { name } : {}
+  // The probes it is not asked from: ids, kept as given, since this also runs where probes are not known.
+  const notFrom = Array.isArray(input.notFrom)
+    ? [...new Set(input.notFrom.filter((probe): probe is string => typeof probe === 'string' && probe.length > 0))].slice(0, MAX_NOT_FROM)
+    : []
+  const excluded = notFrom.length > 0 ? { notFrom } : {}
+  const named = { ...(name ? { name } : {}), ...excluded }
 
   switch (protocol as DnsProtocol) {
     case 'system':
-      return { ok: true, resolver: { protocol: 'system' } }
+      return { ok: true, resolver: { protocol: 'system', ...excluded } }
 
     case 'udp': {
       const host = normalizeHost(server)
