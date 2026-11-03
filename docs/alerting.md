@@ -225,6 +225,25 @@ monitor fires when enough of them are in breach: **any one**, **every**,
 can also choose which probes count. The alert's message names how many and which
 probes saw it. Weighting some probes more than others is not offered.
 
+**A share of the probes that are up.** *At least a share of the probes that are
+reporting* takes the share from the probes that answered, not from all of them:
+two thirds (66%) of the 3 probes that are up is 2, even with 3 more offline.
+Resolving still counts a probe that is offline as in breach, so it never fires
+and clears in turn.
+
+**Seen from several places.** Label each probe with a region and a network under
+Settings, Probes, *Where each probe is* (Europe, Example Networks). An alert can
+then also ask that the probes in breach come from at least some number of
+regions and networks, such as 3 and 3: a problem seen from one data centre does
+not page anyone. A probe with no label counts for neither. A message for a
+problem seen from one region only says so.
+
+**What broke.** A notification that fires says the likely cause, read from the
+failing reading: the connection was refused, the name did not resolve, it did
+not answer in time, a certificate expired, an HTTP error, or a different answer
+from the one expected. It is a guess from the message the probe gave, and the
+history keeps it with the event.
+
 A probe that is **not reporting**, because its probe agent is down or it has
 taken no reading for two intervals, is not counted as seeing the problem, so a
 probe agent going quiet cannot make an alert fire. Nor can it make one clear:
@@ -307,7 +326,8 @@ An alert is created with `metric`, `threshold`, `consecutiveProbes`,
 clearThreshold?, window? }`, the first of which is also `metric` and
 `threshold`), `combine` (`"any"`, `"all"` or `{ atLeast: n }`), `forMinutes`,
 `clearAfter`, `policy` (`"any"`, `"all"`, `{ kind: "atLeast", count }` or
-`{ kind: "share", percent }`), `probes` (the probes that count, `"local"` being
+`{ kind: "share", percent, of?: "healthy" }`), `spread` (`{ regions?, networks? }`, or
+`null`), `probes` (the probes that count, `"local"` being
 the dashboard's own) and `scope` (a list of `{ kind: "monitor" | "group" |
 "probe", ref }`), and also `name`, `traceOnFire` and `traceCooldownMinutes`
 (tracing the route when it fires, and the wait before the same monitor is

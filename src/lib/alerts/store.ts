@@ -4,12 +4,14 @@ import { describeCondition, notificationFor, parseNotifyUrls, probeAgentNotifica
 import { sendNotification, type DeliveryResult } from './apprise';
 import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
 import { LOCAL_PROBE, type ProbeAgentState } from '@/types/probe-agent';
-import type { AlertCombine, AlertCondition, AlertScopeEntry, ConditionResult, ProbePolicy, ProbeVerdict } from '@/types/alert-rules';
+import type { AlertCombine, AlertCondition, AlertScopeEntry, ConditionResult, ProbePolicy, ProbeSpread, ProbeVerdict } from '@/types/alert-rules';
 import { isProbeAgentDown } from '../probe-agents/store';
 import { probeNames } from '../probe-agents/probes';
 import { recordAlertEvent } from './history';
 import { coveredProbes, isScopeEntry } from './scope';
-import { conditionsOf, describePolicy, FRESH_PROBE_STATE, judgeMonitor, policyOf, stepProbe, type ProbeRuleState, type ProbeStanding } from './rules';
+import { conditionsOf, describePolicy, describeSpread, FRESH_PROBE_STATE, judgeMonitor, policyOf, stepProbe, type ProbeRuleState, type ProbeStanding } from './rules';
+import { describeCause, likelyCause, whereSeen } from './cause';
+import { probePlaces } from '../probe-agents/places';
 import {
   ALERT_METRIC_LABELS,
   DEFAULT_TRACE_COOLDOWN_MINUTES,
@@ -51,6 +53,7 @@ interface AlertRow {
   clear_after: number | null;
   probe_policy: string | null;
   probe_quorum: number | null;
+  probe_spread?: string | null;
   probes: string | null;
 }
 
@@ -90,6 +93,8 @@ function policyFromRow(row: AlertRow): ProbePolicy {
       return { kind: 'atLeast', count: row.probe_quorum ?? 1 };
     case 'share':
       return { kind: 'share', percent: row.probe_quorum ?? 100 };
+    case 'shareHealthy':
+      return { kind: 'share', percent: row.probe_quorum ?? 100, of: 'healthy' };
     default:
       return { kind: 'any' };
   }
@@ -103,6 +108,7 @@ function settingsFromRow(row: AlertRow): AlertSettings & { id: string; enabled: 
     ...(row.for_minutes ? { forMinutes: row.for_minutes } : {}),
     ...(row.clear_after ? { clearAfter: row.clear_after } : {}),
     policy: policyFromRow(row),
+    spread: parseJson<ProbeSpread>(row.probe_spread ?? null) ?? null,
     probes: parseJson<string[]>(row.probes) ?? null,
     name: row.name || undefined,
     metric: row.metric,
@@ -234,15 +240,16 @@ function parseConditions(raw: unknown): { ok: true; conditions: AlertCondition[]
 
 function parsePolicy(raw: unknown): { ok: true; policy: ProbePolicy } | { ok: false; error: string } {
   if (raw === 'any' || raw === 'all') return { ok: true, policy: { kind: raw } };
-  const each = raw as { kind?: unknown; count?: unknown; percent?: unknown } | null;
+  const each = raw as { kind?: unknown; count?: unknown; percent?: unknown; of?: unknown } | null;
   if (each?.kind === 'any' || each?.kind === 'all') return { ok: true, policy: { kind: each.kind } };
   if (each?.kind === 'atLeast' && typeof each.count === 'number' && Number.isInteger(each.count) && each.count >= 1 && each.count <= 1000) {
     return { ok: true, policy: { kind: 'atLeast', count: each.count } };
   }
   if (each?.kind === 'share' && typeof each.percent === 'number' && each.percent > 0 && each.percent <= 100) {
-    return { ok: true, policy: { kind: 'share', percent: Math.round(each.percent) } };
+    if (each.of !== undefined && each.of !== 'healthy') return { ok: false, error: 'of is "healthy" for a share of the probes that are reporting, or left out for a share of them all' };
+    return { ok: true, policy: { kind: 'share', percent: Math.round(each.percent), ...(each.of === 'healthy' ? { of: 'healthy' as const } : {}) } };
   }
-  return { ok: false, error: 'policy is "any", "all", { kind: "atLeast", count } or { kind: "share", percent }' };
+  return { ok: false, error: 'policy is "any", "all", { kind: "atLeast", count } or { kind: "share", percent, of?: "healthy" }' };
 }
 
 /**
@@ -362,6 +369,18 @@ export function parseAlertInput(
     input.policy = policy.policy;
   }
 
+  if (given('spread')) {
+    const spread = body.spread as { regions?: unknown; networks?: unknown } | null;
+    const count = (value: unknown) => value === undefined || (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 20);
+    if (spread !== null && (typeof spread !== 'object' || !count(spread.regions) || !count(spread.networks))) {
+      return fail('spread is { regions?, networks? }, each a whole number from 1 to 20, or null for no rule');
+    }
+    const tidy: ProbeSpread | null = spread && (spread.regions || spread.networks)
+      ? { ...(spread.regions ? { regions: spread.regions as number } : {}), ...(spread.networks ? { networks: spread.networks as number } : {}) }
+      : null;
+    input.spread = tidy;
+  }
+
   if (given('probes')) {
     const probes = body.probes;
     if (probes !== null && (!Array.isArray(probes) || !probes.every(each => typeof each === 'string' && each))) {
@@ -400,8 +419,8 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
   await run(
     `INSERT INTO alerts
       (id, name, metric, threshold, consecutive_probes, notify_urls, trace_on_fire, trace_cooldown_minutes, trace_keep_count, trace_keep_days, enabled, created_at,
-       conditions, combine, for_minutes, clear_after, probe_policy, probe_quorum, probes, probe_agent_offline)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       conditions, combine, for_minutes, clear_after, probe_policy, probe_quorum, probes, probe_agent_offline, probe_spread)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.name ?? '',
@@ -422,6 +441,7 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
       ...policyColumns(input.policy),
       input.probes ? JSON.stringify(input.probes) : null,
       input.probeAgentOffline ? 1 : 0,
+      input.spread ? JSON.stringify(input.spread) : null,
     ]
   );
 
@@ -432,7 +452,8 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
 /** The two columns a policy is stored in. */
 function policyColumns(policy: ProbePolicy | undefined): [string, number] {
   if (!policy || policy.kind === 'any' || policy.kind === 'all') return [policy?.kind ?? 'any', 1];
-  return policy.kind === 'atLeast' ? ['atLeast', policy.count] : ['share', policy.percent];
+  if (policy.kind === 'atLeast') return ['atLeast', policy.count];
+  return [policy.of === 'healthy' ? 'shareHealthy' : 'share', policy.percent];
 }
 
 /**
@@ -498,6 +519,7 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
     set('probe_policy', kind);
     set('probe_quorum', quorum);
   }
+  if (changes.spread !== undefined) set('probe_spread', changes.spread ? JSON.stringify(changes.spread) : null);
   if (changes.probes !== undefined) set('probes', changes.probes ? JSON.stringify(changes.probes) : null);
 
   if (fields.length > 0) {
@@ -645,6 +667,7 @@ export async function evaluateAlerts(
   const probe = result.probe ?? LOCAL_PROBE;
   const intervalMs = Math.max(1, (target.interval ?? 300) * 1000);
   const names = await probeNames(probes);
+  const places = await probePlaces();
 
   for (const alert of alertRows) {
     const scope: AlertScopeEntry[] = scopeRows.filter(row => row.alert_id === alert.id);
@@ -698,10 +721,10 @@ export async function evaluateAlerts(
       const inBreach = id === probe ? step.state.inBreach : stateRows.some(row => row.alert_id === alert.id && row.probe === id && row.in_breach === 1);
       const last = lastAt.get(id) ?? 0;
       const silent = id !== probe && (!!agentDown.get(id) || (last > 0 && now - last > intervalMs * 2));
-      return { probe: id, inBreach, silent };
+      return { probe: id, inBreach, silent, region: places.get(id)?.region, network: places.get(id)?.network };
     });
     const policy = policyOf(alert);
-    const verdict = judgeMonitor(policy, was, standing);
+    const verdict = judgeMonitor(policy, was, standing, alert.spread);
     // The target's own streak is what an older image reads: with one probe it is that probe's.
     const targetStreak = covered.length <= 1 ? step.state.streak : 0;
 
@@ -711,13 +734,18 @@ export async function evaluateAlerts(
     if (!verdict.transition) continue;
 
     const inBreach = standing.filter(each => each.inBreach).map(each => each.probe);
-    const verdicts: ProbeVerdict[] = standing.map(each => ({ probe: each.probe, name: names.get(each.probe) ?? each.probe, breaching: each.inBreach, silent: each.silent }));
+    const verdicts: ProbeVerdict[] = standing.map(each => ({ probe: each.probe, name: names.get(each.probe) ?? each.probe, breaching: each.inBreach, silent: each.silent, region: each.region, network: each.network }));
     const results: ConditionResult[] = step.outcomes.map(outcome => ({
       label: describeConditionOf(outcome.condition),
       observed: worded(outcome.condition.metric, outcome.observed),
       held: outcome.held,
     }));
-    const policyText = `${describePolicy(policy, verdict.total)}: ${verdict.breaching} in breach`;
+    const reportingNow = standing.filter(each => !each.silent).length;
+    const policyText =
+      `${describePolicy(policy, policy.kind === 'share' && policy.of === 'healthy' ? reportingNow : verdict.total)}: ${verdict.breaching} in breach` +
+      (describeSpread(alert.spread) ? `, ${describeSpread(alert.spread)}` : '');
+    // What most likely broke: the failing reading's own words, and whether it is one region's trouble.
+    const cause = verdict.transition === 'firing' ? describeCause(likelyCause(result, now), whereSeen(standing)) : null;
     // The condition that headlines the message: the one that held, or the first.
     const lead = step.outcomes.find(outcome => outcome.held) ?? step.outcomes[0];
 
@@ -728,7 +756,7 @@ export async function evaluateAlerts(
       transition: verdict.transition,
       conditions: results,
       probes: verdicts,
-      reason: policyText,
+      reason: cause ? `${policyText}. Likely cause: ${cause}` : policyText,
     }).catch(error => console.error('[Alerts] Could not record the event:', error));
 
     events.push({
@@ -748,6 +776,7 @@ export async function evaluateAlerts(
       conditions: results,
       probeVerdicts: verdicts,
       policyText,
+      ...(cause ? { cause } : {}),
     });
   }
 

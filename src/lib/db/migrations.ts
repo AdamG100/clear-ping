@@ -691,6 +691,17 @@ async function probesPerMonitor(database: Database): Promise<void> {
 }
 
 /**
+ * Alert spread: an alert can ask that the probes in breach are from several
+ * regions and networks. Kept as JSON, null when it asks for none.
+ */
+async function alertSpread(database: Database): Promise<void> {
+  const columns = await all<{ name: string }>(database, 'PRAGMA table_info(alerts)');
+  if (!columns.some(column => column.name === 'probe_spread')) {
+    await run(database, 'ALTER TABLE alerts ADD COLUMN probe_spread TEXT');
+  }
+}
+
+/**
  * Alert rules: several conditions, how long they must hold, where an alert
  * applies, and how many of a monitor's probes must agree.
  *
@@ -761,6 +772,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'alert trace retention', up: alertTraceRetention },
   { name: 'probes per monitor', up: probesPerMonitor },
   { name: 'alert rules', up: alertRules },
+  { name: 'alert spread', up: alertSpread },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -250,6 +250,7 @@ export function notificationFor(event: AlertEvent, options: NotificationOptions 
     details.push(['Conditions', event.conditions.map(each => `${each.label}: ${each.observed ?? 'no reading'}, ${each.held ? 'held' : 'not held'}`).join('; ')]);
   }
   if (event.policyText && (event.probeVerdicts?.length ?? 0) > 1) details.push(['Probes agreeing', event.policyText]);
+  if (event.cause) details.push(['Likely cause', event.cause]);
   if (event.probeVerdicts && event.probeVerdicts.length > 1) {
     const shown = event.probeVerdicts.slice(0, 10).map(each => `${each.name} (${each.silent ? 'not reporting' : each.breaching ? 'in breach' : 'fine'})`);
     details.push(['Probes', shown.join(', ') + (event.probeVerdicts.length > 10 ? `, and ${event.probeVerdicts.length - 10} more` : '')]);

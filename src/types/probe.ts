@@ -633,6 +633,8 @@ export interface AlertEvent {
   conditions?: ConditionResult[];
   /** Each probe's part, when the monitor has several. */
   probeVerdicts?: ProbeVerdict[];
+  /** What most likely broke, from the readings of the probes in breach: "the connection was refused". */
+  cause?: string;
   /** How the policy came out: "at least 4 of 7 probes: 5 in breach". */
   policyText?: string;
 }

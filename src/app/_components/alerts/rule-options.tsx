@@ -8,8 +8,8 @@ import { NumberField } from '@/components/arc/number-field/number-field'
 import { Select } from '@/components/arc/select/select'
 import { SegmentedField } from '@/components/segmented-field'
 import { groupLabel } from '@/lib/targets/group-path'
-import { describePolicy } from '@/lib/alerts/rules'
-import type { AlertCondition, AlertCombine, AlertScopeEntry, ProbePolicy } from '@/types/alert-rules'
+import { describePolicy, describeSpread } from '@/lib/alerts/rules'
+import type { AlertCondition, AlertCombine, AlertScopeEntry, ProbePolicy, ProbeSpread } from '@/types/alert-rules'
 import { ALERT_METRIC_LABELS, type AlertMetric } from '@/types/probe'
 import type { ProbeId, ProbeSummary } from '@/types/probe-agent'
 import { ProbeChecklist } from '../targets/probe-checklist'
@@ -28,9 +28,13 @@ export interface RuleOptions {
   /** The first condition's own clear threshold, and window. */
   clearThreshold: number | null
   window: number
-  policy: ProbePolicy['kind']
+  /** `shareHealthy` is a share of the probes that are reporting. */
+  policy: ProbePolicy['kind'] | 'shareHealthy'
   policyCount: number
   policyPercent: number
+  /** The probes in breach must come from this many regions and networks; 0 for no rule. */
+  spreadRegions: number
+  spreadNetworks: number
   /** The probes that count; null for every probe. */
   probes: ProbeId[] | null
   groups: string[]
@@ -41,12 +45,12 @@ export interface RuleOptions {
 
 export const NO_OPTIONS: RuleOptions = {
   extra: [], combine: 'any', combineCount: 2, byMinutes: false, minutes: 5, clearAfter: 0, clearThreshold: null, window: 1,
-  policy: 'any', policyCount: 2, policyPercent: 60, probes: null, groups: [], probeScope: [], probeAgentOffline: false,
+  policy: 'any', policyCount: 2, policyPercent: 60, spreadRegions: 0, spreadNetworks: 0, probes: null, groups: [], probeScope: [], probeAgentOffline: false,
 }
 
 /** The options an existing alert has, as the form keeps them. */
 export function optionsOf(alert: {
-  conditions?: AlertCondition[]; combine?: AlertCombine; forMinutes?: number; clearAfter?: number; policy?: ProbePolicy; probes?: ProbeId[] | null; scope?: AlertScopeEntry[]; probeAgentOffline?: boolean
+  conditions?: AlertCondition[]; combine?: AlertCombine; forMinutes?: number; clearAfter?: number; policy?: ProbePolicy; spread?: ProbeSpread | null; probes?: ProbeId[] | null; scope?: AlertScopeEntry[]; probeAgentOffline?: boolean
 }): RuleOptions {
   const [first, ...extra] = alert.conditions ?? []
   const combine = alert.combine
@@ -60,7 +64,9 @@ export function optionsOf(alert: {
     clearAfter: alert.clearAfter ?? 0,
     clearThreshold: first?.clearThreshold ?? null,
     window: first?.window ?? 1,
-    policy: policy.kind,
+    policy: policy.kind === 'share' && policy.of === 'healthy' ? 'shareHealthy' : policy.kind,
+    spreadRegions: alert.spread?.regions ?? 0,
+    spreadNetworks: alert.spread?.networks ?? 0,
     policyCount: policy.kind === 'atLeast' ? policy.count : 2,
     policyPercent: policy.kind === 'share' ? policy.percent : 60,
     probes: alert.probes ?? null,
@@ -80,7 +86,7 @@ export function ruleFields(
   options: RuleOptions,
   first: { metric: AlertMetric; threshold: number }
 ): {
-  conditions?: AlertCondition[]; combine?: AlertCombine; forMinutes: number | null; clearAfter: number | null; policy: ProbePolicy; probes: ProbeId[] | null; scope: AlertScopeEntry[]; probeAgentOffline: boolean
+  conditions?: AlertCondition[]; combine?: AlertCombine; forMinutes: number | null; clearAfter: number | null; policy: ProbePolicy; spread: ProbeSpread | null; probes: ProbeId[] | null; scope: AlertScopeEntry[]; probeAgentOffline: boolean
 } {
   const head: AlertCondition = { ...first, ...(options.clearThreshold !== null ? { clearThreshold: options.clearThreshold } : {}), ...(options.window > 1 ? { window: options.window } : {}) }
   const conditions = [head, ...options.extra]
@@ -93,7 +99,11 @@ export function ruleFields(
     policy:
       options.policy === 'atLeast' ? { kind: 'atLeast', count: options.policyCount }
       : options.policy === 'share' ? { kind: 'share', percent: options.policyPercent }
+      : options.policy === 'shareHealthy' ? { kind: 'share', percent: options.policyPercent, of: 'healthy' }
       : { kind: options.policy },
+    spread: options.spreadRegions > 0 || options.spreadNetworks > 0
+      ? { ...(options.spreadRegions > 0 ? { regions: options.spreadRegions } : {}), ...(options.spreadNetworks > 0 ? { networks: options.spreadNetworks } : {}) }
+      : null,
     probes: options.probes,
     probeAgentOffline: options.probeAgentOffline,
     scope: [
@@ -268,13 +278,22 @@ export function RuleOptionsPanel({
           { value: 'all', label: 'Every probe sees it' },
           { value: 'atLeast', label: 'At least some number of probes' },
           { value: 'share', label: 'At least a share of the probes' },
+          { value: 'shareHealthy', label: 'At least a share of the probes that are reporting' },
         ]}
       />
       {options.policy === 'atLeast' && <NumberField label="At least this many probes" min={1} max={1000} value={options.policyCount} onValueChange={value => set({ policyCount: value })} />}
-      {options.policy === 'share' && <NumberField label="At least this share of them" suffix="%" min={1} max={100} value={options.policyPercent} onValueChange={value => set({ policyPercent: value })} />}
+      {(options.policy === 'share' || options.policy === 'shareHealthy') && <NumberField label="At least this share of them" suffix="%" min={1} max={100} value={options.policyPercent} onValueChange={value => set({ policyPercent: value })} />}
+      <NumberField label="From at least this many regions (0 for any)" min={0} max={20} value={options.spreadRegions} onValueChange={value => set({ spreadRegions: value })} />
+      <NumberField label="From at least this many networks (0 for any)" min={0} max={20} value={options.spreadNetworks} onValueChange={value => set({ spreadNetworks: value })} />
       <p className="text-xs leading-relaxed text-muted-foreground">
-        {describePolicy(options.policy === 'atLeast' ? { kind: 'atLeast', count: options.policyCount } : options.policy === 'share' ? { kind: 'share', percent: options.policyPercent } : { kind: options.policy }, probes.length)}
-        {' '}must see it. A probe whose probe agent is offline is not counted as seeing it, and it clears only when too few could.
+        {describePolicy(
+          options.policy === 'atLeast' ? { kind: 'atLeast', count: options.policyCount }
+          : options.policy === 'share' ? { kind: 'share', percent: options.policyPercent }
+          : options.policy === 'shareHealthy' ? { kind: 'share', percent: options.policyPercent, of: 'healthy' }
+          : { kind: options.policy },
+          probes.length
+        )}
+        {' '}must see it{describeSpread(options.spreadRegions > 0 || options.spreadNetworks > 0 ? { regions: options.spreadRegions, networks: options.spreadNetworks } : null) ? `, ${describeSpread({ regions: options.spreadRegions, networks: options.spreadNetworks })}` : ''}. Regions and networks are labelled under Settings, Probes. A probe whose probe agent is offline is not counted as seeing it, and it clears only when too few could.
       </p>
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">Count these probes</legend>

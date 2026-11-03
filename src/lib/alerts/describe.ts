@@ -1,6 +1,6 @@
 import type { AlertSettings } from '@/types/probe';
 import { describeCondition } from './delivery';
-import { conditionsOf, policyOf } from './rules';
+import { conditionsOf, describeSpread, policyOf } from './rules';
 
 /** The probes an alert needs to agree, in words, without a count of how many there are. */
 export function policyPhrase(alert: Pick<AlertSettings, 'policy'>): string {
@@ -13,7 +13,7 @@ export function policyPhrase(alert: Pick<AlertSettings, 'policy'>): string {
     case 'atLeast':
       return `at least ${policy.count} probes`;
     case 'share':
-      return `at least ${policy.percent}% of probes`;
+      return policy.of === 'healthy' ? `at least ${policy.percent}% of probes that are reporting` : `at least ${policy.percent}% of probes`;
   }
 }
 
@@ -21,7 +21,7 @@ export function policyPhrase(alert: Pick<AlertSettings, 'policy'>): string {
  * The whole of an alert's rule on one line, as its card says it: "Packet loss
  * above 5% and Latency above 200 ms, for 5 minutes, at least 4 probes".
  */
-export function describeRule(alert: Pick<AlertSettings, 'metric' | 'threshold' | 'conditions' | 'combine' | 'forMinutes' | 'clearAfter' | 'consecutiveProbes' | 'policy' | 'probes' | 'scope'>): string {
+export function describeRule(alert: Pick<AlertSettings, 'metric' | 'threshold' | 'conditions' | 'combine' | 'forMinutes' | 'clearAfter' | 'consecutiveProbes' | 'policy' | 'spread' | 'probes' | 'scope'>): string {
   const conditions = conditionsOf(alert).map(describeCondition);
   const combine = alert.combine ?? 'any';
   const joined =
@@ -38,5 +38,5 @@ export function describeRule(alert: Pick<AlertSettings, 'metric' | 'threshold' |
   const where = scope.length > 0 ? `also ${scope.length} ${scope.length === 1 ? 'place' : 'places'} by group or probe` : '';
   const only = alert.probes && alert.probes.length > 0 ? `counting ${alert.probes.length} probe${alert.probes.length === 1 ? '' : 's'}` : '';
 
-  return [joined, duration, clears, policyPhrase(alert), only, where].filter(Boolean).join(', ');
+  return [joined, duration, clears, [policyPhrase(alert), describeSpread(alert.spread)].filter(Boolean).join(' '), only, where].filter(Boolean).join(', ');
 }

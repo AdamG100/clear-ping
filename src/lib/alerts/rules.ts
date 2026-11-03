@@ -1,4 +1,4 @@
-import type { AlertCombine, AlertCondition, ProbePolicy } from '@/types/alert-rules';
+import type { AlertCombine, AlertCondition, ProbePolicy, ProbeSpread } from '@/types/alert-rules';
 import { ALERT_METRIC_LABELS, type AlertMetric, type AlertRule, type AlertSettings, type ProbeResult } from '@/types/probe';
 
 /** The conditions of an alert: those it has, or the one in its metric and threshold. */
@@ -222,6 +222,17 @@ export interface ProbeStanding {
   inBreach: boolean;
   /** Not reporting: no reading within two intervals, or its probe agent is down. */
   silent: boolean;
+  /** Where it is, as labelled under Settings, Probes. */
+  region?: string;
+  network?: string;
+}
+
+/** Whether the probes in breach are spread over as many regions and networks as asked. */
+export function spreadHolds(spread: ProbeSpread | null | undefined, breaching: Pick<ProbeStanding, 'region' | 'network'>[]): boolean {
+  if (!spread) return true;
+  const distinct = (pick: (each: Pick<ProbeStanding, 'region' | 'network'>) => string | undefined) =>
+    new Set(breaching.map(pick).filter((label): label is string => !!label)).size;
+  return distinct(each => each.region) >= (spread.regions ?? 0) && distinct(each => each.network) >= (spread.networks ?? 0);
 }
 
 /**
@@ -234,14 +245,21 @@ export interface ProbeStanding {
 export function judgeMonitor(
   policy: ProbePolicy,
   state: 'ok' | 'firing',
-  probes: ProbeStanding[]
+  probes: ProbeStanding[],
+  spread?: ProbeSpread | null
 ): { next: 'ok' | 'firing'; transition: 'firing' | 'resolved' | null; breaching: number; total: number } {
   const total = probes.length;
   const breaching = probes.filter(probe => probe.inBreach && !probe.silent).length;
   const mostCharitable = probes.filter(probe => probe.inBreach || probe.silent).length;
-  const reporting = probes.some(probe => !probe.silent);
+  const reportingCount = probes.filter(probe => !probe.silent).length;
+  const reporting = reportingCount > 0;
+  // "Two thirds of the probes that are up" counts the silent ones out of the
+  // pool to fire. To resolve they are in it, as in breach, as before: that is
+  // never less than the share needed to fire, so the two cannot both hold.
+  const pool = policy.kind === 'share' && policy.of === 'healthy' ? reportingCount : total;
+  const spread_ = spreadHolds(spread, probes.filter(probe => probe.inBreach && !probe.silent));
 
-  if (state === 'ok' && reporting && policyHolds(policy, breaching, total)) {
+  if (state === 'ok' && reporting && spread_ && policyHolds(policy, breaching, pool)) {
     return { next: 'firing', transition: 'firing', breaching, total };
   }
   if (state === 'firing' && !policyHolds(policy, mostCharitable, total)) {
@@ -260,6 +278,17 @@ export function describePolicy(policy: ProbePolicy, total: number): string {
     case 'atLeast':
       return `at least ${policy.count} of ${total} probes`;
     case 'share':
-      return `at least ${policy.percent}% of ${total} probes (${Math.ceil((policy.percent / 100) * total)})`;
+      return policy.of === 'healthy'
+        ? `at least ${policy.percent}% of the ${total} probes that are reporting (${Math.ceil((policy.percent / 100) * total)})`
+        : `at least ${policy.percent}% of ${total} probes (${Math.ceil((policy.percent / 100) * total)})`;
   }
+}
+
+/** The spread in words: "from at least 3 regions and 2 networks"; empty when none is asked. */
+export function describeSpread(spread: ProbeSpread | null | undefined): string {
+  const parts = [
+    spread?.regions ? `${spread.regions} region${spread.regions === 1 ? '' : 's'}` : '',
+    spread?.networks ? `${spread.networks} network${spread.networks === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return parts.length > 0 ? `from at least ${parts.join(' and ')}` : '';
 }

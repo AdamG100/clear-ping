@@ -108,6 +108,21 @@ describe('what the API accepts for an alert', () => {
     expect(parsed).toMatchObject({ ok: true, input: { metric: 'packetLoss', threshold: 5, combine: 'all', forMinutes: 5, policy: { kind: 'share', percent: 60 } } })
   })
 
+  it('takes a share of the probes that are reporting and a spread, and keeps them', async () => {
+    const parsed = parseAlertInput({
+      metric: 'unreachable', threshold: 0, consecutiveProbes: 3, notifyUrls: [], targetIds: [MONITOR.id],
+      policy: { kind: 'share', percent: 66, of: 'healthy' }, spread: { regions: 3, networks: 3 },
+    })
+    expect(parsed).toMatchObject({ ok: true, input: { policy: { kind: 'share', percent: 66, of: 'healthy' }, spread: { regions: 3, networks: 3 } } })
+    if (!parsed.ok) return
+    const made = await createAlert(parsed.input as Parameters<typeof createAlert>[0])
+    const stored = (await getAlerts()).find(each => each.id === made.id)!
+    expect(stored.policy).toEqual({ kind: 'share', percent: 66, of: 'healthy' })
+    expect(stored.spread).toEqual({ regions: 3, networks: 3 })
+    expect(parseAlertInput({ spread: { regions: 0 } }, true)).toMatchObject({ ok: false })
+    expect(parseAlertInput({ spread: null }, true)).toMatchObject({ ok: true, input: { spread: null } })
+  })
+
   it('refuses what it cannot judge', () => {
     for (const body of [
       { conditions: [], consecutiveProbes: 1, notifyUrls: [], targetIds: [] },

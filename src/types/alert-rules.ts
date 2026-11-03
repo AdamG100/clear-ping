@@ -27,7 +27,18 @@ export type ProbePolicy =
   | { kind: 'any' }
   | { kind: 'all' }
   | { kind: 'atLeast'; count: number }
-  | { kind: 'share'; percent: number };
+  /** `of: 'healthy'` takes the share of the probes that are reporting, not of all the monitor's probes. */
+  | { kind: 'share'; percent: number; of?: 'healthy' };
+
+/**
+ * How spread out the probes in breach must be: from at least this many
+ * different regions and networks (the labels set under Settings, Probes). A
+ * probe with no label there counts for neither.
+ */
+export interface ProbeSpread {
+  regions?: number;
+  networks?: number;
+}
 
 /** Somewhere an alert applies: a monitor, everything in a group, or what one probe measures. */
 export type AlertScopeEntry = { kind: 'monitor' | 'group' | 'probe'; ref: string };
@@ -42,6 +53,8 @@ export interface AlertRuleSettings {
   /** How long it must be clear to resolve, in the unit of the duration; the duration itself when absent. */
   clearAfter?: number;
   policy?: ProbePolicy;
+  /** The probes in breach must also span this many regions and networks; no such rule when absent. */
+  spread?: ProbeSpread | null;
   /** Only these probes count; every probe of each monitor when absent. */
   probes?: ProbeId[] | null;
   /** Everywhere it applies besides the monitors ticked. */
@@ -64,6 +77,9 @@ export interface ProbeVerdict {
   breaching: boolean;
   /** Not reporting: no reading in two intervals, or its probe agent is down. */
   silent: boolean;
+  /** Where it is, as labelled under Settings, Probes. */
+  region?: string;
+  network?: string;
 }
 
 /** An entry in an alert's history: what changed, and why. */
