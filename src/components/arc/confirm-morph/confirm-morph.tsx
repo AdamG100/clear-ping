@@ -118,8 +118,16 @@ function Face({ id, reduced, onSize, children, labelledBy }: { id: FaceKey; redu
   useLayoutEffect(() => {
     const node = ref.current;
     if (!node || !present) return;
-    // Fractional widths, so the spring lands exactly where the pill's natural width is and the hand back to auto is seamless.
-    const report = () => onSize(id, node.getBoundingClientRect().width);
+    // The width the face wants, not the one it was squeezed to: its clamp to the pill is lifted for the read. Reporting the
+    // clamped box would aim the spring at the width it is itself holding the pill to, and the hand back to auto would
+    // unclamp it again, so the pill would flicker between the two for ever. Fractional, so the hand back to auto is seamless.
+    const report = () => {
+      const clamp = node.style.maxWidth;
+      node.style.maxWidth = "none";
+      const natural = node.getBoundingClientRect().width;
+      node.style.maxWidth = clamp;
+      onSize(id, natural);
+    };
     report();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(report);
@@ -247,14 +255,27 @@ export function ConfirmMorph({
 
   /* The shape: one pill whose width springs to whichever face is current. At rest it is auto, so it renders right before hydration. */
   const width = useMotionValue<number | "auto">("auto");
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  // How wide the pill last was on screen, which is less than the last face's width when the room held it back.
+  const shown = useRef(0);
+  useEffect(() => {
+    const node = surfaceRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    shown.current = node.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => { shown.current = node.getBoundingClientRect().width; });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   const target = useRef(0);
   const flight = useRef(0);
   // Only the present face reports (a leaving face stops observing), so every report is the current face's width.
   const onFaceSize = useCallback((_id: FaceKey, w: number) => {
     if (Math.abs(w - target.current) < .25) return;
-    const from = target.current;
+    const was = target.current;
     target.current = w;
-    if (!from || reduced) { flight.current++; width.jump("auto"); return; }
+    if (!was || reduced) { flight.current++; width.jump("auto"); return; }
+    // Starting from what was shown, not from a width the room never allowed, so the spring does not wait out widths nobody saw.
+    const from = shown.current > 0 ? Math.min(was, shown.current) : was;
     const now = width.get();
     if (now === "auto") width.jump(from);
     const token = ++flight.current;
@@ -433,7 +454,7 @@ export function ConfirmMorph({
     data-disabled={disabled || undefined} tabIndex={-1} onKeyDown={onKeyDown} aria-busy={state === "pending" || undefined}
     onPointerEnter={() => { holds.current.hover = true; sync(); }} onPointerLeave={() => { holds.current.hover = false; sync(); }}
     onPointerCancel={() => { holds.current.hover = false; sync(); }}>
-    <motion.div className={styles.surface} style={{ width }}>
+    <motion.div ref={surfaceRef} className={styles.surface} style={{ width }}>
       <AnimatePresence initial={false}>
         <Face key={faceKey} id={faceKey} reduced={reduced} onSize={onFaceSize} labelledBy={faceKey === "confirming" ? promptId : undefined}>{face}</Face>
       </AnimatePresence>

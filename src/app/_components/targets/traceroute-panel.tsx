@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { CheckCircle2, ChevronDown, ChevronRight, Download, Route, Trash2, XCircle } from 'lucide-react'
@@ -431,11 +431,15 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
   const choosable = canChooseTraceFamily(host)
   const [families, setFamilies] = useState<TraceFamilies>(() => defaultTraceFamilies(host, ipVersion))
   const [tracing, setTracing] = useState<Array<AddressFamily | null>>([])
-  const [deleting, setDeleting] = useState(false)
+  // What is being deleted, by route id (or 'older'), so one delete does not grey out every other row's button.
+  const [deleting, setDeleting] = useState<ReadonlySet<string>>(new Set())
+  const reduceMotion = useReducedMotion()
   // The newest trace is open unless another has been chosen.
   const [chosenId, setChosenId] = useState<string | null | undefined>(undefined)
+  const loadSeq = useRef(0)
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current
     try {
       const response = await fetch(`/api/targets/${targetId}/traceroute`)
       if (!response.ok) {
@@ -443,6 +447,8 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
         return
       }
       const data = await response.json()
+      // A later load has the say: this one may have been read before a route was deleted, and would bring it back.
+      if (seq !== loadSeq.current) return
       const listed: Traceroute[] = (data.traceroutes ?? []).map(parseTrace)
       setTraces(listed)
       setTotal(typeof data.total === 'number' ? data.total : listed.length)
@@ -496,9 +502,9 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
     }
   }
 
-  /** Delete what `query` names; true if it went. */
-  const remove = async (query: string): Promise<boolean> => {
-    setDeleting(true)
+  /** Delete what `query` names, called `key` while it goes; true if it went. `leave` takes it out of the list at once. */
+  const remove = async (query: string, key: string, leave: () => void): Promise<boolean> => {
+    setDeleting(current => new Set(current).add(key))
     try {
       const response = await fetch(`/api/targets/${targetId}/traceroute?${query}`, { method: 'DELETE' })
       if (!response.ok) {
@@ -506,20 +512,31 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
         reportError('Could not delete the route', error)
         return false
       }
-      await load()
+      // The route leaves with its exit now; the reload after only confirms it, and a read begun before it is dropped.
+      loadSeq.current++
+      leave()
+      void load()
       return true
     } catch (error) {
       reportError('Could not delete the route', error)
       return false
     } finally {
-      setDeleting(false)
+      setDeleting(current => {
+        const rest = new Set(current)
+        rest.delete(key)
+        return rest
+      })
     }
   }
 
   // Deleting asks first, in place: a trace taken while something was broken
   // cannot be taken again once it has mended.
   const removeOne = async (item: Traceroute) => {
-    if (!(await remove(`trace=${encodeURIComponent(item.id)}`))) throw new Error('Not deleted')
+    const leave = () => {
+      setTraces(current => current.filter(other => other.id !== item.id))
+      setTotal(current => Math.max(0, current - 1))
+    }
+    if (!(await remove(`trace=${encodeURIComponent(item.id)}`, item.id, leave))) throw new Error('Not deleted')
     // The one that was open is gone; the newest takes its place.
     if (item.id === chosenId) setChosenId(undefined)
   }
@@ -529,7 +546,12 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
   const olderCount = Math.max(0, total - newestPerFamily(traces).length)
 
   const removeOlder = async () => {
-    if (!(await remove('older=1'))) throw new Error('Not deleted')
+    const leave = () => {
+      const kept = newestPerFamily(traces)
+      setTraces(kept)
+      setTotal(kept.length)
+    }
+    if (!(await remove('older=1', 'older', leave))) throw new Error('Not deleted')
     {
       setChosenId(undefined)
       notify({
@@ -566,14 +588,13 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
         {!readOnly && <div className="flex w-full min-w-0 max-w-full flex-wrap items-center justify-end gap-2 @2xl/main:w-auto @2xl/main:min-w-80">
           {olderCount > 0 && (
             <ConfirmMorph
-              key={olderCount}
               label={`Delete ${olderCount} older`}
               icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
               // Short enough, with Cancel and Delete beside it, for a phone.
               prompt="Keep only the newest?"
               confirmLabel="Delete"
               doneLabel="Deleted"
-              disabled={deleting}
+              disabled={deleting.has('older')}
               onConfirm={removeOlder}
             />
           )}
@@ -610,92 +631,98 @@ export function TraceroutePanel({ targetId, name, host, ipVersion, refreshKey, r
             <ul className="space-y-1.5">
               {startedAt !== null &&
                 tracing.map(family => <TracingRow key={family ?? 'any'} family={family} startedAt={startedAt} />)}
-              {traces.map(item => {
-                const open = item.id === openId
-                const summary = traceSummary(item)
-                const took = endToEnd(item)
-                const StatusIcon = summary.tone === 'ok' ? CheckCircle2 : XCircle
-                const time = formatTime(item.timestamp)
-                const family = traceFamily(item)
+              <AnimatePresence initial={false}>
+                {traces.map(item => {
+                  const open = item.id === openId
+                  const summary = traceSummary(item)
+                  const took = endToEnd(item)
+                  const StatusIcon = summary.tone === 'ok' ? CheckCircle2 : XCircle
+                  const time = formatTime(item.timestamp)
+                  const family = traceFamily(item)
 
-                return (
-                  <li
-                    key={item.id}
-                    className={cn(
-                      'rounded-2xl border transition-colors',
-                      open ? 'border-border bg-background' : 'border-border hover:border-border-strong'
-                    )}
-                  >
-                    {/* Side by side, not one inside the other: a button
-                        cannot hold another button. Delete stays on its own
-                        line at every width. Beside the summary, the row gives
-                        the spare width to the summary, and the confirmation
-                        is clipped down to the Delete button: it flashes open
-                        and cannot be pressed. */}
-                    <div className="flex flex-wrap items-center gap-1 pr-2">
-                      <button
-                        type="button"
-                        onClick={() => setChosenId(open ? null : item.id)}
-                        aria-expanded={open}
-                        className="flex min-w-0 w-full cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl px-3 py-2.5 text-left text-sm touch:py-3"
-                      >
-                        {open
-                          ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-                        <StatusIcon
-                          className={cn('h-4 w-4 shrink-0', summary.tone === 'ok' ? 'text-signal-perfect' : 'text-signal-critical')}
-                          aria-hidden="true"
-                        />
-                        {/* Which family, first: the two take different routes,
-                            and a list of both read as one otherwise. */}
-                        {family && <Badge size="sm" tone="info">{FAMILY_LABEL[family]}</Badge>}
-                        <span className={cn('font-medium', summary.tone === 'bad' ? 'text-signal-critical' : 'text-foreground')}>
-                          {summary.text}
-                        </span>
-                        {took !== null && <span className="font-mono text-muted-foreground">{ms(took)} ms</span>}
-                        {item.trigger === 'alert' && <Badge tone="danger" size="sm">Taken on alert</Badge>}
-                        <span className="ml-auto flex flex-wrap items-center justify-end gap-x-3 font-mono text-[11px] text-muted-foreground">
-                          <span className="break-all"><Masked value={item.address} /></span>
-                          <span className="whitespace-nowrap">{time}</span>
-                        </span>
-                      </button>
-
-                      {/* Asked in the route's own row, so "this" says which;
-                          the time it was taken made the question too wide. */}
-                      {readOnly ? null : (
-                        <div className="flex w-full shrink-0 justify-end pb-2">
-                          <ConfirmMorph
-                            label="Delete"
-                            icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
-                            prompt="Delete this route?"
-                            confirmLabel="Delete"
-                            doneLabel="Deleted"
-                            disabled={deleting}
-                            onConfirm={() => removeOne(item)}
-                          />
-                        </div>
+                  return (
+                    <motion.li
+                      key={item.id}
+                      // A deleted route folds away instead of vanishing, so the rows below settle rather than jump.
+                      exit={reduceMotion
+                        ? { opacity: 0, transition: { duration: 0.1 } }
+                        : { height: 0, opacity: 0, marginBottom: 0, overflow: 'hidden', transition: { duration: 0.22 } }}
+                      className={cn(
+                        'rounded-2xl border transition-colors',
+                        open ? 'border-border bg-background' : 'border-border hover:border-border-strong'
                       )}
-                    </div>
-
-                    <AnimatePresence initial={false}>
-                      {open && item.hops.length > 0 && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.18 }}
-                          className="overflow-hidden"
+                    >
+                      {/* Side by side, not one inside the other: a button
+                          cannot hold another button. Delete stays on its own
+                          line at every width. Beside the summary, the row gives
+                          the spare width to the summary, and the confirmation
+                          is clipped down to the Delete button: it flashes open
+                          and cannot be pressed. */}
+                      <div className="flex flex-wrap items-center gap-1 pr-2">
+                        <button
+                          type="button"
+                          onClick={() => setChosenId(open ? null : item.id)}
+                          aria-expanded={open}
+                          className="flex min-w-0 w-full cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl px-3 py-2.5 text-left text-sm touch:py-3"
                         >
-                          <div className="border-t border-border px-3 pb-3 pt-3">
-                            <ShareTrace trace={item} subject={{ name, host }} />
-                            <HopTable trace={item} />
+                          {open
+                            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                          <StatusIcon
+                            className={cn('h-4 w-4 shrink-0', summary.tone === 'ok' ? 'text-signal-perfect' : 'text-signal-critical')}
+                            aria-hidden="true"
+                          />
+                          {/* Which family, first: the two take different routes,
+                              and a list of both read as one otherwise. */}
+                          {family && <Badge size="sm" tone="info">{FAMILY_LABEL[family]}</Badge>}
+                          <span className={cn('font-medium', summary.tone === 'bad' ? 'text-signal-critical' : 'text-foreground')}>
+                            {summary.text}
+                          </span>
+                          {took !== null && <span className="font-mono text-muted-foreground">{ms(took)} ms</span>}
+                          {item.trigger === 'alert' && <Badge tone="danger" size="sm">Taken on alert</Badge>}
+                          <span className="ml-auto flex flex-wrap items-center justify-end gap-x-3 font-mono text-[11px] text-muted-foreground">
+                            <span className="break-all"><Masked value={item.address} /></span>
+                            <span className="whitespace-nowrap">{time}</span>
+                          </span>
+                        </button>
+
+                        {/* Asked in the route's own row, so "this" says which;
+                            the time it was taken made the question too wide. */}
+                        {readOnly ? null : (
+                          <div className="flex w-full shrink-0 justify-end pb-2">
+                            <ConfirmMorph
+                              label="Delete"
+                              icon={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
+                              prompt="Delete this route?"
+                              confirmLabel="Delete"
+                              doneLabel="Deleted"
+                              disabled={deleting.has(item.id)}
+                              onConfirm={() => removeOne(item)}
+                            />
                           </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </li>
-                )
-              })}
+                        )}
+                      </div>
+
+                      <AnimatePresence initial={false}>
+                        {open && item.hops.length > 0 && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.18 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="border-t border-border px-3 pb-3 pt-3">
+                              <ShareTrace trace={item} subject={{ name, host }} />
+                              <HopTable trace={item} />
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.li>
+                  )
+                })}
+              </AnimatePresence>
             </ul>
             {total > traces.length && (
               <p className="mt-2 text-xs text-muted-foreground">

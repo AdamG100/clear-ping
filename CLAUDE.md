@@ -84,6 +84,8 @@ Things that bite:
 - Notifications are `useToast()` from `@/components/notifications` (Arc's toast stack).
 - Some installed Arc files are edited, and `shadcn add --overwrite` would undo
   them: tooltip (dark colours), code-block (no `//` comments in shell),
+  confirm-morph (a face reports the width it wants, not the width the room
+  clamps it to, so the pill does not flicker between the two),
   expandable-card (a `leading` slot for a status dot), timeline (a `unit` for
   what its day count counts), alert (a circled tick
   for success, like the circled icons of the other tones), lib/use-copy-feedback
