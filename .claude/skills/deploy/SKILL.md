@@ -5,7 +5,7 @@ description: Deploy ClearPing - check the work, push to main, and confirm the ne
 
 # Deploying ClearPing
 
-Every push to `main` is a deployment. CI (`.github/workflows/docker.yml`) builds
+Every push to `main` that changes what goes into the images is a deployment. CI (`.github/workflows/docker.yml`) builds
 the Docker image, numbers it, publishes it to `ghcr.io/adamg100/clear-ping` as
 `:latest` and `:<version>`, and makes a GitHub release `v<version>`. The live
 install at https://ping.gnetworx.cloud runs `:latest` and shows its version in

@@ -17,7 +17,9 @@ its latest commit. Open a draft to hold one back.
 
 ## Version numbers
 
-Every push to `main` is released, numbered by CI (`scripts/next-version.mjs`),
+Every push to `main` that changes what goes into the images is released (docs,
+tests and workflows alone build nothing, and go out with the next release),
+numbered by CI (`scripts/next-version.mjs`),
 so the version is decided in the commit message: when a commit deserves more
 than a patch, end its message with a `Release:` trailer beside `Co-Authored-By`.
 

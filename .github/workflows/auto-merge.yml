@@ -13,7 +13,8 @@ name: Auto-merge
 #
 # It runs from main's copy of this file with nothing checked out, so nothing in
 # the pull request runs with this job's token. A merge made with that token
-# starts no workflow of its own, so the release is asked for at the end.
+# starts no workflow of its own, so the release is asked for at the end. It only
+# builds if something that goes into the images has changed (docker.yml).
 
 on:
   workflow_run:
@@ -91,4 +92,4 @@ jobs:
             leave "$author's pull requests are not merged automatically"
           fi
 
-          gh workflow run docker.yml --ref main
+          gh workflow run docker.yml --ref main -f force=false
