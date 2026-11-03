@@ -547,6 +547,7 @@ in its place and stops the old one at once. See
 | `GET /api/compare` | The same period of several monitors (`?targets=id,id`; `&probes=all` draws a line for each probe of each monitor, `&probe=id` moves them to one probe, and `?series=id:probe,…` names the lines exactly); `&split=resolver` gives a DNS monitor's resolvers a line each (`&family=4` or `6` for one side of a monitor on both) |
 | `GET`, `POST /api/alerts` | Every alert; make one |
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
+| `GET /api/alerts/:id/events` | Its history: each fire and clear, and why |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 | `GET /api/probe-agents` | The probe agents monitors can be probed from, and whether each can be reached. A monitor's `probeAgentId` says which it uses (`null` for this server), and is set the same way in `POST` and `PATCH /api/targets` |
 | `/api/security/probe-agents/…` | Add, change and remove probe agents, connect to one (`…/:id/connect`) and make it a new token (`…/:id/token`); admins only ([docs/probe-agents.md](docs/probe-agents.md)) |

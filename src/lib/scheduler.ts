@@ -17,6 +17,7 @@ import { getPairTimes, pairKey, recordPairRound } from './targets/store';
 import { LOCAL_PROBE, type ProbeId } from '@/types/probe-agent';
 import type { IpVersion, ProbeConfig, ProbeResult, ProbeType } from '@/types/probe';
 import { randomUUID } from 'crypto';
+import { cleanOldAlertEvents } from './alerts/history';
 import { asksForTrace, dispatchAlert, evaluateAlerts, getAlerts, shouldTraceOnAlert } from './alerts/store';
 import { cleanOldTraceroutes, ensureTracerouteSchema, lastAlertTraceAt, traceAndStore, trimAlertTraces } from './traceroute/store';
 
@@ -435,7 +436,7 @@ class ProbeScheduler {
       }
 
       const found = await evaluateAlerts(
-        { id: target.id, name: target.name, host: target.host, group: target.group },
+        { id: target.id, name: target.name, host: target.host, group: target.group, interval: target.interval },
         { ...result, probe: target.probe }
       );
       // Where it was measured from is only looked up for an alert to say so.
@@ -585,6 +586,7 @@ class ProbeScheduler {
         console.log(`[Scheduler] Retention: removed ${removed} measurements older than ${this.retentionDays}d`);
       }
       await cleanOldTraceroutes(this.retentionDays);
+      await cleanOldAlertEvents(this.retentionDays);
       await cleanOldProbeAgentOutages(this.retentionDays);
       for (const alert of await getAlerts()) {
         await trimAlertTraces(alert.id, alert.traceKeepCount, alert.traceKeepDays);

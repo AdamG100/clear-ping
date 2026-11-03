@@ -222,6 +222,15 @@ export function notificationFor(event: AlertEvent, options: NotificationOptions 
   ];
   if (event.targetGroup) details.push(['Group', groupLabel(event.targetGroup)]);
   if (event.probedFrom) details.push(['Probed from', event.probedFrom]);
+  // Why it fired: each condition as it stood, how many probes agreed, and which.
+  if (event.conditions && event.conditions.length > 1) {
+    details.push(['Conditions', event.conditions.map(each => `${each.label}: ${each.observed ?? 'no reading'}, ${each.held ? 'held' : 'not held'}`).join('; ')]);
+  }
+  if (event.policyText && (event.probeVerdicts?.length ?? 0) > 1) details.push(['Probes agreeing', event.policyText]);
+  if (event.probeVerdicts && event.probeVerdicts.length > 1) {
+    const shown = event.probeVerdicts.slice(0, 10).map(each => `${each.name} (${each.silent ? 'not reporting' : each.breaching ? 'in breach' : 'fine'})`);
+    details.push(['Probes', shown.join(', ') + (event.probeVerdicts.length > 10 ? `, and ${event.probeVerdicts.length - 10} more` : '')]);
+  }
 
   return {
     title: clip(defuse(`${options.test ? 'Test: ' : ''}${headline(event)}`), TITLE_MAX),

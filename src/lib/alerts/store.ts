@@ -1,9 +1,16 @@
 import { randomUUID } from 'crypto';
 import { getDatabase } from '../db/database';
-import { notificationFor, parseNotifyUrls, withEmbeds } from './delivery';
+import { describeCondition, notificationFor, parseNotifyUrls, withEmbeds } from './delivery';
 import { sendNotification, type DeliveryResult } from './apprise';
 import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
-import { LOCAL_PROBE } from '@/types/probe-agent';
+import { LOCAL_PROBE, type ProbeAgentState } from '@/types/probe-agent';
+import type { AlertCombine, AlertCondition, AlertScopeEntry, ConditionResult, ProbePolicy, ProbeVerdict } from '@/types/alert-rules';
+import type { ComparisonLine } from '@/types/comparison';
+import { isProbeAgentDown } from '../probe-agents/store';
+import { probeNames } from '../probe-agents/probes';
+import { recordAlertEvent } from './history';
+import { coveredProbes, isScopeEntry } from './scope';
+import { conditionsOf, describePolicy, FRESH_PROBE_STATE, judgeMonitor, policyOf, stepProbe, type ProbeRuleState, type ProbeStanding } from './rules';
 import {
   ALERT_METRIC_LABELS,
   DEFAULT_TRACE_COOLDOWN_MINUTES,
@@ -38,6 +45,13 @@ interface AlertRow {
   trace_keep_days: number;
   enabled: number;
   created_at: number;
+  conditions: string | null;
+  combine: string | null;
+  for_minutes: number | null;
+  clear_after: number | null;
+  probe_policy: string | null;
+  probe_quorum: number | null;
+  probes: string | null;
 }
 
 interface AlertTargetRow {
@@ -59,9 +73,37 @@ function parseUrls(value: string | null): string[] {
   }
 }
 
+function parseJson<T>(value: string | null): T | undefined {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function policyFromRow(row: AlertRow): ProbePolicy {
+  switch (row.probe_policy) {
+    case 'all':
+      return { kind: 'all' };
+    case 'atLeast':
+      return { kind: 'atLeast', count: row.probe_quorum ?? 1 };
+    case 'share':
+      return { kind: 'share', percent: row.probe_quorum ?? 100 };
+    default:
+      return { kind: 'any' };
+  }
+}
+
 function settingsFromRow(row: AlertRow): AlertSettings & { id: string; enabled: boolean; createdAt: Date } {
   return {
     id: row.id,
+    conditions: parseJson<AlertCondition[]>(row.conditions),
+    combine: parseJson<AlertCombine>(row.combine) ?? 'any',
+    ...(row.for_minutes ? { forMinutes: row.for_minutes } : {}),
+    ...(row.clear_after ? { clearAfter: row.clear_after } : {}),
+    policy: policyFromRow(row),
+    probes: parseJson<string[]>(row.probes) ?? null,
     name: row.name || undefined,
     metric: row.metric,
     threshold: row.threshold,
@@ -106,7 +148,7 @@ async function all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
 // ─── Reading and writing alerts ─────────────────────────────────────────────
 
 export async function getAlerts(): Promise<Alert[]> {
-  const [alerts, states, breaching] = await Promise.all([
+  const [alerts, states, breaching, scopes] = await Promise.all([
     all<AlertRow>('SELECT * FROM alerts ORDER BY created_at ASC'),
     all<AlertTargetRow>('SELECT * FROM alert_targets'),
     all<{ alert_id: string; target_id: string; probe: string }>(
@@ -114,6 +156,7 @@ export async function getAlerts(): Promise<Alert[]> {
        JOIN target_probes p ON p.target_id = s.target_id AND p.probe = s.probe AND p.removed_at IS NULL
        WHERE s.in_breach = 1`
     ),
+    all<{ alert_id: string; kind: AlertScopeEntry['kind']; ref: string }>('SELECT alert_id, kind, ref FROM alert_scope'),
   ]);
 
   const holding = new Map<string, string[]>();
@@ -130,7 +173,8 @@ export async function getAlerts(): Promise<Alert[]> {
     byAlert.set(row.alert_id, list);
   }
 
-  return alerts.map(row => ({ ...settingsFromRow(row), targets: byAlert.get(row.id) ?? [] }));
+  const scopeOf = (id: string): AlertScopeEntry[] => scopes.filter(row => row.alert_id === id).map(row => ({ kind: row.kind, ref: row.ref }));
+  return alerts.map(row => ({ ...settingsFromRow(row), scope: scopeOf(row.id), targets: byAlert.get(row.id) ?? [] }));
 }
 
 export async function getAlert(id: string): Promise<Alert | null> {
@@ -161,6 +205,45 @@ export type AlertInput = Omit<AlertSettings, 'traceOnFire' | 'traceCooldownMinut
     enabled?: boolean;
   };
 
+const MAX_CONDITIONS = 6;
+const MAX_DURATION = 7 * 24 * 60;
+
+function parseConditions(raw: unknown): { ok: true; conditions: AlertCondition[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_CONDITIONS) return { ok: false, error: `conditions is a list of 1 to ${MAX_CONDITIONS}` };
+  const conditions: AlertCondition[] = [];
+  for (const entry of raw) {
+    const each = entry as Partial<AlertCondition> | null;
+    if (!each || !ALERT_METRICS.includes(each.metric as AlertMetric)) return { ok: false, error: `Each condition's metric is one of: ${ALERT_METRICS.join(', ')}` };
+    const threshold = each.metric === 'unreachable' ? 0 : Number(each.threshold);
+    if (!Number.isFinite(threshold) || threshold < 0) return { ok: false, error: 'A threshold must be a non-negative number' };
+    const condition: AlertCondition = { metric: each.metric as AlertMetric, threshold };
+    if (each.clearThreshold !== undefined && each.clearThreshold !== null && each.metric !== 'unreachable') {
+      const clear = Number(each.clearThreshold);
+      if (!Number.isFinite(clear) || clear < 0) return { ok: false, error: 'A clear threshold must be a non-negative number' };
+      condition.clearThreshold = clear;
+    }
+    if (each.window !== undefined && each.window !== null) {
+      if (!Number.isInteger(each.window) || each.window < 1 || each.window > 100) return { ok: false, error: 'A window is from 1 to 100 readings' };
+      if (each.window > 1) condition.window = each.window;
+    }
+    conditions.push(condition);
+  }
+  return { ok: true, conditions };
+}
+
+function parsePolicy(raw: unknown): { ok: true; policy: ProbePolicy } | { ok: false; error: string } {
+  if (raw === 'any' || raw === 'all') return { ok: true, policy: { kind: raw } };
+  const each = raw as { kind?: unknown; count?: unknown; percent?: unknown } | null;
+  if (each?.kind === 'any' || each?.kind === 'all') return { ok: true, policy: { kind: each.kind } };
+  if (each?.kind === 'atLeast' && typeof each.count === 'number' && Number.isInteger(each.count) && each.count >= 1 && each.count <= 1000) {
+    return { ok: true, policy: { kind: 'atLeast', count: each.count } };
+  }
+  if (each?.kind === 'share' && typeof each.percent === 'number' && each.percent > 0 && each.percent <= 100) {
+    return { ok: true, policy: { kind: 'share', percent: Math.round(each.percent) } };
+  }
+  return { ok: false, error: 'policy is "any", "all", { kind: "atLeast", count } or { kind: "share", percent }' };
+}
+
 /**
  * Check and tidy what the API was sent for an alert.
  *
@@ -177,14 +260,23 @@ export function parseAlertInput(
 
   if (given('name')) input.name = String(body.name ?? '').trim().slice(0, 80);
 
-  if (given('metric') || !partial) {
+  const conditions = given('conditions') ? parseConditions(body.conditions) : null;
+  if (conditions && !conditions.ok) return fail(conditions.error);
+  if (conditions?.ok) {
+    // The first condition is also the alert's metric and threshold, which an older client and image read.
+    input.conditions = conditions.conditions;
+    input.metric = conditions.conditions[0].metric;
+    input.threshold = conditions.conditions[0].threshold;
+  }
+
+  if (!conditions && (given('metric') || !partial)) {
     if (!ALERT_METRICS.includes(body.metric as AlertMetric)) {
       return fail(`Invalid metric. Expected one of: ${ALERT_METRICS.join(', ')}`);
     }
     input.metric = body.metric as AlertMetric;
   }
 
-  if (given('threshold') || !partial) {
+  if (!conditions && (given('threshold') || !partial)) {
     // 'unreachable' has no threshold to compare against; everything else does.
     const threshold = body.metric === 'unreachable' ? 0 : Number(body.threshold);
     if (!Number.isFinite(threshold) || threshold < 0) return fail('Threshold must be a non-negative number');
@@ -238,7 +330,46 @@ export function parseAlertInput(
     input.traceKeepDays = days;
   }
 
-  if (given('targetIds') || !partial) {
+  if (given('combine')) {
+    const combine = body.combine as unknown;
+    if (combine === 'any' || combine === 'all') input.combine = combine;
+    else {
+      const count = typeof combine === 'number' ? combine : (combine as { atLeast?: unknown } | null)?.atLeast;
+      if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > MAX_CONDITIONS) return fail(`combine is "any", "all", or { atLeast: 1 to ${MAX_CONDITIONS} }`);
+      input.combine = { atLeast: count };
+    }
+  }
+
+  for (const [field, column] of [['forMinutes', 'minutes'], ['clearAfter', 'clear time']] as const) {
+    if (!given(field)) continue;
+    const value = body[field];
+    if (value === null) continue;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > MAX_DURATION) return fail(`${field} is a whole number of ${column} from 1 to ${MAX_DURATION}, or null`);
+    input[field] = value;
+  }
+  if (given('forMinutes') && body.forMinutes === null) input.forMinutes = 0;
+  if (given('clearAfter') && body.clearAfter === null) input.clearAfter = 0;
+
+  if (given('policy')) {
+    const policy = parsePolicy(body.policy);
+    if (!policy.ok) return fail(policy.error);
+    input.policy = policy.policy;
+  }
+
+  if (given('probes')) {
+    const probes = body.probes;
+    if (probes !== null && (!Array.isArray(probes) || !probes.every(each => typeof each === 'string' && each))) {
+      return fail('probes is a list of probe ids ("local" for the dashboard\'s own), or null for every probe');
+    }
+    input.probes = probes === null ? null : [...new Set(probes as string[])];
+  }
+
+  if (given('scope')) {
+    if (!Array.isArray(body.scope) || !body.scope.every(isScopeEntry)) return fail('scope is a list of { kind: "monitor" | "group" | "comparison" | "probe", ref }');
+    input.scope = body.scope.map(entry => ({ kind: entry.kind, ref: entry.ref }));
+  }
+
+  if (given('targetIds') || (!partial && !given('scope'))) {
     if (!Array.isArray(body.targetIds)) return fail('targetIds must be a list of target ids');
     input.targetIds = [...new Set(body.targetIds.map(String))];
   }
@@ -262,8 +393,9 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
 
   await run(
     `INSERT INTO alerts
-      (id, name, metric, threshold, consecutive_probes, notify_urls, trace_on_fire, trace_cooldown_minutes, trace_keep_count, trace_keep_days, enabled, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, name, metric, threshold, consecutive_probes, notify_urls, trace_on_fire, trace_cooldown_minutes, trace_keep_count, trace_keep_days, enabled, created_at,
+       conditions, combine, for_minutes, clear_after, probe_policy, probe_quorum, probes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.name ?? '',
@@ -277,14 +409,58 @@ export async function createAlert(input: AlertInput): Promise<Alert> {
       input.traceKeepDays ?? DEFAULT_TRACE_KEEP_DAYS,
       input.enabled === false ? 0 : 1,
       Date.now(),
+      input.conditions ? JSON.stringify(input.conditions) : null,
+      input.combine !== undefined ? JSON.stringify(input.combine) : null,
+      input.forMinutes || null,
+      input.clearAfter || null,
+      ...policyColumns(input.policy),
+      input.probes ? JSON.stringify(input.probes) : null,
     ]
   );
 
-  for (const targetId of await existingTargets(input.targetIds)) {
-    await run('INSERT OR IGNORE INTO alert_targets (alert_id, target_id) VALUES (?, ?)', [id, targetId]);
-  }
-
+  await writeScope(id, { monitors: input.targetIds ?? [], scope: input.scope });
   return (await getAlert(id))!;
+}
+
+/** The two columns a policy is stored in. */
+function policyColumns(policy: ProbePolicy | undefined): [string, number] {
+  if (!policy || policy.kind === 'any' || policy.kind === 'all') return [policy?.kind ?? 'any', 1];
+  return policy.kind === 'atLeast' ? ['atLeast', policy.count] : ['share', policy.percent];
+}
+
+/**
+ * Where an alert applies. A `scope` replaces everything; monitors alone (the
+ * ticks an older client sends) replace only the monitor entries and leave the
+ * groups, comparisons and probes as they are. Ticked monitors are also kept
+ * as `alert_targets`, which is where each one's state lives.
+ */
+async function writeScope(alertId: string, change: { monitors?: string[]; scope?: AlertScopeEntry[] }): Promise<void> {
+  const known = change.monitors ? await existingTargets(change.monitors) : undefined;
+  const entries = change.scope
+    ? change.scope
+    : (await all<ScopeRow>('SELECT alert_id, kind, ref FROM alert_scope WHERE alert_id = ? AND kind != ?', [alertId, 'monitor'])).map(row => ({ kind: row.kind, ref: row.ref }));
+  const monitors = known ?? (change.scope ? await existingTargets(change.scope.filter(entry => entry.kind === 'monitor').map(entry => entry.ref)) : null);
+
+  if (monitors) {
+    await run('DELETE FROM alert_scope WHERE alert_id = ? AND kind = ?', [alertId, 'monitor']);
+    const ticked = (await all<{ target_id: string }>('SELECT target_id FROM alert_targets WHERE alert_id = ?', [alertId])).map(row => row.target_id);
+    // Targets that stay ticked keep their state: unticking one must not make
+    // the others forget that they are firing.
+    for (const targetId of ticked.filter(targetId => !monitors.includes(targetId))) {
+      await run('DELETE FROM alert_targets WHERE alert_id = ? AND target_id = ?', [alertId, targetId]);
+      await run('DELETE FROM alert_probe_states WHERE alert_id = ? AND target_id = ?', [alertId, targetId]);
+    }
+    for (const targetId of monitors) {
+      await run('INSERT OR IGNORE INTO alert_targets (alert_id, target_id) VALUES (?, ?)', [alertId, targetId]);
+      await run('INSERT OR IGNORE INTO alert_scope (alert_id, kind, ref) VALUES (?, ?, ?)', [alertId, 'monitor', targetId]);
+    }
+  }
+  if (change.scope) {
+    await run('DELETE FROM alert_scope WHERE alert_id = ? AND kind != ?', [alertId, 'monitor']);
+    for (const entry of entries.filter(each => each.kind !== 'monitor')) {
+      await run('INSERT OR IGNORE INTO alert_scope (alert_id, kind, ref) VALUES (?, ?, ?)', [alertId, entry.kind, entry.ref]);
+    }
+  }
 }
 
 export async function updateAlert(id: string, changes: Partial<AlertInput>): Promise<Alert | null> {
@@ -305,6 +481,16 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
   if (changes.traceKeepCount !== undefined) set('trace_keep_count', changes.traceKeepCount);
   if (changes.traceKeepDays !== undefined) set('trace_keep_days', changes.traceKeepDays);
   if (changes.enabled !== undefined) set('enabled', changes.enabled ? 1 : 0);
+  if (changes.conditions !== undefined) set('conditions', JSON.stringify(changes.conditions));
+  if (changes.combine !== undefined) set('combine', JSON.stringify(changes.combine));
+  if (changes.forMinutes !== undefined) set('for_minutes', changes.forMinutes || null);
+  if (changes.clearAfter !== undefined) set('clear_after', changes.clearAfter || null);
+  if (changes.policy !== undefined) {
+    const [kind, quorum] = policyColumns(changes.policy);
+    set('probe_policy', kind);
+    set('probe_quorum', quorum);
+  }
+  if (changes.probes !== undefined) set('probes', changes.probes ? JSON.stringify(changes.probes) : null);
 
   if (fields.length > 0) {
     const changed = await run(`UPDATE alerts SET ${fields.join(', ')} WHERE id = ?`, [...values, id]);
@@ -313,30 +499,21 @@ export async function updateAlert(id: string, changes: Partial<AlertInput>): Pro
     return null;
   }
 
-  if (changes.targetIds !== undefined) {
-    const wanted = await existingTargets(changes.targetIds);
-    const ticked = (await all<{ target_id: string }>('SELECT target_id FROM alert_targets WHERE alert_id = ?', [id]))
-      .map(row => row.target_id);
-
-    // Targets that stay ticked keep their state: unticking one must not make
-    // the others forget that they are firing.
-    for (const targetId of ticked.filter(targetId => !wanted.includes(targetId))) {
-      await run('DELETE FROM alert_targets WHERE alert_id = ? AND target_id = ?', [id, targetId]);
-      await run('DELETE FROM alert_probe_states WHERE alert_id = ? AND target_id = ?', [id, targetId]);
-    }
-    for (const targetId of wanted.filter(targetId => !ticked.includes(targetId))) {
-      await run('INSERT OR IGNORE INTO alert_targets (alert_id, target_id) VALUES (?, ?)', [id, targetId]);
-    }
+  // `scope` replaces everywhere it applies; `targetIds` alone, only the monitors ticked.
+  if (changes.scope !== undefined || changes.targetIds !== undefined) {
+    await writeScope(id, { monitors: changes.targetIds, scope: changes.scope });
   }
 
-  // A count of probes towards a condition says nothing about a different
-  // condition, and a re-enabled alert must not resume part-way through a
-  // breach it was not watching.
-  const conditionChanged =
-    changes.metric !== undefined || changes.threshold !== undefined || changes.consecutiveProbes !== undefined;
-  if (conditionChanged || changes.enabled !== undefined) {
+  // A count of readings towards a condition says nothing about a different
+  // condition, duration or policy, and a re-enabled alert must not resume
+  // part-way through a breach it was not watching.
+  const ruleChanged =
+    changes.metric !== undefined || changes.threshold !== undefined || changes.consecutiveProbes !== undefined ||
+    changes.conditions !== undefined || changes.combine !== undefined || changes.forMinutes !== undefined ||
+    changes.clearAfter !== undefined || changes.policy !== undefined || changes.probes !== undefined;
+  if (ruleChanged || changes.enabled !== undefined) {
     await run('UPDATE alert_targets SET streak = 0 WHERE alert_id = ?', [id]);
-    await run('UPDATE alert_probe_states SET streak = 0 WHERE alert_id = ?', [id]);
+    await run('UPDATE alert_probe_states SET streak = 0, memory = NULL WHERE alert_id = ?', [id]);
   }
 
   return getAlert(id);
@@ -346,80 +523,14 @@ export async function deleteAlert(id: string): Promise<boolean> {
   // Removed explicitly as well as by the cascade, as measurements are.
   await run('DELETE FROM alert_probe_states WHERE alert_id = ?', [id]);
   await run('DELETE FROM alert_targets WHERE alert_id = ?', [id]);
+  await run('DELETE FROM alert_scope WHERE alert_id = ?', [id]);
+  await run('DELETE FROM alert_events WHERE alert_id = ?', [id]);
   return (await run('DELETE FROM alerts WHERE id = ?', [id])) > 0;
 }
 
 // ─── Judging a probe ────────────────────────────────────────────────────────
 
-/** The value a rule watches, or null when the probe produced no reading for it. */
-export function observedValue(rule: Pick<AlertRule, 'metric'>, result: ProbeResult): number | null {
-  switch (rule.metric) {
-    case 'packetLoss':
-      return result.packetLoss ?? null;
-    case 'latency':
-      return result.latency;
-    case 'jitter':
-      return result.jitter ?? null;
-    case 'unreachable':
-      return result.success ? 0 : 1;
-    case 'certExpiry': {
-      // Days of validity left, as of the probe that saw the certificate. Null
-      // for anything that is not HTTPS, and for a probe that never got as far
-      // as a handshake.
-      const expiresAt = result.details?.certExpiresAt;
-      if (expiresAt === undefined) return null;
-      return Math.round(((expiresAt - result.timestamp.getTime()) / DAY_MS) * 10) / 10;
-    }
-  }
-}
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Whether this probe breaches the rule. */
-export function isBreaching(
-  rule: Pick<AlertRule, 'metric' | 'threshold' | 'state'>,
-  result: ProbeResult
-): boolean {
-  const value = observedValue(rule, result);
-  if (rule.metric === 'unreachable') return value === 1;
-
-  // A probe with no reading for this metric is not evidence either way, so it
-  // holds the current state rather than advancing a streak. Treating "unknown"
-  // as "fine" would silently resolve a real alert, and treating it as a breach
-  // would fire a latency rule on a host that is simply down.
-  if (value === null) return rule.state === 'firing';
-
-  return ALERT_METRIC_LABELS[rule.metric].comparison === 'below'
-    ? value < rule.threshold
-    : value > rule.threshold;
-}
-
-/**
- * Advance a rule's state machine by one probe.
- *
- * Pure, so the hysteresis can be tested without a database. A rule fires only
- * after `consecutiveProbes` breaching probes in a row, and resolves only after
- * the same number of clean ones — that is what stops a single blip paging
- * somebody at 3am.
- */
-export function nextRuleState(
-  rule: Pick<AlertRule, 'state' | 'streak' | 'consecutiveProbes'>,
-  breaching: boolean
-): { streak: number; state: AlertRule['state']; transition: 'firing' | 'resolved' | null } {
-  // A probe advances the streak when it argues for changing the current state.
-  const advancing = breaching === (rule.state === 'ok');
-  const streak = advancing ? rule.streak + 1 : 0;
-
-  if (advancing && streak >= rule.consecutiveProbes) {
-    return {
-      streak: 0,
-      state: rule.state === 'ok' ? 'firing' : 'ok',
-      transition: rule.state === 'ok' ? 'firing' : 'resolved',
-    };
-  }
-
-  return { streak, state: rule.state, transition: null };
-}
+export { isBreaching, nextRuleState, observedValue } from './rules';
 
 async function persistRuleState(
   rule: Pick<AlertRule, 'id' | 'targetId'>,
@@ -450,89 +561,189 @@ interface ProbeStateRow {
   probe: string;
   in_breach: number;
   streak: number;
+  memory: string | null;
+}
+
+interface ScopeRow {
+  alert_id: string;
+  kind: AlertScopeEntry['kind'];
+  ref: string;
+}
+
+function stateOfProbe(row: ProbeStateRow | undefined): ProbeRuleState {
+  if (!row) return { ...FRESH_PROBE_STATE };
+  let memory: Partial<ProbeRuleState> = {};
+  try {
+    memory = row.memory ? (JSON.parse(row.memory) as Partial<ProbeRuleState>) : {};
+  } catch {
+    memory = {};
+  }
+  return {
+    inBreach: row.in_breach === 1,
+    streak: row.streak,
+    since: memory.since ?? null,
+    at: memory.at ?? null,
+    held: memory.held ?? [],
+    recent: memory.recent ?? [],
+  };
+}
+
+/** What an alert's condition says in words: "Latency above 200ms". */
+function describeConditionOf(condition: AlertCondition): string {
+  return describeCondition(condition);
+}
+
+/** A value in words, with its unit. */
+function worded(metric: AlertMetric, value: number | null): string | null {
+  if (value === null) return null;
+  if (metric === 'unreachable') return value === 1 ? 'not responding' : 'responding';
+  return `${value}${ALERT_METRIC_LABELS[metric].unit}`;
 }
 
 /**
- * Evaluate every enabled alert a target is ticked for against one probe result.
- * Returns the transitions that occurred; notification is the caller's job.
+ * Evaluate every enabled alert that covers a target against one reading from
+ * one probe. Returns the transitions that occurred; notification is the
+ * caller's job.
  *
  * Each probe that measures the target keeps its own state against the alert,
- * so two probes' readings never run one streak between them: a probe fires
- * after its own run of breaching readings and clears after its own run of
- * clean ones. The target fires when any probe is in breach and resolves when
- * none is. For a target measured from one probe that is exactly what it was
- * before probes were counted.
+ * so two probes' readings never run one streak between them: a probe goes in
+ * breach after its own run of readings that hold the conditions, and out of it
+ * after its own run that do not. The monitor fires when its probes meet the
+ * alert's policy and resolves when they cannot (see judgeMonitor). For a
+ * monitor measured from one probe, with one condition, that is exactly what it
+ * was before alerts had more to them.
  */
 export async function evaluateAlerts(
-  target: Pick<Target, 'id' | 'name' | 'host' | 'group'> & { probedFrom?: string },
+  target: Pick<Target, 'id' | 'name' | 'host' | 'group'> & { probedFrom?: string; interval?: number },
   result: ProbeResult
 ): Promise<AlertEvent[]> {
-  const rules = (await getAlertRules(target.id)).filter(r => r.enabled);
   const events: AlertEvent[] = [];
-  if (rules.length === 0) return events;
+  const alertRows = (await all<AlertRow>('SELECT * FROM alerts WHERE enabled = 1')).map(settingsFromRow);
+  if (alertRows.length === 0) return events;
 
-  const at = Date.now();
+  const [scopeRows, ticks, probeRows, agentRows, comparisonRows, stateRows] = await Promise.all([
+    all<ScopeRow>('SELECT alert_id, kind, ref FROM alert_scope'),
+    all<AlertTargetRow>('SELECT * FROM alert_targets WHERE target_id = ?', [target.id]),
+    all<{ probe: string; last_probe_at: number }>('SELECT probe, last_probe_at FROM target_probes WHERE target_id = ? AND removed_at IS NULL ORDER BY position', [target.id]),
+    all<{ id: string; state: ProbeAgentState }>('SELECT id, state FROM probe_agents'),
+    all<{ comparison_id: string; target_id: string; probe: string }>('SELECT comparison_id, target_id, probe FROM comparison_series'),
+    all<ProbeStateRow>('SELECT alert_id, probe, in_breach, streak, memory FROM alert_probe_states WHERE target_id = ?', [target.id]),
+  ]);
+
+  const probes = probeRows.length > 0 ? probeRows.map(row => row.probe) : [result.probe ?? LOCAL_PROBE];
+  const lastAt = new Map(probeRows.map(row => [row.probe, row.last_probe_at]));
+  const agentDown = new Map(agentRows.map(row => [row.id, isProbeAgentDown(row.state)]));
+  const comparisons = new Map<string, ComparisonLine[]>();
+  for (const row of comparisonRows) comparisons.set(row.comparison_id, [...(comparisons.get(row.comparison_id) ?? []), { targetId: row.target_id, probe: row.probe }]);
+
+  const now = Date.now();
   const probe = result.probe ?? LOCAL_PROBE;
-  // Only the probes that measure it now count: one taken off, or a probe
-  // agent since removed, cannot hold an alert open.
-  const active = (await all<{ probe: string }>('SELECT probe FROM target_probes WHERE target_id = ? AND removed_at IS NULL', [target.id]))
-    .map(row => row.probe);
-  const states = await all<ProbeStateRow>('SELECT alert_id, probe, in_breach, streak FROM alert_probe_states WHERE target_id = ?', [target.id]);
+  const intervalMs = Math.max(1, (target.interval ?? 300) * 1000);
+  const names = await probeNames(probes);
 
-  for (const rule of rules) {
-    const rows = states.filter(row => row.alert_id === rule.id);
-    const mine = rows.find(row => row.probe === probe);
-    const others = rows.filter(row => row.probe !== probe && row.in_breach === 1 && active.includes(row.probe));
+  for (const alert of alertRows) {
+    const scope: AlertScopeEntry[] = scopeRows.filter(row => row.alert_id === alert.id);
+    // Ticked monitors are monitor entries, whether or not the scope table has them yet.
+    if (ticks.some(tick => tick.alert_id === alert.id)) scope.push({ kind: 'monitor', ref: target.id });
+    const covered = coveredProbes(scope, alert.probes, target, probes, comparisons);
+    if (!covered.includes(probe)) continue;
 
-    // A probe with no state of its own yet (just added to the monitor) joins
-    // an alert that is already firing as part of what holds it open, if
-    // nothing else does: the alert is not announced as resolved just because
-    // the probe that raised it was replaced.
-    const inheriting = !mine && rule.state === 'firing' && others.length === 0;
-    const was: AlertRule['state'] = mine ? (mine.in_breach === 1 ? 'firing' : 'ok') : inheriting ? 'firing' : 'ok';
-    const streak = mine?.streak ?? 0;
+    const tick = ticks.find(each => each.alert_id === alert.id);
+    if (!tick) await run('INSERT OR IGNORE INTO alert_targets (alert_id, target_id) VALUES (?, ?)', [alert.id, target.id]);
+    const was: AlertTargetState['state'] = tick?.state ?? 'ok';
 
-    const breaching = isBreaching({ ...rule, state: was }, result);
-    const next = nextRuleState({ state: was, streak, consecutiveProbes: rule.consecutiveProbes }, breaching);
+    // This probe's reading, against the conditions.
+    const mine = stateRows.find(row => row.alert_id === alert.id && row.probe === probe);
+    const conditions = conditionsOf(alert);
+    // A probe new to an alert that is already firing, with nothing else holding
+    // it open, joins as in breach: the alert is not announced as resolved
+    // because the probe that raised it was replaced.
+    const othersInBreach = stateRows.filter(row => row.alert_id === alert.id && row.probe !== probe && row.in_breach === 1 && covered.includes(row.probe));
+    const inheriting = !mine && was === 'firing' && othersInBreach.length === 0;
+    const before = { ...stateOfProbe(mine), inBreach: mine ? mine.in_breach === 1 : inheriting };
+    const step = stepProbe(
+      {
+        conditions,
+        combine: alert.combine ?? 'any',
+        readings: alert.consecutiveProbes,
+        minutes: alert.forMinutes,
+        clearAfter: alert.clearAfter,
+      },
+      before,
+      result,
+      now,
+      intervalMs
+    );
 
-    // Most probes change nothing (a healthy target stays at ok with no
-    // streak), and are not written back.
-    if (!mine || next.streak !== streak || next.state !== was) {
-      await run(
-        `INSERT INTO alert_probe_states (alert_id, target_id, probe, in_breach, streak) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(alert_id, target_id, probe) DO UPDATE SET in_breach = excluded.in_breach, streak = excluded.streak`,
-        [rule.id, target.id, probe, next.state === 'firing' ? 1 : 0, next.streak]
-      );
-    }
-
-    const inBreach = [...others.map(row => row.probe), ...(next.state === 'firing' ? [probe] : [])];
-    const state: AlertRule['state'] = inBreach.length > 0 ? 'firing' : 'ok';
-    const transition = state === rule.state ? null : state === 'firing' ? 'firing' : 'resolved';
-    // The target's own streak is what an older image reads: with one probe it
-    // is that probe's, and with several there is no one streak to give.
-    const targetStreak = active.length <= 1 ? next.streak : 0;
-
-    if (transition || state !== rule.state || targetStreak !== rule.streak) {
-      await persistRuleState(rule, { streak: targetStreak, state }, transition, at);
-    }
-
-    if (transition) {
-      events.push({
-        rule: { ...rule, state, streak: targetStreak },
-        targetName: target.name,
-        targetHost: target.host,
-        targetGroup: target.group || undefined,
-        ...(target.probedFrom ? { probedFrom: target.probedFrom } : {}),
+    await run(
+      `INSERT INTO alert_probe_states (alert_id, target_id, probe, in_breach, streak, memory) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(alert_id, target_id, probe) DO UPDATE SET in_breach = excluded.in_breach, streak = excluded.streak, memory = excluded.memory`,
+      [
+        alert.id,
+        target.id,
         probe,
-        breaching: inBreach,
-        probeCount: Math.max(active.length, 1),
-        transition,
-        metric: rule.metric,
-        observed: observedValue(rule, result),
-        threshold: rule.threshold,
-        at: new Date(at),
-      });
+        step.state.inBreach ? 1 : 0,
+        step.state.streak,
+        JSON.stringify({ since: step.state.since, at: step.state.at, held: step.state.held, recent: step.state.recent }),
+      ]
+    );
+
+    // The monitor's probes, put to the policy.
+    const standing: ProbeStanding[] = covered.map(id => {
+      const inBreach = id === probe ? step.state.inBreach : stateRows.some(row => row.alert_id === alert.id && row.probe === id && row.in_breach === 1);
+      const last = lastAt.get(id) ?? 0;
+      const silent = id !== probe && (!!agentDown.get(id) || (last > 0 && now - last > intervalMs * 2));
+      return { probe: id, inBreach, silent };
+    });
+    const policy = policyOf(alert);
+    const verdict = judgeMonitor(policy, was, standing);
+    // The target's own streak is what an older image reads: with one probe it is that probe's.
+    const targetStreak = covered.length <= 1 ? step.state.streak : 0;
+
+    if (verdict.transition || verdict.next !== was || targetStreak !== (tick?.streak ?? 0)) {
+      await persistRuleState({ id: alert.id, targetId: target.id }, { streak: targetStreak, state: verdict.next }, verdict.transition, now);
     }
+    if (!verdict.transition) continue;
+
+    const inBreach = standing.filter(each => each.inBreach).map(each => each.probe);
+    const verdicts: ProbeVerdict[] = standing.map(each => ({ probe: each.probe, name: names.get(each.probe) ?? each.probe, breaching: each.inBreach, silent: each.silent }));
+    const results: ConditionResult[] = step.outcomes.map(outcome => ({
+      label: describeConditionOf(outcome.condition),
+      observed: worded(outcome.condition.metric, outcome.observed),
+      held: outcome.held,
+    }));
+    const policyText = `${describePolicy(policy, verdict.total)}: ${verdict.breaching} in breach`;
+    // The condition that headlines the message: the one that held, or the first.
+    const lead = step.outcomes.find(outcome => outcome.held) ?? step.outcomes[0];
+
+    await recordAlertEvent({
+      alertId: alert.id,
+      targetId: target.id,
+      at: now,
+      transition: verdict.transition,
+      conditions: results,
+      probes: verdicts,
+      reason: policyText,
+    }).catch(error => console.error('[Alerts] Could not record the event:', error));
+
+    events.push({
+      rule: { ...alert, ...stateFromRow({ alert_id: alert.id, target_id: target.id, state: verdict.next, streak: targetStreak, last_fired_at: null, last_resolved_at: null }), id: alert.id, enabled: true, createdAt: alert.createdAt, state: verdict.next, streak: targetStreak },
+      targetName: target.name,
+      targetHost: target.host,
+      targetGroup: target.group || undefined,
+      ...(target.probedFrom ? { probedFrom: target.probedFrom } : {}),
+      probe,
+      breaching: inBreach,
+      probeCount: Math.max(covered.length, 1),
+      transition: verdict.transition,
+      metric: lead.condition.metric,
+      observed: lead.observed,
+      threshold: lead.condition.threshold,
+      at: new Date(now),
+      conditions: results,
+      probeVerdicts: verdicts,
+      policyText,
+    });
   }
 
   return events;
@@ -619,7 +830,7 @@ export async function sendTestAlert(alert: Alert, target?: Pick<Target, 'id' | '
         state: 'firing',
         streak: 0,
       },
-      targetName: target?.name ?? 'Example target',
+      targetName: target?.name ?? 'Example monitor',
       targetHost: target?.host ?? 'example.com',
       targetGroup: target?.group || undefined,
       transition: 'firing',
@@ -627,6 +838,24 @@ export async function sendTestAlert(alert: Alert, target?: Pick<Target, 'id' | '
       observed: sample[alert.metric],
       threshold: alert.threshold,
       at: new Date(),
+      // An alert with more to it than one threshold is sampled with the detail a real one carries.
+      ...(conditionsOf(alert).length > 1 || policyOf(alert).kind !== 'any'
+        ? {
+            conditions: conditionsOf(alert).map(condition => ({
+              label: describeConditionOf(condition),
+              observed: worded(condition.metric, sample[condition.metric]),
+              held: true,
+            })),
+            probeVerdicts: [
+              { probe: 'a', name: 'Home', breaching: true, silent: false },
+              { probe: 'b', name: 'Office', breaching: true, silent: false },
+              { probe: 'c', name: 'VPS', breaching: false, silent: false },
+            ],
+            policyText: `${describePolicy(policyOf(alert), 3)}: 2 in breach`,
+            probeCount: 3,
+            breaching: ['a', 'b'],
+          }
+        : {}),
     },
     { test: true }
   );

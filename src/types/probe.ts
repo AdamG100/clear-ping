@@ -1,4 +1,5 @@
 import type { ProbeAgentSummary, ProbeId } from './probe-agent';
+import type { AlertRuleSettings, ConditionResult, ProbeVerdict } from './alert-rules';
 
 export type ProbeType = 'ping' | 'dns' | 'tcp' | 'game' | 'http';
 
@@ -517,7 +518,7 @@ export type AlertState = 'ok' | 'firing';
  * the condition has held for that many probes in a row, and only clears after
  * the same number of clean ones.
  */
-export interface AlertSettings {
+export interface AlertSettings extends AlertRuleSettings {
   /** What to call it. An alert without one is described by its condition. */
   name?: string;
   metric: AlertMetric;
@@ -626,6 +627,12 @@ export interface AlertEvent {
   observed: number | null;
   threshold: number;
   at: Date;
+  /** Each condition as it stood, when the alert has more than one or says why. */
+  conditions?: ConditionResult[];
+  /** Each probe's part, when the monitor has several. */
+  probeVerdicts?: ProbeVerdict[];
+  /** How the policy came out: "at least 4 of 7 probes: 5 in breach". */
+  policyText?: string;
 }
 
 /**

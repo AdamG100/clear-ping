@@ -196,6 +196,48 @@ If the `apprise` program is not on the `PATH`, name it with
 `CLEARPING_APPRISE_BIN`. Without it alerts still fire and clear and show in the
 app; sending one, or a test, says that Apprise is missing.
 
+## More than one condition, and more than one probe
+
+Under **More options** on the alert's form, and in the API, an alert can say
+more than one threshold on the monitors you tick.
+
+**Conditions.** Up to six, each a metric past a threshold: *loss above 5%*
+*and* *latency above 200 ms*. They add up as **any holds**, **all hold** or
+**at least N hold** (nothing nested: no "A and (B or C)"). Each condition can
+clear under its own lower threshold (a rule that fires above 5% and clears
+under 2%), and can judge the mean of the newest readings, a window, in place
+of the newest alone.
+
+**How long.** The default is some readings in a row. Choose **minutes**
+instead and it fires once the conditions have held that long. A probe that goes
+quiet for longer than two intervals starts a duration in minutes again, so it
+never fires the moment it comes back. **Clear after** can be a different time
+from the time to fire, in the same unit.
+
+**Where it applies.** The monitors ticked, plus everything in chosen
+**groups** (including any added later), the lines of chosen **saved
+comparisons** (each monitor from the probe the comparison draws it from) and
+**everything one probe measures**.
+
+**How many probes must agree.** With more than one probe, a monitor measured
+from several is judged probe by probe, each on its own readings, and the
+monitor fires when enough of them are in breach: **any one**, **every**,
+**at least a number** (4 of 7), or **at least a share** (60%, rounded up). You
+can also choose which probes count. The alert's message names how many and which
+probes saw it. Weighting some probes more than others is not offered.
+
+A probe that is **not reporting**, because its probe agent is down or it has
+taken no reading for two intervals, is not counted as seeing the problem, so a
+probe agent going quiet cannot make an alert fire. Nor can it make one clear:
+a firing alert resolves only when it could not hold even if every probe that is
+not reporting were in breach. So a quorum never fires and clears in turn, and
+the dashboard losing its own connection, which silences every probe agent at
+once, does not fire an alert that needs every probe to agree.
+
+**History.** The clock button on an alert's card lists each time a monitor fired
+or cleared: the conditions as they stood, with their values, and each probe's
+part in it.
+
 ## Behaviour worth knowing
 
 - **A metric with no reading holds the current state.** A host that is down
@@ -239,18 +281,30 @@ too: rules that said the same thing on different monitors become one alert
 ticked for all of them, and each monitor keeps its state, so one that was
 firing does not announce itself again.
 
+Alerts made before conditions, durations and probes could be set carry over as
+one condition, held for the readings in a row they had, on every probe of the
+monitors ticked for them, and fire when any probe is in breach: exactly what
+they did. A firing one is still firing and does not announce itself again.
+
 ## API
 
 | | |
 |---|---|
 | `GET /api/alerts` | Every alert, with the state of each ticked monitor |
 | `POST /api/alerts` | Create one |
-| `PATCH /api/alerts/:id` | Change one; `targetIds` replaces the ticked set, `enabled` mutes |
+| `PATCH /api/alerts/:id` | Change one; `targetIds` replaces the ticked set (and only those entries of its scope), `scope` replaces all of it, `enabled` mutes |
+| `GET /api/alerts/:id/events` | Its history: each fire and clear, with the conditions and probes behind it (`?limit=`) |
 | `DELETE /api/alerts/:id` | Delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 
 An alert is created with `metric`, `threshold`, `consecutiveProbes`,
-`targetIds`, and optionally `name`, `traceOnFire` and `traceCooldownMinutes`
+`targetIds`, and optionally `conditions` (a list of `{ metric, threshold,
+clearThreshold?, window? }`, the first of which is also `metric` and
+`threshold`), `combine` (`"any"`, `"all"` or `{ atLeast: n }`), `forMinutes`,
+`clearAfter`, `policy` (`"any"`, `"all"`, `{ kind: "atLeast", count }` or
+`{ kind: "share", percent }`), `probes` (the probes that count, `"local"` being
+the dashboard's own) and `scope` (a list of `{ kind: "monitor" | "group" |
+"comparison" | "probe", ref }`), and also `name`, `traceOnFire` and `traceCooldownMinutes`
 (tracing the route when it fires, and the wait before the same monitor is
 traced again), and `notifyUrls`: the Apprise URLs to send it
 to, as a list or as text with one to a line. An empty list is an alert that is

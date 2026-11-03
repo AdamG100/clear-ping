@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, type CSSProperties } from 'react'
-import { Bell, BellOff, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { Bell, BellOff, History, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { Alert as Notice } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
@@ -18,8 +18,13 @@ import { Textarea } from '@/components/arc/textarea/textarea'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
 import { useToast } from '@/components/notifications'
 import { alertTitle, describeCondition, notifyUrlLabel, parseNotifyUrls } from '@/lib/alerts/delivery'
+import { describeRule } from '@/lib/alerts/describe'
+import { groupWithAncestors } from '@/lib/targets/group-path'
 import { cn } from '@/lib/utils'
+import type { ProbeSummary } from '@/types/probe-agent'
 import { PANE, PANE_TITLE } from '../dashboard/pane-layout'
+import { AlertHistory } from './history'
+import { isCustom, NO_OPTIONS, optionsOf, RuleOptionsPanel, ruleFields, type RuleOptions } from './rule-options'
 import { PageFrame } from '../targets/target-page'
 import { TargetChecklist } from '../sidebar/target-checklist'
 import type { Alert, AlertMetric, AlertTargetState, GroupOrder, Target } from '@/types/probe'
@@ -128,6 +133,14 @@ interface AlertPayload {
   traceKeepCount: number
   traceKeepDays: number
   targetIds: string[]
+  // What more than one condition on the monitors ticked takes: see rule-options.
+  conditions?: unknown
+  combine?: unknown
+  forMinutes?: number | null
+  clearAfter?: number | null
+  policy?: unknown
+  probes?: string[] | null
+  scope?: unknown
 }
 
 /** "every 15 minutes", "every 2 hours": the pause between traces, as said on an alert's card. */
@@ -145,6 +158,8 @@ function AlertForm({
   alert,
   targets,
   groupOrders,
+  groups,
+  probes,
   saving,
   onSubmit,
   onCancel,
@@ -154,6 +169,10 @@ function AlertForm({
   alert: AlertResponse | null
   targets: Target[]
   groupOrders: GroupOrder[]
+  /** Every group there is, for an alert to cover whole. */
+  groups: string[]
+  /** Every probe there is; one probe and there is no policy to choose. */
+  probes: ProbeSummary[]
   saving: boolean
   onSubmit: (payload: AlertPayload) => void
   onCancel: () => void
@@ -173,6 +192,7 @@ function AlertForm({
   const [traceChosen, setTraceChosen] = useState(alert !== null)
   const [selected, setSelected] = useState(() => new Set(alert?.targets.map(entry => entry.targetId) ?? []))
   const [attempted, setAttempted] = useState(false)
+  const [options, setOptions] = useState<RuleOptions>(() => (alert ? optionsOf(alert) : NO_OPTIONS))
 
   const urls = parseNotifyUrls(notifyUrls)
   const traceable = TRACEABLE_ALERT_METRICS.includes(metric)
@@ -191,7 +211,9 @@ function AlertForm({
       (!Number.isInteger(traceKeepDays) || traceKeepDays < 1 || traceKeepDays > MAX_TRACE_KEEP_DAYS) &&
       `Keep routes for between 1 and ${MAX_TRACE_KEEP_DAYS} days.`,
     !urls && 'Each notification URL must be an Apprise URL, such as discord://… or mailto://…, on a line of its own.',
-    selected.size === 0 && 'Tick at least one monitor for the alert to watch.',
+    selected.size === 0 && options.groups.length + options.comparisons.length + options.probeScope.length === 0 &&
+      'Tick at least one monitor, group, comparison or probe for the alert to watch.',
+    options.byMinutes && (!Number.isInteger(options.minutes) || options.minutes < 1) && 'Hold for a whole number of minutes, one or more.',
   ].filter((problem): problem is string => !!problem)
 
   const watch = (next: AlertMetric) => {
@@ -221,6 +243,8 @@ function AlertForm({
       traceKeepCount,
       traceKeepDays,
       targetIds: [...selected],
+      // Said only when it says more than the simple form: an alert made here stays one an older version can read.
+      ...(alert || isCustom(options) ? ruleFields(options, { metric, threshold: metric === 'unreachable' ? 0 : threshold }) : {}),
     })
   }
 
@@ -413,6 +437,12 @@ function AlertForm({
         )}
       </fieldset>
 
+      {/* More than one condition, how long, where else, and how many probes */}
+      <fieldset className="space-y-3">
+        <legend className={`${SECTION_TITLE} pb-2`}>More options</legend>
+        <RuleOptionsPanel options={options} onChange={setOptions} groups={groups} probes={probes} firstMetric={metric} />
+      </fieldset>
+
       {/* Name */}
       <Input id="alert-name" label="Name (optional)" placeholder={condition} value={name} onChange={e => setName(e.target.value)} maxLength={80} />
 
@@ -441,6 +471,8 @@ interface AlertsViewProps {
   groupOrders: GroupOrder[]
   onChanged: () => Promise<void>
   onSelectTarget: (id: string) => void
+  /** Every probe there is, to say which an alert counts. */
+  probes?: ProbeSummary[]
   /** The account signed in may look but not change anything: the alerts are shown, not offered for editing. */
   readOnly?: boolean
   /**
@@ -469,6 +501,7 @@ export function AlertsView({
   groupOrders,
   onChanged,
   onSelectTarget,
+  probes = [],
   readOnly = false,
   editor,
   onOpenEditor,
@@ -478,6 +511,10 @@ export function AlertsView({
   const editing: Editing = editor === null ? null : editor === 'new' ? 'new' : alerts.find(alert => alert.id === editor) ?? null
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // The alert whose history is open.
+  const [historyOf, setHistoryOf] = useState<AlertResponse | null>(null)
+  // Every group, the ones a monitor sits in and those above them.
+  const groups = useMemo(() => [...new Set(targets.flatMap(target => (target.group ? groupWithAncestors(target.group) : [])))].sort(), [targets])
 
   const targetsById = useMemo(() => new Map(targets.map(target => [target.id, target])), [targets])
 
@@ -607,7 +644,7 @@ export function AlertsView({
     return (
       <PageFrame
         title={editing === 'new' ? 'New alert' : `Edit ${alertTitle(editing)}`}
-        description="One condition, watched on every monitor you tick. Each monitor fires and clears on its own."
+        description="One condition (or several, under More options), watched on every monitor you tick. Each monitor fires and clears on its own."
         onBack={onCloseEditor}
       >
         <AlertForm
@@ -615,6 +652,8 @@ export function AlertsView({
           alert={editing === 'new' ? null : editing}
           targets={targets}
           groupOrders={groupOrders}
+          groups={groups}
+          probes={probes}
           saving={saving}
           onSubmit={save}
           onCancel={onCloseEditor}
@@ -665,7 +704,7 @@ export function AlertsView({
             const isFiring = firing.length > 0
             const busy = busyId === alert.id
             const title = alertTitle(alert)
-            const condition = describeCondition(alert)
+            const condition = describeRule(alert)
 
             return (
               // Muted is set back, so what is on stands out from what is not;
@@ -677,9 +716,8 @@ export function AlertsView({
                   style={(isFiring ? FIRING_EDGE : alert.enabled ? ON_EDGE : undefined) as CSSProperties | undefined}
                   title={title}
                   description={[
-                    title !== condition ? condition : null,
-                    alert.consecutiveProbes === 1 ? 'on a single probe' : `for ${alert.consecutiveProbes} probes in a row`,
-                    `${alert.targets.length} target${alert.targets.length === 1 ? '' : 's'}`,
+                    condition,
+                    `${alert.targets.length} monitor${alert.targets.length === 1 ? '' : 's'}`,
                     deliveryLabel(alert),
                     alert.traceOnFire && TRACEABLE_ALERT_METRICS.includes(alert.metric)
                       ? `Traces the route, at most ${cooldownLabel(alert.traceCooldownMinutes)}, keeping the newest ${alert.traceKeepCount} for ${alert.traceKeepDays} days`
@@ -701,6 +739,11 @@ export function AlertsView({
                             onCheckedChange={() => toggle(alert)}
                             aria-label={alert.enabled ? `Mute ${title}` : `Unmute ${title}`}
                           />
+                        </Tooltip>
+                        <Tooltip content="History: when it fired and why">
+                          <Button variant="ghost" size="sm" onClick={() => setHistoryOf(alert)} aria-label={`History of ${title}`}>
+                            <History {...ICON} />
+                          </Button>
                         </Tooltip>
                         <Tooltip content="Edit">
                           <Button variant="ghost" size="sm" disabled={busy} onClick={() => onOpenEditor(alert.id)} aria-label={`Edit ${title}`}>
@@ -740,6 +783,7 @@ export function AlertsView({
           })}
         </ul>
       )}
+      <AlertHistory alertId={historyOf?.id ?? null} title={historyOf ? alertTitle(historyOf) : ''} onClose={() => setHistoryOf(null)} />
     </div>
   )
 }

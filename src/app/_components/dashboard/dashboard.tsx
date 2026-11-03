@@ -577,13 +577,19 @@ function currentReadings(points: DataPoint[]) {
  * are managed. Alerts are no longer made here, but a target's page should
  * still say whether anything would tell you if it broke.
  */
+/** Whether the probes are several, so that saying which see an alert says something. */
+const monitorProbeCount = (_alert: AlertResponse, names: ReadonlyMap<string, string>) => names.size
+
 function TargetAlerts({
   alerts,
   targetId,
+  probeNames,
   onManage,
 }: {
   alerts: AlertResponse[]
   targetId: string
+  /** What each probe is called, to say which see it. */
+  probeNames: ReadonlyMap<string, string>
   onManage: () => void
 }) {
   const watching = alerts.filter(alert => alert.targets.some(entry => entry.targetId === targetId))
@@ -596,12 +602,17 @@ function TargetAlerts({
       ) : (
         <ul className="flex flex-wrap gap-2">
           {watching.map(alert => {
-            const firing = alert.enabled && alert.targets.some(entry => entry.targetId === targetId && entry.state === 'firing')
+            const entry = alert.targets.find(each => each.targetId === targetId)
+            const firing = alert.enabled && entry?.state === 'firing'
+            // With more than one probe, which of them see it.
+            const seenBy = firing && (entry?.breachingProbes?.length ?? 0) > 0 && monitorProbeCount(alert, probeNames) > 1
+              ? ` from ${entry!.breachingProbes!.map(probe => probeNames.get(probe) ?? probe).join(', ')}`
+              : ''
             return (
               <li key={alert.id}>
                 <Badge tone={firing ? 'danger' : alert.enabled ? 'success' : 'neutral'}>
                   {alertTitle(alert)}
-                  {firing ? ': firing' : !alert.enabled ? ': muted' : ''}
+                  {firing ? `: firing${seenBy}` : !alert.enabled ? ': muted' : ''}
                 </Badge>
               </li>
             )
@@ -1321,6 +1332,7 @@ export function Dashboard() {
           >
             <ErrorBoundary label="Alerts">
               <AlertsView
+                probes={probeList}
                 alerts={alerts}
                 loaded={alertsLoaded}
                 targets={transformedTargets}
@@ -1903,6 +1915,7 @@ export function Dashboard() {
                 <TargetAlerts
                   alerts={alerts}
                   targetId={selectedTarget.id}
+                  probeNames={new Map(probeList.map(probe => [probe.id, probe.name]))}
                   onManage={openAlerts}
                 />
             </div>

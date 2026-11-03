@@ -716,6 +716,60 @@ async function savedComparisons(database: Database): Promise<void> {
   await run(database, 'CREATE INDEX IF NOT EXISTS idx_comparison_series_target ON comparison_series(target_id)');
 }
 
+/**
+ * Alert rules: several conditions, how long they must hold, where an alert
+ * applies, and how many of a monitor's probes must agree.
+ *
+ * An existing alert is one condition (the metric and threshold it had), held
+ * for the readings in a row it had, on every probe of the monitors ticked for
+ * it, and fires when any probe is in breach: exactly what it did. Those old
+ * columns are still written from the first condition, for an older image.
+ * `alert_scope` holds where it applies besides the ticked monitors (groups,
+ * comparisons, probes); `alert_events` is its history.
+ */
+async function alertRules(database: Database): Promise<void> {
+  const columns = await all<{ name: string }>(database, 'PRAGMA table_info(alerts)');
+  const has = (name: string) => columns.some(column => column.name === name);
+  for (const [name, definition] of [
+    ['conditions', 'TEXT'],
+    ['combine', 'TEXT'],
+    ['for_minutes', 'INTEGER'],
+    ['clear_after', 'INTEGER'],
+    ['probe_policy', "TEXT NOT NULL DEFAULT 'any'"],
+    ['probe_quorum', 'INTEGER NOT NULL DEFAULT 1'],
+    ['probes', 'TEXT'],
+  ] as const) {
+    if (!has(name)) await run(database, `ALTER TABLE alerts ADD COLUMN ${name} ${definition}`);
+  }
+
+  await run(database, `CREATE TABLE IF NOT EXISTS alert_scope (
+    alert_id TEXT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('monitor', 'group', 'comparison', 'probe')),
+    ref TEXT NOT NULL,
+    PRIMARY KEY (alert_id, kind, ref)
+  )`);
+  // The monitors ticked are scope entries too.
+  await run(database, `INSERT OR IGNORE INTO alert_scope (alert_id, kind, ref) SELECT alert_id, 'monitor', target_id FROM alert_targets`);
+
+  // What a probe remembers about an alert between readings: each condition as last
+  // judged, the readings a window averages, and when a run in minutes began.
+  const stateColumns = await all<{ name: string }>(database, 'PRAGMA table_info(alert_probe_states)');
+  if (!stateColumns.some(column => column.name === 'memory')) await run(database, 'ALTER TABLE alert_probe_states ADD COLUMN memory TEXT');
+
+  await run(database, `CREATE TABLE IF NOT EXISTS alert_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_id TEXT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
+    at INTEGER NOT NULL,
+    transition TEXT NOT NULL CHECK (transition IN ('firing', 'resolved')),
+    conditions TEXT NOT NULL,
+    probes TEXT NOT NULL,
+    reason TEXT NOT NULL
+  )`);
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_alert_events_alert ON alert_events(alert_id, at DESC)');
+  await run(database, 'CREATE INDEX IF NOT EXISTS idx_alert_events_target ON alert_events(target_id, at DESC)');
+}
+
 const MIGRATIONS: Migration[] = [
   { name: 'nested groups', up: nestedGroups },
   { name: 'shared alerts', up: sharedAlerts },
@@ -732,6 +786,7 @@ const MIGRATIONS: Migration[] = [
   { name: 'alert trace retention', up: alertTraceRetention },
   { name: 'probes per monitor', up: probesPerMonitor },
   { name: 'saved comparisons', up: savedComparisons },
+  { name: 'alert rules', up: alertRules },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
