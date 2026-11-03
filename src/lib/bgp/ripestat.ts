@@ -98,6 +98,19 @@ export async function asCountry(asn: number): Promise<string | null> {
   return location && /^[A-Z]{2}$/.test(location) ? location : null
 }
 
+/**
+ * The country an address is used in, by MaxMind's free GeoLite data as RIPEstat
+ * serves it: ZA. Where it is used, which for a provider spread across
+ * countries can differ from where its network is registered (asCountry).
+ */
+export async function addressCountry(address: string): Promise<string | null> {
+  const data = await ask<{ located_resources?: { locations?: { country?: string; covered_percentage?: number }[] }[] }>('maxmind-geo-lite', address)
+  const locations = data.located_resources?.flatMap(resource => resource.locations ?? []) ?? []
+  const best = locations.sort((a, b) => (b.covered_percentage ?? 0) - (a.covered_percentage ?? 0))[0]
+  const country = best?.country?.trim().toUpperCase()
+  return country && /^[A-Z]{2}$/.test(country) ? country : null
+}
+
 /** The network that announces an address: for a traceroute's hop, whose network it is. */
 export async function addressAsn(address: string): Promise<number | null> {
   const info = await ask<{ asns: string[] }>('network-info', address)

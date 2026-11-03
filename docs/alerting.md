@@ -231,12 +231,21 @@ two thirds (66%) of the 3 probes that are up is 2, even with 3 more offline.
 Resolving still counts a probe that is offline as in breach, so it never fires
 and clears in turn.
 
-**Seen from several places.** Label each probe with a region and a network under
-Settings, Probes, *Where each probe is* (Europe, Example Networks). An alert can
-then also ask that the probes in breach come from at least some number of
-regions and networks, such as 3 and 3: a problem seen from one data centre does
-not page anyone. A probe with no label counts for neither. A message for a
-problem seen from one region only says so.
+**Seen from several places.** Each probe's region (its country) and network
+(the name its provider's network is registered under) are found from its public
+address. That is a probe agent's own address when the dashboard reaches it at a
+public one. Otherwise it is the first router on the internet in the newest route
+traced from it. They show under Settings → Probes → *Locations*, where either can
+be typed over: for a probe behind a VPN, whose address says the wrong place, or
+to group places more broadly, such as Europe. An alert can then also ask that
+the probes in breach come from at least some number of regions and networks,
+such as 3 and 3: a problem seen from one data centre does not page anyone. A
+probe whose place is neither found nor typed counts for neither. A message for
+a problem seen from one region only says so.
+
+Finding them sends that one address to RIPEstat, and only while Settings →
+Privacy → *Look up who runs each address* is on. With it off, type each
+probe's region and network in instead.
 
 **What broke.** A notification that fires says the likely cause, read from the
 failing reading: the connection was refused, the name did not resolve, it did

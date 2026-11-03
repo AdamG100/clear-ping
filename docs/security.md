@@ -326,7 +326,11 @@ applies to everyone.
   That asks RIPE NCC about the one public address, never a private one, and
   keeps the answer for a day. Off, nothing is asked and the page says nothing
   about who runs it. While addresses are hidden on screen the link goes to the
-  network, not the address.
+  network, not the address. The same switch finds each probe's country and
+  network (Settings → Probes → Locations), from a probe agent's public address
+  or the first router on the internet in a route traced from the probe: one
+  address per probe, kept for six hours. Off, each probe's place is only what
+  is typed in.
 
 How long readings and saved routes are kept is set where ClearPing runs, with
 `CLEARPING_RETENTION_DAYS` (90 days unless set); the page shows it.
