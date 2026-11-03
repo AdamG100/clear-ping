@@ -48,8 +48,9 @@ pyasn1-modules==0.4.2 \
 pycares==5.2.0 \
     --hash=sha256:46792166d9e5d265d116d4cee9385a9dcfba8eb5b99c63a9626ceb191c42be69 \
     --hash=sha256:95cc844884b2c5a9b013d29a36e3f6a3af71ca0c12dbd3fb5209f6f40c4fea63
-pycparser==3.11 \
-    --hash=sha256:51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80
+pycparser==3.12 \
+    --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e \
+    --hash=sha256:f03387877eab82ce01bbdfd0ba7252ee55a90b1c708d5129e2ce915475cf1db6
 pynacl==1.6.2 \
     --hash=sha256:46065496ab748469cdd999246d17e301b2c24ae2fdf739132e580a0e94c94a87 \
     --hash=sha256:8a66d6fb6ae7661c58995f9c6435bda2b1e68b54b598a6a10247bfcdadac996c
