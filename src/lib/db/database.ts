@@ -405,17 +405,20 @@ function databasePermissionMessage(dbPath: string): string {
  * image runs as uid 1000. SQLite opens such a file and only refuses at the
  * first write, which for an upgrade is part-way into it.
  */
-function unwritableFile(dbPath: string): { file: string; owner?: number } | null {
+function unwritableFile(dbPath: string): { file: string; owner?: number; mode?: number; readOnlyMount: boolean } | null {
   for (const file of [path.dirname(dbPath), dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     if (!fs.existsSync(file)) continue;
     try {
       fs.accessSync(file, fs.constants.W_OK);
-    } catch {
+    } catch (error) {
       let owner: number | undefined;
+      let mode: number | undefined;
       try {
-        owner = fs.statSync(file).uid;
+        const stat = fs.statSync(file);
+        owner = stat.uid;
+        mode = stat.mode & 0o777;
       } catch {}
-      return { file, owner };
+      return { file, owner, mode, readOnlyMount: (error as { code?: string }).code === 'EROFS' };
     }
   }
   return null;
@@ -424,13 +427,24 @@ function unwritableFile(dbPath: string): { file: string; owner?: number } | null
 /** Why the database cannot be written, and the command that fixes it. */
 function databaseReadOnlyMessage(dbPath: string, found = unwritableFile(dbPath)): string {
   const uid = process.getuid?.();
-  const what = found
-    ? `${found.file}${found.owner !== undefined ? ` belongs to uid ${found.owner}` : ''}${uid !== undefined ? ` and ClearPing runs as uid ${uid}` : ''}`
-    : 'the file system it is on is mounted read-only, or a file beside it belongs to another user';
-  const fix = uid === undefined
-    ? ''
-    : ` On the host, in the directory with the Compose file:\n\n  sudo chown -R ${uid}:${uid} ./data\n\nthen choose Try again, or restart ClearPing.`;
-  return `The database at ${dbPath} can be read but not changed: ${what}. Nothing was changed.${fix}`;
+  const then = '\n\nthen choose Try again, or restart ClearPing.';
+  const onHost = (command: string) => ` On the host, in the directory with the Compose file:\n\n  ${command}${then}`;
+  const mode = found?.mode !== undefined ? ` (mode ${found.mode.toString(8).padStart(3, '0')})` : '';
+
+  // Each cause has its own fix: a chown cannot help a file its owner may not write.
+  let why: string;
+  let fix = '';
+  if (!found || found.readOnlyMount) {
+    why = 'the file system it is on is mounted read-only';
+    fix = ' Check the volume is not mounted with :ro, and that the host can write to the folder (touch ./data/test).' + then.replace('\n\nthen', ' Then');
+  } else if (uid !== undefined && found.owner !== undefined && found.owner !== uid) {
+    why = `${found.file} belongs to uid ${found.owner} and ClearPing runs as uid ${uid}`;
+    fix = onHost(`sudo chown -R ${uid}:${uid} ./data`);
+  } else {
+    why = `${found.file}${mode} has no permission to write, even for its owner`;
+    fix = onHost('sudo chmod -R u+rwX ./data');
+  }
+  return `The database at ${dbPath} can be read but not changed: ${why}. Nothing was changed.${fix}`;
 }
 
 function isReadOnlyError(error: unknown): boolean {
