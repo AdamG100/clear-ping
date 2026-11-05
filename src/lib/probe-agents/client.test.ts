@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProbeResult, ProbeType } from '@/types/probe'
+import type { GameQuery, ProbeResult, ProbeType } from '@/types/probe'
 import { createCertificate } from '../../../probe-agent/certificate'
 import { createProbeAgentServer, type ProbeAgentWork } from '../../../probe-agent/server'
 
@@ -193,6 +193,10 @@ describe('taking readings through a probe agent', () => {
     // What a probe agent from before ARP makes of an ARP monitor: a probe type it does not know.
     const probeType = 'smtp' as ProbeType
     await expect(runProbes({ id: 'target-arp', host: '192.168.1.20', probeType, ipVersion: 'auto', probeConfig: {}, probeAgentId: probeAgent.id }))
+      .rejects.toThrow(/too old for this kind of monitor/)
+    // And a game query it does not know, as one from before the UDP echo does not know that.
+    const gameQuery = 'hologram' as GameQuery
+    await expect(runProbes({ id: 'target-echo', host: '192.0.2.1', probeType: 'game', ipVersion: 'auto', probeConfig: { port: 7770, gameQuery }, probeAgentId: probeAgent.id }))
       .rejects.toThrow(/too old for this kind of monitor/)
   })
 

@@ -22,7 +22,7 @@ export type TargetType = 'ip' | 'domain' | 'arp' | 'dns' | 'tcp' | 'game' | 'htt
  * unreachable" for a port nothing listens on, which many a server that blocks
  * ping still sends (the reply `mtr --udp` gets from its last hop).
  */
-export type GameQuery = 'source' | 'minecraft' | 'bedrock' | 'quake' | 'unreachable';
+export type GameQuery = 'source' | 'minecraft' | 'bedrock' | 'quake' | 'echo' | 'unreachable';
 
 /** The queries of the game's own, sent over UDP. */
 export type UdpGameQuery = Exclude<GameQuery, 'minecraft' | 'unreachable'>;

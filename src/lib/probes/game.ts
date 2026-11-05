@@ -89,6 +89,7 @@ const NO_REPLY: Record<UdpGameQuery, string> = {
   source: 'No reply. A Steam server only answers on its query port, which is not always the port players join on',
   bedrock: 'No reply to the Bedrock ping',
   quake: 'No reply to getinfo',
+  echo: 'No echo. The beacon may be down, or a firewall on the way drops UDP',
 };
 
 type Exchange = { ok: true; latency: number; reply?: Buffer } | { ok: false; error: string };

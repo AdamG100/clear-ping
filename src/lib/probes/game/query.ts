@@ -190,9 +190,27 @@ const quake: UdpQueryFormat = {
   read: readInfoResponse,
 };
 
+// ─── UDP echo (ping beacons) ────────────────────────────────────────────────
+
+/** What an echo starts with, so a reply can be told from anything else the port sends. */
+const ECHO_PREFIX = Buffer.from('clearping-echo:', 'latin1');
+
+/**
+ * A datagram for a server that sends back whatever it is sent: the UDP ping
+ * beacons game hosts put up for exactly this, such as Amazon GameLift's on
+ * port 7770. It says nothing about the server, only that it is there and how far.
+ */
+const echo: UdpQueryFormat = {
+  request: () => Buffer.concat([ECHO_PREFIX, randomBytes(8)]),
+  isReply: reply => reply.length === ECHO_PREFIX.length + 8 && reply.subarray(0, ECHO_PREFIX.length).equals(ECHO_PREFIX),
+  read: () => undefined,
+};
+
 /** The format for a target's query. */
 export function udpQueryFormat(query: UdpGameQuery): UdpQueryFormat {
   switch (query) {
+    case 'echo':
+      return echo;
     case 'source':
       return source;
     case 'bedrock':

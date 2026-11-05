@@ -120,6 +120,7 @@ queries that got no answer. Pick the game the server runs:
 | **Minecraft Java** | TCP | Java servers and proxies such as BungeeCord and Velocity | 25565 |
 | **Minecraft Bedrock** | UDP | Bedrock and Education servers, Geyser | 19132 |
 | **Quake 3 / FiveM** | UDP | FiveM, RedM, Quake 3, Enemy Territory, older Call of Duty | 30120, 27960 |
+| **UDP ping beacon** | UDP | Beacons that echo what they are sent, such as Amazon GameLift's (`gamelift-ping.<region>.api.aws`), used by [Game Server Ping](game-server-ping.md) | 7770 |
 | **Any other game** | UDP | Call of Duty, Valorant, League of Legends, Fortnite: games that answer no query (below) | the game port |
 
 Minecraft Java's is the game's own server list ping: each query connects, reads
