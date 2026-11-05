@@ -93,6 +93,11 @@ export function redactNotifyUrl(url: string): string {
   return scheme === 'http' || scheme === 'https' ? `${scheme}://${label}/…` : `${scheme}://…`;
 }
 
+/** An alert as it may be shown: its URLs whole only when `whole`, to whoever may change alerts. */
+export function alertAsShown<T extends { notifyUrls: string[] }>(alert: T, whole: boolean): T {
+  return whole ? alert : { ...alert, notifyUrls: alert.notifyUrls.map(redactNotifyUrl) };
+}
+
 /**
  * A redacted URL sent back in place of the one it hides: the edit form is
  * filled with what the page was shown, so saving an alert without touching its

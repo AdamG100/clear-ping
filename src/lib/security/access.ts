@@ -129,6 +129,11 @@ export async function actorFor(request: Request): Promise<{ actor: Actor; via: V
 
 // ─── What they may do ───────────────────────────────────────────────────────
 
+/** Whether they may change what is monitored: an account that is not a viewer, or a key that may write. Nobody else, even where sign-in is off. */
+export function mayChange(actor: Actor | null): boolean {
+  return actor?.kind === 'user' ? canChange(actor.role) : actor?.kind === 'key' ? actor.access === 'write' : false
+}
+
 /** How a path is guarded. */
 export type RouteKind = 'open' | 'api' | 'page'
 

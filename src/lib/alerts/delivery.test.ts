@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AlertEvent } from '@/types/probe'
 import {
+  alertAsShown,
   alertTitle,
   describeCondition,
   notificationFor,
@@ -220,6 +221,21 @@ describe('restoreRedacted', () => {
 
   it('takes a URL that was typed as it is, and keeps one that is already whole', () => {
     expect(restoreRedacted(['tgram://new/token', real[0]], real)).toEqual(['tgram://new/token', real[0]])
+  })
+})
+
+describe('alertAsShown', () => {
+  const alert = { id: 'a1', notifyUrls: ['discord://1234/secret-token', 'mailto://me:hunter22@mail.example'] }
+
+  it('shows the URLs whole to whoever may change alerts', () => {
+    expect(alertAsShown(alert, true)).toBe(alert)
+  })
+
+  it('shows anyone else which service, and none of its secrets', () => {
+    const shown = alertAsShown(alert, false)
+    expect(shown.notifyUrls).toEqual(['discord://…', 'mailto://…'])
+    expect(JSON.stringify(shown)).not.toMatch(/secret-token|hunter22/)
+    expect(alert.notifyUrls[0]).toBe('discord://1234/secret-token')
   })
 })
 
