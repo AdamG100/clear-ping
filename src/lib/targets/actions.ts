@@ -65,7 +65,19 @@ export interface ProbedNow {
  * other. From its probe agent if it has one; a ProbeAgentUnavailableError
  * means nothing was taken or kept.
  */
-export async function probeNow(target: Target, probes: ProbeId[] = [primaryProbeOf(target)]): Promise<ProbedNow> {
+export function probeNow(target: Target, probes: ProbeId[] = [primaryProbeOf(target)]): Promise<ProbedNow> {
+  // The same round asked for again while it runs is that round, not another.
+  const key = `${target.id}:${[...probes].sort().join(',')}`;
+  const running = roundsRunning.get(key);
+  if (running) return running;
+  const round = takeRound(target, probes).finally(() => roundsRunning.delete(key));
+  roundsRunning.set(key, round);
+  return round;
+}
+
+const roundsRunning = new Map<string, Promise<ProbedNow>>();
+
+async function takeRound(target: Target, probes: ProbeId[]): Promise<ProbedNow> {
   // One round from each probe asked for, side by side; the first to fail
   // because its probe agent is down says so, and nothing is kept for any.
   const rounds = await Promise.all(

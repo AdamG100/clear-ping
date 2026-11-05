@@ -81,6 +81,29 @@ export function factorsOwed(
 }
 
 /**
+ * The factor an account must still use before this sign-in gets a session, or
+ * null. Having a factor is not using it: a policy that names one asks for it
+ * at sign-in. Only for what the account has; what it has not added yet is for
+ * `factorsOwed`, which sends it to add it.
+ */
+export function factorToProve(
+  policy: FactorPolicy,
+  account: { role: Role } & AccountFactors,
+  used: Factor[]
+): Factor | null {
+  if (policy.require === 'none') return null
+  if (policy.appliesTo === 'others' && account.role === 'admin') return null
+
+  const has: Record<Factor, boolean> = { totp: account.totp, passkey: account.passkeys > 0 }
+  if (policy.require === 'either') {
+    if (used.length > 0) return null
+    return has.totp ? 'totp' : has.passkey ? 'passkey' : null
+  }
+  const wanted: Factor[] = policy.require === 'both' ? ['totp', 'passkey'] : [policy.require]
+  return wanted.find(factor => has[factor] && !used.includes(factor)) ?? null
+}
+
+/**
  * Why a factor cannot be taken away, or null if it can: removing it would
  * leave the account short of what is required. Checked as though signed in
  * with a password, since that is how it would next have to sign in.

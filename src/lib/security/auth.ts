@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { SqliteDialect } from 'kysely'
 import { betterAuth, type BetterAuthOptions } from 'better-auth'
@@ -56,6 +56,15 @@ export const PLACEHOLDER_EMAIL_DOMAIN = 'users.clearping.invalid'
 
 export function placeholderEmail(name: string): string {
   return `${name.toLowerCase().replace(/[^a-z0-9._-]/g, '-')}@${PLACEHOLDER_EMAIL_DOMAIN}`
+}
+
+/**
+ * The address of an account made through the provider: from a hash of the
+ * provider's id for the person, so that two ids never share one, however alike
+ * they are once lower-cased and cleaned up (`Bob` and `bob`, `bob+corp` and `bob-corp`).
+ */
+export function ssoPlaceholderEmail(sub: string): string {
+  return placeholderEmail(`sso-${createHash('sha256').update(sub).digest('hex').slice(0, 40)}`)
 }
 
 export function isPlaceholderEmail(email: string | null | undefined): boolean {
@@ -206,7 +215,7 @@ function ssoProvider(db: Database.Database, config: SsoConfig) {
         // Never the provider's email. Every account's email is a placeholder
         // of its own, so no two ever match, and Better Auth never links an
         // account by a matching email: only by someone signed in choosing to.
-        email: placeholderEmail(`sso-${sub}`),
+        email: ssoPlaceholderEmail(sub),
         emailVerified: true,
         name: typeof claims.name === 'string' && claims.name ? claims.name : usernameFrom(claims),
       }
@@ -328,8 +337,9 @@ function buildOptions(db: Database.Database, secret: string, sso: SsoConfig, sit
     account: {
       // Every account's email is a placeholder of its own, never the
       // provider's, so linking is always by choice (Link my account, signed
-      // in), never by a match. The provider is trusted for that choice.
-      accountLinking: { enabled: true, allowDifferentEmails: true, trustedProviders: [SSO_PROVIDER_ID] },
+      // in), never by a match. The provider is trusted for that choice, and a
+      // match is refused outright, should an account ever turn one up.
+      accountLinking: { enabled: true, disableImplicitLinking: true, allowDifferentEmails: true, trustedProviders: [SSO_PROVIDER_ID] },
     },
     advanced: {
       cookiePrefix: 'clearping',
@@ -491,24 +501,40 @@ interface Holder {
   instances: Map<string, Instance>
   /** Instances being made, which every request in the meantime waits for. */
   building: Map<string, { key: string; done: Promise<Instance> }>
+  /** Bringing the tables up to date, done once for each set of settings however many instances are made. */
+  prepared: Map<string, Promise<void>>
 }
 
 const INSTANCE_KEY = Symbol.for('clearping.auth.v2')
 function holder(): Holder {
   const store = globalThis as typeof globalThis & { [INSTANCE_KEY]?: Holder }
-  return (store[INSTANCE_KEY] ??= { db: null, instances: new Map(), building: new Map() })
+  return (store[INSTANCE_KEY] ??= { db: null, instances: new Map(), building: new Map(), prepared: new Map() })
 }
 
 /** How many site names get an instance of their own before the oldest are let go. */
 const MAX_SITE_INSTANCES = 8
 
-/** Make an instance: Better Auth's tables first (it checks them as soon as it starts), then the accounts moved across. */
+/**
+ * Make an instance: Better Auth's tables first (it checks them as soon as it
+ * starts), then the accounts moved across. A site name comes from the request,
+ * so a new one must cost next to nothing: that work is done once.
+ */
 async function build(db: Database.Database, secret: string, sso: SsoConfig, key: string, site: string): Promise<Instance> {
   const options = buildOptions(db, secret, sso, site)
-  const { runMigrations } = await getMigrations(options)
-  await runMigrations()
-  const { moveLegacyAccounts } = await import('./auth-migration')
-  await moveLegacyAccounts(db)
+  const state = holder()
+  const settings = JSON.stringify([secret, sso, databasePath()])
+  let prepared = state.prepared.get(settings)
+  if (!prepared) {
+    prepared = (async () => {
+      const { runMigrations } = await getMigrations(options)
+      await runMigrations()
+      const { moveLegacyAccounts } = await import('./auth-migration')
+      await moveLegacyAccounts(db)
+    })()
+    state.prepared.set(settings, prepared)
+    prepared.catch(() => state.prepared.delete(settings))
+  }
+  await prepared
   return { key, auth: betterAuth(options) }
 }
 
@@ -584,6 +610,7 @@ export function closeAuth(): void {
   state.db = null
   state.instances.clear()
   state.building.clear()
+  state.prepared.clear()
 }
 
 /** Whether sign-in through the provider is set up and its configuration was read. */

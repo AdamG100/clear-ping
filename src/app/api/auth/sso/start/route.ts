@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { safeNext } from '@/lib/dashboard-pages';
 import { identify } from '@/lib/security/access';
 import { getAuth, SSO_PROVIDER_ID, ssoReady } from '@/lib/security/auth';
 import { passCookies, refusal } from '@/lib/security/http';
-import { getSsoConfig, safeNext, ssoUsable } from '@/lib/security/oidc';
+import { getSsoConfig, ssoUsable } from '@/lib/security/oidc';
 
 /** Back to the sign-in page, saying why. A relative address, so it is right behind any proxy. */
 function failed(message: string) {

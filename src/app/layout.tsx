@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { NotificationsProvider } from "@/components/notifications";
+import { headers } from "next/headers";
 import { connection } from "next/server";
 import { THEME_COLOR } from "@/lib/app-theme";
 import { configuredTimeZone } from "@/lib/time-zone";
@@ -79,6 +80,8 @@ export default async function RootLayout({
   // costs next to nothing.
   await connection();
   const timeZone = configuredTimeZone(process.env.TZ) ?? undefined;
+  // Allows the two scripts below by the page's Content-Security-Policy (proxy.ts).
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
     // suppressHydrationWarning: the inline script below sets the theme
@@ -95,6 +98,7 @@ export default async function RootLayout({
     >
       <head>
         <script
+          nonce={nonce}
           // Applies the saved theme before first paint. Without this the page
           // renders in the default theme and then snaps, which is worse than
           // the flash it is meant to prevent. It also notes whether a group
@@ -107,6 +111,7 @@ export default async function RootLayout({
           }}
         />
         <script
+          nonce={nonce}
           // Keeps the browser's offer to install the app (Android), which it
           // makes once and may make before any of the page's own code has
           // loaded. Holding it is also what stops Chrome showing a bar of its

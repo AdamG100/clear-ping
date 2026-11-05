@@ -314,7 +314,7 @@ See `.env.example`. All settings are optional.
 | `CLEARPING_UPDATE_CHECK` | on | `off` stops the quarter-hourly check for a newer image (see [Versions](#versions)) |
 | `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made ([security.md](security.md#locked-out)) |
 | `CLEARPING_SETUP_CODE` | made at start-up, written to the log | What the first account asks for besides a password |
-| `CLEARPING_ALLOWED_HOSTS` | unset (any) | Comma-separated hostnames ClearPing answers to; a request addressed to another name is refused |
+| `CLEARPING_ALLOWED_HOSTS` | unset | Comma-separated hostnames ClearPing answers to; a request addressed to another name is refused. Unset, a public domain is answered only with sign-in on ([security.md](security.md#before-anyone-can-reach-it)) |
 | `CLEARPING_TRUST_PROXY` | `0` | How many proxies in front of ClearPing add to `X-Forwarded-For` (`1` for Traefik) |
 | `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard ([mcp.md](mcp.md)) |
 | `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes an assistant's token over plain HTTP from anywhere ([mcp.md](mcp.md)) |

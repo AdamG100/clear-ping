@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { devUserEnabled, signInDevUser } from '@/lib/security/dev-user';
+import { safeNext } from '@/lib/dashboard-pages';
 import { passCookies } from '@/lib/security/http';
-import { safeNext } from '@/lib/security/oidc';
 
 /**
  * GET /api/auth/dev-user?next=/path - Sign in as the dev account, then go on

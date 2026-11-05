@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { crossSite, decide, hostAllowed, presentedKey, readCookie, routeKind, type Identity } from './access'
+import { crossSite, decide, hostAllowed, mayChange, presentedKey, readCookie, routeKind, type Identity } from './access'
 
 const nobody: Identity = { actor: null, invalidKey: false }
 const user: Identity = { actor: { kind: 'user', id: 'u1', name: 'adam', role: 'admin' }, invalidKey: false }
@@ -215,5 +215,20 @@ describe('hostAllowed', () => {
     expect(hostAllowed('evil.example', 'ping.example')).toBe(false)
     expect(hostAllowed(null, 'ping.example')).toBe(false)
     expect(hostAllowed('192.168.1.5:9999', '192.168.1.5:3000')).toBe(false)
+  })
+})
+
+describe('mayChange', () => {
+  it('is an account that is not a viewer, or a key that may write', () => {
+    expect(mayChange(user.actor)).toBe(true)
+    expect(mayChange(editor.actor)).toBe(true)
+    expect(mayChange(writer.actor)).toBe(true)
+  })
+
+  it('is nobody else, even where sign-in is off', () => {
+    expect(mayChange(viewer.actor)).toBe(false)
+    expect(mayChange(reader.actor)).toBe(false)
+    expect(mayChange(nobody.actor)).toBe(false)
+    expect(mayChange({ kind: 'anonymous', name: 'Anonymous' })).toBe(false)
   })
 })

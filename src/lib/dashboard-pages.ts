@@ -117,3 +117,26 @@ export function pathOf(page: DashboardPage | null): string {
   }
   return `/${page.kind}`
 }
+
+const SAFE_NEXT_BASE = 'http://clearping.invalid'
+
+/**
+ * Where to go next from a `next` anyone could have written into a link: a
+ * path on this site, or the dashboard. It is read the way a browser will read
+ * it, since that is where it leads: a browser drops tabs and line breaks from
+ * an address and takes `\` for `/`, so `/<tab>/evil.example` and
+ * `/\evil.example` are both `//evil.example`, another site. What comes out is
+ * checked too: `/.//evil.example` starts on this site, but its dot is resolved
+ * away and leaves the same `//evil.example`.
+ */
+export function safeNext(next: unknown): string {
+  if (typeof next !== 'string' || !next.startsWith('/')) return '/'
+  let url: URL
+  try {
+    url = new URL(next, SAFE_NEXT_BASE)
+  } catch {
+    return '/'
+  }
+  if (url.origin !== SAFE_NEXT_BASE || url.pathname.startsWith('//')) return '/'
+  return `${url.pathname}${url.search}${url.hash}`
+}

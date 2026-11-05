@@ -1,6 +1,7 @@
 import { generateRandomString } from 'better-auth/crypto'
 import { authDatabase, getAuth, placeholderEmail, SSO_PROVIDER_ID } from './auth'
 import type { FactorsOwed } from './factors'
+import { ssoSessionOver } from './oidc'
 import { effectiveKeyAccess, isRole, type KeyAccess, type Role } from './roles'
 import { verifyPassword } from './secrets'
 import { getJsonSetting, recordSecurityActivity, setJsonSetting } from './settings-store'
@@ -352,7 +353,11 @@ export async function signedIn(headers: Headers): Promise<{ user: User; viaSso: 
   const found = await auth.api.getSession({ headers }).catch(() => null)
   if (!found) return null
   const user = await getUser(found.user.id)
-  const session = found.session as { viaSso?: boolean | number | null }
+  const session = found.session as { token: string; createdAt: Date; viaSso?: boolean | number | null }
+  if (session.viaSso && ssoSessionOver(session.createdAt)) {
+    await (await auth.$context).internalAdapter.deleteSession(session.token)
+    return null
+  }
   return user ? { user, viaSso: !!session.viaSso } : null
 }
 
