@@ -125,7 +125,9 @@ const SAFE_NEXT_BASE = 'http://clearping.invalid'
  * path on this site, or the dashboard. It is read the way a browser will read
  * it, since that is where it leads: a browser drops tabs and line breaks from
  * an address and takes `\` for `/`, so `/<tab>/evil.example` and
- * `/\evil.example` are both `//evil.example`, another site.
+ * `/\evil.example` are both `//evil.example`, another site. What comes out is
+ * checked too: `/.//evil.example` starts on this site, but its dot is resolved
+ * away and leaves the same `//evil.example`.
  */
 export function safeNext(next: unknown): string {
   if (typeof next !== 'string' || !next.startsWith('/')) return '/'
@@ -135,5 +137,6 @@ export function safeNext(next: unknown): string {
   } catch {
     return '/'
   }
-  return url.origin === SAFE_NEXT_BASE ? `${url.pathname}${url.search}${url.hash}` : '/'
+  if (url.origin !== SAFE_NEXT_BASE || url.pathname.startsWith('//')) return '/'
+  return `${url.pathname}${url.search}${url.hash}`
 }
