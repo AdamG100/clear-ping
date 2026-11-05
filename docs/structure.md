@@ -49,6 +49,7 @@ src/
 | `traceroute/` | Running (`run.ts`), reading (`parse.ts`), keeping (`store.ts`) and exporting (`export.ts`) traceroutes. |
 | `probe-agents/` | The dashboard's side of probe agents: the protocol both ends share (`protocol.ts`), talking to one (`client.ts`), keeping them (`store.ts`), and checking and installing one. |
 | `alerts/` | Alerts and how targets stand against them (`store.ts`), what they say (`delivery.ts`), sending them (`apprise.ts`). |
+| `game-ping/` | Game Server Ping: the games and their regions, with the source of each (`catalogue.ts` for the shapes, `games.ts` for the list), Valve's relays read live (`valve.ts`), and testing one region from one probe (`run.ts`). |
 | `bgp/` | BGP monitoring: following RIS Live (`ris-live.ts`) and asking RIPEstat (`ripestat.ts`), judging a prefix (`assess.ts`), learning what is normal for it (`learn.ts`), the monitor that runs it all (`monitor.ts`), keeping it (`store.ts`), how your networks reach a prefix, from this server and each probe agent (`home.ts`), when a route is flapping (`flapping.ts`), exchanges' peering LANs from PeeringDB (`exchanges.ts`), their members' addresses on them from IXPDB (`ixpdb.ts`), and the pure helpers the pages share (`prefix.ts`, `path.ts`, `collectors.ts`, `countries.ts`, and `scope.ts` for narrowing a prefix's page to a place or an upstream). |
 | `db/` | The database: opening and querying it, migrations, maintenance. |
 | `targets/` | Targets and groups as data: checking a new one, sharing, actions taken on several, group paths and health, the sidebar's layout. |

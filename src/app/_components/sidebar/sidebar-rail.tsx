@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Bell, LayoutDashboard, Network, PanelLeftOpen, Plus, Settings, Share2 } from 'lucide-react'
+import { Bell, Gamepad2, LayoutDashboard, Network, PanelLeftOpen, Plus, Settings, Share2 } from 'lucide-react'
 import { Badge } from '@/components/arc/badge/badge'
 import { Button } from '@/components/arc/button/button'
 import { Tooltip } from '@/components/arc/tooltip/tooltip'
@@ -39,6 +39,8 @@ interface SidebarRailProps {
   /** Off, its icon is greyed out, and opens Settings for whoever may turn it on. */
   routingEnabled?: boolean
   onTurnOnRouting?: () => void
+  gamePingOpen?: boolean
+  onOpenGamePing?: () => void
   alertsOpen: boolean
   onOpenAlerts?: () => void
   /** How many alerts are firing on at least one target. */
@@ -75,6 +77,8 @@ export function SidebarRail({
   onOpenRouting,
   routingEnabled = true,
   onTurnOnRouting,
+  gamePingOpen = false,
+  onOpenGamePing,
   alertsOpen,
   onOpenAlerts,
   firingAlerts,
@@ -135,6 +139,13 @@ export function SidebarRail({
                 </Button>
               </span>
             )}
+          </Beside>
+        )}
+        {onOpenGamePing && (
+          <Beside name="Game Server Ping">
+            <Button type="button" variant={gamePingOpen ? 'primary' : 'ghost'} size="sm" onClick={onOpenGamePing} aria-pressed={gamePingOpen} aria-label="Game Server Ping">
+              <Gamepad2 {...ICON} />
+            </Button>
           </Beside>
         )}
         {groups.map(({ group, memberIds, health }) => {
