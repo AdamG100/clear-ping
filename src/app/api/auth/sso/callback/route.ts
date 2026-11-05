@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { safeNext } from '@/lib/dashboard-pages';
 import { getAuth, SSO_PROVIDER_ID } from '@/lib/security/auth';
 import { passCookies } from '@/lib/security/http';
 import { getSsoConfig } from '@/lib/security/oidc';
@@ -59,7 +60,8 @@ export async function GET(request: NextRequest) {
     to = `/login?error=${encodeURIComponent(reason(error, label, allowedGroup))}`;
   } else {
     // A path on this site, kept relative so it is right behind any proxy.
-    to = destination.origin === new URL(request.url).origin ? `${destination.pathname}${destination.search}` : location!;
+    // Never another site's address, whatever Better Auth was handed.
+    to = safeNext(`${destination.pathname}${destination.search}`);
   }
   return passCookies(answer, new NextResponse(null, { status: 303, headers: { Location: to } }), request);
 }

@@ -5,13 +5,13 @@ import { Check, CircleX, Loader2 } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Button } from '@/components/arc/button/button'
 import { TextShimmer } from '@/components/arc/text-shimmer/text-shimmer'
+import { safeNext } from '@/lib/dashboard-pages'
 import type { UpgradeProgress } from '@/lib/db/upgrade-progress'
 
 /** Where to go back to once the database is open: the page that was asked for. */
 function nextPage(): string {
-  const next = new URLSearchParams(window.location.search).get('next') ?? '/'
-  // Only somewhere on this site.
-  return next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/upgrading') ? next : '/'
+  const next = safeNext(new URLSearchParams(window.location.search).get('next'))
+  return next.startsWith('/upgrading') ? '/' : next
 }
 
 const seconds = (ms: number) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`)

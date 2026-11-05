@@ -179,13 +179,6 @@ async function signingKeys(jwksUri: string, fetchFn: FetchFn, fresh = false): Pr
   return keys
 }
 
-// ─── Coming back ────────────────────────────────────────────────────────────
-
-/** A path on this site, or the dashboard. */
-export function safeNext(next: unknown): string {
-  return typeof next === 'string' && /^\/(?![/\\])/.test(next) ? next : '/'
-}
-
 export interface Claims {
   iss: string
   sub: string
