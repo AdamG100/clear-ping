@@ -1,6 +1,9 @@
+import { createHmac } from 'node:crypto'
 import { NextResponse } from 'next/server'
-import { identify } from './access'
+import { identify, readCookie } from './access'
+import { getAuth } from './auth'
 import { canAdminister, ROLE_LABEL } from './roles'
+import { sameSecret } from './secrets'
 import { countUsers, type Actor } from './store'
 
 /** What the security routes have in common. */
@@ -16,11 +19,13 @@ export function isHttps(request: Request): boolean {
  * through the provider) to the browser. They are `HttpOnly` and
  * `SameSite=Lax`, and `Secure` where the request came over HTTPS: decided per
  * request, as ClearPing is reached over plain HTTP on a home network as often
- * as over HTTPS, where a cookie marked `Secure` would never be kept.
+ * as over HTTPS, where a cookie marked `Secure` would never be kept. `only`
+ * hands on just the cookies it picks.
  */
-export function passCookies(from: Response, to: NextResponse, request: Request): NextResponse {
+export function passCookies(from: Response, to: NextResponse, request: Request, only?: (line: string) => boolean): NextResponse {
   const secure = isHttps(request)
   for (const line of from.headers.getSetCookie()) {
+    if (only && !only(line)) continue
     to.headers.append('set-cookie', secure && !/;\s*secure/i.test(line) ? `${line}; Secure` : line)
   }
   return to
@@ -57,6 +62,16 @@ export const NO_PASSKEY_HERE =
 export async function refusal(response: Response, fallback: string): Promise<string> {
   const body = (await response.clone().json().catch(() => null)) as { message?: string } | null
   return body?.message || fallback
+}
+
+/**
+ * Add a cookie of ClearPing's own beside those handed on. As a header of its
+ * own: `response.cookies.set` writes every cookie out again, and encoding
+ * Better Auth's signed ones a second time breaks them.
+ */
+export function addCookie(response: NextResponse, request: Request, name: string, value: string, path: string, maxAge: number): void {
+  const secure = isHttps(request) ? '; Secure' : ''
+  response.headers.append('set-cookie', `${name}=${value}; Path=${path}; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure}`)
 }
 
 export type UserActor = Extract<Actor, { kind: 'user' }>
@@ -102,6 +117,7 @@ interface Attempts {
 const FREE_ATTEMPTS = 5
 const MAX_LOCK_MS = 15 * 60 * 1000
 const attempts = new Map<string, Attempts>()
+const MAX_COUNTED = 10_000
 
 /**
  * How many proxies stand in front of ClearPing and add to `X-Forwarded-For`:
@@ -156,12 +172,47 @@ export function noteLoginFailure(keys: string[], now = Date.now()): void {
     if (entry.failures > FREE_ATTEMPTS) {
       entry.lockedUntil = now + Math.min(MAX_LOCK_MS, 1000 * 2 ** (entry.failures - FREE_ATTEMPTS))
     }
+    // Moved to the end, so what is going on now is the last to be let go.
+    attempts.delete(key)
     attempts.set(key, entry)
   }
-  // Bounded, whatever is thrown at it.
-  if (attempts.size > 10_000) attempts.clear()
+  // Bounded, whatever is thrown at it. Only the oldest go: emptying it would
+  // let anyone wipe every lock by trying enough made-up usernames.
+  for (const key of attempts.keys()) {
+    if (attempts.size <= MAX_COUNTED) break
+    attempts.delete(key)
+  }
 }
 
 export function noteLoginSuccess(keys: string[]): void {
   for (const key of keys) attempts.delete(key)
+}
+
+// ─── A browser that has signed in before ────────────────────────────────────
+
+const DEVICE_COOKIE = 'clearping.known_device'
+const DEVICE_DAYS = 180
+
+async function deviceMark(username: string): Promise<string> {
+  const { secret } = await (await getAuth()).$context
+  return createHmac('sha256', secret).update(`known-device:${username.toLowerCase()}`).digest('base64url')
+}
+
+/**
+ * What wrong passwords for a username are counted against. Anyone can run up
+ * the count for a name, which would keep its owner out for as long as they
+ * liked. A browser that has given this account's password before is counted
+ * apart, so it can still get in. It proves nothing else: the password is still
+ * needed, and is still slowed down, on a count of its own.
+ */
+export async function usernameKey(request: Request, username: string): Promise<string> {
+  const name = username.toLowerCase()
+  const cookie = readCookie(request.headers.get('cookie'), DEVICE_COOKIE)
+  return cookie && sameSecret(cookie, await deviceMark(name)) ? `device:${name}` : `user:${name}`
+}
+
+/** Remember that this browser has given the right password for this account. */
+export async function markKnownDevice(response: NextResponse, request: Request, username: string): Promise<NextResponse> {
+  addCookie(response, request, DEVICE_COOKIE, await deviceMark(username), '/api/auth/login', DEVICE_DAYS * 24 * 60 * 60)
+  return response
 }

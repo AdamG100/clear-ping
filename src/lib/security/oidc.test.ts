@@ -4,7 +4,6 @@ import {
   discover,
   endSessionUrl,
   inAllowedGroup,
-  safeNext,
   usernameFrom,
   verifyLogoutToken,
   SSO_DEFAULTS,
@@ -130,15 +129,6 @@ describe('discover', () => {
   it('refuses a provider that says it is some other issuer', async () => {
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({ ...discovery, issuer: 'https://other.example/' })))
     await expect(discover('https://auth.example/application/o/elsewhere/', fetchFn as unknown as typeof fetch)).rejects.toThrow('says its issuer')
-  })
-})
-
-describe('coming back', () => {
-  it('goes back only to a path on this site', () => {
-    expect(safeNext('/alerts')).toBe('/alerts')
-    for (const elsewhere of ['//evil.example', 'https://evil.example/', '/\\evil.example', 42, undefined]) {
-      expect(safeNext(elsewhere)).toBe('/')
-    }
   })
 })
 

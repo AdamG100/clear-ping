@@ -734,6 +734,7 @@ export async function initDatabase(): Promise<Database> {
   // A failed open must not stick, or the next attempt in this process repeats
   // it after the folder has been fixed.
   void opening.catch(error => {
+    console.error('Database: could not be opened:', error);
     databaseFailed(error instanceof Error ? error.message : String(error));
     if (connection.opening === opening && !connection.ready) {
       connection.opening = null;

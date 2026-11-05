@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pageFromPath, pathOf, SETTINGS_SECTIONS, type DashboardPage, type SettingsSection } from './dashboard-pages'
+import { pageFromPath, pathOf, safeNext, SETTINGS_SECTIONS, type DashboardPage, type SettingsSection } from './dashboard-pages'
 
 describe('dashboard pages', () => {
   it('reads each page from its address', () => {
@@ -91,3 +91,39 @@ describe('the pages for adding and editing a target', () => {
   })
 })
 
+
+describe('safeNext', () => {
+  it('keeps a path on this site', () => {
+    expect(safeNext('/alerts')).toBe('/alerts')
+    expect(safeNext('/monitors/abc/edit?from=x#top')).toBe('/monitors/abc/edit?from=x#top')
+  })
+
+  it('goes to the dashboard instead of anywhere else, however it is written', () => {
+    for (const elsewhere of [
+      '//evil.example',
+      'https://evil.example/',
+      '/\\evil.example',
+      '/\t/evil.example',
+      '/\n/evil.example',
+      '/\r/evil.example',
+      '/\\\t\\evil.example',
+      '/.//evil.example',
+      '/..//evil.example',
+      '/x/..//evil.example',
+      '/%2e//evil.example',
+      '/.\t//evil.example',
+      'javascript:alert(1)',
+      ' /alerts',
+      '',
+      42,
+      undefined,
+      ['/alerts'],
+    ]) {
+      expect(safeNext(elsewhere)).toBe('/')
+    }
+  })
+
+  it('gives back the path a browser would go to, not what was written', () => {
+    expect(safeNext('/al\terts')).toBe('/alerts')
+  })
+})

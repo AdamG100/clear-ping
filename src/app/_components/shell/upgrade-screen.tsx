@@ -5,13 +5,13 @@ import { Check, CircleX, Loader2 } from 'lucide-react'
 import { Alert } from '@/components/arc/alert/alert'
 import { Button } from '@/components/arc/button/button'
 import { TextShimmer } from '@/components/arc/text-shimmer/text-shimmer'
+import { safeNext } from '@/lib/dashboard-pages'
 import type { UpgradeProgress } from '@/lib/db/upgrade-progress'
 
 /** Where to go back to once the database is open: the page that was asked for. */
 function nextPage(): string {
-  const next = new URLSearchParams(window.location.search).get('next') ?? '/'
-  // Only somewhere on this site.
-  return next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/upgrading') ? next : '/'
+  const next = safeNext(new URLSearchParams(window.location.search).get('next'))
+  return next.startsWith('/upgrading') ? '/' : next
 }
 
 const seconds = (ms: number) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`)
@@ -71,7 +71,7 @@ export function UpgradeScreen() {
           <h1 className="text-lg font-medium">{failed ? 'ClearPing could not start' : upgrading ? 'Bringing the database up to date' : 'Starting ClearPing'}</h1>
           <p className="text-sm text-muted-foreground">
             {failed
-              ? 'Its database could not be opened. Fix what is said below, then try again.'
+              ? 'Its database could not be opened. Fix what the container log says, then try again.'
               : upgrading
               ? `This version of ClearPing needs some changes to the database${from !== undefined && to !== undefined && from < to ? ` (version ${from} to ${to})` : ''}, made once, before anything is shown. Nothing is lost. This page carries on by itself when it is done.`
               : 'Opening the database. This page carries on by itself in a moment.'}
@@ -81,7 +81,7 @@ export function UpgradeScreen() {
         {progress?.phase === 'failed' && (
           <div className="space-y-3">
             <Alert tone="danger" title="The database could not be opened">
-              <p className="whitespace-pre-line break-words">{progress.error ?? 'The container log says why.'}</p>
+              <p>The container log says why: docker logs clear_ping</p>
             </Alert>
             <Button size="sm" variant="secondary" loading={retrying} onClick={() => void retry()}>Try again</Button>
           </div>

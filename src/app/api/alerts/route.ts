@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAlert, getAlerts, parseAlertInput, type AlertInput } from '@/lib/alerts/store';
 import { checkNotifyUrls } from '@/lib/alerts/apprise';
 import { initializeServer } from '@/lib/init';
-import { redactNotifyUrl } from '@/lib/alerts/delivery';
-import { actorFor, identify } from '@/lib/security/access';
-import { canChange } from '@/lib/security/roles';
+import { alertAsShown } from '@/lib/alerts/delivery';
+import { actorFor, identify, mayChange } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
 
 /**
@@ -18,11 +17,8 @@ export async function GET(request: NextRequest) {
   try {
     await initializeServer();
     const alerts = await getAlerts();
-    const { actor } = await identify(request);
-    const mayChange = actor?.kind === 'user' ? canChange(actor.role) : actor?.kind === 'key' ? actor.access === 'write' : false;
-    return NextResponse.json({
-      alerts: mayChange ? alerts : alerts.map(alert => ({ ...alert, notifyUrls: alert.notifyUrls.map(redactNotifyUrl) })),
-    });
+    const whole = mayChange((await identify(request)).actor);
+    return NextResponse.json({ alerts: alerts.map(alert => alertAsShown(alert, whole)) });
   } catch (error) {
     console.error('Error fetching alerts:', error);
     return NextResponse.json({ error: 'Failed to fetch alerts' }, { status: 500 });

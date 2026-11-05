@@ -470,7 +470,8 @@ Returns information about:
 POST /api/scheduler/start
 ```
 
-Manually starts the scheduler (useful if it was stopped).
+Manually starts the scheduler (useful if it was stopped). Refused with a 409
+when `CLEARPING_EXTERNAL_PROBER=1` is set, where a separate process does the probing.
 
 ### Monitoring
 

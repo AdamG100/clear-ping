@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { decide, FACTOR_SETUP_PAGE, hostAllowed, identify, routeKind, securityPolicy } from '@/lib/security/access'
+import { decide, FACTOR_SETUP_PAGE, hostAllowed, identify, nameRefused, routeKind, securityPolicy } from '@/lib/security/access'
 import { corsHeaders, corsOrigin, corsPath } from '@/lib/security/cors'
 import { devUserEnabled } from '@/lib/security/dev-user'
+import { HSTS, pageSecurityPolicy } from '@/lib/security/headers'
+import { isHttps } from '@/lib/security/http'
 import { databaseOpening, upgradeProgress } from '@/lib/db/upgrade-progress'
 
 /**
@@ -36,6 +38,23 @@ export async function proxy(request: NextRequest) {
       { error: 'ClearPing is opening its database. Try again in a moment.', upgrading: true },
       { status: 503, headers: { 'Retry-After': '5' } }
     )
+  }
+
+  // Only now: whether sign-in is on is in the database.
+  if (pathname !== '/api/health' && !databaseOpening() && upgradeProgress().phase !== 'failed') {
+    const host = request.headers.get('host')
+    const forwarded = request.headers.get('x-forwarded-host')?.split(',')[0].trim() || null
+    const names = [...new Set([host, forwarded])].filter((name): name is string => !!name)
+    if (await nameRefused(names)) {
+      noteRefusedName(names.join(', '))
+      return NextResponse.json(
+        {
+          error:
+            'While sign-in is off, ClearPing only answers at this name if it is listed. Add it to CLEARPING_ALLOWED_HOSTS where ClearPing runs, or open ClearPing by its IP address and turn sign-in on.',
+        },
+        { status: 421 }
+      )
+    }
   }
 
   const open = routeKind(pathname) === 'open'
@@ -78,7 +97,8 @@ export async function proxy(request: NextRequest) {
   })
 
   if (decision.allow) {
-    const response = NextResponse.next()
+    const response = pathname === '/api' || pathname.startsWith('/api/') ? NextResponse.next() : pageResponse(request)
+    if (isHttps(request)) response.headers.set('Strict-Transport-Security', HSTS)
     if (cors) for (const [name, value] of Object.entries(corsHeaders(cors))) response.headers.set(name, value)
     return response
   }
@@ -100,6 +120,31 @@ export async function proxy(request: NextRequest) {
       headers: { ...(decision.status === 401 ? { 'WWW-Authenticate': 'Bearer' } : {}), ...(cors ? corsHeaders(cors) : {}) },
     }
   )
+}
+
+/**
+ * A page, let through with a Content-Security-Policy of its own. Next.js reads
+ * the nonce from the request's copy and puts it on the scripts it writes, and
+ * the root layout reads it from `x-nonce` for its own (see security/headers.ts).
+ */
+function pageResponse(request: NextRequest): NextResponse {
+  const nonce = btoa(crypto.randomUUID())
+  const policy = pageSecurityPolicy(nonce, process.env.NODE_ENV === 'development')
+  const headers = new Headers(request.headers)
+  headers.set('x-nonce', nonce)
+  headers.set('Content-Security-Policy', policy)
+  const response = NextResponse.next({ request: { headers } })
+  response.headers.set('Content-Security-Policy', policy)
+  return response
+}
+
+/** Names refused so far, so each is said once in the log, however often it is asked for. */
+const refusedNames = new Set<string>()
+
+function noteRefusedName(names: string): void {
+  if (refusedNames.has(names) || refusedNames.size >= 20) return
+  refusedNames.add(names)
+  console.warn(`[Access] Refused a request addressed to ${names}: sign-in is off and CLEARPING_ALLOWED_HOSTS does not list it. If that is this ClearPing's address, add it there.`)
 }
 
 /** What is answered while the database is opened: the page that says so, what it reads, and the health check. */

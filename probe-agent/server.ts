@@ -131,9 +131,15 @@ export function createProbeAgentServer(options: ProbeAgentOptions): Server {
     if (entry.count > FREE_FAILURES) {
       entry.until = Date.now() + Math.min(MAX_LOCK_MS, 1000 * 2 ** (entry.count - FREE_FAILURES));
     }
+    // Moved to the end, so what is going on now is the last to be let go.
+    failures.delete(address);
     failures.set(address, entry);
-    // Bounded, whatever is thrown at it.
-    if (failures.size > 10_000) failures.clear();
+    // Bounded, whatever is thrown at it. Only the oldest go: emptying it would
+    // lift every lock at once.
+    for (const key of failures.keys()) {
+      if (failures.size <= 10_000) break;
+      failures.delete(key);
+    }
   }
 
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {

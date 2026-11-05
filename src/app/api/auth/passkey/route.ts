@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { securityPolicy } from '@/lib/security/access';
 import { getAuth } from '@/lib/security/auth';
 import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, NO_PASSKEY_HERE, passCookies, passkeySite } from '@/lib/security/http';
+import type { Factor } from '@/lib/security/factors';
+import { endHeldSession, factorStillOwed, takeCodeProof } from '@/lib/security/step-up';
 import { actorOf, getUser, recordActivity } from '@/lib/security/store';
 
 /**
@@ -13,6 +15,9 @@ import { actorOf, getUser, recordActivity } from '@/lib/security/store';
  * browser's passkey prompt is opened with; the second hands Better Auth what
  * the passkey signed, which it checks and makes the session from. No password
  * and no code: a passkey is something held and something unlocked already.
+ *
+ * Unless an admin requires the authenticator app, for an account that has one:
+ * then the password and code have to come first, in this browser (step-up.ts).
  */
 export async function POST(request: NextRequest) {
   if (!(await securityPolicy()).passwordLogin) {
@@ -49,7 +54,7 @@ export async function POST(request: NextRequest) {
   const answer = await auth.api
     .verifyPasskeyAuthentication({ body: { response: body.response }, headers: request.headers, asResponse: true })
     .catch(() => null);
-  const verified = answer?.ok ? ((await answer.clone().json().catch(() => null)) as { session?: { userId: string } } | null) : null;
+  const verified = answer?.ok ? ((await answer.clone().json().catch(() => null)) as { session?: { userId: string; token?: string } } | null) : null;
   const user = verified?.session?.userId ? await getUser(verified.session.userId) : null;
 
   if (!answer?.ok || !user) {
@@ -59,6 +64,12 @@ export async function POST(request: NextRequest) {
   }
 
   noteLoginSuccess(keys);
+  const used: Factor[] = ['passkey'];
+  if ((await takeCodeProof(request)) === user.id) used.push('totp');
+  if (await factorStillOwed(user, used)) {
+    await endHeldSession(verified?.session?.token);
+    return NextResponse.json({ error: 'An admin requires your authenticator app too. Sign in with your password and code first.' }, { status: 403 });
+  }
   await recordActivity(actorOf(user), 'dashboard', 'signin', `With a passkey, from ${address}`);
   return passCookies(answer, NextResponse.json({ username: user.username }), request);
 }

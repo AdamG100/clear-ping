@@ -3,8 +3,8 @@ import { deleteAlert, getAlert, parseAlertInput, updateAlert } from '@/lib/alert
 import { trimAlertTraces } from '@/lib/traceroute/store';
 import { checkNotifyUrls } from '@/lib/alerts/apprise';
 import { initializeServer } from '@/lib/init';
-import { restoreRedacted } from '@/lib/alerts/delivery';
-import { actorFor } from '@/lib/security/access';
+import { alertAsShown, restoreRedacted } from '@/lib/alerts/delivery';
+import { actorFor, mayChange } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
 
 /**
@@ -44,7 +44,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const { actor, via } = await actorFor(request);
     await recordActivity(actor, via, 'alert.change', `${alert.name || `${alert.metric} alert`}: ${Object.keys(parsed.input).join(', ')}`);
-    return NextResponse.json(alert);
+    // As GET /api/alerts shows it: a change made by someone who may not see
+    // the URLs (anyone, with sign-in off) must not be a way to read them.
+    return NextResponse.json(alertAsShown(alert, mayChange(actor)));
   } catch (error) {
     console.error('Error updating alert:', error);
     return NextResponse.json({ error: 'Failed to update alert' }, { status: 500 });

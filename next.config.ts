@@ -24,6 +24,18 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // Everywhere, the files the proxy does not see included. No other site
+        // can load ClearPing in a frame, where clicks tricked out of someone
+        // would count as made on ClearPing's own pages. The page's own policy
+        // says the same in the proxy, with what only a request can decide.
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "same-origin" },
+        ],
+      },
+      {
         // The service worker is never served from a cache, the browser's or a
         // proxy's in front of the app. A stale one keeps running on every
         // device that has the app installed, with no way to reach in and
