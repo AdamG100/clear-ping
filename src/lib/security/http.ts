@@ -16,11 +16,13 @@ export function isHttps(request: Request): boolean {
  * through the provider) to the browser. They are `HttpOnly` and
  * `SameSite=Lax`, and `Secure` where the request came over HTTPS: decided per
  * request, as ClearPing is reached over plain HTTP on a home network as often
- * as over HTTPS, where a cookie marked `Secure` would never be kept.
+ * as over HTTPS, where a cookie marked `Secure` would never be kept. `only`
+ * hands on just the cookies it picks.
  */
-export function passCookies(from: Response, to: NextResponse, request: Request): NextResponse {
+export function passCookies(from: Response, to: NextResponse, request: Request, only?: (line: string) => boolean): NextResponse {
   const secure = isHttps(request)
   for (const line of from.headers.getSetCookie()) {
+    if (only && !only(line)) continue
     to.headers.append('set-cookie', secure && !/;\s*secure/i.test(line) ? `${line}; Secure` : line)
   }
   return to

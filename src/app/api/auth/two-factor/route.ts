@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from '@/lib/security/auth';
 import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies, refusal } from '@/lib/security/http';
+import { askForPasskey, factorStillOwed } from '@/lib/security/step-up';
 import { actorOf, getUser, recordActivity } from '@/lib/security/store';
 
 /**
@@ -10,7 +11,9 @@ import { actorOf, getUser, recordActivity } from '@/lib/security/store';
  * After /api/auth/login answered { twoFactor: true }: the code from the
  * account's authenticator app, or one of its backup codes. Better Auth checks
  * it against the sign-in the cookie from that step names, and makes the
- * session. `trustDevice` skips this step in this browser for 30 days.
+ * session. `trustDevice` skips this step in this browser for 30 days. Where an
+ * admin requires a passkey as well it answers { passkey: true } instead, with
+ * no session, and that is next (step-up.ts).
  */
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -34,7 +37,7 @@ export async function POST(request: NextRequest) {
     ? auth.api.verifyBackupCode({ body: { code, trustDevice }, headers: request.headers, asResponse: true })
     : auth.api.verifyTOTP({ body: { code, trustDevice }, headers: request.headers, asResponse: true })
   ).catch(() => null);
-  const verified = answer?.ok ? ((await answer.clone().json().catch(() => null)) as { user?: { id: string } } | null) : null;
+  const verified = answer?.ok ? ((await answer.clone().json().catch(() => null)) as { user?: { id: string }; token?: string } | null) : null;
   const user = verified?.user ? await getUser(verified.user.id) : null;
 
   if (!answer?.ok || !user) {
@@ -59,6 +62,9 @@ export async function POST(request: NextRequest) {
   }
 
   noteLoginSuccess(keys);
+  if ((await factorStillOwed(user, ['totp'])) === 'passkey') {
+    return askForPasskey(answer, request, { sessionToken: verified?.token, codeUsedBy: user.id });
+  }
   await recordActivity(actorOf(user), 'dashboard', 'signin', `With ${backup ? 'a backup code' : 'an authenticator code'}, from ${address}`);
   return passCookies(answer, NextResponse.json({ username: user.username }), request);
 }

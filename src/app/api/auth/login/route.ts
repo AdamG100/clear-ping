@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from '@/lib/security/auth';
 import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies, refusal } from '@/lib/security/http';
 import { securityPolicy } from '@/lib/security/access';
-import { actorOf, getUser, recordActivity, signInTrouble } from '@/lib/security/store';
+import { askForPasskey, factorStillOwed } from '@/lib/security/step-up';
+import { actorOf, findUserByUsername, getUser, recordActivity, signInTrouble } from '@/lib/security/store';
 
 /**
  * POST /api/auth/login - Sign in
@@ -15,6 +16,9 @@ import { actorOf, getUser, recordActivity, signInTrouble } from '@/lib/security/
  * An account with an authenticator app is not signed in yet: Better Auth
  * answers { twoFactor: true } with a cookie that lets the code be checked
  * next, at /api/auth/two-factor, unless this browser was trusted then.
+ *
+ * Nor is one an admin requires a passkey of: it is answered { passkey: true },
+ * with no session, and signs in at /api/auth/passkey (step-up.ts).
  */
 export async function POST(request: NextRequest) {
   if (!(await securityPolicy()).passwordLogin) {
@@ -48,12 +52,14 @@ export async function POST(request: NextRequest) {
           })
       : null;
   const signedIn = answer?.ok
-    ? ((await answer.clone().json().catch(() => null)) as { user?: { id: string }; twoFactorRedirect?: boolean } | null)
+    ? ((await answer.clone().json().catch(() => null)) as { user?: { id: string }; token?: string; twoFactorRedirect?: boolean } | null)
     : null;
 
-  // The password was right; the code is next.
+  // The password was right; the code is next, unless it is a passkey that is required.
   if (answer?.ok && signedIn?.twoFactorRedirect) {
     noteLoginSuccess(keys);
+    const account = await findUserByUsername(username);
+    if (account && (await factorStillOwed(account, [])) === 'passkey') return askForPasskey(answer, request, {});
     return passCookies(answer, NextResponse.json({ twoFactor: true }), request);
   }
   const user = signedIn?.user ? await getUser(signedIn.user.id) : null;
@@ -68,6 +74,11 @@ export async function POST(request: NextRequest) {
   }
 
   noteLoginSuccess(keys);
+  // Better Auth asks an account with the app for its code unless this browser
+  // is trusted, so here the app counts as used.
+  if ((await factorStillOwed(user, user.twoFactor ? ['totp'] : [])) === 'passkey') {
+    return askForPasskey(answer, request, { sessionToken: signedIn?.token, codeUsedBy: user.twoFactor ? user.id : undefined });
+  }
   await recordActivity(actorOf(user), 'dashboard', 'signin', `From ${address}`);
   return passCookies(answer, NextResponse.json({ username: user.username }), request);
 }

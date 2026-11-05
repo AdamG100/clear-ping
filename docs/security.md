@@ -235,6 +235,19 @@ have, and an admin cannot require of everyone something their own account does
 not have yet: that is how an admin would lock themselves out. If it happens
 anyway, `CLEARPING_AUTH=off` (below) lifts the requirement while it is set.
 
+What is required is asked for at every sign-in, not only checked to exist:
+
+| Required | Signing in with a password | Signing in with a passkey alone |
+|---|---|---|
+| An authenticator app or a passkey | then the code, or the passkey if there is no app | yes |
+| An authenticator app | then the code | not once the account has the app |
+| A passkey | then the passkey | yes |
+| An authenticator app and a passkey | then the code, then the passkey | not once the account has the app |
+
+A passkey only works at the name it was made at, so an account required to use
+one has to sign in at that name. Sessions made before this rule stay signed in
+until they end.
+
 Both factors are Better Auth's, its two-factor and passkey plugins, called
 from ClearPing's routes like the rest of sign-in.
 

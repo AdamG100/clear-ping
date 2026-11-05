@@ -21,7 +21,8 @@ import { BrandMark } from '../_components/shell/brand-mark'
  *
  * An account with an authenticator app is asked for its code after the
  * password; one with a passkey can sign in with that alone. Both are Better
- * Auth's, through /api/auth/two-factor and /api/auth/passkey.
+ * Auth's, through /api/auth/two-factor and /api/auth/passkey. Where an admin
+ * requires a passkey, either of those steps can answer that it is next.
  *
  * A forgotten password is reset with a one-time code ClearPing writes to its
  * server log (/api/auth/password-reset). A password link an admin made
@@ -54,7 +55,8 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
   const [error, setError] = useState<string | null>(initialError)
   const [busy, setBusy] = useState(false)
   // After a right password, for an account with an authenticator app.
-  const [step, setStep] = useState<'password' | 'code'>('password')
+  // Or with a passkey, where an admin requires one.
+  const [step, setStep] = useState<'password' | 'code' | 'passkey'>('password')
   const [code, setCode] = useState('')
   const [backup, setBackup] = useState(false)
   const [trustDevice, setTrustDevice] = useState(false)
@@ -118,6 +120,10 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
         setStep('code')
         return
       }
+      if (body.passkey) {
+        setStep('passkey')
+        return
+      }
       // A full load, so the dashboard starts from scratch as the signed-in user.
       window.location.assign(next)
     } catch {
@@ -147,6 +153,11 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
         }
         return
       }
+      if (body.passkey) {
+        setStep('passkey')
+        setCode('')
+        return
+      }
       window.location.assign(next)
     } catch {
       setError('ClearPing could not be reached. Try again in a moment.')
@@ -172,7 +183,9 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
         response = await startAuthentication({ optionsJSON })
       } catch (problem) {
         // Closing the browser's prompt is a choice, not a failure.
-        if ((problem as Error).name !== 'NotAllowedError') setError('The passkey could not be used. Try again, or sign in with your password.')
+        if ((problem as Error).name !== 'NotAllowedError') {
+          setError(step === 'passkey' ? 'The passkey could not be used. Try again.' : 'The passkey could not be used. Try again, or sign in with your password.')
+        }
         return
       }
       const verified = await post({ step: 'verify', response })
@@ -338,6 +351,38 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
               </Button>
             </div>
           </form>
+        </div>
+      </main>
+    )
+  }
+
+  if (step === 'passkey') {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="flex items-center gap-2.5">
+            <BrandMark />
+            <div>
+              <p className="text-sm font-medium text-foreground">ClearPing</p>
+              <p className="text-xs text-muted-foreground">Network monitor</p>
+            </div>
+          </div>
+          <div className="space-y-5 rounded-3xl border border-border bg-card p-6">
+            <div className="space-y-1">
+              <h1 className="text-lg font-medium text-card-foreground">Use your passkey</h1>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                An admin requires a passkey for your account. Use it to finish signing in.
+              </p>
+            </div>
+            {error && <Alert tone="danger" title="You are not signed in">{error}</Alert>}
+            <Button type="button" className="w-full" loading={busy} onClick={withPasskey}>
+              <Fingerprint size={16} strokeWidth={1.75} aria-hidden="true" />
+              Use my passkey
+            </Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={() => { setStep('password'); setPassword(''); setError(null) }}>
+              Back
+            </Button>
+          </div>
         </div>
       </main>
     )
