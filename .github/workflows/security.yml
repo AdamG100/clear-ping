@@ -3,6 +3,9 @@ name: Security review
 # Has Claude read the changes in a pull request for security holes, and comment
 # on what it finds. A commit pushed straight to main is not reviewed.
 #
+# Semgrep reads them too. It is a fixed set of rules rather than a judgement, so
+# the same code gets the same answer, and only what the pull request adds counts.
+#
 # Runs on a Claude subscription, using up its limits: the
 # CLAUDE_CODE_OAUTH_TOKEN repository secret is what `claude setup-token` prints.
 # Dependabot's pull requests are left out, because GitHub does not give them
@@ -14,6 +17,27 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
+  scan:
+    name: Scan
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # The merge of the pull request into main, whose first parent is main.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Scan what this pull request adds
+        run: |
+          pipx run semgrep==1.183.0 scan \
+            --config p/typescript --config p/nextjs --config p/secrets \
+            --baseline-commit HEAD^1 --metrics off --error
+
   review:
     name: Review
     if: github.event.pull_request.user.login != 'dependabot[bot]' && !github.event.pull_request.draft
