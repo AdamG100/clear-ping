@@ -7,7 +7,7 @@
  */
 
 import { getAllTargets, storeMeasurements, getNeverAnswered, cleanOldMeasurements } from './db/database';
-import { isClosedPortCheck } from './probes/config';
+import { countsPackets, isClosedPortCheck } from './probes/config';
 import { checkProbeAgent, ProbeAgentUnavailableError, runProbes } from './probe-agents/client';
 import { cleanOldProbeAgentOutages, pairedProbeAgentConnections } from './probe-agents/store';
 import { probedFromPhrase } from './probe-agents/probes';
@@ -310,7 +310,8 @@ class ProbeScheduler {
 
   /** The lane a target waits in: its probe agent's, or this server's for its kind. */
   private laneFor(target: ScheduledTarget): Lane {
-    if (target.probe === LOCAL_PROBE) return target.probeType === 'ping' ? this.pingLane : this.otherLane;
+    // ARP goes with ping: both run a program a packet at a time, and lose a second on each lost one.
+    if (target.probe === LOCAL_PROBE) return countsPackets(target.probeType) ? this.pingLane : this.otherLane;
     let lane = this.agentLanes.get(target.probe);
     if (!lane) {
       lane = new Lane(AGENT_CONCURRENCY);

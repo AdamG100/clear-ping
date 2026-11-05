@@ -15,7 +15,22 @@ import { classifyHost, isIpv6, normalizeHost, resolverDomain } from './host'
  * Pure, with no Node imports: the add-target dialog runs this as you type.
  */
 
-export const PROBE_TYPES: readonly ProbeType[] = ['ping', 'tcp', 'game', 'http', 'dns']
+export const PROBE_TYPES: readonly ProbeType[] = ['ping', 'arp', 'tcp', 'game', 'http', 'dns']
+
+/**
+ * Whether a probe counts packets of its own, so a target can ask for how many:
+ * ping's echo requests and ARP's requests. Loss reads in steps of one packet.
+ */
+export function countsPackets(probeType: ProbeType): boolean {
+  return probeType === 'ping' || probeType === 'arp'
+}
+
+/** Why a probe cannot run over an IP version, or null if it can. ARP has no IPv6: that is Neighbor Discovery. */
+export function ipVersionProblem(probeType: ProbeType, ipVersion: IpVersion | undefined): string | null {
+  return probeType === 'arp' && (ipVersion === 'ipv6' || ipVersion === 'both')
+    ? 'ARP works over IPv4 only: leave the IP version automatic, or set it to IPv4'
+    : null
+}
 
 export const GAME_QUERIES: readonly GameQuery[] = ['source', 'minecraft', 'bedrock', 'quake', 'unreachable']
 
@@ -222,7 +237,13 @@ export function validateProbeConfig(probeType: ProbeType, host: string, raw: unk
   const config: ProbeConfig = {}
 
   switch (probeType) {
+    case 'arp':
     case 'ping': {
+      // ARP has no IPv6 (that is Neighbor Discovery): refused here rather than
+      // stored as a target that can only ever fail.
+      if (probeType === 'arp' && classifyHost(host) === 'ipv6') {
+        return { ok: false, error: 'ARP works over IPv4 only: use an IPv4 address, or a name with one' }
+      }
       if (input.packets === undefined || input.packets === null) return { ok: true, config }
       const packets = input.packets
       if (typeof packets !== 'number' || !Number.isInteger(packets) || packets < MIN_PING_PACKETS || packets > MAX_PING_PACKETS) {

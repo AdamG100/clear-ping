@@ -10,8 +10,9 @@ slow looks different from one that is unstable.
 
 ## What it does
 
-- **Five kinds of probe.** ICMP ping, TCP connect, game server query, HTTP(S)
+- **Six kinds of probe.** ICMP ping, ARP, TCP connect, game server query, HTTP(S)
   request and DNS query. Paste a host, `host:port` or a URL and the right one is picked.
+  ARP checks a device on the same network that ignores ping, from a probe agent there.
 - **Game servers.** A game server probe speaks the Steam server query (CS2,
   Rust, ARK, Valheim…), Minecraft Java's and Bedrock's pings and FiveM's
   `getinfo`, and shows the server's name, map and player count along with how

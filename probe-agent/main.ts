@@ -107,9 +107,11 @@ function main(): void {
   const dataDirectory = process.env.CLEARPING_PROBE_AGENT_DATA?.trim() || join(process.cwd(), 'probe-agent-data');
   const certificate = certificateIn(dataDirectory);
 
-  const tools = { ping: installed('ping'), traceroute: installed('traceroute') };
+  const tools = { ping: installed('ping'), traceroute: installed('traceroute'), arping: installed('arping') };
   if (!tools.ping) log('Warning: ping is not installed, so ping targets will fail. Install iputils-ping.');
   if (!tools.traceroute) log('Warning: traceroute is not installed, so traces will fail. Install traceroute.');
+  // Only ARP monitors need it, so its absence is said but is not a warning.
+  if (!tools.arping) log('arping is not installed, so ARP monitors cannot be measured from here. Install iputils-arping to use them.');
 
   const server = createProbeAgentServer({ token, key: certificate.key, cert: certificate.cert, version: VERSION, tools, log });
 

@@ -20,6 +20,7 @@ import { addressFamilyFor, classifyHost, isDualStack, isWellKnownResolver, targe
 import { groupLabel, joinGroupPath } from '@/lib/targets/group-path'
 import { describeProbe } from '@/lib/probes/labels'
 import {
+  countsPackets,
   dnsQueryNameFor,
   DEFAULT_PING_PACKETS,
   DNS_RECORD_TYPES,
@@ -35,7 +36,7 @@ import {
 } from '@/lib/probes/config'
 import { DualStackBadge, Ipv6Badge, TypeBadge } from './target-badges'
 import { ResolverList } from './resolver-list'
-import { Gamepad2, Globe, Network, Pause, Plug, Trash2, Wifi } from 'lucide-react'
+import { Gamepad2, Globe, Network, Pause, Plug, Router, Trash2, Wifi } from 'lucide-react'
 import { Masked } from '../privacy/masked'
 
 /**
@@ -129,6 +130,7 @@ const ICON = { size: 16, strokeWidth: 1.75, 'aria-hidden': true } as const
  */
 const PROBE_METHODS: { value: ProbeType; label: string; question: string; icon: typeof Wifi }[] = [
   { value: 'ping', label: 'Ping', question: 'ICMP. Is it up, and how fast does it reply?', icon: Wifi },
+  { value: 'arp', label: 'ARP', question: 'Is a device on the same network there, even if it ignores ping?', icon: Router },
   { value: 'tcp', label: 'TCP port', question: 'Is a service accepting connections?', icon: Plug },
   { value: 'game', label: 'Game server', question: 'Is a game server up, and how fast does it answer?', icon: Gamepad2 },
   { value: 'http', label: 'Web page', question: 'HTTP. Does a page load as expected?', icon: Globe },
@@ -226,13 +228,13 @@ function ProbeConfigFields({
   onChange: (changes: Partial<ConfigDraft>) => void
   onPortBlur: () => void
 }) {
-  if (probeType === 'ping') {
+  if (countsPackets(probeType)) {
     return (
       <div className="space-y-2">
         <div className="max-w-48">
           <Input
             id={`${idPrefix}-packets`}
-            label="Packets per probe"
+            label={probeType === 'arp' ? 'Requests per probe' : 'Packets per probe'}
             inputMode="numeric"
             placeholder={String(DEFAULT_PING_PACKETS)}
             value={draft.packets}
@@ -244,6 +246,13 @@ function ProbeConfigFields({
           50 gives 2% and {MAX_PING_PACKETS} gives 1%. More packets take longer, up to a second for each one a failing
           path never answers.
         </FieldHint>
+        {probeType === 'arp' && (
+          <FieldHint>
+            ARP does not cross a router, so the address has to be on the same network as the machine measuring it:
+            usually a probe agent on that network, running on Linux. In Docker it needs the host&apos;s network.
+            IPv4 only.
+          </FieldHint>
+        )}
       </div>
     )
   }
@@ -533,6 +542,7 @@ const INTERVALS = [
 
 const RECAP_VERB: Record<ProbeType, string> = {
   ping: 'Pings',
+  arp: 'Sends ARP to',
   tcp: 'Connects to',
   game: 'Queries',
   http: 'Requests',
@@ -714,7 +724,8 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
   // A record that is not an address has no IP version to be asked for over:
   // set to both, the same question would be put twice and charted as two lines.
   const asksNoAddress = probeType === 'dns' && draft.resolvers.length > 0 && !isAddressRecord(draft.recordType)
-  const hasIpVersion = isDomain && !asksNoAddress
+  // ARP has IPv4 alone: a name is looked up as its IPv4 address, so there is nothing to choose.
+  const hasIpVersion = isDomain && !asksNoAddress && probeType !== 'arp'
   const effectiveIpVersion = hasIpVersion ? ipVersion : 'auto'
 
   // What each required field still needs, if anything.
@@ -891,7 +902,7 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
           <div className="grid items-start gap-4 sm:grid-cols-2">
             <IntervalSelect id={`${idPrefix}-interval`} value={interval} onChange={setInterval} />
           </div>
-          {hostKind !== 'ipv4' && hostKind !== 'ipv6' && !asksNoAddress && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
+          {hostKind !== 'ipv4' && hostKind !== 'ipv6' && !asksNoAddress && probeType !== 'arp' && <IpVersionPicker value={ipVersion} onChange={setIpVersion} />}
         </FormSection>
 
         {/* From where: asked only once there is somewhere besides here. */}

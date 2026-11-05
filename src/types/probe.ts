@@ -1,13 +1,13 @@
 import type { ProbeAgentSummary, ProbeId } from './probe-agent';
 import type { AlertRuleSettings, ConditionResult, ProbeVerdict } from './alert-rules';
 
-export type ProbeType = 'ping' | 'dns' | 'tcp' | 'game' | 'http';
+export type ProbeType = 'ping' | 'arp' | 'dns' | 'tcp' | 'game' | 'http';
 
 export type ProbeStatus = 'active' | 'paused' | 'error';
 
 export type TimeRange = '1h' | '3h' | '6h' | '12h' | '24h' | '2d' | '7d' | '30d' | '90d';
 
-export type TargetType = 'ip' | 'domain' | 'dns' | 'tcp' | 'game' | 'http';
+export type TargetType = 'ip' | 'domain' | 'arp' | 'dns' | 'tcp' | 'game' | 'http';
 
 /**
  * How a game server probe asks the server how it is: in the game's own query,
@@ -89,8 +89,8 @@ export interface DnsResolverReading {
 export interface ProbeConfig {
   /**
    * ping: echo requests sent per probe, when not the 20 most targets use.
-   * Loss is counted in whole packets, so this is how finely it is read: one
-   * lost of 20 is 5%, one of 100 is 1%.
+   * arp: ARP requests, likewise. Loss is counted in whole packets, so this is
+   * how finely it is read: one lost of 20 is 5%, one of 100 is 1%.
    */
   packets?: number;
   /** tcp: the port to connect to. game: the port to query. http: the port, when not the scheme's default. */

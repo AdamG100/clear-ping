@@ -64,7 +64,7 @@ export interface ProbeAgent extends ProbeAgentSummary {
   lastError?: string;
   version?: string;
   platform?: string;
-  tools?: { ping: boolean; traceroute: boolean };
+  tools?: { ping: boolean; traceroute: boolean; arping?: boolean };
   createdAt: number;
   updatedAt: number;
   targetCount: number;

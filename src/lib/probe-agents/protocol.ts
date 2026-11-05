@@ -35,8 +35,12 @@ export interface ProbeAgentInfo {
   hostname: string;
   platform: string;
   arch: string;
-  /** Whether the programs some probes run are installed there. */
-  tools: { ping: boolean; traceroute: boolean };
+  /**
+   * Whether the programs some probes run are installed there. `arping` is
+   * only needed for ARP monitors, and is not said at all by a probe agent from
+   * before ARP probes.
+   */
+  tools: { ping: boolean; traceroute: boolean; arping?: boolean };
 }
 
 export interface ProbeAgentProbeRequest {

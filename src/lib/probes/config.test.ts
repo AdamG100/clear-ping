@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countsPackets,
   DEFAULT_DNS_QUERY_NAME,
   dnsQueryNameFor,
   httpUrlFor,
+  ipVersionProblem,
   isProbeType,
   nameRecordType,
   parseAddressInput,
@@ -269,9 +271,43 @@ describe('displaying a target', () => {
 })
 
 describe('isProbeType', () => {
-  it('knows the five probes and nothing else', () => {
-    expect(['ping', 'tcp', 'game', 'http', 'dns'].every(isProbeType)).toBe(true)
+  it('knows the six probes and nothing else', () => {
+    expect(['ping', 'arp', 'tcp', 'game', 'http', 'dns'].every(isProbeType)).toBe(true)
     expect(isProbeType('icmp')).toBe(false)
     expect(isProbeType(undefined)).toBe(false)
+  })
+})
+
+describe('ARP targets', () => {
+  it('takes a packet count as ping does, and keeps the usual one unsaid', () => {
+    expect(validateProbeConfig('arp', '192.168.1.20', {})).toEqual({ ok: true, config: {} })
+    expect(validateProbeConfig('arp', '192.168.1.20', { packets: 10 })).toEqual({ ok: true, config: { packets: 10 } })
+    expect(validateProbeConfig('arp', '192.168.1.20', { packets: 20 })).toEqual({ ok: true, config: {} })
+    expect(validateProbeConfig('arp', 'printer.lan', { packets: 4 }).ok).toBe(false)
+  })
+
+  it('drops settings that belong to other probes', () => {
+    expect(validateProbeConfig('arp', '192.168.1.20', { port: 80, path: '/' })).toEqual({ ok: true, config: {} })
+  })
+
+  it('refuses an IPv6 address, which has no ARP', () => {
+    const checked = validateProbeConfig('arp', 'fe80::1', {})
+    expect(checked.ok).toBe(false)
+    expect(!checked.ok && checked.error).toMatch(/IPv4 only/)
+  })
+
+  it('refuses IPv6 and both families, and nothing else', () => {
+    expect(ipVersionProblem('arp', 'ipv6')).toMatch(/IPv4 only/)
+    expect(ipVersionProblem('arp', 'both')).toMatch(/IPv4 only/)
+    expect(ipVersionProblem('arp', 'auto')).toBeNull()
+    expect(ipVersionProblem('arp', 'ipv4')).toBeNull()
+    expect(ipVersionProblem('arp', undefined)).toBeNull()
+    expect(ipVersionProblem('ping', 'both')).toBeNull()
+  })
+
+  it('counts packets, as ping does', () => {
+    expect(countsPackets('arp')).toBe(true)
+    expect(countsPackets('ping')).toBe(true)
+    expect(countsPackets('tcp')).toBe(false)
   })
 })

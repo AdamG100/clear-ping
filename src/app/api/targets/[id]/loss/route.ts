@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getProbeReadings, getTargetById } from '@/lib/db/database';
 import { windowFromQuery } from '@/lib/charts/series';
 import { initializeServer } from '@/lib/init';
-import { DEFAULT_PING_PACKETS } from '@/lib/probes/config';
+import { countsPackets, DEFAULT_PING_PACKETS } from '@/lib/probes/config';
 import { isTimeZone } from '@/lib/reports/evidence';
 import { analyzeLoss } from '@/lib/reports/loss';
 import { readNeighbours } from '@/lib/reports/neighbours';
@@ -43,7 +43,7 @@ export async function GET(
       analyzeLoss(family ? readings.filter(reading => reading.family === family) : readings, {
         intervalMs: target.interval * 1000,
         timeZone: isTimeZone(timeZone) ? timeZone : 'UTC',
-        packetsPerProbe: target.probeType === 'ping' ? target.probeConfig?.packets ?? DEFAULT_PING_PACKETS : null,
+        packetsPerProbe: countsPackets(target.probeType) ? target.probeConfig?.packets ?? DEFAULT_PING_PACKETS : null,
         neighbours,
       })
     );
