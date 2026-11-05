@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from '@/lib/security/auth';
-import { addressKeys, clientAddress, loginLockedFor, noteLoginFailure, noteLoginSuccess, passCookies, refusal } from '@/lib/security/http';
+import { addressKeys, clientAddress, loginLockedFor, markKnownDevice, noteLoginFailure, noteLoginSuccess, passCookies, refusal, usernameKey } from '@/lib/security/http';
 import { securityPolicy } from '@/lib/security/access';
 import { askForPasskey, factorStillOwed } from '@/lib/security/step-up';
 import { actorOf, findUserByUsername, getUser, recordActivity, signInTrouble } from '@/lib/security/store';
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   const username = typeof body?.username === 'string' ? body.username.trim() : '';
   const password = typeof body?.password === 'string' ? body.password : '';
   const address = clientAddress(request);
-  const keys = [...addressKeys(address), `user:${username.toLowerCase()}`];
+  const keys = [...addressKeys(address), await usernameKey(request, username)];
 
   const wait = loginLockedFor(keys);
   if (wait > 0) {
@@ -59,8 +59,8 @@ export async function POST(request: NextRequest) {
   if (answer?.ok && signedIn?.twoFactorRedirect) {
     noteLoginSuccess(keys);
     const account = await findUserByUsername(username);
-    if (account && (await factorStillOwed(account, [])) === 'passkey') return askForPasskey(answer, request, {});
-    return passCookies(answer, NextResponse.json({ twoFactor: true }), request);
+    if (account && (await factorStillOwed(account, [])) === 'passkey') return markKnownDevice(await askForPasskey(answer, request, {}), request, username);
+    return markKnownDevice(passCookies(answer, NextResponse.json({ twoFactor: true }), request), request, username);
   }
   const user = signedIn?.user ? await getUser(signedIn.user.id) : null;
 
@@ -77,8 +77,8 @@ export async function POST(request: NextRequest) {
   // Better Auth asks an account with the app for its code unless this browser
   // is trusted, so here the app counts as used.
   if ((await factorStillOwed(user, user.twoFactor ? ['totp'] : [])) === 'passkey') {
-    return askForPasskey(answer, request, { sessionToken: signedIn?.token, codeUsedBy: user.twoFactor ? user.id : undefined });
+    return markKnownDevice(await askForPasskey(answer, request, { sessionToken: signedIn?.token, codeUsedBy: user.twoFactor ? user.id : undefined }), request, username);
   }
   await recordActivity(actorOf(user), 'dashboard', 'signin', `From ${address}`);
-  return passCookies(answer, NextResponse.json({ username: user.username }), request);
+  return markKnownDevice(passCookies(answer, NextResponse.json({ username: user.username }), request), request, username);
 }

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { readCookie } from './access'
 import { getAuth } from './auth'
 import { factorToProve, type Factor } from './factors'
-import { isHttps, passCookies } from './http'
+import { addCookie, passCookies } from './http'
 import { getFactorPolicy, recoveryMode } from './settings-store'
 import type { User } from './store'
 
@@ -55,13 +55,7 @@ export async function askForPasskey(
       value: codeUsedBy,
       expiresAt: new Date(Date.now() + PROOF_MINUTES * 60_000),
     })
-    response.cookies.set(PROOF_COOKIE, proof, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: isHttps(request),
-      path: '/api/auth',
-      maxAge: PROOF_MINUTES * 60,
-    })
+    addCookie(response, request, PROOF_COOKIE, proof, '/api/auth', PROOF_MINUTES * 60)
   }
   return response
 }
