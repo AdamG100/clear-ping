@@ -53,7 +53,7 @@ COPY --from=binary-build /app/dist/probe-agent/clearping-probe-agent /clearping-
 FROM node:26.13.0-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS runtime
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends iputils-ping traceroute \
+ && apt-get install -y --no-install-recommends iputils-ping iputils-arping traceroute \
  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \

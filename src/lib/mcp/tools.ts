@@ -61,6 +61,7 @@ const MAX_PERIOD_MS = 366 * DAY_MS
 
 const PROBE_NAME: Record<Target['probeType'], string> = {
   ping: 'ICMP ping',
+  arp: 'ARP request',
   tcp: 'TCP connect',
   game: 'Game server query',
   http: 'HTTP(S) request',
@@ -738,7 +739,7 @@ const TARGET_PROPERTIES = {
     type: 'string',
     enum: PROBE_TYPES,
     description:
-      'How to check it: "ping" (ICMP), "tcp" (a port accepts connections), "game" (a game server answers its query), "http" (a page loads) or "dns" (a lookup answers). Left out, it is taken from the address: a URL is http, udp://host:port is game, host:port is tcp, anything else ping.',
+      'How to check it: "ping" (ICMP), "arp" (a device on the same network as the probe answers ARP, even if it ignores ping; IPv4 and Linux only, so usually from a probe agent on that network), "tcp" (a port accepts connections), "game" (a game server answers its query), "http" (a page loads) or "dns" (a lookup answers). Left out, it is taken from the address: a URL is http, udp://host:port is game, host:port is tcp, anything else ping.',
   },
   group: { type: 'string', description: 'The group to put it in, as a path: "Home/Network". Made if it is not there. An empty string for no group.' },
   interval_seconds: { type: 'number', description: 'How often to probe it, from 10 to 86400 seconds. 300 unless said.' },
@@ -760,7 +761,7 @@ const TARGET_PROPERTIES = {
   settings: {
     type: 'object',
     description:
-      'What only that probe has. ping: packets (echo requests per probe, 5 to 100, default 20; loss is read in steps of 100/packets percent). tcp: port (required unless it is in the address). ' +
+      'What only that probe has. ping: packets (echo requests per probe, 5 to 100, default 20; loss is read in steps of 100/packets percent). arp: packets (ARP requests per probe, the same). tcp: port (required unless it is in the address). ' +
       'game: port (required unless it is in the address; for a Steam game, its query port), gameQuery ("source" for Steam games such as CS2, Rust, ARK and Valheim, the default; "minecraft" for Minecraft Java; "bedrock" for Minecraft Bedrock; "quake" for FiveM, RedM and Quake 3; "unreachable" for games that answer no query, such as Call of Duty, Valorant and League of Legends: it times the "port unreachable" the server sends for closed ports, needs ClearPing on Linux, and cannot measure a server whose firewall drops such packets, as on Google Cloud). http: scheme ("http" or "https"), port, path, expectedStatus, keyword (text the page must contain). ' +
       'dns on a server address: queryName, recordType, expectedAnswer. dns on a hostname: resolvers (a list of { protocol: "system" | "udp" | "dot" | "doh", server, name }), recordType, expectedAnswer.',
   },
@@ -1135,7 +1136,7 @@ export const clearPingMcp: McpServer = {
   title: 'ClearPing',
   version: currentBuild().version,
   instructions:
-    'ClearPing is a self-hosted network monitor: it probes hosts on a schedule (ping, TCP, game servers, HTTP, DNS) and keeps every result. ' +
+    'ClearPing is a self-hosted network monitor: it probes hosts on a schedule (ping, ARP, TCP, game servers, HTTP, DNS) and keeps every result. ' +
     'These tools read that history. ' +
     'For a request to gather logs or evidence of connection problems, or to report them to an ISP, call build_isp_report and write from what it returns. ' +
     'Use list_targets to learn what is monitored, get_target_history for one monitor in depth, get_incidents for outages across monitors, ' +

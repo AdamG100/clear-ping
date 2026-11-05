@@ -140,6 +140,11 @@ For IPv6 monitors, Docker's default network has no IPv6. Run the container with
 `--network host` instead of `-p …`, and set `CLEARPING_PROBE_AGENT_LISTEN` to
 the address and port to listen on.
 
+ARP monitors need the same: on Docker's default network the container's only
+neighbour is Docker's own bridge, so every device on the LAN is "not on a local
+network of this machine". With `--network host` it sees the machine's own
+networks, and can ask anything on them. See [ARP](automatic-probing.md#arp).
+
 ### Docker Compose
 
 [compose.probe-agent.example.yaml](../compose.probe-agent.example.yaml) has
@@ -163,7 +168,10 @@ This installs one program for x64 or ARM64 (Node.js is built in), at
 - its certificate is kept in `/var/lib/clearping-probe-agent`.
 
 It needs `ping` and `traceroute` on the machine, and says if either is
-missing. On Debian or Ubuntu: `apt install iputils-ping traceroute`.
+missing. On Debian or Ubuntu: `apt install iputils-ping traceroute`. ARP
+monitors also need `arping` from iputils (`apt install iputils-arping`); it is
+optional, and the agent says at start-up when it is not there. The Docker image
+has all three.
 
 Check it with `systemctl status clearping-probe-agent`. Read its log with
 `journalctl -u clearping-probe-agent`.
@@ -340,3 +348,6 @@ If the two can't understand each other, the agent is marked **Update needed**.
 | **Certificate changed** | See [Its certificate](#its-certificate) |
 | **Update needed** | The agent and the dashboard are different versions. Update the older one |
 | *No ping installed* | Install `iputils-ping` (and `traceroute`) on the agent's machine |
+| *It is too old for this kind of monitor* | The agent is from before that probe type (ARP, say). Update it |
+| *arping is not installed on this machine* | Install `iputils-arping` on the agent's machine, for ARP monitors |
+| *Not on a local network of this machine* | An ARP monitor on an agent that is not on the device's network, or in Docker without `--network host` |

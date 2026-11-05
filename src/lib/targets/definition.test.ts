@@ -12,6 +12,15 @@ describe('validateTargetDefinition', () => {
     })
   })
 
+  it('takes an ARP target over IPv4 only', () => {
+    expect(validateTargetDefinition({ name: 'Printer', host: 'printer.lan', probeType: 'arp', interval: 60 }).ok).toBe(true)
+    expect(validateTargetDefinition({ name: 'Printer', host: 'printer.lan', probeType: 'arp', interval: 60, ipVersion: 'ipv4' }).ok).toBe(true)
+    for (const ipVersion of ['ipv6', 'both']) {
+      const checked = validateTargetDefinition({ name: 'Printer', host: 'printer.lan', probeType: 'arp', interval: 60, ipVersion })
+      expect(!checked.ok && checked.error).toMatch(/IPv4 only/)
+    }
+  })
+
   it('has no group rather than an empty one', () => {
     const checked = validateTargetDefinition({ name: 'a', host: 'example.com', probeType: 'ping', interval: 300, group: ' / ' })
     expect(checked.ok && 'group' in checked.target).toBe(false)

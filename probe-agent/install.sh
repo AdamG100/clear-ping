@@ -161,6 +161,8 @@ systemctl restart "$NAME"
 for tool in ping traceroute; do
   command -v "$tool" >/dev/null 2>&1 || say "Warning: $tool is not installed, so probes that use it will fail. Install it (Debian and Ubuntu: apt install iputils-ping traceroute)."
 done
+# Only ARP monitors need it, so it is mentioned, not warned about.
+command -v arping >/dev/null 2>&1 || say "arping is not installed, so ARP monitors cannot be measured from here. To use them: apt install iputils-arping."
 
 sleep 2
 if systemctl is-active --quiet "$NAME"; then

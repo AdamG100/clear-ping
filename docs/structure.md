@@ -44,7 +44,7 @@ src/
 
 | Folder | Subject |
 |--------|---------|
-| `probes/` | Taking one reading: the probe of each kind (`ping.ts`, `tcp.ts`, `http.ts`, `dns.ts`, `game.ts`), what they share (`result.ts`, `config.ts`, `labels.ts`, `host.ts`, `resolve.ts`, `metrics.ts`, `log.ts`) and the dispatcher (`probe.ts`). A probe with helpers of its own gets a folder beside its file: `dns/`, `game/`. |
+| `probes/` | Taking one reading: the probe of each kind (`ping.ts`, `arp.ts`, `tcp.ts`, `http.ts`, `dns.ts`, `game.ts`), what they share (`result.ts`, `config.ts`, `labels.ts`, `host.ts`, `resolve.ts`, `metrics.ts`, `log.ts`) and the dispatcher (`probe.ts`). A probe with helpers of its own gets a folder beside its file: `arp/`, `dns/`, `game/`. |
 | `networks/` | Who runs an address: the network that holds it and the exchange it is on (`lookup.ts`), for a monitor's page. |
 | `traceroute/` | Running (`run.ts`), reading (`parse.ts`), keeping (`store.ts`) and exporting (`export.ts`) traceroutes. |
 | `probe-agents/` | The dashboard's side of probe agents: the protocol both ends share (`protocol.ts`), talking to one (`client.ts`), keeping them (`store.ts`), and checking and installing one. |
@@ -57,7 +57,7 @@ src/
 | `mcp/` | The MCP server: the protocol and the tools. |
 | `security/` | Sign-in and everything around it, all through Better Auth. |
 | `privacy/` | Settings → Privacy (`settings.ts`, with what is in force held in memory in `current.ts`), hiding addresses (`mask.ts`, pure) and hiding them from AI assistants (`assistant.ts`). |
-| `__fixtures__/` | Captured output that tests read: ping, traceroute and DNS messages. |
+| `__fixtures__/` | Captured output that tests read: ping, arping, traceroute and DNS messages. |
 
 A few modules are about the app as a whole and sit directly in `lib/`:
 `init.ts`, `scheduler.ts`, `version.ts`, `time-zone.ts`, `dashboard-pages.ts`,

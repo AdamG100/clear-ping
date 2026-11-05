@@ -11,7 +11,7 @@ ClearPing includes an automatic probe scheduler that works similarly to **Smokep
 - When you create a monitor, you specify a **probe interval** (in seconds)
 - The scheduler checks every second for monitors that need to be probed
 - When a monitor's interval has elapsed, the scheduler automatically:
-  1. Executes a probe (ICMP ping or DNS query)
+  1. Executes a probe (ICMP ping, ARP, TCP, game query, HTTP or DNS)
   2. Captures the latency and packet loss
   3. Stores the measurement in the database
   4. Updates the last probe timestamp
@@ -56,13 +56,14 @@ the one before. The defaults live in [src/lib/probes/ping.ts](../src/lib/probes/
 
 ## What Each Kind of Monitor Measures
 
-The sidebar labels every monitor `IP`, `DOMAIN`, `TCP`, `GAME`, `HTTP` or `DNS`. The label is
+The sidebar labels every monitor `IP`, `DOMAIN`, `ARP`, `TCP`, `GAME`, `HTTP` or `DNS`. The label is
 derived from the address and the probe method, and each kind is measured differently:
 
 | Monitor | Example | What a probe does |
 |--------|---------|-------------------|
 | **IP** | `1.1.1.1`, `2606:4700:4700::1111` | Pings the address directly with ICMP echo requests. |
 | **Domain** | `example.com` | Resolves the name once, then sends every packet of that probe to the one address it returned. |
+| **ARP** | `192.168.1.20` with the ARP method | Asks who has the address over ARP and times the reply. 20 requests per probe, as ping. Same network, IPv4 and Linux only. |
 | **TCP** | `db.internal:5432` | Opens a connection to the port, times the handshake and closes it. 10 attempts per probe. |
 | **Game** | `udp://203.0.113.5:27015` | Asks the server how it is, in its game's own query, and times the answer. 10 queries per probe. |
 | **HTTP** | `https://example.com/health` | Makes the request and checks the answer. 3 requests per probe, each on a fresh connection. |
@@ -72,6 +73,33 @@ derived from the address and the probe method, and each kind is measured differe
 The address box accepts a URL, `host:port` or `udp://host:port` and picks the method to match. Whatever
 the method, the host is resolved once per probe and the resolved address is shown
 next to the monitor, so the IPv4/IPv6 setting below applies to all of them.
+
+### ARP
+
+For devices on your own network that drop or rate-limit ping: phones, printers,
+IoT devices, hosts with a firewall on. Nothing on a network can talk without
+answering ARP, so a reply says the device is really there, and its time says how
+the local link to it is doing. "Loss" is the share of ARP requests that got no
+reply, read in steps of one request as ping's packets are, and the count is set
+the same way (5 to 100, 20 unless said).
+
+- **Same network only.** ARP does not cross a router. The probe first finds which
+  of the measuring machine's own networks holds the address, and fails with
+  *Not on a local network of this machine* when none does, rather than reading
+  100% loss. For most set-ups that machine is a [probe agent](probe-agents.md) on
+  the LAN, not the dashboard.
+- **In Docker,** a container on Docker's default network can only see Docker's
+  bridge. Give it the host's network (`network_mode: host`) to probe the LAN.
+- **IPv4 only.** IPv6 has Neighbor Discovery instead. A name is resolved to its
+  IPv4 address, and the IP version cannot be set to IPv6 or both.
+- **Linux only,** through `arping` from iputils, which the Docker images include.
+  It needs `CAP_NET_RAW`, as ping does; Debian's package grants the program that
+  itself, so it runs as the containers' non-root user.
+
+Each request is a run of `arping` of its own, one after another, because
+`arping` spaces the requests of one run a whole second apart. Twenty answered
+requests take about as long as ping's twenty packets; each one that goes
+unanswered costs its one-second timeout, as a lost ping does.
 
 ### TCP
 

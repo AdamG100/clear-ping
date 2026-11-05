@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProbeResult } from '@/types/probe'
+import type { ProbeResult, ProbeType } from '@/types/probe'
 import { createCertificate } from '../../../probe-agent/certificate'
 import { createProbeAgentServer, type ProbeAgentWork } from '../../../probe-agent/server'
 
@@ -184,6 +184,18 @@ describe('keeping the connection to a probe agent', () => {
 })
 
 describe('taking readings through a probe agent', () => {
+  it('says to update a probe agent that does not know the kind of monitor, as one from before ARP does not', async () => {
+    const { probeAgent, token } = await newAgent('Older', 1)
+    const running = await startAgent(token)
+    await agents.updateProbeAgent(probeAgent.id, { port: running.port })
+    await connectProbeAgent(probeAgent.id)
+
+    // What a probe agent from before ARP makes of an ARP monitor: a probe type it does not know.
+    const probeType = 'smtp' as ProbeType
+    await expect(runProbes({ id: 'target-arp', host: '192.168.1.20', probeType, ipVersion: 'auto', probeConfig: {}, probeAgentId: probeAgent.id }))
+      .rejects.toThrow(/too old for this kind of monitor/)
+  })
+
   it('stamps them with the dashboard’s clock and the target they are for', async () => {
     const { probeAgent, token } = await newAgent('Readings', 1)
     const running = await startAgent(token)

@@ -41,6 +41,18 @@ const VOCABULARY: Record<ProbeType, ProbeVocabulary> = {
     unit: 'packets',
     summarize: (latency, loss) => `${latency}ms, ${loss}% loss`,
   },
+  arp: {
+    method: 'ARP',
+    latencyTitle: 'Median Reply Time',
+    latencyLabel: 'Median time for the device to answer an ARP request',
+    lossTitle: 'Unanswered Requests',
+    lossLabel: 'Average share of ARP requests left unanswered',
+    jitterLabel: 'Variation between consecutive replies',
+    chartTitle: 'Reply time & unanswered requests',
+    noLoss: 'No unanswered requests in this window',
+    unit: 'requests',
+    summarize: (latency, loss) => `${latency}ms to reply, ${loss}% of requests unanswered`,
+  },
   tcp: {
     method: 'TCP',
     latencyTitle: 'Median Connect Time',
@@ -145,6 +157,15 @@ export function describeProbe(
       return ipVersion === 'auto'
         ? `Resolves the name before every probe, then pings the address the system prefers.${counted}`
         : `Resolves the name's ${FAMILY_NAME[ipVersion]} before every probe, then pings it.${counted}`
+    }
+
+    case 'arp': {
+      const packets = config.packets ?? DEFAULT_PING_PACKETS
+      const step = 100 / packets
+      const counted = ` ${packets} requests a probe, so loss is read in steps of ${Number.isInteger(step) ? step : step.toFixed(1)}%.`
+      const asks = isName ? 'Resolves the name to its IPv4 address before every probe, then asks' : 'Asks'
+      return `${asks} who has it over ARP and times the reply, which a device on the network sends even when it ignores ping. ` +
+        `Only works from a machine on the same network, so usually from a probe agent there, and on Linux.${counted}`
     }
 
     case 'tcp': {

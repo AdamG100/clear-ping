@@ -103,6 +103,15 @@ describe('the probe agent’s server', () => {
     )
   })
 
+  it('runs an ARP probe, and refuses one over IPv6', async () => {
+    const { status } = await ask('POST', '/v1/probe', {
+      body: JSON.stringify({ target: { id: 't2', host: '192.168.1.20', probeType: 'arp', probeConfig: { packets: 10 } } }),
+    })
+    expect(status).toBe(200)
+    expect(work.probe).toHaveBeenCalledWith(expect.objectContaining({ id: 't2', probeType: 'arp', probeConfig: { packets: 10 } }))
+    expect((await ask('POST', '/v1/probe', { body: '{"target":{"id":"t","host":"fe80::1","probeType":"arp"}}' })).status).toBe(400)
+  })
+
   it('refuses a probe no target could be', async () => {
     expect((await ask('POST', '/v1/probe', { body: '{"target":{"id":"t","host":"not a host","probeType":"ping"}}' })).status).toBe(400)
     expect((await ask('POST', '/v1/probe', { body: '{"target":{"id":"t","host":"1.1.1.1","probeType":"smtp"}}' })).status).toBe(400)

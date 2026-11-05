@@ -259,6 +259,10 @@ function refusal(agent: ProbeAgentConnection, reply: AgentReply): ProbeAgentUnav
     return new ProbeAgentUnavailableError(agent.name, 'It refused the token. Give it the current token, or make a new one.', 'token-rejected');
   }
   if (reply.status === 503) return new ProbeAgentUnavailableError(agent.name, said ?? 'It is busy');
+  // A probe type added since it was installed (ARP, say) is one it refuses as unknown.
+  if (reply.status === 400 && said === 'Invalid probe type') {
+    return new ProbeAgentUnavailableError(agent.name, 'It is too old for this kind of monitor. Update the probe agent.');
+  }
   return new ProbeAgentUnavailableError(agent.name, said ?? `It answered ${reply.status}`);
 }
 

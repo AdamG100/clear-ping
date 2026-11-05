@@ -1,4 +1,5 @@
 import type { AddressFamily, ProbeIpVersion, ProbeResult, Target } from '@/types/probe';
+import { executeArp } from './arp';
 import { executeDnsProbe } from './dns';
 import { classifyHost, probeRuns } from './host';
 import { executeHttpProbe } from './http';
@@ -17,6 +18,11 @@ function runProbe(target: ProbeTarget, ipVersion: ProbeIpVersion): Promise<Probe
   switch (target.probeType) {
     case 'ping':
       return executePing(id, host, { ipVersion, count: config.packets });
+    case 'arp':
+      // IPv4 only, whatever a row edited by hand says: a name is resolved to its IPv4 address.
+      return ipVersion === 'ipv6'
+        ? Promise.resolve(failedProbe(id, new Date(), 'ARP works over IPv4 only'))
+        : executeArp(id, host, { count: config.packets });
     case 'dns':
       return executeDnsProbe(id, host, { ...config, ipVersion });
     case 'http':

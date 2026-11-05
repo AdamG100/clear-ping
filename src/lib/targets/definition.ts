@@ -1,7 +1,7 @@
-import type { ProbeConfig, Target, TargetDefinition } from '@/types/probe'
+import type { IpVersion, ProbeConfig, Target, TargetDefinition } from '@/types/probe'
 import { normalizeGroupPath } from './group-path'
 import { classifyHost, IP_VERSIONS, isIpVersion, isValidHost, normalizeHost } from '../probes/host'
-import { isProbeType, PROBE_TYPES, validateProbeConfig } from '../probes/config'
+import { ipVersionProblem, isProbeType, PROBE_TYPES, validateProbeConfig } from '../probes/config'
 
 /**
  * Checking what a new target is made of.
@@ -39,6 +39,8 @@ export function validateTargetDefinition(raw: unknown): DefinitionValidation {
   if (ipVersion !== undefined && !isIpVersion(ipVersion)) {
     return { ok: false, error: `Invalid IP version. Expected one of: ${IP_VERSIONS.join(', ')}` }
   }
+  const familyProblem = ipVersionProblem(probeType, ipVersion as IpVersion | undefined)
+  if (familyProblem) return { ok: false, error: familyProblem }
 
   const intervalSeconds = Number(interval)
   if (!Number.isFinite(intervalSeconds) || intervalSeconds < 10 || intervalSeconds > 86400) {

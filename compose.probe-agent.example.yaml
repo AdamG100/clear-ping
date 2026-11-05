@@ -24,8 +24,9 @@ services:
       # off every other interface:
       #   - "100.84.12.7:7380:7380"
       - "7380:7380"
-    # For IPv6 targets, which Docker's default network cannot reach, use the
-    # host's network instead of `ports`, with the address to listen on:
+    # For IPv6 targets, which Docker's default network cannot reach, and for
+    # ARP monitors, which can only ask the networks the container is on, use
+    # the host's network instead of `ports`, with the address to listen on:
     # network_mode: host
     environment:
       CLEARPING_PROBE_AGENT_TOKEN: "cpa_paste_the_token_from_clearping_here"

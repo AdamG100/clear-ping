@@ -353,6 +353,8 @@ export function ProbeAgentDetails({
                 <span className="inline-flex flex-wrap justify-end gap-1">
                   <Badge size="sm" tone={agent.tools.ping ? 'success' : 'warning'}>ping</Badge>
                   <Badge size="sm" tone={agent.tools.traceroute ? 'success' : 'warning'}>traceroute</Badge>
+                  {/* Only ARP monitors need it, so not having it is no warning. Unsaid by a probe agent from before ARP. */}
+                  {agent.tools.arping !== undefined && <Badge size="sm" tone={agent.tools.arping ? 'success' : 'neutral'}>arping</Badge>}
                 </span>
               </Fact>
             )}

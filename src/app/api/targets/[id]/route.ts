@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTargetById, updateTarget, deleteTarget, pruneEmptyGroups } from '@/lib/db/database';
 import { IP_VERSIONS, isIpVersion, isValidHost, normalizeHost } from '@/lib/probes/host';
-import { isProbeType, PROBE_TYPES, validateProbeConfig } from '@/lib/probes/config';
+import { ipVersionProblem, isProbeType, PROBE_TYPES, validateProbeConfig } from '@/lib/probes/config';
 import { getScheduler } from '@/lib/scheduler';
 import { initializeServer } from '@/lib/init';
 import { probeNames, readRequestedProbes } from '@/lib/probe-agents/probes';
@@ -145,6 +145,14 @@ export async function PATCH(
         return NextResponse.json({ error: config.error }, { status: 400 });
       }
       updates.probeConfig = config.config;
+    }
+
+    // Likewise the probe and the IP version: ARP set to IPv6 could only fail.
+    if (updates.probeType !== undefined || updates.ipVersion !== undefined) {
+      const existing = await getTargetById(id);
+      if (!existing) return NextResponse.json({ error: 'Target not found' }, { status: 404 });
+      const problem = ipVersionProblem(updates.probeType ?? existing.probeType, updates.ipVersion ?? existing.ipVersion);
+      if (problem) return NextResponse.json({ error: problem }, { status: 400 });
     }
 
     if (Object.keys(updates).length === 0) {

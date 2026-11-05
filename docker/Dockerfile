@@ -100,7 +100,7 @@ FROM node:26.13.0-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68
 # The programs the probes run, and Python for Apprise. Nothing else is needed
 # at run time.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends iputils-ping traceroute python3 python3-venv \
+ && apt-get install -y --no-install-recommends iputils-ping iputils-arping traceroute python3 python3-venv \
  && rm -rf /var/lib/apt/lists/*
 
 # Apprise, which alerts are sent with (https://github.com/caronc/apprise), in an

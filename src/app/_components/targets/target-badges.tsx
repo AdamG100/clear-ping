@@ -4,6 +4,7 @@ import type { TargetType } from '@/types/probe'
 const TYPE_LABEL: Record<TargetType, string> = {
   ip: 'IP',
   domain: 'Domain',
+  arp: 'ARP',
   dns: 'DNS',
   tcp: 'TCP',
   game: 'Game',
