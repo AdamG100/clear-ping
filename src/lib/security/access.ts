@@ -2,6 +2,7 @@ import { originAllowed } from '../mcp/protocol'
 import { KEY_PREFIX, sameSecret } from './secrets'
 import { canChange, ROLE_LABEL } from './roles'
 import { describeOwed, factorsOwed } from './factors'
+import { getSsoConfig } from './oidc'
 import { getFactorPolicy, getSecuritySettings, recoveryMode } from './settings-store'
 import { actorOf, ANONYMOUS, apiKeyFor, signedIn, type Actor, type Via } from './store'
 
@@ -172,10 +173,10 @@ export function crossSite(origin: string | null, host: string | null, fetchSite:
 
 /**
  * The hostnames ClearPing answers to: CLEARPING_ALLOWED_HOSTS, comma
- * separated, each with or without a port. Unset, any is accepted. Set, a
- * request addressed to another name is refused, which is what stops a page
- * from pointing its own domain at this machine (DNS rebinding) and reading the
- * API as if it were its own.
+ * separated, each with or without a port. Set, a request addressed to another
+ * name is refused, which is what stops a page from pointing its own domain at
+ * this machine (DNS rebinding) and reading the API as if it were its own.
+ * Unset, this passes everything and `nameRefused` has the say.
  */
 export function hostAllowed(host: string | null, allowed = process.env.CLEARPING_ALLOWED_HOSTS): boolean {
   const list = (allowed ?? '').split(',').map(entry => entry.trim().toLowerCase()).filter(Boolean)
@@ -184,6 +185,42 @@ export function hostAllowed(host: string | null, allowed = process.env.CLEARPING
   const full = host.trim().toLowerCase()
   const name = full.startsWith('[') ? full.slice(0, full.indexOf(']') + 1) : full.replace(/:\d+$/, '')
   return list.includes(full) || list.includes(name)
+}
+
+/** The name in a Host header: lower case, without its port or a final dot. */
+function nameOf(host: string): string {
+  const full = host.trim().toLowerCase()
+  return full.startsWith('[') ? full.slice(0, full.indexOf(']') + 1) : full.replace(/:\d+$/, '').replace(/\.$/, '')
+}
+
+/** Endings that no public domain has, so that no other website can be at one. */
+const LOCAL_ENDINGS = ['.localhost', '.local', '.lan', '.home', '.internal', '.intranet', '.corp', '.localdomain', '.home.arpa']
+
+/**
+ * A name no other website can stand behind: an IP address, `localhost`, a name
+ * of one word (a container's, say) or one on a private ending. A page has to
+ * own a domain to point it at this machine, so these need no listing.
+ */
+export function localName(host: string): boolean {
+  const name = nameOf(host)
+  if (name.startsWith('[') || /^\d{1,3}(\.\d{1,3}){3}$/.test(name) || !name.includes('.')) return true
+  return LOCAL_ENDINGS.some(ending => name.endsWith(ending))
+}
+
+/**
+ * Whether to refuse these names when CLEARPING_ALLOWED_HOSTS is not set. While
+ * sign-in is off, anything else could be a page that has pointed its own domain
+ * at this machine, and would be given the whole API. With sign-in on it has no
+ * session to use, since a browser keeps cookies per name. The name single
+ * sign-on is set up with has been given by an admin, so it counts as listed.
+ */
+export async function nameRefused(names: string[], allowed = process.env.CLEARPING_ALLOWED_HOSTS): Promise<boolean> {
+  if ((allowed ?? '').split(',').some(entry => entry.trim())) return false
+  const unlisted = names.filter(name => !localName(name))
+  if (unlisted.length === 0 || (await securityPolicy()).loginRequired) return false
+  const { redirectUri } = await getSsoConfig()
+  const site = URL.canParse(redirectUri) ? new URL(redirectUri).hostname.toLowerCase() : null
+  return unlisted.some(name => nameOf(name) !== site)
 }
 
 export type Decision =

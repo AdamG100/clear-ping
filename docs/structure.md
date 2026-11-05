@@ -55,7 +55,7 @@ src/
 | `charts/` | Readings turned into what is drawn: series, ticks, colours. |
 | `reports/` | Readings turned into words: outages, evidence for an ISP, where a target's loss is, and the day of readings the overview is worked out from (`day-readings.ts`). |
 | `mcp/` | The MCP server: the protocol and the tools. |
-| `security/` | Sign-in and everything around it, all through Better Auth. |
+| `security/` | Sign-in and everything around it, all through Better Auth: holding a sign-in back until a required factor is used (`step-up.ts`), and the headers pages are sent with (`headers.ts`). |
 | `privacy/` | Settings → Privacy (`settings.ts`, with what is in force held in memory in `current.ts`), hiding addresses (`mask.ts`, pure) and hiding them from AI assistants (`assistant.ts`). |
 | `__fixtures__/` | Captured output that tests read: ping, traceroute and DNS messages. |
 

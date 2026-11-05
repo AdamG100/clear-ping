@@ -46,14 +46,25 @@ reaches it. These close what that leaves:
   which site a request came from (`Origin`, `Sec-Fetch-Site`), and one from
   anywhere but ClearPing's own pages is turned away. Keys and scripts, which
   send neither, are not affected.
-- **`CLEARPING_ALLOWED_HOSTS`** lists the names ClearPing answers to. Set it,
-  and a page that points its own domain at your machine (DNS rebinding) is
-  refused.
+- **`CLEARPING_ALLOWED_HOSTS`** lists the names ClearPing answers to, and a
+  page that points its own domain at your machine (DNS rebinding) is refused.
+  Unset, ClearPing answers at an IP address, at `localhost`, at a name of one
+  word or on a private ending such as `.lan`, `.local` or `.internal`, and at
+  the name single sign-on is set up with. Any other name is answered only once
+  sign-in is on, since a browser at that name would have no session to use. So
+  a public domain with sign-in off has to be listed here.
 - **`CLEARPING_TRUST_PROXY`** says how many proxies in front of ClearPing can be
   believed about the address a request came from. Left at 0, `X-Forwarded-For`
-  is ignored and failed sign-ins are counted per username only.
+  is ignored and failed sign-ins are counted per username only, apart from a
+  browser that has signed in to that account before, which has a count of its
+  own so that nobody can keep you out by failing on purpose.
 - **Where alerts are sent is hidden from anyone not signed in,** since the URLs
   carry tokens. Saving an alert you were shown redacted keeps its real URLs.
+- **Alerts are not sent to link-local or cloud metadata addresses,** such as
+  `169.254.169.254`. With sign-in off, anyone who can reach ClearPing can still
+  point an alert at another machine on your network: another reason to turn it on.
+- **Pages cannot be framed by other sites,** and run only the scripts ClearPing
+  wrote for them. Over HTTPS, browsers are told to keep using it.
 
 ## Roles
 
