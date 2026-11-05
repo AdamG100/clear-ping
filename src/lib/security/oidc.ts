@@ -179,6 +179,18 @@ async function signingKeys(jwksUri: string, fetchFn: FetchFn, fresh = false): Pr
   return keys
 }
 
+/**
+ * How long a session made through the provider lasts, however much it is used.
+ * Who may sign in, and with what role, is read from the person's groups at
+ * sign-in, so this is how long it can take a change there to count here. With
+ * a session still open at the provider, signing in again is one click.
+ */
+export const SSO_SESSION_HOURS = 24
+
+export function ssoSessionOver(createdAt: Date | number | string, now = Date.now()): boolean {
+  return now - new Date(createdAt).getTime() > SSO_SESSION_HOURS * 3_600_000
+}
+
 export interface Claims {
   iss: string
   sub: string
