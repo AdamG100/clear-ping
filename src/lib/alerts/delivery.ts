@@ -93,6 +93,34 @@ export function redactNotifyUrl(url: string): string {
   return scheme === 'http' || scheme === 'https' ? `${scheme}://${label}/…` : `${scheme}://…`;
 }
 
+/** Services Apprise takes as a plain request to whatever host the URL names. */
+const WEB_REQUEST_SCHEMES = new Set(['http', 'https', 'json', 'jsons', 'xml', 'xmls', 'form', 'forms']);
+
+/**
+ * Whether a URL would have ClearPing call an address only its own machine can
+ * reach: a link-local one, or a cloud provider's metadata service, which hands
+ * out the machine's credentials. No notification service lives at one. A URL's
+ * host is read as a browser reads it, so `2852039166` is `169.254.169.254`.
+ */
+export function reachesMachineOnly(url: string): boolean {
+  const at = url.indexOf('://');
+  if (at < 0 || !WEB_REQUEST_SCHEMES.has(url.slice(0, at).toLowerCase())) return false;
+  let host: string;
+  try {
+    host = new URL(`http://${url.slice(at + 3)}`).hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  } catch {
+    return false;
+  }
+  return (
+    host === 'metadata.google.internal' ||
+    host === 'metadata.goog' ||
+    host.startsWith('169.254.') ||
+    /^fe[89ab][0-9a-f]:/.test(host) ||
+    host.startsWith('::ffff:a9fe:') ||
+    host === 'fd00:ec2::254'
+  );
+}
+
 /** An alert as it may be shown: its URLs whole only when `whole`, to whoever may change alerts. */
 export function alertAsShown<T extends { notifyUrls: string[] }>(alert: T, whole: boolean): T {
   return whole ? alert : { ...alert, notifyUrls: alert.notifyUrls.map(redactNotifyUrl) };

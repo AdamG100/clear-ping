@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import type { AlertNotification } from './delivery';
+import { reachesMachineOnly, type AlertNotification } from './delivery';
 
 /**
  * Sending a notification, which is Apprise's job.
@@ -149,6 +149,9 @@ function outcome(run: Run, failed: { all: string; some: string }): DeliveryResul
 
 /** Send one notification to every URL, and say how that went. */
 export async function sendNotification(urls: string[], notification: AlertNotification): Promise<DeliveryResult> {
+  // One saved before these were refused is not sent to either.
+  const usable = urls.filter(url => !reachesMachineOnly(url));
+  if (usable.length === 0 && urls.length > 0) return { ok: false, detail: 'ClearPing will not send to a link-local or cloud metadata address' };
   const run = await runApprise(
     [
       // One level of verbosity is what makes it log why a service refused.
@@ -158,7 +161,7 @@ export async function sendNotification(urls: string[], notification: AlertNotifi
       `--notification-type=${notification.type}`,
       '--input-format=html',
     ],
-    urls
+    usable
   );
   return outcome(run, {
     all: 'Apprise could not deliver it',
@@ -176,6 +179,9 @@ export async function sendNotification(urls: string[], notification: AlertNotifi
  */
 export async function checkNotifyUrls(urls: string[]): Promise<DeliveryResult> {
   if (urls.length === 0) return { ok: true };
+  if (urls.some(reachesMachineOnly)) {
+    return { ok: false, detail: 'A notification URL points at a link-local or cloud metadata address, which ClearPing will not send to' };
+  }
 
   const run = await runApprise(['--dry-run', '-v'], urls);
   if (run.missing) return { ok: true };
