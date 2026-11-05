@@ -19,6 +19,10 @@ slow looks different from one that is unstable.
   fast it answers. For games that answer no query at all, such as Call of
   Duty, it times the server's "port unreachable" replies to closed ports
   instead.
+- **Game Server Ping.** A game's regions pinged from every probe at once:
+  Valve's relays for CS2, Dota 2 and Deadlock, Epic's endpoints for Fortnite,
+  and Amazon GameLift's beacons for games hosted there. Any region is one press
+  from being a monitor. See [docs/game-server-ping.md](docs/game-server-ping.md).
 - **Probe from anywhere.** A probe agent is a small program on another
   machine, such as a VPS in another country, that takes a monitor's readings
   from there. The dashboard connects to it over an encrypted, pinned link,

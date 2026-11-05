@@ -32,6 +32,17 @@ describe('dashboard pages', () => {
   })
 })
 
+describe('the Game Server Ping page', () => {
+  it('opens with or without a game, and back at the same address', () => {
+    expect(pageFromPath('/game-ping')).toEqual({ kind: 'game-ping' })
+    expect(pageFromPath('/game-ping/cs2')).toEqual({ kind: 'game-ping', game: 'cs2' })
+    expect(pageFromPath('/game-ping/cs2/more')).toBeNull()
+    for (const page of [{ kind: 'game-ping' }, { kind: 'game-ping', game: 'cs2' }] as DashboardPage[]) {
+      expect(pageFromPath(pathOf(page))).toEqual(page)
+    }
+  })
+})
+
 describe('the routing pages', () => {
   it('reads each from its address, and gives each an address that reads back as itself', () => {
     expect(pageFromPath('/routing')).toEqual({ kind: 'routing' })

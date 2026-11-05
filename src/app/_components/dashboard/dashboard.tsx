@@ -48,7 +48,8 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { AlertsView, type AlertResponse } from '../alerts/alerts-view'
 import { SettingsPage } from '../settings/settings-page'
 import { MaintenanceToast } from '../settings/maintenance-toast'
-import { AddTargetPage, EditTargetPage } from '../targets/target-page'
+import { AddTargetPage, EditTargetPage, type MonitorPreset } from '../targets/target-page'
+import { GamePingPage } from '../game-ping/game-ping-page'
 import { SetupAdvice } from './setup-advice'
 import { useDashboardPage } from './use-dashboard-page'
 import { useSignedIn } from './use-signed-in'
@@ -713,6 +714,10 @@ export function Dashboard() {
   // BGP monitoring, a tool of its own: its list, or one prefix in full.
   const routingPrefix = page?.kind === 'routing-prefix' ? page.id : null
   const showingRouting = page?.kind === 'routing' || routingPrefix !== null
+  const gamePing = page?.kind === 'game-ping' ? page : null
+  // A monitor another page has in mind, for the add-monitor form to start from.
+  // Let go of as soon as anything else is opened, so a later "Add monitor" starts blank.
+  const [monitorPreset, setMonitorPreset] = useState<MonitorPreset | null>(null)
   const routing = useRoutingStatus()
   // On a narrow screen the sidebar is a drawer over the page. Choosing
   // anything in it is the reason it was opened, so every choice closes it.
@@ -809,6 +814,7 @@ export function Dashboard() {
   }, [hideSidebar, goTo])
 
   const openPage = useCallback((next: DashboardPage) => {
+    setMonitorPreset(null)
     goTo(next)
     hideSidebar()
   }, [goTo, hideSidebar])
@@ -821,6 +827,15 @@ export function Dashboard() {
   // signed in (no accounts yet), Settings is where an account is made first.
   const canTurnOnRouting = !signedIn || signedIn.role === 'admin'
   const openRoutingPrefix = useCallback((id: string) => goTo({ kind: 'routing-prefix', id }), [goTo])
+  const openGamePing = useCallback(() => openPage({ kind: 'game-ping' }), [openPage])
+  const pickGame = useCallback((game: string) => goTo({ kind: 'game-ping', game }), [goTo])
+  const monitorFrom = useCallback(
+    (preset: MonitorPreset) => {
+      setMonitorPreset(preset)
+      goTo({ kind: 'target-new' })
+    },
+    [goTo]
+  )
   const openPatchNotes = useCallback(() => openPage({ kind: 'patch-notes' }), [openPage])
   const openAlertEditor = useCallback(
     (which: 'new' | string) => goTo(which === 'new' ? { kind: 'alert-new' } : { kind: 'alert-edit', id: which }),
@@ -1280,6 +1295,8 @@ export function Dashboard() {
         routingTrouble={routing.trouble}
         routingEnabled={routing.enabled !== false}
         onTurnOnRouting={canTurnOnRouting ? openRoutingSettings : undefined}
+        gamePingOpen={gamePing !== null}
+        onOpenGamePing={openGamePing}
         alertsOpen={showingAlerts}
         onOpenAlerts={openAlerts}
         settingsOpen={page?.kind === 'settings'}
@@ -1429,6 +1446,26 @@ export function Dashboard() {
               )}
             </ErrorBoundary>
           </motion.div>
+          ) : gamePing ? (
+          <motion.div
+            // One page whichever game is picked: a new game fills the same grid.
+            key="game-ping"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+          >
+            <ErrorBoundary label="Game Server Ping">
+              <GamePingPage
+                game={gamePing.game}
+                probes={probeList}
+                readOnly={readOnly}
+                onPickGame={pickGame}
+                onMonitor={monitorFrom}
+                onAddProbeAgent={canTurnOnRouting ? openProbeAgentSettings : undefined}
+              />
+            </ErrorBoundary>
+          </motion.div>
           ) : page?.kind === 'patch-notes' ? (
           <motion.div
             key="patch-notes"
@@ -1489,6 +1526,7 @@ export function Dashboard() {
                   localProbeName={localProbeName}
                   group={targetPage.group ?? ''}
                   template={targetPage.from ? targets.find(target => target.id === targetPage.from) ?? null : null}
+                  preset={targetPage.from || targetPage.group ? null : monitorPreset}
                   onAddTarget={copy =>
                     handleAddTarget(targetPage.from ? targets.find(target => target.id === targetPage.from) ?? null : null, copy)
                   }

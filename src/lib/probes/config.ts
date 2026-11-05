@@ -32,7 +32,7 @@ export function ipVersionProblem(probeType: ProbeType, ipVersion: IpVersion | un
     : null
 }
 
-export const GAME_QUERIES: readonly GameQuery[] = ['source', 'minecraft', 'bedrock', 'quake', 'unreachable']
+export const GAME_QUERIES: readonly GameQuery[] = ['source', 'minecraft', 'bedrock', 'quake', 'echo', 'unreachable']
 
 /**
  * Each game query as the form offers it: what it is called, which servers
@@ -72,6 +72,16 @@ export const GAME_QUERY_INFO: Record<
     answers: 'FiveM, RedM, Quake 3, Wolfenstein: Enemy Territory and the older Call of Duty games.',
     port: 'e.g., 30120, 27960',
     sends: 'an id Tech getinfo query',
+    transport: 'UDP',
+    queryPort: false,
+  },
+  echo: {
+    label: 'UDP ping beacon',
+    answers:
+      'Servers that send back whatever they are sent: the ping beacons game hosts run for players to measure against, ' +
+      'such as Amazon GameLift\'s (gamelift-ping.<region>.api.aws, port 7770). It times the echo, as a game choosing a region does.',
+    port: 'e.g., 7770',
+    sends: 'a datagram to be echoed',
     transport: 'UDP',
     queryPort: false,
   },

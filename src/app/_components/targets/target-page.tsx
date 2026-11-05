@@ -9,7 +9,7 @@ import type { ProbeAgentSummary } from '@/types/probe-agent'
 import { cn } from '@/lib/utils'
 import { PANE, PANE_HEADER, PANE_TITLE } from '../dashboard/pane-layout'
 import { PAGE_CARD } from '../settings/mcp-setup'
-import { BLANK_TARGET, formValuesOf, TargetForm } from './target-dialogs'
+import { BLANK_TARGET, formValuesOf, TargetForm, type TargetFormValues } from './target-dialogs'
 import { agentIdOf } from '@/lib/targets/probes'
 
 /**
@@ -45,12 +45,21 @@ export function PageFrame({ title, description, onBack, wide = false, children }
   )
 }
 
+/** A monitor another page has in mind: the values the form starts with, and what the page says about them. */
+export interface MonitorPreset {
+  values: Partial<TargetFormValues>
+  title: string
+  description: string
+}
+
 interface AddTargetPageProps {
   availableGroups: string[]
   /** The group a blank form starts in, when it was opened from inside one. */
   group?: string
   /** The target being duplicated, when it was opened to copy one. */
   template?: Target | null
+  /** Where the form starts when another page sent it here with a monitor in mind (Game Server Ping's regions). */
+  preset?: MonitorPreset | null
   onAddTarget: (target: NewTarget) => void
   onClose: () => void
   probeAgents?: ProbeAgentSummary[]
@@ -61,21 +70,23 @@ interface AddTargetPageProps {
  * Only the address is needed. A copy starts from the same settings, and none
  * of the history is copied.
  */
-export function AddTargetPage({ availableGroups, group = '', template = null, onAddTarget, onClose, probeAgents, localProbeName }: AddTargetPageProps) {
+export function AddTargetPage({ availableGroups, group = '', template = null, preset = null, onAddTarget, onClose, probeAgents, localProbeName }: AddTargetPageProps) {
   return (
     <PageFrame
-      title={template ? `Duplicate ${template.name}` : 'Add a monitor'}
+      title={template ? `Duplicate ${template.name}` : preset ? preset.title : 'Add a monitor'}
       description={
         template
           ? 'A new monitor that starts with the same settings. Change what is different about this one. None of the history is copied.'
-          : 'Only the address is needed. Everything else starts with a sensible default.'
+          : preset
+            ? preset.description
+            : 'Only the address is needed. Everything else starts with a sensible default.'
       }
       onBack={onClose}
       wide
     >
       <TargetForm
         idPrefix="add"
-        initial={template ? { ...formValuesOf(template), name: `${template.name} copy` } : { ...BLANK_TARGET, group }}
+        initial={template ? { ...formValuesOf(template), name: `${template.name} copy` } : preset ? { ...BLANK_TARGET, ...preset.values } : { ...BLANK_TARGET, group }}
         availableGroups={availableGroups}
         probeAgents={probeAgents}
         localProbeName={localProbeName}

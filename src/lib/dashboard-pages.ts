@@ -31,6 +31,8 @@ export type DashboardPage =
   /** BGP monitoring: every watched prefix, and one of them in full. */
   | { kind: 'routing' }
   | { kind: 'routing-prefix'; id: string }
+  /** Game Server Ping: a game's regions pinged from every probe, the game picked or not yet. */
+  | { kind: 'game-ping'; game?: string }
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
   return typeof value === 'string' && (SETTINGS_SECTIONS as readonly string[]).includes(value)
@@ -82,6 +84,11 @@ export function pageFromPath(pathname: string): DashboardPage | null {
     return rest.length === 0 ? { kind: 'routing-prefix', id: decodeSegment(second) } : null
   }
 
+  if (first === 'game-ping') {
+    if (!second) return { kind: 'game-ping' }
+    return rest.length === 0 ? { kind: 'game-ping', game: decodeSegment(second) } : null
+  }
+
   if (rest.length > 0) return null
   if (first === 'overview' && !second) return { kind: 'overview' }
   if (first === 'alerts' && !second) return { kind: 'alerts' }
@@ -105,6 +112,7 @@ export function pathOf(page: DashboardPage | null): string {
   }
   if (page.kind === 'target-edit') return `/monitors/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'routing-prefix') return `/routing/${encodeURIComponent(page.id)}`
+  if (page.kind === 'game-ping') return page.game ? `/game-ping/${encodeURIComponent(page.game)}` : '/game-ping'
   if (page.kind === 'alert-new') return '/alerts/new'
   if (page.kind === 'alert-edit') return `/alerts/${encodeURIComponent(page.id)}/edit`
   if (page.kind === 'target-new') {

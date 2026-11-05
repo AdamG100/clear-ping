@@ -172,6 +172,20 @@ describe('executeGameProbe', () => {
     })
   })
 
+  it('times a UDP ping beacon by its echo', async () => {
+    const result = await executeGameProbe('t', '127.0.0.1', { port: port.echo, query: 'echo', ...quick })
+    expect(result).toMatchObject({ success: true, packetLoss: 0 })
+    expect(result.details).toBeUndefined()
+  })
+
+  it('reads a beacon that sends something other than the echo, or nothing, as no echo', async () => {
+    const other = await executeGameProbe('t', '127.0.0.1', { port: port.quake, query: 'echo', ...quick })
+    expect(other.success).toBe(false)
+    const silent = await executeGameProbe('t', '127.0.0.1', { port: port.silent, query: 'echo', ...quick })
+    expect(silent).toMatchObject({ success: false, packetLoss: 100 })
+    expect(silent.errorMessage).toMatch(/No echo/)
+  })
+
   it('counts a datagram that is not an answer as no answer', async () => {
     // The echo server sends the query straight back, which is not a pong.
     const result = await executeGameProbe('t', '127.0.0.1', { port: port.echo, query: 'bedrock', ...quick, timeout: 200 })

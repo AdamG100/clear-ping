@@ -72,6 +72,7 @@ import {
   ChartLine,
   Bell,
   ClipboardCopy,
+  Gamepad2,
   LayoutDashboard,
 
   ListX,
@@ -112,6 +113,9 @@ const GROUP_PANEL = [
 const SELECTED_ROW = 'bg-primary/20 ring-1 ring-inset ring-primary/50 hover:bg-primary/25'
 
 /** One of the pages beside the list, as a tile with its icon in a well. */
+/** The row of page tiles, by how many there are. Tailwind needs each class written out whole. */
+const PAGE_COLUMNS: Record<number, string> = { 1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3' }
+
 function PageTile({
   icon,
   label,
@@ -120,6 +124,7 @@ function PageTile({
   off,
   count,
   countLabel,
+  stacked = false,
 }: {
   icon: ReactNode
   label: string
@@ -131,6 +136,8 @@ function PageTile({
   /** Something there wants a look: shown as a count in the warning colour. */
   count?: number
   countLabel?: string
+  /** The icon above the label, for a row of three, where beside it the labels were cut short. */
+  stacked?: boolean
 }) {
   const tile = (
     <button
@@ -140,7 +147,8 @@ function PageTile({
       aria-current={open ? 'page' : undefined}
       aria-label={off ? `${label}: ${off}` : undefined}
       className={cn(
-        'flex w-full min-w-0 items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left text-sm font-medium transition-colors',
+        'relative flex w-full min-w-0 rounded-xl border font-medium transition-colors',
+        stacked ? 'h-full flex-col items-center justify-start gap-1.5 px-1.5 py-2 text-center text-xs leading-tight' : 'items-center gap-2.5 px-2.5 py-2 text-left text-sm',
         off
           ? 'border-dashed border-sidebar-border text-muted-foreground'
           : open
@@ -159,10 +167,16 @@ function PageTile({
       >
         {icon}
       </span>
-      <span className="min-w-0 truncate">{label}</span>
+      <span className={stacked ? 'min-w-0 text-balance break-words' : 'min-w-0 truncate'}>{label}</span>
       {/* Off, it says so in its tooltip: a tag beside the name cut the name short. */}
       {!off && count !== undefined && (
-        <span className="ml-auto rounded-full bg-signal-moderate/15 px-1.5 font-mono text-[10px] tabular-nums text-signal-moderate" aria-label={countLabel}>
+        <span
+          className={cn(
+            'rounded-full bg-signal-moderate/15 px-1.5 font-mono text-[10px] tabular-nums text-signal-moderate',
+            stacked ? 'absolute top-1 right-1' : 'ml-auto'
+          )}
+          aria-label={countLabel}
+        >
           {count}
         </span>
       )}
@@ -362,6 +376,9 @@ interface SidebarProps {
   routingEnabled?: boolean
   /** Open Settings where Routing is turned on, for whoever may; otherwise its tile does nothing while off. */
   onTurnOnRouting?: () => void
+  /** Whether Game Server Ping is what the main pane is showing. */
+  gamePingOpen?: boolean
+  onOpenGamePing?: () => void
   /** Whether the alerts screen is what the main pane is showing. */
   alertsOpen?: boolean
   onOpenAlerts?: () => void
@@ -1157,6 +1174,8 @@ function SidebarView({
   routingTrouble = 0,
   routingEnabled = true,
   onTurnOnRouting,
+  gamePingOpen = false,
+  onOpenGamePing,
   alertsOpen = false,
   onOpenAlerts,
   firingAlerts = 0,
@@ -1432,6 +1451,10 @@ function SidebarView({
   const draggedTarget = drag.active ? targetsById.get(drag.active.id) : undefined
   const deletingTarget = deletingId ? targetsById.get(deletingId) ?? null : null
 
+  // Three pages in a row leave too little room for an icon beside each name: then each is stacked.
+  const pageTiles = [onOpenOverview, onOpenRouting, onOpenGamePing].filter(Boolean).length
+  const stackTiles = pageTiles > 2
+
   return (
     <>
     {/* What is behind the drawer, dimmed. Pressing it puts the drawer away. */}
@@ -1479,6 +1502,8 @@ function SidebarView({
           onOpenRouting={onOpenRouting}
           routingEnabled={routingEnabled}
           onTurnOnRouting={onTurnOnRouting}
+          gamePingOpen={gamePingOpen}
+          onOpenGamePing={onOpenGamePing}
           alertsOpen={alertsOpen}
           onOpenAlerts={onOpenAlerts}
           firingAlerts={firingAlerts}
@@ -1529,15 +1554,16 @@ function SidebarView({
 
         {/* The pages beside the list: the overview first, then Routing, a
             tool of its own (BGP monitoring, for networks that announce their
-            own prefixes) rather than a setting. Tiles, not rows: as rows they
-            read as two more targets and went unnoticed. */}
-        {(onOpenOverview || onOpenRouting) && (
-          <nav aria-label="Pages" className={cn('grid gap-2', onOpenOverview && onOpenRouting ? 'grid-cols-2' : 'grid-cols-1')}>
+            own prefixes) rather than a setting, then Game Server Ping. Tiles,
+            not rows: as rows they read as more targets and went unnoticed. */}
+        {pageTiles > 0 && (
+          <nav aria-label="Pages" className={cn('grid gap-2', PAGE_COLUMNS[pageTiles])}>
             {onOpenOverview && (
-              <PageTile icon={<LayoutDashboard {...ICON} />} label="Overview" open={overviewOpen} onOpen={onOpenOverview} />
+              <PageTile icon={<LayoutDashboard {...ICON} />} label="Overview" open={overviewOpen} onOpen={onOpenOverview} stacked={stackTiles} />
             )}
             {onOpenRouting && (
               <PageTile
+                stacked={stackTiles}
                 icon={<Network {...ICON} />}
                 label="Routing"
                 open={routingOpen}
@@ -1552,6 +1578,9 @@ function SidebarView({
                 count={routingTrouble > 0 ? routingTrouble : undefined}
                 countLabel={`${routingTrouble} prefix${routingTrouble === 1 ? '' : 'es'} not as normal`}
               />
+            )}
+            {onOpenGamePing && (
+              <PageTile icon={<Gamepad2 {...ICON} />} label="Game Server Ping" open={gamePingOpen} onOpen={onOpenGamePing} stacked={stackTiles} />
             )}
           </nav>
         )}
