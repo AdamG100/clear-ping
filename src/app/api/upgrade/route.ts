@@ -6,8 +6,9 @@ import { upgradeProgress } from '@/lib/db/upgrade-progress';
  *
  * Open whether or not sign-in is on, since nothing can be signed in to until
  * the database is open: it is what the page shown meanwhile reads. It says
- * only what is being done to the database, never what is in it.
+ * only what is being done to the database, never what is in it, nor why it
+ * failed, which can name paths on the server: that is in the container's log.
  */
 export function GET() {
-  return NextResponse.json(upgradeProgress(), { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json({ ...upgradeProgress(), error: undefined }, { headers: { 'Cache-Control': 'no-store' } });
 }
