@@ -101,6 +101,9 @@ export async function POST(request: NextRequest) {
 
     // An older revision of the protocol lets several messages be sent as a list.
     const messages = Array.isArray(body) ? body : [body];
+    if (messages.length > MAX_BATCH) {
+      return refuse(400, JSON_RPC.invalidRequest, `Send at most ${MAX_BATCH} messages at once`);
+    }
     const answers = [];
     for (const message of messages) {
       const answered = await handleMessage(clearPingMcp, message, access);
@@ -116,6 +119,9 @@ export async function POST(request: NextRequest) {
     return refuse(500, JSON_RPC.internalError, 'ClearPing could not answer');
   }
 }
+
+/** How many messages one request may carry: each can read up to a year of readings. */
+const MAX_BATCH = 20;
 
 /** There is no stream to listen on: everything is answered where it is asked. */
 export function GET() {
