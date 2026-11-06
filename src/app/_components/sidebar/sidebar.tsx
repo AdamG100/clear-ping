@@ -83,6 +83,7 @@ import {
   X,
 } from 'lucide-react'
 import { SidebarRail } from './sidebar-rail'
+import { PageTile, ToolsTile, type PageLink } from './page-tiles'
 import { SIDEBAR_COLLAPSE_BUTTON_ID, useSidebarCollapsed } from './use-sidebar-drawer'
 import { Masked } from '../privacy/masked'
 
@@ -111,86 +112,6 @@ const GROUP_PANEL = [
 
 /** How the target on show is marked in the list. */
 const SELECTED_ROW = 'bg-primary/20 ring-1 ring-inset ring-primary/50 hover:bg-primary/25'
-
-/** One of the pages beside the list, as a tile with its icon in a well. */
-/** The row of page tiles, by how many there are. Tailwind needs each class written out whole. */
-const PAGE_COLUMNS: Record<number, string> = { 1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3' }
-
-function PageTile({
-  icon,
-  label,
-  open,
-  onOpen,
-  off,
-  count,
-  countLabel,
-  stacked = false,
-}: {
-  icon: ReactNode
-  label: string
-  open: boolean
-  /** Without it, while off, the tile cannot be pressed. */
-  onOpen?: () => void
-  /** Why it is greyed out, when it is turned off: said in its tooltip. */
-  off?: string
-  /** Something there wants a look: shown as a count in the warning colour. */
-  count?: number
-  countLabel?: string
-  /** The icon above the label, for a row of three, where beside it the labels were cut short. */
-  stacked?: boolean
-}) {
-  const tile = (
-    <button
-      type="button"
-      onClick={onOpen}
-      disabled={!onOpen}
-      aria-current={open ? 'page' : undefined}
-      aria-label={off ? `${label}: ${off}` : undefined}
-      className={cn(
-        'relative flex w-full min-w-0 rounded-xl border font-medium transition-colors',
-        stacked ? 'h-full flex-col items-center justify-start gap-1.5 px-1.5 py-2 text-center text-xs leading-tight' : 'items-center gap-2.5 px-2.5 py-2 text-left text-sm',
-        off
-          ? 'border-dashed border-sidebar-border text-muted-foreground'
-          : open
-            ? 'border-primary/60 bg-primary/15 text-sidebar-foreground hover:bg-primary/20'
-            : 'border-sidebar-border bg-sidebar-group text-sidebar-foreground hover:border-sidebar-group-border hover:bg-sidebar-row-hover',
-        onOpen ? 'cursor-pointer' : 'cursor-not-allowed',
-        off && onOpen && 'hover:bg-sidebar-row-hover'
-      )}
-      suppressHydrationWarning
-    >
-      <span
-        className={cn(
-          'flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors',
-          off ? 'bg-muted text-muted-foreground' : open ? 'bg-primary text-primary-foreground' : 'bg-primary/15 text-primary'
-        )}
-      >
-        {icon}
-      </span>
-      <span className={stacked ? 'min-w-0 text-balance break-words' : 'min-w-0 truncate'}>{label}</span>
-      {/* Off, it says so in its tooltip: a tag beside the name cut the name short. */}
-      {!off && count !== undefined && (
-        <span
-          className={cn(
-            'rounded-full bg-signal-moderate/15 px-1.5 font-mono text-[10px] tabular-nums text-signal-moderate',
-            stacked ? 'absolute top-1 right-1' : 'ml-auto'
-          )}
-          aria-label={countLabel}
-        >
-          {count}
-        </span>
-      )}
-    </button>
-  )
-  // A disabled button gives a tooltip nothing to hang on: the span does.
-  return off ? (
-    <Tooltip content={off}>
-      <span className="flex min-w-0">{tile}</span>
-    </Tooltip>
-  ) : (
-    tile
-  )
-}
 
 /**
  * One count of how the targets stand, as a badge with a dot of its colour.
@@ -1451,9 +1372,30 @@ function SidebarView({
   const draggedTarget = drag.active ? targetsById.get(drag.active.id) : undefined
   const deletingTarget = deletingId ? targetsById.get(deletingId) ?? null : null
 
-  // Three pages in a row leave too little room for an icon beside each name: then each is stacked.
-  const pageTiles = [onOpenOverview, onOpenRouting, onOpenGamePing].filter(Boolean).length
-  const stackTiles = pageTiles > 2
+  // The tools beside the overview: Routing, a tool of its own (BGP monitoring,
+  // for networks that announce their own prefixes) rather than a setting, then
+  // Game Server Ping. They share one tile, which opens a menu of them.
+  const tools: PageLink[] = []
+  if (onOpenRouting) {
+    tools.push({
+      key: 'routing',
+      icon: <Network {...ICON} />,
+      label: 'Routing',
+      open: routingOpen,
+      onOpen: routingEnabled ? onOpenRouting : onTurnOnRouting,
+      off: routingEnabled
+        ? undefined
+        : onTurnOnRouting
+          ? 'Routing is off. Turn it on in Settings'
+          : 'Routing is off. An admin can turn it on in Settings',
+      count: routingTrouble > 0 ? routingTrouble : undefined,
+      countLabel: `${routingTrouble} prefix${routingTrouble === 1 ? '' : 'es'} not as normal`,
+    })
+  }
+  if (onOpenGamePing) {
+    tools.push({ key: 'game-ping', icon: <Gamepad2 {...ICON} />, label: 'Game Server Ping', open: gamePingOpen, onOpen: onOpenGamePing })
+  }
+  const pageTiles = (onOpenOverview ? 1 : 0) + (tools.length > 0 ? 1 : 0)
 
   return (
     <>
@@ -1552,36 +1494,14 @@ function SidebarView({
 
         <UpdateNotice version={version} onOpen={onOpenPatchNotes} />
 
-        {/* The pages beside the list: the overview first, then Routing, a
-            tool of its own (BGP monitoring, for networks that announce their
-            own prefixes) rather than a setting, then Game Server Ping. Tiles,
-            not rows: as rows they read as more targets and went unnoticed. */}
+        {/* The pages beside the list: the overview on its own tile, and the
+            tools behind the one beside it (page-tiles.tsx). */}
         {pageTiles > 0 && (
-          <nav aria-label="Pages" className={cn('grid gap-2', PAGE_COLUMNS[pageTiles])}>
+          <nav aria-label="Pages" className={cn('grid gap-2', pageTiles > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
             {onOpenOverview && (
-              <PageTile icon={<LayoutDashboard {...ICON} />} label="Overview" open={overviewOpen} onOpen={onOpenOverview} stacked={stackTiles} />
+              <PageTile page={{ key: 'overview', icon: <LayoutDashboard {...ICON} />, label: 'Overview', open: overviewOpen, onOpen: onOpenOverview }} />
             )}
-            {onOpenRouting && (
-              <PageTile
-                stacked={stackTiles}
-                icon={<Network {...ICON} />}
-                label="Routing"
-                open={routingOpen}
-                onOpen={routingEnabled ? onOpenRouting : onTurnOnRouting}
-                off={
-                  routingEnabled
-                    ? undefined
-                    : onTurnOnRouting
-                      ? 'Routing is off. Turn it on in Settings'
-                      : 'Routing is off. An admin can turn it on in Settings'
-                }
-                count={routingTrouble > 0 ? routingTrouble : undefined}
-                countLabel={`${routingTrouble} prefix${routingTrouble === 1 ? '' : 'es'} not as normal`}
-              />
-            )}
-            {onOpenGamePing && (
-              <PageTile icon={<Gamepad2 {...ICON} />} label="Game Server Ping" open={gamePingOpen} onOpen={onOpenGamePing} stacked={stackTiles} />
-            )}
+            <ToolsTile tools={tools} />
           </nav>
         )}
         {/* Always there once there is something to find: behind a button it
