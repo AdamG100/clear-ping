@@ -3,7 +3,12 @@
 Game Server Ping pings each region of a game from the local probe and every
 probe agent that is online, side by side, on demand. It shows which region each
 of your networks reaches best, and how much farther the next one is. Open it
-from the tile beside Routing.
+from **Tools**, the tile beside Overview in the sidebar.
+
+While a test runs, the page says which region it is pinging from which probe
+and how many readings are in. When it finishes, it shows the fastest region from
+each probe, and lists the regions no probe heard back from; those are marked in
+the grid too.
 
 Nothing is kept. To watch a region over time, press **+** beside it: the
 add-monitor form opens with the address, the method and a group
@@ -22,8 +27,9 @@ servers drop ping:
 | Amazon GameLift's beacons | UDP echo, port 7770 | The AWS region a match would be hosted in, not a game server |
 
 Each test is 10 requests, and the grid shows their median. Hover a reading for
-its jitter, its loss and the address it went to. **Fastest first** sorts the
-regions by the first probe's readings.
+its jitter, its loss and the address it went to; on a phone, where each region
+is a card, they are written under it. **Fastest first** sorts the regions by
+the quickest reading from any probe.
 
 A probe agent measures with the same code as the local probe, so its column is
 the network as that machine sees it. One from before Game Server Ping has no
