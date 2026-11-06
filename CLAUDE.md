@@ -41,7 +41,25 @@ commit's subject and body go onto the GitHub release and into the image, where
 the version badge opens them, filed under the part its trailer says (`major`
 is "Before you update", `minor` "New", none "Fixes and improvements"). Write
 the subject and body for someone running ClearPing, saying what changed for
-them; keep file names and internals to a minimum.
+them, in the words of the dashboard and the docs.
+
+The notes are public, so a commit message carries nothing sensitive or
+internal:
+- Nothing sensitive: no addresses, host names, ASNs or ISPs of a real network
+  (examples use documentation ranges such as `192.0.2.0/24` and `example.net`),
+  no keys or tokens, no people.
+- Nothing about how ClearPing is made: no CI, workflows, tests, linting or
+  build steps; no AI assistants or tools used to write it (Claude, skills,
+  `CLAUDE.md`); no file paths, function names, issue or pull request numbers;
+  no "this commit" or "Verified: …". The product's own features keep their
+  names: MCP, the assistant tools, Node.js in the images.
+- A commit with nothing in it for someone running ClearPing (CI, tests,
+  tooling, the repo's guides) ends with a `Notes: internal` trailer beside
+  `Co-Authored-By`, and is left out of the notes.
+
+A note already pushed that breaks this is put right, or left out, in
+`NOTE_CORRECTIONS` in `scripts/release-notes.mjs`, and the GitHub release it
+went out in is edited to match.
 
 ## Structure
 

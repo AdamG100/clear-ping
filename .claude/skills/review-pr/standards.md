@@ -145,5 +145,8 @@ days. Look for what grows, what keeps running, and what runs too often.
   feature and, if it moves something, `docs/structure.md`.
 - **Commits are the patch notes.** Each subject and body says what changed for
   someone running ClearPing; a commit that adds something new ends with
-  `Release: minor` (`major` only with the owner's agreement); none of them name
-  people. The PR is not squashed.
+  `Release: minor` (`major` only with the owner's agreement). The notes are
+  public: a message that names people, a real network, a secret, CI, tests,
+  AI tooling, file paths or "this commit" breaks the rules in `CLAUDE.md`
+  (Version numbers), and a commit with nothing for users needs
+  `Notes: internal`. The PR is not squashed.
