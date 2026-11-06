@@ -263,6 +263,32 @@
   html {
     -webkit-tap-highlight-color: transparent;
   }
+  /* Anything that can be pressed shows the hand, without each one having to
+     ask: Tailwind gives a button the arrow. A utility on an element still wins
+     (cursor-grab on a drag handle, cursor-default on a bar that only shows a
+     tooltip), and so do Arc's own modules, which sit outside any layer. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([data-disabled]),
+  [role="menuitemcheckbox"]:not([data-disabled]),
+  [role="menuitemradio"]:not([data-disabled]),
+  [role="option"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="switch"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([aria-disabled="true"]),
+  [role="radio"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  select:not(:disabled),
+  input:is([type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="range"]):not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
 }
 
 /* iOS zooms the whole page in when a field whose text is under 16px takes
