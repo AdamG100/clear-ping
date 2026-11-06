@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 // The script CI writes each release's patch notes with.
-import { markdownFor, noteFor, RELEASE_CORRECTIONS } from './release-notes.mjs'
+import { corrected, markdownFor, NOTE_CORRECTIONS, noteFor, RELEASE_CORRECTIONS } from './release-notes.mjs'
 
 describe('noteFor', () => {
   it('joins a wrapped body back into paragraphs, and leaves the trailers out', () => {
@@ -18,14 +18,14 @@ describe('noteFor', () => {
   })
 
   it('keeps list items on lines of their own', () => {
-    const { paragraphs } = noteFor({ subject: 's', body: 'Three things:\n- one\n- two that\n  wraps\n' })
+    const { paragraphs } = noteFor({ subject: 's', body: 'Three things:\n- one\n- two that\n  wraps\n' })!
     expect(paragraphs).toEqual(['Three things:', '- one', '- two that wraps'])
   })
 
   it('files a commit by its Release trailer', () => {
-    expect(noteFor({ subject: 's', body: '', release: 'major' }).kind).toBe('action')
-    expect(noteFor({ subject: 's', body: '', release: 'Minor' }).kind).toBe('new')
-    expect(noteFor({ subject: 's', body: '' }).kind).toBe('improved')
+    expect(noteFor({ subject: 's', body: '', release: 'major' })!.kind).toBe('action')
+    expect(noteFor({ subject: 's', body: '', release: 'Minor' })!.kind).toBe('new')
+    expect(noteFor({ subject: 's', body: '' })!.kind).toBe('improved')
   })
 })
 
@@ -56,5 +56,42 @@ describe('corrections to notes already out', () => {
       expect(hash).toMatch(/^[0-9a-f]{40}$/)
       expect(['patch', 'minor', 'major']).toContain(release)
     }
+    for (const hash of Object.keys(NOTE_CORRECTIONS)) expect(hash).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  const note = noteFor({
+    subject: 'Add a thing',
+    body: 'It does it.\n\nThis commit adds tests for it.\n\n- one\n- two (see src/thing.ts)\n',
+    release: 'minor',
+  })!
+
+  it('leave a note out', () => {
+    expect(corrected(note, null)).toBeNull()
+  })
+
+  it('leave a note alone when there is no correction', () => {
+    expect(corrected(note, undefined)).toBe(note)
+  })
+
+  it('drop paragraphs, swap text, and keep the part of the notes', () => {
+    expect(corrected(note, { title: 'A thing', drop: ['This commit'], replace: [[' (see src/thing.ts)', '']] })).toEqual({
+      title: 'A thing',
+      kind: 'new',
+      paragraphs: ['It does it.', '- one', '- two'],
+    })
+  })
+
+  it('replace the text outright', () => {
+    expect(corrected(note, { paragraphs: ['It does it well.'] })?.paragraphs).toEqual(['It does it well.'])
+  })
+})
+
+describe('commits for the people working on ClearPing', () => {
+  it('have no note when they say Notes: internal', () => {
+    expect(noteFor({ subject: 'Retry a slow test', body: 'It timed out.\n\nNotes: internal\nCo-Authored-By: Someone <someone@example.com>\n' })).toBeNull()
+  })
+
+  it('keep the trailer out of a note otherwise', () => {
+    expect(noteFor({ subject: 's', body: 'Text.\n\nNotes: user\n' })?.paragraphs).toEqual(['Text.'])
   })
 })
