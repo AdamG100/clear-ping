@@ -16,18 +16,18 @@ every problem on it is one click from the monitor it was on.
 - **Four figures.** *Answering now* (of the monitors being probed), *Up all
   day* with the average uptime, *Outages, last 24h* with the longest, and
   *Alerts firing*.
-- **Right now.** Each monitor that is not answering, with why (as its probe
-  said it) and since when.
 - **Last 24 hours.** A strip of quarter hours: green when every monitor probed
   in it answered, amber when some lost packets, queries or requests, red when
   some got no reply at all, and grey when nothing was probed. Click a red or
   amber stretch to list only who had trouble then.
 - **Problems in the last 24 hours.** Every monitor that had trouble, whether it
   stopped answering or lost packets, why, for how long, how many times, and
-  whether it is still going on. A probe agent that could not be reached has a
-  row of its own, listing its monitors: they took no readings meanwhile, so
-  they are not counted as down. Filter by *Not answering* or *Losing packets*.
-  Click one to go to that monitor.
+  whether it is still going on: what is going on now comes first, marked
+  *Now*. The first two are in view and the rest are one press away, under
+  *N more problems*. A probe agent that could not be reached has a row of its
+  own, listing its monitors: they took no readings meanwhile, so they are not
+  counted as down. Filter by *Not answering* or *Losing packets*. Click one to
+  go to that monitor.
 - **Your groups**, each as a tile with how many of its monitors are online and
   its uptime today, and how many monitors there are of each kind.
 - **Where readings are taken from.** This server and each probe agent, with

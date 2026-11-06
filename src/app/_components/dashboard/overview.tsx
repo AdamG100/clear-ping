@@ -2,10 +2,11 @@
 
 import { useMemo, useState, type ReactNode } from 'react'
 import { ChartLine, ChevronRight, MapPin, Plus, Server, X } from 'lucide-react'
-import type { GroupOrder, LatestMeasurement, Target } from '@/types/probe'
+import type { GroupOrder, Target } from '@/types/probe'
 import { LOCAL_PROBE, DEFAULT_LOCAL_PROBE_NAME, type ProbeAgentSummary } from '@/types/probe-agent'
 import { probeIdsOf } from '@/lib/targets/probes'
 import type { IncidentKind, OverviewEvent, OverviewReport, OverviewSlice } from '@/types/overview'
+import { Accordion } from '@/components/arc/accordion/accordion'
 import { Alert } from '@/components/arc/alert/alert'
 import { MergeNotice } from './merge-notice'
 import { Badge } from '@/components/arc/badge/badge'
@@ -50,7 +51,6 @@ const PANEL = 'rounded-3xl border border-border bg-card p-4 text-foreground @2xl
 interface OverviewPageProps {
   /** As the sidebar has them: with each one's newest reading and the probe agent it is probed from. */
   targets: Target[]
-  latest: Record<string, LatestMeasurement>
   probeAgents: ProbeAgentSummary[]
   /** What the local probe is called. */
   localProbeName?: string
@@ -79,9 +79,6 @@ interface OverviewPageProps {
  * reading of it is not something to be told about on the front page.
  */
 const ATTENTION_LOSS = 10
-
-/** Targets listed under Needs attention before the rest are only counted. */
-const ATTENTION_ROWS = 5
 
 /**
  * A closed-port check that has never had an answer cannot measure its server
@@ -145,67 +142,6 @@ function Headline({ now, agentsDown }: { now: ReturnType<typeof standing>; agent
     <Alert tone="success" title="Everything is answering">
       All {plural(now.answering.length, 'monitor')} answered {now.answering.length === 1 ? 'its latest reading' : 'their latest readings'}.
     </Alert>
-  )
-}
-
-/** The targets that are wrong now, each with why and for how long. */
-function Attention({
-  now,
-  latest,
-  report,
-  onSelectTarget,
-}: {
-  now: ReturnType<typeof standing>
-  latest: Record<string, LatestMeasurement>
-  report: OverviewReport | null
-  onSelectTarget: (id: string) => void
-}) {
-  const all = [...now.down, ...now.lossy, ...now.onHold]
-  if (all.length === 0) return null
-  // The worst first, and only a few: the sidebar has the full list.
-  const rows = all.slice(0, ATTENTION_ROWS)
-
-  // Since when: the start of the event it is in that has not ended.
-  const since = (id: string) =>
-    report?.events.find(event => event.ongoing && event.targets.some(each => each.targetId === id))?.start
-
-  return (
-    <section className={PANEL} aria-labelledby="overview-attention">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="overview-attention" className="text-sm font-medium">Right now</h2>
-        {all.length > rows.length && (
-          <p className="text-xs text-muted-foreground">{all.length - rows.length} more in the sidebar</p>
-        )}
-      </div>
-      <ul className="mt-3 divide-y divide-border">
-        {rows.map(target => {
-          const started = since(target.id)
-          const why = target.onHold
-            ? target.onHold
-            : target.isOnline === false
-              ? latest[target.id]?.errorMessage ?? 'No reply'
-              : `${(target.packetLoss ?? 0).toFixed(1)}% lost in the latest probe`
-          return (
-            <li key={target.id}>
-              <button
-                type="button"
-                onClick={() => onSelectTarget(target.id)}
-                className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-muted/40"
-              >
-                <StatusIndicator isOnline={target.isOnline} packetLoss={target.packetLoss} onHold={target.onHold} bare />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm"><Masked text value={target.name} /></span>
-                  <span className="block truncate text-xs text-muted-foreground">{why}</span>
-                </span>
-                {started !== undefined && (
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">since {clock(started)}</span>
-                )}
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-    </section>
   )
 }
 
@@ -273,8 +209,8 @@ function problemsBetween(report: OverviewReport, from: number, to: number, targe
 
 type Show = 'all' | IncidentKind
 
-/** Rows listed before "Show all". */
-const PROBLEM_ROWS = 8
+/** Problems listed in view: the rest fold into a "more" panel below them. Sorted, so these are the ones going on now and the longest outages. */
+const PROBLEM_ROWS = 2
 
 /**
  * The day in quarters of an hour, and under it who had trouble: the whole
@@ -299,7 +235,6 @@ function Day({
   const { slices, sliceMs } = report
   const [picked, setPicked] = useState<number | null>(null)
   const [show, setShow] = useState<Show>('all')
-  const [everything, setEverything] = useState(false)
 
   const troubled = slices.filter(slice => slice.down > 0).length
   // "All day" only of a day that was watched all through.
@@ -339,12 +274,79 @@ function Day({
     loss: problems.filter(problem => problem.kind === 'loss').length,
   }
   const shown = show === 'all' ? problems : problems.filter(problem => problem.kind === show)
-  const rows = everything ? shown : shown.slice(0, PROBLEM_ROWS)
   const agentRows = show === 'loss' ? [] : agentsOut
-  const pick = (start: number) => {
-    setPicked(was => (was === start ? null : start))
-    setEverything(false)
-  }
+  const pick = (start: number) => setPicked(was => (was === start ? null : start))
+
+  // One list, probe agents first: the first few in view, the rest folded away below them.
+  const items = [
+    ...agentRows.map(agent => (
+      <li key={`agent:${agent.id}`}>
+        <button
+          type="button"
+          onClick={() => onShowTargetsFrom(agent.id)}
+          className="group flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-muted/40"
+        >
+          <MapPin size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-destructive" />
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm">Probe agent {agent.name}</span>
+              {agent.ongoing && <Badge size="sm" tone="danger">Now</Badge>}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              Could not be reached, so its monitors took no readings. Click to list them.
+            </span>
+          </span>
+          <span className="shrink-0 text-right font-mono text-xs text-muted-foreground">
+            <span className="block">
+              {humanDuration(agent.totalMs)}
+              {agent.spells > 1 ? `, ${agent.spells} times` : ''}
+            </span>
+            <span className="block">{agent.ongoing ? `since ${clock(agent.latest)}` : `last at ${clock(agent.latest)}`}</span>
+          </span>
+          <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+        </button>
+      </li>
+    )),
+    ...shown.map(problem => (
+      <li key={problem.targetId}>
+        <button
+          type="button"
+          onClick={() => onSelectTarget(problem.targetId)}
+          className="group flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-muted/40"
+        >
+          <span
+            className="size-2.5 shrink-0 rounded-full"
+            style={{ background: problem.kind === 'outage' ? NO_REPLY_COLOR : SIGNAL_VARS.minor }}
+            aria-hidden="true"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm"><Masked text value={targetsById.get(problem.targetId)?.name ?? problem.label} /></span>
+              {problem.ongoing && <Badge size="sm" tone="danger">Now</Badge>}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {problem.kind === 'outage' ? 'Not answering' : 'Losing packets'}
+              {problem.reasons.length > 0 ? `: ${problem.reasons.slice(0, 2).join('; ')}` : ''}
+            </span>
+            {scopeNote(problem.event, agentName(problem.event.probeAgentId), localProbeName) && (
+              <span className="block truncate text-xs text-muted-foreground">
+                {scopeNote(problem.event, agentName(problem.event.probeAgentId), localProbeName)}
+              </span>
+            )}
+          </span>
+          <span className="shrink-0 text-right font-mono text-xs text-muted-foreground">
+            <span className="block">
+              {humanDuration(problem.totalMs)}
+              {problem.spells > 1 ? `, ${problem.spells} times` : ''}
+            </span>
+            <span className="block">{problem.ongoing ? `since ${clock(problem.latest)}` : `last at ${clock(problem.latest)}`}</span>
+          </span>
+          <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+        </button>
+      </li>
+    )),
+  ]
+  const folded = items.length - PROBLEM_ROWS
 
   return (
     <section className={PANEL} aria-labelledby="overview-day">
@@ -423,10 +425,7 @@ function Day({
             <SegmentedControl
               label="Which problems"
               value={show}
-              onValueChange={value => {
-                setShow(value as Show)
-                setEverything(false)
-              }}
+              onValueChange={value => setShow(value as Show)}
               options={[
                 { value: 'all', label: `All ${counts.all}` },
                 { value: 'outage', label: `Not answering ${counts.outage}` },
@@ -447,79 +446,28 @@ function Day({
                   : 'No outages and no lasting loss.'}
           </p>
         ) : (
-          <ul className="mt-2 divide-y divide-border">
-            {agentRows.map(agent => (
-              <li key={`agent:${agent.id}`}>
-                <button
-                  type="button"
-                  onClick={() => onShowTargetsFrom(agent.id)}
-                  className="group flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-muted/40"
-                >
-                  <MapPin size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-destructive" />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm">Probe agent {agent.name}</span>
-                      {agent.ongoing && <Badge size="sm" tone="danger">Now</Badge>}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      Could not be reached, so its monitors took no readings. Click to list them.
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-right font-mono text-xs text-muted-foreground">
-                    <span className="block">
-                      {humanDuration(agent.totalMs)}
-                      {agent.spells > 1 ? `, ${agent.spells} times` : ''}
-                    </span>
-                    <span className="block">{agent.ongoing ? `since ${clock(agent.latest)}` : `last at ${clock(agent.latest)}`}</span>
-                  </span>
-                  <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                </button>
-              </li>
-            ))}
-            {rows.map(problem => (
-              <li key={problem.targetId}>
-                <button
-                  type="button"
-                  onClick={() => onSelectTarget(problem.targetId)}
-                  className="group flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-muted/40"
-                >
-                  <span
-                    className="size-2.5 shrink-0 rounded-full"
-                    style={{ background: problem.kind === 'outage' ? NO_REPLY_COLOR : SIGNAL_VARS.minor }}
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm"><Masked text value={targetsById.get(problem.targetId)?.name ?? problem.label} /></span>
-                      {problem.ongoing && <Badge size="sm" tone="danger">Now</Badge>}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {problem.kind === 'outage' ? 'Not answering' : 'Losing packets'}
-                      {problem.reasons.length > 0 ? `: ${problem.reasons.slice(0, 2).join('; ')}` : ''}
-                    </span>
-                    {scopeNote(problem.event, agentName(problem.event.probeAgentId), localProbeName) && (
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {scopeNote(problem.event, agentName(problem.event.probeAgentId), localProbeName)}
-                      </span>
-                    )}
-                  </span>
-                  <span className="shrink-0 text-right font-mono text-xs text-muted-foreground">
-                    <span className="block">
-                      {humanDuration(problem.totalMs)}
-                      {problem.spells > 1 ? `, ${problem.spells} times` : ''}
-                    </span>
-                    <span className="block">{problem.ongoing ? `since ${clock(problem.latest)}` : `last at ${clock(problem.latest)}`}</span>
-                  </span>
-                  <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {shown.length > rows.length && (
-          <Button type="button" size="sm" variant="ghost" className="mt-1" onClick={() => setEverything(true)}>
-            Show all {shown.length}
-          </Button>
+          <>
+            <ul className="mt-2 divide-y divide-border">{items.slice(0, PROBLEM_ROWS)}</ul>
+            {folded > 0 && (
+              // Folded again whenever what is listed changes: another stretch of the day, or another kind of problem.
+              <div key={`${picked}:${show}`} className="mt-1">
+                <Accordion
+                  defaultOpen={-1}
+                  items={[
+                    {
+                      title: `${plural(folded, 'more problem')}`,
+                      content: (
+                        // The panel keeps room on its right for its chevron, and greys its text: the rows have their own.
+                        <ul className="divide-y divide-border text-foreground" style={{ marginRight: 'calc(-1 * var(--space-8))' }}>
+                          {items.slice(PROBLEM_ROWS)}
+                        </ul>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>
@@ -710,7 +658,6 @@ function ProbeAgents({
 
 export function OverviewPage({
   targets: allTargets,
-  latest,
   probeAgents,
   localProbeName = DEFAULT_LOCAL_PROBE_NAME,
   alerts,
@@ -835,10 +782,9 @@ export function OverviewPage({
         />
       </div>
 
-      {/* Most important first: what is wrong now, then the day and what went
-          wrong in it, then the network as a whole. */}
-      <Attention now={now} latest={latest} report={report} onSelectTarget={onSelectTarget} />
-
+      {/* Most important first: the day and what went wrong in it, with what is
+          still going on at the top of its list, then the network as a whole.
+          A list of only what is wrong now said the same again above it. */}
       {report ? (
         <>
           <Day

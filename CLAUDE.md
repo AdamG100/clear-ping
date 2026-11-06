@@ -115,7 +115,9 @@ Things that bite:
   them: tooltip (dark colours), code-block (no `//` comments in shell),
   confirm-morph (a face reports the width it wants, not the width the room
   clamps it to, so the pill does not flicker between the two),
-  expandable-card (a `leading` slot for a status dot), timeline (a `unit` for
+  expandable-card (a `leading` slot for a status dot), dropdown-menu (a
+  `trigger` of the caller's own, an `align`, and a `trailing` slot and
+  `ariaLabel` on an item, for the sidebar's Tools tile), timeline (a `unit` for
   what its day count counts), alert (a circled tick
   for success, like the circled icons of the other tones), lib/use-copy-feedback
   (copies through `src/lib/clipboard.ts`, which works over plain HTTP), and the fields (input,

@@ -1370,7 +1370,6 @@ export function Dashboard() {
               <OverviewPage
                 onOpenProbeSettings={readOnly ? undefined : openProbeAgentSettings}
                 targets={transformedTargets}
-                latest={latest}
                 probeAgents={probeAgents}
                 localProbeName={localProbeName}
                 alerts={alerts}
