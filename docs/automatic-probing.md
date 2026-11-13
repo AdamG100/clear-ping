@@ -110,6 +110,8 @@ error distinguishes a refused connection (nothing listening) from a timeout
 
 ### Game servers
 
+![A CS2 server's page: how fast it answers, and its name, players, map and version](screenshots/game-server.jpg)
+
 A game server says nothing to a packet it does not understand, so a game server
 probe asks in the game's own query and times the answer. "Loss" is the share of
 queries that got no answer. Pick the game the server runs:
@@ -370,6 +372,8 @@ inside a group when the database is upgraded.
 
 ## Comparing Monitors
 
+![Four monitors in a group on one chart over 24 hours](screenshots/group-comparison.jpg)
+
 Every group in the sidebar with two or more monitors has a Compare button on its
 header. It puts the whole group, including the groups inside it, on one chart,
 the way a Smokeping multi-host graph does: one median line per monitor on a shared
@@ -395,7 +399,7 @@ beside its probes: one line for each probe that measures it.
   scale changes, and the usual readings keep most of the height. A single
   monitor's own chart does the same (*scale squeezed above 22 ms*).
 
-![A day of latency with one spike to 940 ms in a band along the top](screenshots/spikes.jpg)
+![A day of latency with one spike to over a second in a band along the top](screenshots/spikes.jpg)
 
 Only the median is drawn. The latency spread that surrounds it on a single
 monitor's chart would bury a dozen overlapping lines, and is one click away.

@@ -52,7 +52,7 @@ stored, charted and alerted on like any other reading
 
 ## Adding one
 
-1. In ClearPing, open **Settings → Probe agents** (admins only) and press
+1. In ClearPing, open **Settings → Probes** (admins only) and press
    **Add probe agent**.
 2. Give it a name, such as *Germany VPS*, and the address the dashboard will
    reach it at. That is its tailnet address or name if you use Tailscale, and
@@ -63,6 +63,8 @@ stored, charted and alerted on like any other reading
 4. Press **Connect**. ClearPing shows the certificate fingerprint it now
    trusts. The agent printed its own fingerprint when it started (it is in its
    log), and the two should be the same.
+
+![Settings, Probes: three probe agents, two online and one offline](screenshots/probe-agents.jpg)
 
 The page counts how many are online and how many need attention, and lists
 every probe agent in a table you can search by name, address or machine and
@@ -92,10 +94,10 @@ already do this when the address is an IP:
 
 ```bash
 # Docker: publish the port on the tailnet address only
-docker run … -p 100.84.12.7:7380:7380 …
+docker run … -p 100.64.0.7:7380:7380 …
 
 # Linux, no Docker
-… CLEARPING_PROBE_AGENT_LISTEN=100.84.12.7:7380 …
+… CLEARPING_PROBE_AGENT_LISTEN=100.64.0.7:7380 …
 ```
 
 ## Over the internet
@@ -225,9 +227,8 @@ be removed while a monitor is measured from it.
 
 Everywhere a monitor appears, it says where it is probed from:
 
-- **The sidebar.** A purple *Remote* badge beside the monitor's type, which
-  names the agent when you point at it, or *2 probes* for a monitor measured
-  from several. Its dot is green while any probe reaches it, with the loss of
+- **The sidebar.** A monitor measured from several probes has a pin badge with
+  how many. Its dot is green while any probe reaches it, with the loss of
   the worst, and its note names the probes that fail. *Show its monitors* on a
   probe's Overview tile lists only the monitors it measures, until you clear it.
 - **The monitor's page.** A *Probed from …* line under the address. The
@@ -236,8 +237,8 @@ Everywhere a monitor appears, it says where it is probed from:
 - **Group comparisons.** Each line from an agent is named *Monitor · Agent*.
 - **Alerts.** *Cloudflare DNS is not responding (from Germany VPS)*, with a
   *Probed from* line in the details.
-- **The Overview.** *Where readings are taken from* has a tile for this server
-  and each probe agent, with how it is doing and how many monitors it probes. A
+- **The Overview.** *Where readings are taken from* has a tile for the local
+  probe and each probe agent, with how it is doing and how many monitors it probes. A
   probe agent that could not be reached has a row in the day's problems, listing
   its monitors, and a fault among its monitors is judged by what else it was
   probing ([overview.md](overview.md)).
@@ -302,8 +303,7 @@ offline:
 - **No readings are taken for its monitors.** A dead agent never shows up as
   your monitors being down, so it never sets off their alerts either.
 - Its monitors show a grey status dot that says *No readings: probe agent … is
-  offline*. Their *Remote* badge turns amber, and their page says no readings
-  are being taken.
+  offline*, and their page says no readings are being taken.
 - On the chart, the time it was down is shaded *Probe agent offline: no
   readings*.
 - The activity record notes when it was lost and when it came back.

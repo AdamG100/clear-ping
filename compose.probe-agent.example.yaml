@@ -22,7 +22,7 @@ services:
     ports:
       # On a tailnet, publish it on the tailnet address only, which keeps it
       # off every other interface:
-      #   - "100.84.12.7:7380:7380"
+      #   - "100.64.0.7:7380:7380"
       - "7380:7380"
     # For IPv6 targets, which Docker's default network cannot reach, and for
     # ARP monitors, which can only ask the networks the container is on, use
@@ -31,7 +31,7 @@ services:
     environment:
       CLEARPING_PROBE_AGENT_TOKEN: "cpa_paste_the_token_from_clearping_here"
       # With network_mode: host, the address and port to listen on:
-      # CLEARPING_PROBE_AGENT_LISTEN: 100.84.12.7:7380
+      # CLEARPING_PROBE_AGENT_LISTEN: 100.64.0.7:7380
     volumes:
       # Its certificate. Keep it: a new one has to be trusted again in ClearPing.
       # For a folder instead of a volume (./data:/data), the container runs as

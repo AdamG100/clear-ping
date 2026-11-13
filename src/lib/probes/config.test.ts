@@ -24,7 +24,7 @@ describe('dnsQueryNameFor', () => {
   })
 
   it('asks any other server for a name every resolver has to hand', () => {
-    expect(dnsQueryNameFor('154.0.1.1')).toBe(DEFAULT_DNS_QUERY_NAME)
+    expect(dnsQueryNameFor('198.51.100.1')).toBe(DEFAULT_DNS_QUERY_NAME)
     expect(dnsQueryNameFor('192.168.1.1')).toBe(DEFAULT_DNS_QUERY_NAME)
   })
 })

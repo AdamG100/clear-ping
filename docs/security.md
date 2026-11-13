@@ -14,6 +14,8 @@ network or behind a sign-in proxy such as Authentik. For anything else, the
 
 ## Setting it up
 
+![Settings, Access: whether sign-in is required, and who may change things](screenshots/access.jpg)
+
 1. Open **Settings** (the cog, bottom of the sidebar) and choose **Create an
    account**. The first account is made on the sign-in page; after that the
    page offers only to sign in, and more accounts are added in Settings →
@@ -40,7 +42,7 @@ Sign-in is off until it is turned on, so a new install is open to whoever
 reaches it. These close what that leaves:
 
 - **The first account asks for a setup code.** Made at start-up and written to
-  the server's log (`docker logs clear_ping`), or `CLEARPING_SETUP_CODE` if you
+  the server's log (`docker logs clearping`), or `CLEARPING_SETUP_CODE` if you
   set it. Without it, whoever got to the sign-in page first would be the admin.
 - **Changes from other websites are refused,** signed in or not. A browser says
   which site a request came from (`Origin`, `Sec-Fetch-Site`), and one from
@@ -67,6 +69,8 @@ reaches it. These close what that leaves:
   wrote for them. Over HTTPS, browsers are told to keep using it.
 
 ## Roles
+
+![Settings, Accounts: an admin, an editor and two viewers](screenshots/accounts.jpg)
 
 Every account has one of three roles, set by an admin in **Settings →
 Accounts** (or by Authentik groups; see below):
@@ -319,6 +323,8 @@ or as long as **Settings → Privacy** says (30 days, 90 days or a year).
 
 ## Privacy
 
+![The privacy settings](screenshots/privacy.jpg)
+
 **Settings → Privacy** decides what ClearPing shows, hands to AI assistants,
 keeps and asks of the internet. Anyone can open it; only an admin changes what
 applies to everyone.
@@ -403,7 +409,7 @@ the server can read. On the sign-in page, **Forgot your password?** asks for the
 username and writes the code to the log:
 
 ```bash
-docker logs clear_ping 2>&1 | grep "reset code"
+docker logs clearping 2>&1 | grep "reset code"
 ```
 
 ```

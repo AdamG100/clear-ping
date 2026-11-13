@@ -11,6 +11,8 @@ The assistant asks ClearPing for the evidence and writes the report from it.
 
 ## Connecting
 
+![Settings, AI assistant: the address to give an assistant, and the command for Claude Code](screenshots/assistant.jpg)
+
 The address is `/api/mcp` on wherever your ClearPing is reached:
 
 ```
@@ -235,9 +237,9 @@ way, and whoever reads it can do what the key can. So a request carrying a key
 is taken only if it is one of:
 
 - **over HTTPS**, from anywhere. ClearPing in a datacentre and an assistant at
-  home is this case: put it behind a proxy that does TLS, as
-  [compose.example.yaml](../compose.example.yaml) does with Traefik, and give
-  the assistant the `https://` address;
+  home is this case: put it behind a proxy that does TLS
+  ([reverse-proxy.md](reverse-proxy.md)), and give the assistant the
+  `https://` address;
 - **at an address on its own network**, over plain HTTP: `localhost`, a private
   address (`192.168…`, `10…`), or a local name (`clearping.lan`, `nas.local`).
   There is no internet in between to listen.
@@ -248,7 +250,8 @@ travelled in the clear. Settings → AI assistant warns of this before it is
 tried, when the page itself was opened over plain HTTP at a public address.
 
 How it arrived is read from `X-Forwarded-Proto`, which a proxy has to pass on
-(Traefik and Caddy do; nginx needs `proxy_set_header X-Forwarded-Proto $scheme`).
+(Caddy, Traefik, Cloudflare Tunnel and Tailscale Serve do; nginx needs
+`proxy_set_header X-Forwarded-Proto $scheme`).
 If something else encrypts the connection, a VPN or an SSH tunnel to a public
 address, set `CLEARPING_MCP_ALLOW_HTTP=1` to say so.
 

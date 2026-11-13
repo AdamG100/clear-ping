@@ -22,11 +22,11 @@ describe('exchanges', () => {
 
   it('says where a traceroute crossed, by the first hop on an exchange', () => {
     const hops = [
-      { hop: 1, address: '172.22.2.1' },
+      { hop: 1, address: '192.168.1.1' },
       { hop: 2, address: null },
-      { hop: 5, address: '154.0.0.82' },
+      { hop: 5, address: '198.51.100.82' },
       { hop: 6, address: '198.19.8.129' },
-      { hop: 7, address: '102.218.212.29' },
+      { hop: 7, address: '203.0.113.29' },
     ]
     expect(crossingOf(hops, lans)).toEqual({ ...NAPAFRICA, address: '198.19.8.129', hop: 6, member: null })
     expect(crossingOf(hops.slice(0, 3), lans)).toBeNull()

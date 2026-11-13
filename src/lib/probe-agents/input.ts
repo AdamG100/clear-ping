@@ -30,7 +30,7 @@ export function readProbeAgentAddress(raw: unknown): Checked<string> {
   const bare = /^\[(.+)\](?::\d+)?$/.exec(written)?.[1] ?? written;
   const address = normalizeHost(bare);
   if (!address || !isValidHost(address)) {
-    return { ok: false, error: 'The address is the probe agent machine’s hostname or IP address, such as 100.84.12.7' };
+    return { ok: false, error: 'The address is the probe agent machine’s hostname or IP address, such as 100.64.0.7' };
   }
   return { ok: true, value: address };
 }

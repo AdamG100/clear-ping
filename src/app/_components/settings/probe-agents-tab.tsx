@@ -566,7 +566,7 @@ export function ProbeAgentsTab({ onShowTargets, onProbesChanged }: { onShowTarge
               <Input
                 label="Address"
                 required
-                placeholder="100.84.12.7 or vps.tail1234.ts.net"
+                placeholder="100.64.0.7 or vps.tail1234.ts.net"
                 value={address}
                 onChange={event => setAddress(event.target.value)}
                 error={address.trim() && !typed.ok ? typed.error : undefined}

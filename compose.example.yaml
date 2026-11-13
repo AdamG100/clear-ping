@@ -1,48 +1,38 @@
-# An example for running ClearPing behind Traefik. Copy it and make it yours:
+# ClearPing with Docker Compose. Copy it and make it yours:
 #
-#   cp compose.example.yaml compose.yaml
+#   curl -o compose.yaml https://raw.githubusercontent.com/AdamG100/clear-ping/main/compose.example.yaml
+#   mkdir -p data && sudo chown -R 1000:1000 data     # Linux: the container runs as uid 1000
 #   docker compose up -d
 #
-# Change the hostname and the network name below to match your setup.
+# Then open http://<this machine>:3000. The first account asks for a setup
+# code, which is in `docker logs clearping`.
 #
 # Sign-in is off until you turn it on, and while it is off anyone who can reach
-# ClearPing can use all of it. After `docker compose up -d`, read the setup code
-# with `docker logs clear_ping`, create the first account, then turn on
-# Settings -> Access -> Require sign-in. Or keep it behind a VPN or a proxy that
-# signs people in.
+# ClearPing can use all of it. Create the first account, then turn on
+# Settings -> Access -> Require sign-in. To reach it from outside your network,
+# put it behind a reverse proxy with HTTPS: docs/reverse-proxy.md has Caddy,
+# nginx, Traefik, Cloudflare Tunnel and Tailscale set up step by step.
 
 services:
   clearping:
     image: ghcr.io/adamg100/clear-ping:latest
-    container_name: clear_ping
+    container_name: clearping
     restart: unless-stopped
-    labels:
-      traefik.enable: true
-      traefik.http.routers.clearping.entryPoints: https
-      traefik.http.routers.clearping.rule: Host(`ping.example.com`)
-    # Without Traefik, drop the labels and publish the port instead:
-    # ports:
-    #   - "3000:3000"
+    ports:
+      - "3000:3000"
     environment:
-      # The names ClearPing answers to. Keep it the same as the Host rule above.
-      CLEARPING_ALLOWED_HOSTS: ping.example.com
-      # One proxy (Traefik) sits in front, so its X-Forwarded-For can be believed.
-      CLEARPING_TRUST_PROXY: 1
       # The time zone every time in ClearPing is shown in: the charts, the
-      # routes, the alerts it sends and when the nightly clean-up runs. An IANA
-      # name (https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+      # routes, the alerts it sends and when maintenance runs. An IANA name
+      # (https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
       # Left out, each person sees their own time and the container keeps UTC.
-      TZ: Europe/London
+      TZ: Etc/UTC
+      # Behind a reverse proxy, uncomment these two (docs/reverse-proxy.md):
+      # The name ClearPing is reached at; requests for any other are refused.
+      # CLEARPING_ALLOWED_HOSTS: ping.example.com
+      # How many proxies in front add to X-Forwarded-For.
+      # CLEARPING_TRUST_PROXY: 1
     volumes:
       # The database. The container runs as uid 1000, so on Linux create the
-      # directory first and hand it over, or the app cannot write to it.
-      # Startup logs this command if the folder is still root's:
-      #   mkdir -p data && sudo chown -R 1000:1000 data
+      # folder first and hand it over (the commands at the top), or ClearPing
+      # cannot write to it. Startup logs the command if the folder is still root's.
       - ./data:/data
-    networks:
-      - proxy
-
-# The network Traefik is attached to. It has to exist already.
-networks:
-  proxy:
-    external: true

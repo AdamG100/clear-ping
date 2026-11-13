@@ -8,7 +8,7 @@ description: Deploy ClearPing - check the work, push to main, and confirm the ne
 Every push to `main` that changes what goes into the images is a deployment. CI (`.github/workflows/docker.yml`) builds
 the Docker image, numbers it, publishes it to `ghcr.io/adamg100/clear-ping` as
 `:latest` and `:<version>`, and makes a GitHub release `v<version>`. The live
-install at https://ping.gnetworx.cloud runs `:latest` and shows its version in
+install (its address in `CLEARPING_URL`, or passed with `--url`) runs `:latest` and shows its version in
 the sidebar.
 
 ## How the version number works
@@ -101,6 +101,6 @@ node .claude/skills/deploy/release.mjs status
 ```
 
 says the newest published version and what the live server runs, and whether
-it knows of an update. `GET https://ping.gnetworx.cloud/api/version` gives the
-same from the server itself. Pass `--url` (or set `CLEARPING_URL`) for another
+it knows of an update. `GET <install>/api/version` gives the
+same from the server itself. Pass `--url`, or set `CLEARPING_URL`, to say which
 install.
