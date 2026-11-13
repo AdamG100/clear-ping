@@ -16,8 +16,8 @@ describe('parseTraceroute', () => {
     const hops = parseTraceroute(fixture.WINDOWS_COMPLETE)
 
     expect(hops).toHaveLength(6)
-    expect(hops[0]).toEqual({ hop: 1, address: '172.22.2.1', rtts: [1, 1, 1], sent: 3 })
-    expect(hops[4]).toEqual({ hop: 5, address: '154.0.2.115', rtts: [3, 2, 5], sent: 3 })
+    expect(hops[0]).toEqual({ hop: 1, address: '192.168.1.1', rtts: [1, 1, 1], sent: 3 })
+    expect(hops[4]).toEqual({ hop: 5, address: '198.51.100.115', rtts: [3, 2, 5], sent: 3 })
     expect(traceReached(hops, '1.1.1.1')).toBe(true)
   })
 
@@ -29,9 +29,9 @@ describe('parseTraceroute', () => {
     const hops = parseTraceroute(fixture.WINDOWS_IPV6)
 
     expect(hops.map(h => h.address)).toEqual([
-      'fe80::ba69:f4ff:feae:febd',
-      '2c0f:f9a8:3000::1:9657',
-      '2c0f:f9a8::1:27:11:4',
+      'fe80::1',
+      '2001:db8:3000::1:9657',
+      '2001:db8::1:27:11:4',
       '2606:4700:4700::1111',
     ])
     expect(traceReached(hops, '2606:4700:4700::1111')).toBe(true)
@@ -40,7 +40,7 @@ describe('parseTraceroute', () => {
   it('counts a partly answered hop as partial loss', () => {
     const hop = parseTraceroute(fixture.WINDOWS_DEAD_END)[2]
 
-    expect(hop).toEqual({ hop: 3, address: '154.0.0.89', rtts: [2, 1], sent: 3 })
+    expect(hop).toEqual({ hop: 3, address: '198.51.100.89', rtts: [2, 1], sent: 3 })
     expect(hopLoss(hop)).toBeCloseTo(33.33, 1)
   })
 
@@ -114,7 +114,7 @@ describe('lastAnsweringHop', () => {
 
   it('finds the furthest hop that answered on the way to a server that does not', () => {
     // As mtr --udp shows a server behind Google Cloud's firewall: Google's edge answers, the server never does.
-    const hops = [hop(1, '172.22.2.1', true), hop(2, null, false), hop(3, '154.0.0.89', true), hop(5, '72.14.220.200', true), hop(6, null, false)]
+    const hops = [hop(1, '192.168.1.1', true), hop(2, null, false), hop(3, '198.51.100.89', true), hop(5, '72.14.220.200', true), hop(6, null, false)]
     expect(lastAnsweringHop(hops, '34.1.208.133')?.address).toBe('72.14.220.200')
   })
 

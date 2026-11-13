@@ -15,7 +15,8 @@
 import { nextVersionHere } from '../../../scripts/next-version.mjs';
 
 const IMAGE = { registry: 'ghcr.io', repository: 'adamg100/clear-ping' };
-const DEFAULT_URL = process.env.CLEARPING_URL || 'https://ping.gnetworx.cloud';
+// The install to check: --url, or CLEARPING_URL. Without either only the registry is checked.
+const DEFAULT_URL = process.env.CLEARPING_URL || '';
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -40,6 +41,7 @@ async function publishedTags() {
 }
 
 async function live() {
+  if (!url) return { error: 'no install given: pass --url or set CLEARPING_URL' };
   try {
     const response = await fetch(`${url}/api/version`, { signal: AbortSignal.timeout(20_000) });
     if (response.status === 404) return { error: 'no /api/version (running a build from before versions were numbered)' };

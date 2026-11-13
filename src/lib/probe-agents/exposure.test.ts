@@ -4,7 +4,7 @@ import { readProbeAgentAddress, readProbeAgentInput, readProbeAgentPort } from '
 
 describe('how a probe agent is reached', () => {
   it('knows a tailnet by its addresses and its names', () => {
-    expect(isTailnetAddress('100.84.12.7')).toBe(true)
+    expect(isTailnetAddress('100.64.0.7')).toBe(true)
     expect(isTailnetAddress('100.64.0.1')).toBe(true)
     expect(isTailnetAddress('100.127.255.254')).toBe(true)
     expect(isTailnetAddress('fd7a:115c:a1e0::1234')).toBe(true)
@@ -17,7 +17,7 @@ describe('how a probe agent is reached', () => {
   })
 
   it('calls a tailnet, a private network and the internet what they are', () => {
-    expect(exposureOfAddress('100.84.12.7')).toBe('tailnet')
+    expect(exposureOfAddress('100.64.0.7')).toBe('tailnet')
     expect(exposureOfAddress('[fd7a:115c:a1e0::1]')).toBe('tailnet')
     expect(exposureOfAddress('192.168.1.20')).toBe('private')
     expect(exposureOfAddress('10.0.0.5')).toBe('private')
@@ -33,7 +33,7 @@ describe('how a probe agent is reached', () => {
 
 describe('what a probe agent is added with', () => {
   it('takes an address as written, without brackets or a port', () => {
-    expect(readProbeAgentAddress(' 100.84.12.7 ')).toEqual({ ok: true, value: '100.84.12.7' })
+    expect(readProbeAgentAddress(' 100.64.0.7 ')).toEqual({ ok: true, value: '100.64.0.7' })
     expect(readProbeAgentAddress('[2001:db8::1]:7380')).toEqual({ ok: true, value: '2001:db8::1' })
     expect(readProbeAgentAddress('VPS.Example.com').ok).toBe(true)
     expect(readProbeAgentAddress('not an address').ok).toBe(false)
@@ -49,11 +49,11 @@ describe('what a probe agent is added with', () => {
   })
 
   it('needs a name', () => {
-    expect(readProbeAgentInput({ address: '100.84.12.7' }).ok).toBe(false)
-    expect(readProbeAgentInput({ name: 'x'.repeat(61), address: '100.84.12.7' }).ok).toBe(false)
-    expect(readProbeAgentInput({ name: 'Germany VPS', address: '100.84.12.7' })).toEqual({
+    expect(readProbeAgentInput({ address: '100.64.0.7' }).ok).toBe(false)
+    expect(readProbeAgentInput({ name: 'x'.repeat(61), address: '100.64.0.7' }).ok).toBe(false)
+    expect(readProbeAgentInput({ name: 'Germany VPS', address: '100.64.0.7' })).toEqual({
       ok: true,
-      value: { name: 'Germany VPS', address: '100.84.12.7', port: 7380 },
+      value: { name: 'Germany VPS', address: '100.64.0.7', port: 7380 },
     })
   })
 })
