@@ -15,9 +15,10 @@ sidebar should be able to guess the path before searching for it.
 | `probe-agent/` | The probe agent's own program (its server, certificate, installer). It runs the probe code from `src/lib`. See [probe-agents.md](probe-agents.md). |
 | `scripts/` | Programs run by hand or by CI: the probe agent build, version numbering, the standalone prober. A script's test sits beside it. |
 | `docker/` | Dockerfiles, their `.dockerignore` files, and what the images install. |
-| `docs/` | Guides for people running ClearPing, and this one. |
+| `docs/` | Guides for people running ClearPing, and this one. Screenshots are in `docs/screenshots/`, taken from made-up demo data, never a real install. |
 | `public/` | Files served as they are: icons, the service worker, the offline page. |
 | `compose.example.yaml`, `compose.probe-agent.example.yaml` | At the top on purpose: the README tells people to download them by their URL. Do not move them. |
+| `README.md`, `CONTRIBUTING.md`, `.env.example` | What someone finds first: what ClearPing is and how to run it, how to change it, and every setting. |
 | `data/`, `dist/`, `.next/` | Made while running or building, never committed. |
 
 Nothing else belongs at the top level besides the config files the tools

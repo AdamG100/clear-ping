@@ -5,7 +5,7 @@
 # gives the token this needs and the line to run:
 #
 #   curl -fsSL https://github.com/adamg100/clear-ping/releases/latest/download/install-probe-agent.sh \
-#     | sudo CLEARPING_PROBE_AGENT_TOKEN=cpa_… CLEARPING_PROBE_AGENT_LISTEN=100.84.12.7:7380 sh
+#     | sudo CLEARPING_PROBE_AGENT_TOKEN=cpa_… CLEARPING_PROBE_AGENT_LISTEN=100.64.0.7:7380 sh
 #
 # Run it again to update: without a token it keeps the one already set up.
 # Run it with `uninstall` to take it all off again: the service, the program,

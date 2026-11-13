@@ -6,11 +6,11 @@ New to the words ClearPing uses? They are [at the end of this page](#words-used-
 network at a glance. It runs from what matters most to what matters least, and
 every problem on it is one click from the monitor it was on.
 
-![The overview, with one monitor not answering and one losing packets](screenshots/overview.jpg)
+![The overview, with one monitor not answering and a probe agent offline](screenshots/overview.jpg)
 
 ## What is on it
 
-- **A summary** under the title: how many monitors are probed from this server
+- **A summary** under the title: how many monitors are measured by the local probe
   and from probe agents, and how many are paused. If anything is wrong, a card
   under it says so, and which monitors.
 - **Four figures.** *Answering now* (of the monitors being probed), *Up all

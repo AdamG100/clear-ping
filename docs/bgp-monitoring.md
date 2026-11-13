@@ -17,9 +17,9 @@ ClearPing asks nothing of RIPE or PeeringDB.
   reads every peer's route from RIPEstat (stat.ripe.net) and follows each
   change live from RIS Live (ris-live.ripe.net).
 - **Your networks' routes:** many ISPs share their routes with RIS too. The
-  routes of your networks (this server's, and each probe agent's) are picked
+  routes of your networks (the local probe's, and each probe agent's) are picked
   out from the rest.
-- **Your traffic:** traceroutes into the prefix from this server and from each
+- **Your traffic:** traceroutes into the prefix from the local probe and from each
   probe agent. Each hop's address is checked against the exchanges' peering
   LANs from PeeringDB (peeringdb.com), which names the exchange the traffic
   crosses, and against the members' addresses on the exchanges from IXPDB
@@ -55,7 +55,7 @@ then:
 - reads the routes afresh whenever the connection to RIS Live comes back, and
   every half hour, so nothing missed while it was down stays wrong.
 
-**Your network**, on the Routing page, is the AS number of this server's ISP,
+**Your network**, on the Routing page, is the AS number of the local probe's ISP,
 or your own (for example AS64500). Left unset, it is found the way a probe
 agent's is: the network of the first hop on the internet in its traces.
 
@@ -113,13 +113,13 @@ wait again.
 
 ## The prefix's page
 
-- **From your networks:** a card for each place you look from: this server,
+- **From your networks:** a card for each place you look from: the local probe,
   and each of your probe agents, with a timeline of what was seen from there,
   newest first, by day. Above them, a chip for each probe agent says which are
   looked from: choose one to leave it out (it is no longer traced from, and its
   network is no longer marked) or to take it back in. Every probe agent is in
   until left out, one added later too.
-  - **Its network:** set for this server, or found from its traces (the
+  - **Its network:** set for the local probe, or found from its traces (the
     network of the first hop on the internet).
   - **Its traffic's way in:** the networks its newest trace passed through, its
     own first.
@@ -158,7 +158,7 @@ wait again.
     the monitors' traceroute history. A probe agent that is offline is skipped.
 - **At the exchanges:** the exchanges anywhere in the world on the way to the
   prefix from your own networks: along your ISPs' routes (where they share
-  them with RIS) and the way your traceroutes went, from this server and each
+  them with RIS) and the way your traceroutes went, from the local probe and each
   probe agent. Where two networks next to each other on that way are both
   members of an exchange, by PeeringDB, they probably meet there; where they
   share two or three in one country, all are named ("NAPAfrica IX
@@ -167,7 +167,7 @@ wait again.
   crosses its peering LAN is marked "Your traceroute crosses it". With none
   on the way, there is no such section.
 - **Yours, across the page:** your networks' routes are marked by whose they
-  are, "Your ISP" for this server's network and each probe agent by name (two
+  are, "Your ISP" for the local probe's network and each probe agent by name (two
   on one network share a mark), in Where it is seen, Who carries it, the paths
   (each drawn as a dashed line over the bands, "Your ISP" in the text colour
   and each probe agent in a colour and dash of its own, with a key beneath),

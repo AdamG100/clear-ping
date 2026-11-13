@@ -66,8 +66,7 @@ docker build -f docker/Dockerfile -t clearping .
 docker run -d --name clearping -p 3000:3000 -v clearping-data:/data clearping
 ```
 
-Or pull the one GitHub builds on every push to `main`
-(`.github/workflows/docker.yml`):
+Or pull the published image, built for every release:
 
 ```bash
 docker run -d --name clearping -p 3000:3000 -v clearping-data:/data ghcr.io/adamg100/clear-ping:latest
@@ -89,9 +88,9 @@ matches the machine. 32-bit ARM is not supported.
 - The settings in the table below are passed with `-e`, for example
   `-e CLEARPING_RETENTION_DAYS=30`.
 
-`compose.example.yaml` in the repository root is the same thing as a Compose
-file, set up to sit behind Traefik. Copy it to `compose.yaml` and change the
-hostname and network to yours.
+[compose.example.yaml](../compose.example.yaml) in the repository root is the
+same thing as a Compose file. To serve it over HTTPS behind Caddy, nginx,
+Traefik, a Cloudflare Tunnel or Tailscale, see [reverse-proxy.md](reverse-proxy.md).
 
 The container runs as uid 1000. When Compose mounts `./data`, Docker creates
 that folder as root if it is not already there, and ClearPing cannot create
@@ -120,9 +119,11 @@ that device; the browser's own menu still installs it:
 only run the part that works offline, on a secure address: `https://`, or
 `localhost` on the machine itself. Reached as `http://192.168.1.10:3000` the
 app works exactly as it does in a tab, but there is no *Install*, only a plain
-shortcut, and on Android the card says so instead of offering. Put it behind a reverse proxy with a certificate
-(`compose.example.yaml` does this with Traefik) or a tunnel that provides one.
+shortcut, and on Android the card says so instead of offering. Put it behind a reverse proxy with a certificate,
+or a tunnel that provides one ([reverse-proxy.md](reverse-proxy.md)).
 iOS adds it to the home screen over plain HTTP as well.
+
+![ClearPing on a phone: the Overview](screenshots/phone.jpg)
 
 Installed, the app still needs the server: every reading is fetched live, and
 none are kept on the device. When the server cannot be reached it says so on a
@@ -145,23 +146,12 @@ What makes it installable, for anyone changing it:
 
 ## Versions
 
-Every push to `main` that builds is a deployment with a number of its own,
-`MAJOR.MINOR.PATCH`: one more than the last release. It is a patch unless a
-commit going out asks for more, with a line at the end of its message:
-
-```
-Release: minor      something new a user would notice
-Release: major      an upgrade that needs the user to do something
-```
-
-The biggest one asked for among the commits since the last release wins, so
-several features pushed together still make one minor release. Nothing has to
-be tagged or edited by hand; `node scripts/next-version.mjs --explain` says
-what a push would come out as. `package.json`'s version is only a floor:
-setting it higher makes that the next version. CI bakes the number
-into the image, tags the image with it (`ghcr.io/adamg100/clear-ping:0.1.4`
-beside `:latest`), and makes a GitHub release `v0.1.4` listing what changed.
-To go back to an earlier one, run its tag instead of `:latest`.
+Every release has a number of its own, `MAJOR.MINOR.PATCH`, and a GitHub
+release `v1.2.3` listing what changed. The image is tagged with it
+(`ghcr.io/adamg100/clear-ping:1.2.3`) beside `:latest`; to stay on one
+version, or go back to an earlier one, run its tag instead of `:latest`. A
+minor release adds something new; a major one needs you to do something before
+updating, and its patch notes say what.
 
 The dashboard shows the version it is running beside the ClearPing name at the
 top of the sidebar, and every quarter of an hour asks the registry what
@@ -301,37 +291,11 @@ wrong.
 
 ## Configuration
 
-See `.env.example`. All settings are optional.
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `CLEARPING_DB_PATH` | `./data/clearping.db` | Database location |
-| `CLEARPING_RETENTION_DAYS` | `90` | Measurement retention; `0` keeps everything |
-| `TZ` | unset | Time zone for every time ClearPing shows or sends (IANA name, e.g. `Europe/London`); unset, each viewer sees their own |
-| `CLEARPING_EXTERNAL_PROBER` | unset | `1` stops the web app scheduling probes |
-| `CLEARPING_LOG_READINGS` | unset | `1` logs every reading; otherwise only those that lost something are logged |
-| `CLEARPING_APPRISE_BIN` | `apprise` | The Apprise program that sends alerts, when it is not on the `PATH` |
-| `CLEARPING_UPDATE_CHECK` | on | `off` stops the quarter-hourly check for a newer image (see [Versions](#versions)) |
-| `CLEARPING_AUTH` | unset | `off` turns sign-in off whatever the dashboard says, and lets a new account be made ([security.md](security.md#locked-out)) |
-| `CLEARPING_SETUP_CODE` | made at start-up, written to the log | What the first account asks for besides a password |
-| `CLEARPING_ALLOWED_HOSTS` | unset | Comma-separated hostnames ClearPing answers to; a request addressed to another name is refused. Unset, a public domain is answered only with sign-in on ([security.md](security.md#before-anyone-can-reach-it)) |
-| `CLEARPING_TRUST_PROXY` | `0` | How many proxies in front of ClearPing add to `X-Forwarded-For` (`1` for Traefik) |
-| `CLEARPING_MCP_TOKEN` | unset | The single assistant token from before keys were made in the dashboard ([mcp.md](mcp.md)) |
-| `CLEARPING_MCP_ALLOW_HTTP` | unset | `1` takes an assistant's token over plain HTTP from anywhere ([mcp.md](mcp.md)) |
-| `CLEARPING_PEERINGDB_API_KEY` | unset | A PeeringDB API key, for Routing ([bgp-monitoring.md](bgp-monitoring.md)) |
-| `CLEARPING_DEV_USER` | unset | `off` stops `npm run dev` signing every page in as `dev` |
+Every setting is an environment variable, and all are optional. The full list
+is in the [README](../README.md#configuration); running from source,
+[.env.example](../.env.example) has them with notes.
 
 ## Development
 
-```bash
-npm test          # unit and integration tests
-npm run typecheck
-npm run lint
-```
-
-The tests cover the parts where a silent mistake is most costly: `ping` output
-parsing for all three platforms, the statistics queries, the chart series
-builder, and the alert state machine. They use a temporary SQLite file and a
-local HTTP server; nothing touches the network or your real database. The tests
-that send a notification through the real Apprise, to that local server, run
-when Apprise is installed and are skipped when it is not.
+Running it from source for changing it, and the tests, are in
+[CONTRIBUTING.md](../CONTRIBUTING.md).
