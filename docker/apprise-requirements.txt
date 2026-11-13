@@ -41,8 +41,9 @@ markdown==3.11.2 \
 oauthlib==4.0.1 \
     --hash=sha256:3d73febdb6faa00f277c81fb04be7b7586fb96fc3b7f0b9c772dada69a25ede7 \
     --hash=sha256:498a298876e996301950a5b053d12c31628bb7b895db03666430c69ce182eb61
-paho-mqtt==2.1.0 \
-    --hash=sha256:6db9ba9b34ed5bc6b6e3812718c7e06e2fd7444540df2455d2c51bd58808feee
+paho-mqtt==2.2.0 \
+    --hash=sha256:3243630f7c2b05f71d1de8c6f59865eb04d3a59ae8c866e92377faed6753db4d \
+    --hash=sha256:bcf706f03f1f49e0fc3ae166dc7b67ee35463496f8bdfd7c9c36181f6ba635c9
 pgpy==0.6.0 \
     --hash=sha256:279c2e353f4c3a319f00bd9bd582456e420f8a3ac6de2b4e9731444746828383
 pyasn1==0.6.5 \
