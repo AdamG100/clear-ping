@@ -27,12 +27,14 @@ updates:
       cronjob: "0 3 */2 * *"
     open-pull-requests-limit: 10
     groups:
-      npm-updates:
-        applies-to: version-updates
-        update-types: [minor, patch]
       npm-major:
         applies-to: version-updates
         update-types: [major]
+      # Everything else, including updates Dependabot can't classify, such as a
+      # range like >=2.31.0 being raised. A dependency joins the first group it fits.
+      npm-updates:
+        applies-to: version-updates
+        patterns: ["*"]
       npm-security:
         applies-to: security-updates
         patterns: ["*"]
