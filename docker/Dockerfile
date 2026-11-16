@@ -29,7 +29,7 @@
 # the tag in the FROM line says which Node and Debian it is.
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
-FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS deps
+FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS deps
 WORKDIR /app
 
 # sqlite3 downloads a prebuilt binary and only compiles when there is none for
@@ -95,7 +95,7 @@ RUN found="$(find .next/standalone .next/static public -path '*/node_modules' -p
     fi
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
-FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS runtime
+FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS runtime
 
 # The programs the probes run, and Python for Apprise. Nothing else is needed
 # at run time.
