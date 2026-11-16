@@ -1,0 +1,128 @@
+name: Dependency updates
+
+# Dependabot looks for newer npm packages every two days (.github/dependabot.yml)
+# and gathers them into a pull request per group: minor and patch updates, major
+# updates, and security fixes. Once the checks have passed on one, this decides
+# whether to merge it:
+#
+#   security fixes    merged straight away
+#   other updates     merged once the pull request holds at least MIN_UPDATES
+#                     packages, or one of them has been out MAX_WAIT_DAYS days.
+#                     Until then it stays open and Dependabot adds to it.
+#
+# It also runs on its own every two days, to look again at the ones waiting.
+# A pull request whose checks failed is never merged: it stays open for a person.
+# Nothing from a pull request is checked out or run here.
+
+on:
+  workflow_run:
+    workflows: [Checks, Docker image]
+    types: [completed]
+  schedule:
+    - cron: "30 5 */2 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: dependency-updates
+
+env:
+  MIN_UPDATES: 3
+  MAX_WAIT_DAYS: 14
+  # Every one of these must have passed on the pull request's latest commit.
+  CHECK_WORKFLOWS: checks.yml docker.yml
+  # Started on the default branch after a merge, since a merge made with this
+  # job's token starts no workflow by itself. Empty when nothing needs starting.
+  DEPLOY_WORKFLOW: "docker.yml"
+  DEPLOY_ARGS: "-f force=false"
+
+jobs:
+  merge:
+    name: Merge the updates that are ready
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       startsWith(github.event.workflow_run.head_branch, 'dependabot/npm_and_yarn/'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+
+    steps:
+      - name: Merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -uo pipefail
+
+          passed() {
+            [ "$(gh run list --workflow "$1" --commit "$2" --event pull_request --limit 1 \
+              --json conclusion --jq '.[0].conclusion // ""')" = success ]
+          }
+
+          if [ -n "$BRANCH" ]; then
+            prs=$(gh pr list --head "$BRANCH" --state open --json number,author \
+              --jq '.[] | select(.author.login == "app/dependabot" or .author.login == "dependabot") | .number')
+          else
+            prs=$(gh pr list --state open --limit 100 --json number,author,headRefName \
+              --jq '.[] | select((.author.login == "app/dependabot" or .author.login == "dependabot") and (.headRefName | startswith("dependabot/npm_and_yarn/"))) | .number')
+          fi
+
+          merged=false
+          now=$(date +%s)
+          for pr in $prs; do
+            info=$(gh pr view "$pr" --json headRefOid,title,baseRefName)
+            sha=$(jq -r .headRefOid <<< "$info")
+            title=$(jq -r .title <<< "$info")
+            [ "$(jq -r .baseRefName <<< "$info")" = "$DEFAULT_BRANCH" ] || continue
+
+            for workflow in $CHECK_WORKFLOWS; do
+              if ! passed "$workflow" "$sha"; then
+                echo "#$pr waits: $workflow has not passed on ${sha::7}."
+                continue 2
+              fi
+            done
+
+            case "$title" in
+              *"npm-updates group"*|*"npm-major group"*)
+                # The packages and versions, from Dependabot's commit message.
+                message=$(gh api "repos/$GH_REPO/commits/$sha" --jq .commit.message)
+                updates=$(awk '/^- dependency-name: /{n=$3} /^  dependency-version: /{print n, $2}' <<< "$message")
+                count=$(grep -c . <<< "$updates" || true)
+
+                # How long the oldest of them has been out.
+                oldest=$now
+                while read -r name version; do
+                  [ -n "$name" ] || continue
+                  published=$(npm view "$name" time --json 2>/dev/null | jq -r --arg v "$version" '.[$v] // empty')
+                  [ -n "$published" ] || continue
+                  at=$(date -d "$published" +%s)
+                  [ "$at" -lt "$oldest" ] && oldest=$at
+                done <<< "$updates"
+                days=$(( (now - oldest) / 86400 ))
+
+                if [ "$count" -lt "$MIN_UPDATES" ] && [ "$days" -lt "$MAX_WAIT_DAYS" ]; then
+                  echo "#$pr waits: $count update(s), the oldest out $days day(s). Merged at $MIN_UPDATES updates or $MAX_WAIT_DAYS days."
+                  continue
+                fi
+                reason="$count update(s), the oldest out $days day(s)"
+                ;;
+              *)
+                reason="a security fix"
+                ;;
+            esac
+
+            echo "Merging #$pr ($reason): $title"
+            if gh pr merge "$pr" --squash --delete-branch --match-head-commit "$sha"; then
+              merged=true
+            fi
+          done
+
+          if [ "$merged" = true ] && [ -n "$DEPLOY_WORKFLOW" ]; then
+            # shellcheck disable=SC2086
+            gh workflow run "$DEPLOY_WORKFLOW" --ref "$DEFAULT_BRANCH" $DEPLOY_ARGS
+          fi

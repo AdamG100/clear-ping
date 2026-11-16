@@ -16,3 +16,27 @@ updates:
     directory: /docker
     schedule:
       interval: weekly
+  # npm packages, looked at every two days. New versions are gathered into one
+  # pull request per group, which waits until it is worth merging
+  # (workflows/dependency-updates.yml). Security fixes come as their own group
+  # and are merged as soon as they pass.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "0 3 */2 * *"
+    open-pull-requests-limit: 10
+    groups:
+      npm-updates:
+        applies-to: version-updates
+        update-types: [minor, patch]
+      npm-major:
+        applies-to: version-updates
+        update-types: [major]
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
+    ignore:
+      # The types follow the Node.js the app runs on, which stays on 26.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
