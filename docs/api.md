@@ -27,9 +27,11 @@ in its place and stops the old one at once. See
 | `GET /api/monitors/merge`, `POST /api/monitors/merge` | Monitors set up once for each probe, and putting them together (`{ keep, merge: [...] }`) |
 | `GET /api/monitors/:id/measurements` | Its readings, bucketed for a chart (`?hours=` or `?start=&end=`) |
 | `GET /api/monitors/:id/loss` | Its packet loss analysis over the same period: pattern, hour of day, other monitors that lost packets at the same time, likely source (`&tz=` for the hours) |
+| `GET /api/monitors/:id/network` | Who runs the address it is measured at: its network (ASN and registered name) and the internet exchange it is on (`?probe=&family=`); nothing while Settings → Privacy has looking it up off, or for a private address |
 | `GET`, `POST /api/monitors/:id/traceroute` | Its saved routes; trace it now, over `{"family": "ipv4" \| "ipv6" \| "both"}` if given |
 | `DELETE /api/monitors/:id/traceroute` | Delete one saved route (`?trace=id`) or all but the newest (`?older=1`) |
 | `PUT /api/monitors/reorder` | Save the order of monitors or of groups |
+| `GET /api/monitors/reorder` | The saved order of the groups |
 | `POST /api/groups` | Make a group (`{ group }`, a path such as `Home/Network`) |
 | `PUT /api/groups` | Rename a group or move it inside another (`{ from, to }`) |
 | `DELETE /api/groups` | Delete a group (`{ group }`); what was in it moves up a level |
@@ -40,6 +42,7 @@ in its place and stops the old one at once. See
 | `PATCH`, `DELETE /api/alerts/:id` | Change or delete one |
 | `GET /api/alerts/:id/events` | Its history: each fire and clear, and why |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
+| `DELETE /api/alerts/:id/traces` | Delete the routes this alert traced; ones traced by hand or by another alert are kept |
 | `GET /api/probe-agents` | The probe agents monitors can be probed from, and whether each can be reached. A monitor's `probeAgentId` says which it uses (`null` for the local probe), and is set the same way in `POST` and `PATCH /api/monitors` |
 | `/api/security/probe-agents/…` | Add, change and remove probe agents, connect to one (`…/:id/connect`) and make it a new token (`…/:id/token`); admins only ([docs/probe-agents.md](probe-agents.md)) |
 | `GET /api/bgp` | BGP monitoring: whether it is on, the connection to RIS Live, and every watched prefix with how it stands ([docs/bgp-monitoring.md](bgp-monitoring.md)) |
@@ -48,17 +51,27 @@ in its place and stops the old one at once. See
 | `GET`, `POST`, `PATCH`, `DELETE /api/bgp/:id` | One watched prefix in full, with every update and how your network reaches it; trace into it now from the local probe and each probe agent (`POST`); rename it (`{ label }`) or take how it is carried now as normal (`{ acceptNormal: true }`); stop watching it |
 | `GET /api/overview` | The last 24 hours for the Overview: each monitor's uptime, the events with where each fault lay, and how many monitors had trouble in each quarter of an hour |
 | `GET /api/scheduler/status` | Whether the scheduler is running and when each monitor is next due |
+| `POST /api/scheduler/start` | Start the scheduler if it has stopped; refused (`409`) where a separate process does the probing (`CLEARPING_EXTERNAL_PROBER=1`) |
+| `GET /api/game-ping` | The games Game Server Ping knows; `GET /api/game-ping/:game` one game's regions ([game-server-ping.md](game-server-ping.md)) |
+| `GET /api/game-ping/:game/test?region=&probe=` | Ping one region of a game from one probe. Only the regions in the list can be reached this way, and nothing is kept |
 | `GET /api/health` | Whether the server is up; open even with sign-in on |
 | `POST /api/auth/login`, `/register`, `/logout`; `GET /api/auth/status` | Signing in and out ([docs/security.md](security.md)) |
 | `POST /api/auth/password-reset` | A forgotten password: the primary account's code from the server log, or the code in a password link ([docs/security.md](security.md#forgotten-password)) |
 | `POST /api/auth/two-factor`, `/passkey` | The code after a password, and signing in with a passkey ([docs/security.md](security.md#second-factors)) |
 | `/api/security/…` | Sign-in switches, keys, accounts and their roles (`PATCH /api/security/users/:id`), another account's password or a password link for it (`…/users/:id/password`, `…/users/:id/link`), single sign-on, the activity record, and your own second factors (`/api/security/me`); signed in only, and most of it for admins ([docs/security.md](security.md#roles)) |
+| `POST /api/security/keys`, `POST …/keys/:id/reroll`, `DELETE …/keys/:id` | Make a key (`{ name, access: "read" \| "write", expiresInDays? }`), make a new one in its place, or revoke one. The key is in the answer once and never again ([security.md](security.md#keys)) |
+| `GET /api/security/activity` | Who changed what, newest first (`?limit=&before=`) ([security.md](security.md#activity)) |
+| `PUT /api/security/password` | Change your own password (`{ current, password }`); signs you out everywhere else |
+| `PUT /api/security/sso`, `POST …/sso/test`, `DELETE …/sso/link` | Set up single sign-on, check an issuer can be reached, and stop your own account signing in through it ([security.md](security.md#single-sign-on-with-authentik)) |
+| `PATCH /api/security/probes/local`, `…/probes/heartbeat`; `GET`, `PATCH …/probes/places` | Name the local probe (`{ name }`), how long a probe agent may be silent before it counts as offline (`{ offlineAfterMinutes }`, 1 to 60), and where each probe is (`{ probe, region?, network? }`), which alerts use to ask for a problem seen from several places |
 | `GET /api/auth/sso/start`, `/callback` | Signing in with Authentik or another OpenID Connect provider |
 | `POST /api/auth/sso/logout` | Where the provider says someone signed out there (back-channel logout) |
 | `GET`, `PUT /api/privacy` | The privacy settings, and whether addresses are hidden from whoever asks; changed by admins only ([docs/security.md](security.md#privacy)) |
 | `GET`, `PUT`, `POST /api/maintenance` | The maintenance schedule, its last runs and any run under way; change the schedule (`PUT`) or run it now (`POST`); admins only ([docs/running.md](running.md#maintenance)) |
 | `GET /api/release-notes` | What changed in each version up to the one running, newest first |
 | `GET /api/version` | The version, commit and build time running, the same for the newest published image, and whether that is an update |
+| `GET /api/upgrade`, `POST /api/upgrade/retry` | What opening the database is doing while it is upgraded, and trying again after it failed; open without signing in, since nobody can sign in until it is done |
+| `GET /api/upgrade/history` | The upgrades this database has had: when, from which version to which, and how long each took |
 | `POST /api/mcp` | The MCP server an AI assistant connects to; `GET /api/mcp/info` says whether it asks for a token |
 
 ## Names from before

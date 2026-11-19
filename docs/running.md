@@ -260,17 +260,17 @@ them. A run goes through these steps, in order:
 4. **Alert ticks for monitors or alerts that no longer exist**: removed.
 5. **Groups and their saved order**: a group a monitor is in is restored if it
    went missing, and the saved position of a group that is gone is dropped.
-6. **Monitors marked as probed in the future**: a clock that was wrong and then
+6. **Monitors marked as measured in the future**: a clock that was wrong and then
    corrected leaves a last-probe time that is still to come, and the monitor is
    not probed until it arrives. They are made due now.
-7. **Measurements and routes past their retention**
+7. **Readings and routes past their retention**
    (`CLEARPING_RETENTION_DAYS`).
 8. **Database upkeep**: folds the write-ahead log back in and refreshes the
    statistics queries are planned by. With **Reclaim disk space** on, and at
    least a fifth of the file (and 20 MB) empty, it also rewrites the file to
    give the space back. That is off by default: nothing can write while it runs, so probes
    wait, and it needs room for a second copy.
-9. **Probe scheduler**: reloads its list, so what is probed is what is in the
+9. **Reading scheduler**: reloads its list, so what is probed is what is in the
    database.
 
 Each step stands alone: one that fails is reported and the rest still run.

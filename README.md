@@ -323,6 +323,7 @@ The guides are also on the [wiki](https://github.com/AdamG100/clear-ping/wiki).
 
 
 - [docs/overview.md](docs/overview.md): the Overview, and how it tells where a fault lay
+- [docs/monitors.md](docs/monitors.md): adding a monitor, its page, pausing, deleting and sharing
 - [docs/running.md](docs/running.md): running it, Docker, installing it as an app, maintenance, versions and upgrading
 - [docs/reverse-proxy.md](docs/reverse-proxy.md): HTTPS with Caddy, nginx, Traefik, Cloudflare Tunnel or Tailscale
 - [docs/automatic-probing.md](docs/automatic-probing.md): what each kind of check measures, groups, comparisons, traceroute

@@ -20,6 +20,7 @@ const RAW = 'https://raw.githubusercontent.com/AdamG100/clear-ping/main'
 /** Each guide, in the order the sidebar lists them, with its wiki page name and what it is about. */
 export const PAGES = [
   { file: 'overview.md', page: 'The-Overview', about: 'the Overview, and how it tells where a fault lay' },
+  { file: 'monitors.md', page: 'Monitors', about: "adding one, a monitor's page, pausing, deleting, and sharing them with another ClearPing" },
   { file: 'running.md', page: 'Running-ClearPing', about: 'running it, Docker, installing it as an app, maintenance, versions and upgrading' },
   { file: 'reverse-proxy.md', page: 'Behind-a-Reverse-Proxy', about: 'HTTPS with Caddy, nginx, Traefik, Cloudflare Tunnel or Tailscale' },
   { file: 'automatic-probing.md', page: 'Automatic-Probing', about: 'what each kind of check measures, groups, comparisons, traceroute' },
