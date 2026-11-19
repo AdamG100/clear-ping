@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAlert, sendTestAlert } from '@/lib/alerts/store';
 import { getTargetById } from '@/lib/db/database';
 import { initializeServer } from '@/lib/init';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * POST /api/alerts/:alertId/test - Send the alert's notification URLs a sample message
@@ -9,7 +10,7 @@ import { initializeServer } from '@/lib/init';
  * Worded as the alert firing on the first target it is ticked for, and marked
  * as a test. Nothing about the alert's own state changes.
  */
-export async function POST(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
+async function handlePOST(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
   try {
     await initializeServer();
 
@@ -30,3 +31,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'Failed to send test alert' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const POST = eitherNames(handlePOST)

@@ -4,13 +4,14 @@ import { purgeAlertTraces } from '@/lib/traceroute/store';
 import { initializeServer } from '@/lib/init';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * DELETE /api/alerts/:alertId/traces - Delete the routes this alert has taken
  *
  * A route traced by hand is kept. So is a route taken by a different alert.
  */
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
+async function handleDELETE(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
   try {
     await initializeServer();
 
@@ -27,3 +28,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return NextResponse.json({ error: 'Failed to delete the saved routes' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const DELETE = eitherNames(handleDELETE)

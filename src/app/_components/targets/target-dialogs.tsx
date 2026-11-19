@@ -844,7 +844,7 @@ export function TargetForm({ idPrefix, initial, availableGroups, submitLabel, on
         <FormSection
           number={1}
           tone="neutral"
-          title="Target"
+          title="Address"
           hint="A hostname, an IP address, host:port or a whole URL. A port or path moves into the check's settings."
         >
           {addressField}

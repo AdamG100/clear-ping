@@ -10,6 +10,7 @@ import { isWithinGroup, normalizeGroupPath } from '@/lib/targets/group-path';
 import { probeIdsOf } from '@/lib/targets/probes';
 import { changedResolvers, probesLeftWithout, type ResolverProbeChange } from '@/lib/targets/resolver-probes';
 import type { DnsProtocol } from '@/types/probe';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 function readChange(raw: unknown): ResolverProbeChange | null {
   const { protocol, server, probe, asked } = (raw ?? {}) as Record<string, unknown>;
@@ -26,7 +27,7 @@ function readChange(raw: unknown): ResolverProbeChange | null {
  * resolver. Refused, with the monitors named, if any of their probes would be
  * left with no resolver to ask; nothing is changed then.
  */
-export async function PATCH(request: NextRequest) {
+async function handlePATCH(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -77,3 +78,6 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Could not change which probes ask which resolvers' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const PATCH = eitherNames(handlePATCH)

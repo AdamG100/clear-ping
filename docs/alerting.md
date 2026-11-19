@@ -325,13 +325,13 @@ they did. A firing one is still firing and does not announce itself again.
 |---|---|
 | `GET /api/alerts` | Every alert, with the state of each ticked monitor |
 | `POST /api/alerts` | Create one |
-| `PATCH /api/alerts/:id` | Change one; `targetIds` replaces the ticked set (and only those entries of its scope), `scope` replaces all of it, `enabled` mutes |
+| `PATCH /api/alerts/:id` | Change one; `monitorIds` replaces the ticked set (and only those entries of its scope), `scope` replaces all of it, `enabled` mutes |
 | `GET /api/alerts/:id/events` | Its history: each fire and clear, with the conditions and probes behind it (`?limit=`) |
 | `DELETE /api/alerts/:id` | Delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
 
 An alert is created with `metric`, `threshold`, `consecutiveProbes`,
-`targetIds`, and optionally `conditions` (a list of `{ metric, threshold,
+`monitorIds` (or the older `targetIds`), and optionally `conditions` (a list of `{ metric, threshold,
 clearThreshold?, window? }`, the first of which is also `metric` and
 `threshold`), `combine` (`"any"`, `"all"` or `{ atLeast: n }`), `forMinutes`,
 `clearAfter`, `policy` (`"any"`, `"all"`, `{ kind: "atLeast", count }` or

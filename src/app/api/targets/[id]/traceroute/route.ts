@@ -61,7 +61,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     const target = await getTargetById(id);
     if (!target) {
-      return NextResponse.json({ error: 'Target not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Monitor not found' }, { status: 404 });
     }
 
     const body: unknown = await request.json().catch(() => ({}));

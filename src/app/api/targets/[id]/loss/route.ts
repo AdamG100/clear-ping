@@ -22,7 +22,7 @@ export async function GET(
 
     const { id } = await params;
     const target = await getTargetById(id);
-    if (!target) return NextResponse.json({ error: 'Target not found' }, { status: 404 });
+    if (!target) return NextResponse.json({ error: 'Monitor not found' }, { status: 404 });
 
     const { searchParams } = new URL(request.url);
     const window = windowFromQuery(searchParams);

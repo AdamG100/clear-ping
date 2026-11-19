@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { initializeServer } from '@/lib/init';
 import { getAlert } from '@/lib/alerts/store';
 import { getAlertEvents } from '@/lib/alerts/history';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * GET /api/alerts/[alertId]/events?limit= - An alert's history, newest first
@@ -9,7 +10,7 @@ import { getAlertEvents } from '@/lib/alerts/history';
  * Each time a monitor started or stopped firing: the conditions as they stood,
  * each probe's part in it, and why.
  */
-export async function GET(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
+async function handleGET(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
   try {
     await initializeServer();
     const { alertId } = await params;
@@ -21,3 +22,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Failed to read the alert’s history' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const GET = eitherNames(handleGET)

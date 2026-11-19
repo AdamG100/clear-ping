@@ -20,7 +20,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     await initializeServer();
     const { id } = await params;
     const target = await getTargetById(id);
-    if (!target) return NextResponse.json({ error: 'Target not found' }, { status: 404 });
+    if (!target) return NextResponse.json({ error: 'Monitor not found' }, { status: 404 });
 
     if (!(await getPrivacySettings()).lookUpNetworks) return NextResponse.json({ enabled: false, address: null, network: null });
 

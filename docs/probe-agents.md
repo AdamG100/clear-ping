@@ -29,7 +29,7 @@ from outside.
 
 ```
 Dashboard (home)                                   Probe agent (VPS)
-scheduler: a target's turn comes round
+scheduler: a monitor's turn comes round
    └─ HTTPS to the agent's port, its pinned certificate, its token ─▶  runs the probe
    ◀──────────────────────── the readings ────────────────────────────  (ping, TCP, game servers, HTTP, DNS, traceroute)
 stored, charted and alerted on like any other reading
@@ -215,7 +215,7 @@ agent exists. Tick more than one to compare them; the first you tick is the
 **primary** probe, the one the page opens on. With more than five, a search
 box narrows the list. The local probe is called *Local probe* until you name
 it for the place it is, under Settings, Probes. You can also set this from an
-assistant: `add_targets` and `update_target` take `probes`, and
+assistant: `add_monitors` and `update_monitor` take `probes`, and
 `list_probe_agents` lists them.
 
 Each probe keeps its own readings. A monitor with several probes has a switch

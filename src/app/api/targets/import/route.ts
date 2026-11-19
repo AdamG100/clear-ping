@@ -28,11 +28,11 @@ export async function POST(request: NextRequest) {
     const entries: unknown = body?.targets;
 
     if (!Array.isArray(entries) || entries.length === 0) {
-      return NextResponse.json({ error: 'No targets to import' }, { status: 400 });
+      return NextResponse.json({ error: 'No monitors to import' }, { status: 400 });
     }
     if (entries.length > MAX_SHARED_TARGETS) {
       return NextResponse.json(
-        { error: `At most ${MAX_SHARED_TARGETS} targets can be imported at once` },
+        { error: `At most ${MAX_SHARED_TARGETS} monitors can be imported at once` },
         { status: 400 }
       );
     }
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     for (const [index, entry] of entries.entries()) {
       const definition = validateTargetDefinition(entry);
       if (!definition.ok) {
-        return NextResponse.json({ error: `Target ${index + 1}: ${definition.error}` }, { status: 400 });
+        return NextResponse.json({ error: `Monitor ${index + 1}: ${definition.error}` }, { status: 400 });
       }
       const named: unknown = (entry as { probes?: unknown } | null)?.probes;
       const names = Array.isArray(named) ? named.filter((name): name is string => typeof name === 'string').slice(0, 50) : [];
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error importing targets:', error);
     return NextResponse.json(
-      { error: 'Failed to import targets' },
+      { error: 'Failed to import monitors' },
       { status: 500 }
     );
   }

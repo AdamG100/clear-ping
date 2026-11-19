@@ -71,7 +71,7 @@ and the Overview can tell a fault inside your network from one outside it.
 `GET /api/overview` answers the same as JSON: each monitor's uptime, the events
 with where each fault lay, and how many monitors were watched, down and losing
 packets in each quarter of an hour. What is going on right now is in
-`GET /api/targets?packetLoss=true`, which the sidebar uses too.
+`GET /api/monitors?packetLoss=true`, which the sidebar uses too.
 
 ## Words used throughout
 
@@ -80,7 +80,7 @@ these guides and what an assistant is told.
 
 | Word | What it is |
 |------|------------|
-| **Monitor** | One thing that is measured: an address, a web page, a game server, a DNS lookup. It has a name, a method, an interval, and sits in a group. The API and the assistant tools call it a *target*. |
+| **Monitor** | One thing that is measured: an address, a web page, a game server, a DNS lookup. It has a name, a method, an interval, and sits in a group. The API and the assistant tools call it a monitor too; they called it a *target* before, and still take that name. |
 | **Probe** | A place readings are taken from. A monitor can be measured from one or from several. |
 | **Probe agent** | A small ClearPing program on another machine that takes readings from there. It has nothing to do with AI agents. |
 | **Local probe** | The probe that is the machine the dashboard runs on. Always there, and called *Local probe* until you name it (Settings, Probes). |

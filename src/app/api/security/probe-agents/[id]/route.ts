@@ -14,6 +14,7 @@ import {
 import { getScheduler } from '@/lib/scheduler';
 import { requireAdmin } from '@/lib/security/http';
 import { recordActivity } from '@/lib/security/store';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * PATCH /api/security/probe-agents/:id - Rename a probe agent, or change where it is
@@ -22,7 +23,7 @@ import { recordActivity } from '@/lib/security/store';
  * A probe agent moved to another address keeps its pinned certificate: it is
  * the same agent, reached another way, and must still prove it.
  */
-export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
   await initializeServer();
@@ -69,7 +70,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
  * DELETE /api/security/probe-agents/:id?certificate=1 - Forget its certificate
  * instead, so the next connection pairs afresh.
  */
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
   await initializeServer();
@@ -100,3 +101,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   await recordActivity(user, 'dashboard', 'probe-agent.remove', existing.name);
   return NextResponse.json({ deleted: true });
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const PATCH = eitherNames(handlePATCH)
+export const DELETE = eitherNames(handleDELETE)

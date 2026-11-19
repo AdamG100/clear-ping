@@ -314,7 +314,7 @@ function HopTable({ trace }: { trace: Traceroute }) {
                 <span className={cn('hidden font-mono text-foreground @2xl/main:inline', state === 'destination' && 'font-medium')}>
                   <Masked value={hop.address} />
                 </span>
-                {state === 'destination' && <Badge tone="success" size="sm">Target</Badge>}
+                {state === 'destination' && <Badge tone="success" size="sm">Destination</Badge>}
               </span>
               {hop.hostname ? (
                 <span className="block break-all font-mono text-[11px] text-muted-foreground @2xl/main:hidden"><Masked value={hop.address} /></span>

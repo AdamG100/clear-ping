@@ -80,9 +80,8 @@ There is nothing else to install or run: it is part of the app.
 
 ## What an assistant can do
 
-A monitor is called a *target* in the tools and their arguments, which have not
-changed: `list_targets`, `add_targets`, `target`. A monitor measured from
-several probes takes `probes` (a list of probe names or ids, with `local`),
+The tools and their arguments speak of monitors: `list_monitors`,
+`add_monitors`, `monitor`. A monitor measured from several probes takes `probes` (a list of probe names or ids, with `local`),
 and the tools that read or measure take a `probe` to say which of them.
 
 As it comes, it can read and only read: no tool adds, changes, pauses or probes
@@ -91,10 +90,10 @@ where an alert is sent is usually a URL with a password in it.
 
 | Tool | What it returns |
 |---|---|
-| `list_targets` | Every monitor: its address, probe, group, whether it is inside the local network, and how its latest probe went |
+| `list_monitors` | Every monitor: its address, probe, group, whether it is inside the local network, and how its latest probe went |
 | `build_isp_report` | The evidence for a report to an ISP, in one call (below) |
 | `get_incidents` | Every outage and spell of loss in a period, across monitors, with what the other monitors were doing meanwhile |
-| `get_target_history` | One monitor in depth: its figures, its incidents, the gaps in monitoring, and how it did at each hour of the day |
+| `get_monitor_history` | One monitor in depth: its figures, its incidents, the gaps in monitoring, and how it did at each hour of the day |
 | `get_traceroutes` | Saved routes hop by hop, with the hop at which replies stopped |
 | `get_dns_resolvers` | For a DNS monitor that asks several resolvers: how each did, and what each last answered |
 
@@ -109,6 +108,14 @@ written out: gather the evidence, then write it up in the order an ISP's
 support desk needs it. It takes how many days to cover, the provider's name
 and the format wanted.
 
+### Names from before
+
+The tools used to speak of *targets*: `list_targets`, `get_target_history`,
+`add_targets`, `update_target` and `set_target_paused`, taking `target` and
+`targets`. Those names are still taken, so an assistant set up before keeps
+working, but they are no longer listed, and what comes back uses the monitor
+names (`monitor`, `monitors`, `monitorId`).
+
 ### Letting it change things
 
 Give an assistant a **read and write** key (Settings → Keys, see
@@ -116,9 +123,9 @@ Give an assistant a **read and write** key (Settings → Keys, see
 
 | Tool | What it does |
 |---|---|
-| `add_targets` | Starts monitoring new monitors, up to 50 at once |
-| `update_target` | Changes a monitor's name, group, interval, address, probe or settings |
-| `set_target_paused` | Stops probing a monitor, or starts again |
+| `add_monitors` | Starts monitoring new monitors, up to 50 at once |
+| `update_monitor` | Changes a monitor's name, group, interval, address, probe or settings |
+| `set_monitor_paused` | Stops probing a monitor, or starts again |
 | `probe_now` | Takes a reading straight away |
 | `run_traceroute` | Traces the route to a monitor now and saves it; `ip_version` traces a name over `ipv4`, `ipv6` or `both` |
 

@@ -116,7 +116,7 @@ With **Require sign-in** on:
   `Authorization: Bearer <key>` (or `X-API-Key: <key>`):
 
   ```bash
-  curl -H "Authorization: Bearer cp_…" https://ping.example.com/api/targets
+  curl -H "Authorization: Bearer cp_…" https://ping.example.com/api/monitors
   ```
 
 - The MCP address needs a key too: an open MCP address would hand out what
@@ -273,7 +273,7 @@ from ClearPing's routes like the rest of sign-in.
 | API: `GET` | yes | yes |
 | API: `POST`, `PATCH`, `PUT`, `DELETE` | no (`403`) | yes |
 | MCP: the tools that read | yes | yes |
-| MCP: `add_targets`, `update_target`, `set_target_paused`, `probe_now`, `run_traceroute` | no | yes |
+| MCP: `add_monitors`, `update_monitor`, `set_monitor_paused`, `probe_now`, `run_traceroute` | no | yes |
 | Settings | no | no |
 | Ever more than the account that made it | no | no |
 
