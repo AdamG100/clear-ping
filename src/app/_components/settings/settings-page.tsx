@@ -437,7 +437,7 @@ function KeysTab({ data, reload }: { data: Security; reload: () => void }) {
             language="bash"
             code={`claude mcp add --transport http clearping ${origin}/api/mcp --header "Authorization: Bearer ${made.key}"`}
           />
-          <CodeBlock filename="For a script" language="bash" code={`curl -H "Authorization: Bearer ${made.key}" ${origin}/api/targets`} />
+          <CodeBlock filename="For a script" language="bash" code={`curl -H "Authorization: Bearer ${made.key}" ${origin}/api/monitors`} />
           <Button type="button" size="sm" variant="secondary" onClick={() => setMade(null)}>
             Done, I have copied it
           </Button>

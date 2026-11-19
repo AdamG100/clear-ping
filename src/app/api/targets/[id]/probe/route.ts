@@ -14,7 +14,7 @@ export async function POST(
 
     if (!target) {
       return NextResponse.json(
-        { error: 'Target not found' },
+        { error: 'Monitor not found' },
         { status: 404 }
       );
     }

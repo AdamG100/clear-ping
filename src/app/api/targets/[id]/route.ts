@@ -23,7 +23,7 @@ export async function GET(
 
     if (!target) {
       return NextResponse.json(
-        { error: 'Target not found' },
+        { error: 'Monitor not found' },
         { status: 404 }
       );
     }
@@ -32,7 +32,7 @@ export async function GET(
   } catch (error) {
     console.error('Error fetching target:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch target' },
+      { error: 'Failed to fetch monitor' },
       { status: 500 }
     );
   }
@@ -133,7 +133,7 @@ export async function PATCH(
     if (updates.probeType !== undefined || updates.host !== undefined || body.probeConfig !== undefined) {
       const existing = await getTargetById(id);
       if (!existing) {
-        return NextResponse.json({ error: 'Target not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Monitor not found' }, { status: 404 });
       }
 
       const config = validateProbeConfig(
@@ -150,7 +150,7 @@ export async function PATCH(
     // Likewise the probe and the IP version: ARP set to IPv6 could only fail.
     if (updates.probeType !== undefined || updates.ipVersion !== undefined) {
       const existing = await getTargetById(id);
-      if (!existing) return NextResponse.json({ error: 'Target not found' }, { status: 404 });
+      if (!existing) return NextResponse.json({ error: 'Monitor not found' }, { status: 404 });
       const problem = ipVersionProblem(updates.probeType ?? existing.probeType, updates.ipVersion ?? existing.ipVersion);
       if (problem) return NextResponse.json({ error: problem }, { status: 400 });
     }
@@ -163,7 +163,7 @@ export async function PATCH(
 
     if (!updated) {
       return NextResponse.json(
-        { error: 'Target not found' },
+        { error: 'Monitor not found' },
         { status: 404 }
       );
     }
@@ -188,7 +188,7 @@ export async function PATCH(
   } catch (error) {
     console.error('Error updating target:', error);
     return NextResponse.json(
-      { error: 'Failed to update target' },
+      { error: 'Failed to update monitor' },
       { status: 500 }
     );
   }
@@ -209,7 +209,7 @@ export async function DELETE(
 
     if (!deleted) {
       return NextResponse.json(
-        { error: 'Target not found' },
+        { error: 'Monitor not found' },
         { status: 404 }
       );
     }
@@ -224,7 +224,7 @@ export async function DELETE(
   } catch (error) {
     console.error('Error deleting target:', error);
     return NextResponse.json(
-      { error: 'Failed to delete target' },
+      { error: 'Failed to delete monitor' },
       { status: 500 }
     );
   }

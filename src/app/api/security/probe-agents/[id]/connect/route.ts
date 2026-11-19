@@ -4,6 +4,7 @@ import { connectProbeAgent } from '@/lib/probe-agents/client';
 import { getProbeAgent } from '@/lib/probe-agents/store';
 import { requireAdmin } from '@/lib/security/http';
 import { recordActivity } from '@/lib/security/store';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * POST /api/security/probe-agents/:id/connect - Connect to a probe agent
@@ -14,7 +15,7 @@ import { recordActivity } from '@/lib/security/store';
  * agent logged. After that it is a test. Either way the answer says how it
  * went, with a 200, because "it is unreachable" is an answer, not an error.
  */
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
   await initializeServer();
@@ -37,3 +38,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
   return NextResponse.json({ outcome, probeAgent });
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const POST = eitherNames(handlePOST)

@@ -68,8 +68,8 @@ A few rules that keep ClearPing consistent:
 - **One word for one thing**, in the UI and the docs: a *monitor* is what is
   measured, a *probe* is where readings are taken from, a *probe agent* is the
   program on another machine, the *local probe* is the dashboard's own machine,
-  and a *reading* is one measurement. The API and the MCP tools still say
-  *target* for a monitor, and keep doing so. The full list is in
+  and a *reading* is one measurement. The API and the MCP tools say
+  *monitor* too, and still take the old name, *target*. The full list is in
   [docs/overview.md](docs/overview.md).
 
 ## Pull requests

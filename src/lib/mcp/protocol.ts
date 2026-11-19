@@ -12,6 +12,7 @@
  */
 
 import { isLocalHost } from '../probes/host'
+import { withMonitorKeys, withTargetKeys } from '@/lib/targets/monitor-names'
 
 /** The revisions of the protocol this speaks, newest first. */
 export const MCP_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const
@@ -38,13 +39,15 @@ export interface JsonRpcResponse {
 
 /**
  * Something wrong with what a tool was asked, to be told to the assistant in
- * words it can act on: "No target called Routr. There is: Router, Gateway."
+ * words it can act on: "No monitor called Routr. There is: Router, Gateway."
  * Anything else a tool throws is a fault of ours and is not passed on.
  */
 export class ToolError extends Error {}
 
 export interface McpTool {
   name: string
+  /** What it was called before, still taken when asked for by that name (and kept in the activity record). */
+  formerName?: string
   /** What it is called where a person reads the list. */
   title: string
   /** What it is for and when to reach for it: this is all the assistant has to choose by. */
@@ -109,8 +112,8 @@ export function isRequest(message: unknown): boolean {
 
 async function callTool(tool: McpTool, args: unknown) {
   try {
-    const result = await tool.run(isObject(args) ? args : {})
-    return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }] }
+    const result = await tool.run(isObject(args) ? (withTargetKeys(args) as Record<string, unknown>) : {})
+    return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(withMonitorKeys(result)) }] }
   } catch (error) {
     // A tool that could not do what was asked says so as its result, which
     // the assistant reads and can put right; that is not a protocol error.
@@ -177,7 +180,7 @@ export async function handleMessage(
       })
 
     case 'tools/call': {
-      const tool = server.tools.find(each => each.name === params.name)
+      const tool = server.tools.find(each => each.name === params.name || (each.formerName !== undefined && each.formerName === params.name))
       if (!tool) return refuse(id, JSON_RPC.invalidParams, `Unknown tool: ${String(params.name)}`)
       // Asked for by name all the same. Refused as the tool's result, in
       // words, so that the assistant can tell the person why.
@@ -188,7 +191,7 @@ export async function handleMessage(
         })
       }
       const result = await callTool(tool, params.arguments)
-      if (tool.writes) await access.onWrite?.(tool.name, isObject(params.arguments) ? params.arguments : {}, !!result.isError)
+      if (tool.writes) await access.onWrite?.(tool.formerName ?? tool.name, isObject(params.arguments) ? params.arguments : {}, !!result.isError)
       return answer(id, result)
     }
 

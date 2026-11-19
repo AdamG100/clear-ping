@@ -4,11 +4,12 @@ import { getBgpMonitor } from '@/lib/bgp/monitor'
 import { getBgpPrefix } from '@/lib/bgp/store'
 import { actorFor } from '@/lib/security/access'
 import { recordActivity } from '@/lib/security/store'
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 type Context = { params: Promise<{ id: string }> }
 
 /** GET /api/bgp/[id] - A watched prefix in full: every peer's route, its timeline and its activity. */
-export async function GET(_request: NextRequest, { params }: Context) {
+async function handleGET(_request: NextRequest, { params }: Context) {
   try {
     await initializeServer()
     const { id } = await params
@@ -34,7 +35,7 @@ export async function GET(_request: NextRequest, { params }: Context) {
  * POST /api/bgp/[id] - Trace your targets inside the prefix now, for the path
  * your own traffic takes to it. Answers once the traces are done.
  */
-export async function POST(request: NextRequest, { params }: Context) {
+async function handlePOST(request: NextRequest, { params }: Context) {
   try {
     await initializeServer()
     const { id } = await params
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest, { params }: Context) {
     return NextResponse.json({ traced })
   } catch (error) {
     console.error('Error tracing a BGP prefix:', error)
-    return NextResponse.json({ error: 'Failed to trace the targets in the prefix' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to trace the monitors in the prefix' }, { status: 500 })
   }
 }
 
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest, { params }: Context) {
  * PATCH /api/bgp/[id] - `{ label }` to rename it, or `{ acceptNormal: true }`
  * to take how it is carried now as normal.
  */
-export async function PATCH(request: NextRequest, { params }: Context) {
+async function handlePATCH(request: NextRequest, { params }: Context) {
   try {
     await initializeServer()
     const { id } = await params
@@ -92,7 +93,7 @@ export async function PATCH(request: NextRequest, { params }: Context) {
 }
 
 /** DELETE /api/bgp/[id] - Stop watching it, and forget what was recorded about it. */
-export async function DELETE(request: NextRequest, { params }: Context) {
+async function handleDELETE(request: NextRequest, { params }: Context) {
   try {
     await initializeServer()
     const { id } = await params
@@ -108,3 +109,9 @@ export async function DELETE(request: NextRequest, { params }: Context) {
     return NextResponse.json({ error: 'Failed to stop watching the prefix' }, { status: 500 })
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const GET = eitherNames(handleGET)
+export const POST = eitherNames(handlePOST)
+export const PATCH = eitherNames(handlePATCH)
+export const DELETE = eitherNames(handleDELETE)

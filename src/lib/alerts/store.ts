@@ -395,7 +395,7 @@ export function parseAlertInput(
   }
 
   if (given('targetIds') || (!partial && !given('scope'))) {
-    if (!Array.isArray(body.targetIds)) return fail('targetIds must be a list of target ids');
+    if (!Array.isArray(body.targetIds)) return fail('monitorIds (or targetIds) must be a list of monitor ids');
     input.targetIds = [...new Set(body.targetIds.map(String))];
   }
 

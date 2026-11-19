@@ -100,14 +100,17 @@ nothing to do with AI agents or the assistant.
 
 One word for one thing, in the UI, the docs and what an assistant is told
 (`docs/overview.md` has the list for people): a **monitor** is what is
-measured (the API, its JSON and the MCP tools still call it a *target*, and
-keep doing so); a **probe** is a place readings are taken from; a **probe
+measured (the API, its JSON and the MCP tools call it a monitor too; inside
+the code, the database, the probe agent protocol and the export file it is
+still a *target*, and `/api/targets/…` and the old MCP tool names stay as
+aliases, `src/lib/targets/monitor-names.ts`); a **probe** is a place readings are taken from; a **probe
 agent** is the program on another machine; the **local probe** is the
 dashboard's own machine (never "this server" for where readings come from);
 the **dashboard** is the web app; a **reading** is one measurement (so "3
 readings in a row", never "3 probes in a row"). The stored and public
 identifiers do not change: activity keys, the export file's `kind`, the `/v1/*`
-protocol, `CLEARPING_*` variables, API routes and MCP tool names.
+protocol, `CLEARPING_*` variables, and the old API routes and MCP tool
+names, which keep answering.
 
 ## UI: Arc
 

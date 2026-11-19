@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getScheduler } from '@/lib/scheduler';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * GET /api/scheduler/status
  * Get the current status of the probe scheduler
  */
-export async function GET() {
+async function handleGET() {
   try {
     const scheduler = getScheduler();
     const status = scheduler.getStatus();
@@ -19,3 +20,6 @@ export async function GET() {
     );
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const GET = eitherNames(handleGET)

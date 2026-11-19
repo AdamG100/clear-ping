@@ -4,12 +4,13 @@ import { AlreadyWatchedError, getBgpMonitor } from '@/lib/bgp/monitor'
 import { actorFor } from '@/lib/security/access'
 import { requireAdmin } from '@/lib/security/http'
 import { recordActivity } from '@/lib/security/store'
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * GET /api/bgp - Whether BGP monitoring is on, the connection to RIS Live,
  * and every watched prefix with how it stands.
  */
-export async function GET() {
+async function handleGET() {
   try {
     await initializeServer()
     return NextResponse.json(await getBgpMonitor().overview())
@@ -23,7 +24,7 @@ export async function GET() {
  * POST /api/bgp - Watch a prefix: `{ resource, label? }`, where the resource
  * is a prefix, or an address whose announced prefix is watched.
  */
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   try {
     await initializeServer()
     const body = await request.json().catch(() => null)
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
  * `{ homeAsns: [64500] }`; or choose the probe agents Routing uses, by those
  * to leave out, `{ excludedAgents: ["<id>"] }`.
  */
-export async function PUT(request: NextRequest) {
+async function handlePUT(request: NextRequest) {
   try {
     await initializeServer()
     const body = await request.json().catch(() => null)
@@ -91,3 +92,8 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to change BGP monitoring' }, { status: 500 })
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const GET = eitherNames(handleGET)
+export const POST = eitherNames(handlePOST)
+export const PUT = eitherNames(handlePUT)

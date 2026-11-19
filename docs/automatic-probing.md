@@ -1,4 +1,8 @@
-# ClearPing Automatic Probe Scheduler
+# Automatic probing
+
+How ClearPing measures its monitors: what each kind of check measures, how
+often, groups, comparisons and traceroutes. Adding a monitor and its page are
+in [monitors.md](monitors.md).
 
 ## Overview
 
@@ -20,7 +24,7 @@ ClearPing includes an automatic probe scheduler that works similarly to **Smokep
 
 If you set a monitor to probe every **300 seconds (5 minutes)**:
 - The monitor will be probed automatically every 5 minutes
-- Each probe sends 20 ICMP packets (configurable)
+- Each reading sends 20 ICMP packets (5 to 100, in the monitor's settings)
 - The results are averaged and stored
 - The graphs automatically update with new data
 
@@ -48,7 +52,10 @@ Common intervals:
 
 ### Ping Configuration
 
-By default, each probe sends **20 pings** with a **1 second timeout**. On Linux, which
+By default, each probe sends **20 pings** with a **1 second timeout**. A monitor can
+ask for 5 to 100 in its settings: loss is counted in whole packets, so 20 read
+it in steps of 5% and 100 in steps of 1%, at a second more for each one a dead
+path never answers. On Linux, which
 is what the Docker image and the probe agent run, one `ping` sends them all, **50 ms**
 apart, so a reading takes about a second. Where `ping` will not send that fast without
 root, and on Windows and macOS, each goes out on its own **10 ms** after the answer to
@@ -527,12 +534,16 @@ CREATE TABLE measurements (
   target_id TEXT NOT NULL,
   timestamp INTEGER NOT NULL,
   latency REAL,
+  latency_min REAL, latency_max REAL,  -- the spread of the packets in a reading:
+  latency_p10 REAL, latency_p25 REAL,  -- what the smoke on the chart is drawn from
+  latency_p50 REAL, latency_p75 REAL, latency_p90 REAL,
   packet_loss REAL DEFAULT 0,
   jitter REAL,
   success INTEGER NOT NULL,
   error_message TEXT,
   details TEXT,  -- JSON: HTTP status and timings, certificate expiry, DNS answer
   family INTEGER,  -- 4 or 6: the address family the probe ran over
+  probe TEXT NOT NULL DEFAULT 'local',  -- where it was taken: 'local' or a probe agent's id
   FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
 );
 ```
@@ -614,7 +625,7 @@ curl -X POST http://localhost:3000/api/scheduler/start
 
 If you're seeing unexpected packet loss:
 1. Reduce probe frequency (increase interval)
-2. Decrease ping count from 20 to 10
+2. Lower the packet count in its settings (5 at the fewest)
 3. Check network conditions
 4. Verify monitor host is accessible
 
@@ -639,29 +650,29 @@ and the rules that keep it tidy.
 ```
 src/lib/
 ├── init.ts            Server start-up: the database, then the scheduler
-├── scheduler.ts       Probing each target at its interval, and retention
+├── scheduler.ts       Probing each monitor at its interval, and retention
 ├── probes/
-│   ├── probe.ts       Runs a target's probe, once per address family
+│   ├── probe.ts       Runs a monitor's probe, once per address family
 │   ├── result.ts      Loss, latency and jitter from a probe's samples
 │   ├── config.ts      Per-probe settings: parsing and checking
 │   ├── labels.ts      The words for each probe's readings
 │   ├── host.ts        What an address is (IPv4, IPv6, hostname)
 │   ├── resolve.ts     Resolving a name once per probe
 │   ├── ping.ts        ICMP ping (ping-parse.ts reads its output)
+│   ├── arp.ts         ARP, for a device on the local network that ignores ping
 │   ├── tcp.ts         TCP connect
 │   ├── http.ts        HTTP(S), certificate expiry included
 │   ├── dns.ts         DNS, with dns/ for the wire format, transports and resolvers
-│   └── game.ts        Game servers, with game/ for each game's query
+│   ├── game.ts        Game servers, with game/ for each game's query
+│   ├── metrics.ts     Median, jitter and the like, worked out the same way everywhere
+│   └── log.ts         What a probe writes to the log
 ├── traceroute/        Running, reading, keeping and exporting traceroutes
 └── db/                The database, its migrations and maintenance
 scripts/prober.ts      The scheduler as a process of its own (npm run probe)
 ```
 
-## Future Enhancements
+## Not done yet
 
-Potential improvements:
-- [ ] Web UI for configuring probe intervals
-- [ ] Multiple probe schedules per monitor
-- [x] Distributed probing from multiple locations ([probe agents](probe-agents.md))
-- [ ] Export data to Prometheus/Grafana
-- [ ] RRD-style data aggregation for long-term storage
+- Exporting readings to Prometheus or Grafana.
+- Keeping long-term readings averaged down, the way RRD files do, rather than
+  each reading until it is pruned.

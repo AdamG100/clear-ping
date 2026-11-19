@@ -6,13 +6,14 @@ import { initializeServer } from '@/lib/init';
 import { alertAsShown, restoreRedacted } from '@/lib/alerts/delivery';
 import { actorFor, mayChange } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * PATCH /api/alerts/:alertId - Change an alert
  * Body: any of the fields an alert is created with, and `enabled`. `targetIds`
  * replaces the whole set of ticked targets.
  */
-export async function PATCH(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
+async function handlePATCH(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
   try {
     await initializeServer();
 
@@ -53,7 +54,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
+async function handleDELETE(request: NextRequest, { params }: { params: Promise<{ alertId: string }> }) {
   try {
     await initializeServer();
 
@@ -71,3 +72,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return NextResponse.json({ error: 'Failed to delete alert' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const PATCH = eitherNames(handlePATCH)
+export const DELETE = eitherNames(handleDELETE)

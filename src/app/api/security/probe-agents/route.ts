@@ -7,12 +7,13 @@ import { createProbeAgent, listProbeAgents, probeAgentNameTaken } from '@/lib/pr
 import { requireAdmin } from '@/lib/security/http';
 import { recordActivity } from '@/lib/security/store';
 import { currentBuild } from '@/lib/version';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * GET /api/security/probe-agents - Every probe agent, with how it is doing,
  * where to install one from, and this dashboard's version beside theirs.
  */
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
   await initializeServer();
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
  * The token the agent is to be started with is in the answer and nowhere
  * else, ever; a lost one is replaced, not shown again.
  */
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const user = await requireAdmin(request);
   if (user instanceof NextResponse) return user;
   await initializeServer();
@@ -46,3 +47,7 @@ export async function POST(request: NextRequest) {
   await recordActivity(user, 'dashboard', 'probe-agent.add', `${probeAgent.name} (${probeAgent.address}:${probeAgent.port})`);
   return NextResponse.json({ probeAgent, token, install: probeAgentInstall() }, { status: 201 });
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const GET = eitherNames(handleGET)
+export const POST = eitherNames(handlePOST)

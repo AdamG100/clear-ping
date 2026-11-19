@@ -5,6 +5,7 @@ import { initializeServer } from '@/lib/init';
 import { getScheduler } from '@/lib/scheduler';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * POST /api/groups - Make a group, with nothing in it
@@ -13,7 +14,7 @@ import { recordActivity } from '@/lib/security/store';
  * Any group in the path that does not exist yet is made too. Making one that
  * is already there changes nothing.
  */
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
  *
  * Its targets, and the groups inside it, move up to the group it sat in.
  */
-export async function DELETE(request: NextRequest) {
+async function handleDELETE(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -79,7 +80,7 @@ export async function DELETE(request: NextRequest) {
  * Everything under `from` goes with it. A `to` that already exists merges the
  * two groups.
  */
-export async function PUT(request: NextRequest) {
+async function handlePUT(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -107,3 +108,8 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to move group' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const POST = eitherNames(handlePOST)
+export const DELETE = eitherNames(handleDELETE)
+export const PUT = eitherNames(handlePUT)

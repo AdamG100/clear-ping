@@ -5,6 +5,7 @@ import { initializeServer } from '@/lib/init';
 import { alertAsShown } from '@/lib/alerts/delivery';
 import { actorFor, identify, mayChange } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * GET /api/alerts - Every alert, with the state of each target it is ticked for
@@ -13,7 +14,7 @@ import { recordActivity } from '@/lib/security/store';
  * URLs carry the services' tokens. A viewer, a key that only reads, and anyone
  * not signed in (sign-in may be off) see which service and no more.
  */
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   try {
     await initializeServer();
     const alerts = await getAlerts();
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
  * `notifyUrls` is the Apprise URLs to send it to: any service Apprise has, and
  * as many as wanted. Left out or empty, the alert is only shown in the app.
  */
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -52,3 +53,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to create alert' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const GET = eitherNames(handleGET)
+export const POST = eitherNames(handlePOST)

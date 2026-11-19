@@ -7,6 +7,7 @@ import { MAX_COMPARED_TARGETS, windowFromQuery } from '@/lib/charts/series';
 import { chosenProbe, knownProbeIdsOf, probeIdsOf } from '@/lib/targets/probes';
 import type { AddressFamily, ComparisonSeries } from '@/types/probe';
 import type { ProbeId } from '@/types/probe-agent';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * GET /api/compare?targets=id,id,…&hours=… (or &start=…&end=…)[&maxPoints=…]
@@ -26,7 +27,7 @@ import type { ProbeId } from '@/types/probe-agent';
  * one series for each of them instead of one for all their queries together;
  * `family=4` or `family=6` with it keeps to the lookups made over that family.
  */
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
     const named = (searchParams.get('series') ?? '').split(',').map(token => token.trim()).filter(Boolean);
     const listed = (searchParams.get('targets') ?? '').split(',').map(id => id.trim()).filter(Boolean);
     if (named.length === 0 && listed.length === 0) {
-      return NextResponse.json({ error: 'No targets given' }, { status: 400 });
+      return NextResponse.json({ error: 'No monitors given' }, { status: 400 });
     }
     if (named.length > 0) {
       for (const token of named) {
@@ -130,3 +131,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch comparison' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const GET = eitherNames(handleGET)

@@ -182,7 +182,7 @@ describe('describeTrace', () => {
       takenAt: '2026-03-10T12:00:00+00:00',
       trigger: 'automatic, when an alert fired',
       address: '203.0.113.9',
-      reachedTheTarget: false,
+      reachedTheDestination: false,
       repliesStopAtHop: 3,
       hops: [
         '1  192.168.1.1 (router.lan)  2 ms  loss 0%',

@@ -345,7 +345,7 @@ export interface TraceLine {
   /** Traced by the monitor itself at the moment an alert fired, or by someone pressing the button. */
   trigger: string
   address: string
-  reachedTheTarget: boolean
+  reachedTheDestination: boolean
   /** The hop from which nothing further answered, where the trace did not arrive. */
   repliesStopAtHop: number | null
   error?: string
@@ -359,7 +359,7 @@ export function describeTrace(trace: Traceroute, target: string, timeZone: strin
     takenAt: isoIn(trace.timestamp.getTime(), timeZone),
     trigger: trace.trigger === 'alert' ? 'automatic, when an alert fired' : 'manual',
     address: trace.address,
-    reachedTheTarget: trace.reached,
+    reachedTheDestination: trace.reached,
     repliesStopAtHop: firstDeadHop(trace.hops, trace.reached),
     ...(trace.errorMessage ? { error: trace.errorMessage } : {}),
     hops: trace.hops.map((hop, index) => {

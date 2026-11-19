@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error fetching targets:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch targets' },
+      { error: 'Failed to fetch monitors' },
       { status: 500 }
     );
   }
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error creating target:', error);
     return NextResponse.json(
-      { error: 'Failed to create target' },
+      { error: 'Failed to create monitor' },
       { status: 500 }
     );
   }
@@ -119,7 +119,7 @@ export async function DELETE(request: NextRequest) {
     const isList = (value: unknown): value is string[] =>
       Array.isArray(value) && value.every(each => typeof each === 'string' && each);
     if (!isList(ids) || !isList(groups) || ids.length + groups.length === 0) {
-      return NextResponse.json({ error: 'Say which targets to delete, as a list of their ids' }, { status: 400 });
+      return NextResponse.json({ error: 'Say which monitors to delete, as a list of their ids' }, { status: 400 });
     }
 
     const wanted = new Set(ids);
@@ -147,6 +147,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ deleted, groupsRemoved: groupsRemoved.size });
   } catch (error) {
     console.error('Error deleting targets:', error);
-    return NextResponse.json({ error: 'Failed to delete targets' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to delete monitors' }, { status: 500 });
   }
 }

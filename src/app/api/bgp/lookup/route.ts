@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { initializeServer } from '@/lib/init'
 import { lookUpResource } from '@/lib/bgp/ripestat'
 import { findBgpPrefix } from '@/lib/bgp/store'
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * GET /api/bgp/lookup?resource=203.0.113.10 - What watching an address or
  * prefix would watch: the announced prefix that holds it, who announces it,
  * the announced prefixes around it, and whether it is watched already.
  */
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   try {
     await initializeServer()
     const resource = request.nextUrl.searchParams.get('resource')?.trim() ?? ''
@@ -25,3 +26,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to look that up' }, { status: 500 })
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const GET = eitherNames(handleGET)

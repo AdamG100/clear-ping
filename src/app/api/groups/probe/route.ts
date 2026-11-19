@@ -6,6 +6,7 @@ import { getScheduler } from '@/lib/scheduler';
 import { probeNames, readProbeChoices, readRequestedProbes } from '@/lib/probe-agents/probes';
 import { actorFor } from '@/lib/security/access';
 import { recordActivity } from '@/lib/security/store';
+import { eitherNames } from '@/lib/targets/monitor-names';
 
 /**
  * PUT /api/groups/probe - Probe every target in a group from one place
@@ -14,7 +15,7 @@ import { recordActivity } from '@/lib/security/store';
  * Probes are "local" for this server, or probe agent ids. Targets in groups inside this one move
  * too. Readings already taken stay where they were taken from.
  */
-export async function PUT(request: NextRequest) {
+async function handlePUT(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -55,7 +56,7 @@ export async function PUT(request: NextRequest) {
  * another. Refused, with the monitors named, if any would be left with no
  * probe at all.
  */
-export async function PATCH(request: NextRequest) {
+async function handlePATCH(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -101,7 +102,7 @@ export async function PATCH(request: NextRequest) {
  * too. Monitors in groups inside `group` gain it as well. Each monitor's
  * first probe stays its first.
  */
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   try {
     await initializeServer();
 
@@ -124,3 +125,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to add the probe to the monitors' }, { status: 500 });
   }
 }
+
+// Either name for a monitor in, both out (see monitor-names.ts).
+export const PUT = eitherNames(handlePUT)
+export const PATCH = eitherNames(handlePATCH)
+export const POST = eitherNames(handlePOST)
