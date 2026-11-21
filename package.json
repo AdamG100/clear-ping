@@ -35,7 +35,7 @@
     "better-sqlite3": "^13.2.0",
     "clsx": "^2.1.1",
     "kysely": "^0.29.9",
-    "lucide-react": "^1.73.0",
+    "lucide-react": "^1.74.0",
     "motion": "^14.14.0",
     "next": "^16.4.6",
     "qrcode": "^1.5.4",
