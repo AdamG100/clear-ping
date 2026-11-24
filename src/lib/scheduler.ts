@@ -19,7 +19,8 @@ import { LOCAL_PROBE, type ProbeId } from '@/types/probe-agent';
 import type { IpVersion, ProbeConfig, ProbeResult, ProbeType } from '@/types/probe';
 import { randomUUID } from 'crypto';
 import { cleanOldAlertEvents } from './alerts/history';
-import { asksForTrace, dispatchAlert, evaluateAlerts, getAlerts, shouldTraceOnAlert } from './alerts/store';
+import { asksForTrace, evaluateAlerts, getAlerts, shouldTraceOnAlert } from './alerts/store';
+import { flushAlerts, queueAlert } from './alerts/outbox';
 import { cleanOldTraceroutes, ensureTracerouteSchema, lastAlertTraceAt, traceAndStore, trimAlertTraces } from './traceroute/store';
 
 /**
@@ -222,6 +223,8 @@ class ProbeScheduler {
    * Stop the scheduler
    */
   stop(): void {
+    // Nothing waiting to be told is lost with the prober.
+    void flushAlerts();
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
@@ -442,7 +445,8 @@ class ProbeScheduler {
           `[Alerts] ${event.transition.toUpperCase()}: ${event.targetName} ` +
           `${event.metric}=${event.observed ?? 'n/a'} (threshold ${event.threshold})`
         );
-        await dispatchAlert(event);
+        // Held a moment, to go out with whatever else fires at once.
+        queueAlert(event);
       }
 
       // The moment an alert fires is the one chance to see the route through

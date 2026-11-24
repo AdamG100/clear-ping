@@ -45,6 +45,7 @@ vi.mock('./probe-agents/store', () => ({
   getProbeAgentConnection: vi.fn(async () => null),
   cleanOldProbeAgentOutages: vi.fn(async () => 0),
 }))
+vi.mock('./alerts/outbox', () => ({ queueAlert: vi.fn(), flushAlerts: vi.fn(async () => undefined) }))
 vi.mock('./alerts/store', () => ({ evaluateAlerts: vi.fn(async () => []), dispatchAlert: vi.fn(), asksForTrace: vi.fn(() => false), shouldTraceOnAlert: vi.fn(() => false), getAlerts: vi.fn(async () => []) }))
 vi.mock('./traceroute/store', () => ({ ensureTracerouteSchema: vi.fn(), cleanOldTraceroutes: vi.fn(), traceAndStore: vi.fn(), lastAlertTraceAt: vi.fn(async () => null), trimAlertTraces: vi.fn() }))
 

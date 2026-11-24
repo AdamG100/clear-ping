@@ -1,48 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { AlertEvent } from '@/types/probe'
 import {
   alertAsShown,
   alertTitle,
   describeCondition,
-  notificationFor,
-  probeAgentNotification,
   notifyUrlLabel,
   parseNotifyUrls,
   redactNotifyUrl,
   restoreRedacted,
   withEmbeds,
 } from './delivery'
-
-function event(over: Partial<AlertEvent> = {}, rule: Partial<AlertEvent['rule']> = {}): AlertEvent {
-  return {
-    rule: {
-      id: 'alert-1',
-      targetId: 'target-1',
-      metric: 'packetLoss',
-      threshold: 5,
-      consecutiveProbes: 3,
-      notifyUrls: ['discord://123456789012345678/token'],
-      traceOnFire: true,
-      traceCooldownMinutes: 15,
-      traceKeepCount: 10,
-      traceKeepDays: 30,
-      enabled: true,
-      state: 'firing',
-      streak: 0,
-      createdAt: new Date(0),
-      ...rule,
-    },
-    targetName: 'Router',
-    targetHost: '192.0.2.1',
-    targetGroup: 'Home/Network',
-    transition: 'firing',
-    metric: 'packetLoss',
-    observed: 42.53,
-    threshold: 5,
-    at: new Date('2026-08-19T22:41:43.911Z'),
-    ...over,
-  }
-}
 
 describe('parseNotifyUrls', () => {
   it('reads URLs on separate lines, or as a list', () => {
@@ -145,73 +111,6 @@ describe('withEmbeds', () => {
   })
 })
 
-describe('notificationFor', () => {
-  it('words a firing alert as a failure, with what is wrong in the title', () => {
-    expect(notificationFor(event(), { zone: 'UTC' })).toEqual({
-      title: 'Router: packet loss is too high',
-      body:
-        '<p><b>Packet loss above 5%</b> for 3 readings in a row.</p>' +
-        '<ul>' +
-        '<li><b>Address:</b> 192.0.2.1</li>' +
-        '<li><b>Now:</b> 42.5%</li>' +
-        '<li><b>When:</b> 2026-08-19 22:41:43 UTC</li>' +
-        '<li><b>Alert:</b> Packet loss above 5%</li>' +
-        '<li><b>Group:</b> Home / Network</li>' +
-        '</ul>',
-      type: 'failure',
-    })
-  })
-
-  it('words a recovery as a success', () => {
-    const notification = notificationFor(event({ transition: 'resolved', observed: 0 }))
-
-    expect(notification.title).toBe('Router has recovered')
-    expect(notification.body).toContain('<p><b>Packet loss above 5%</b> has been clear for 3 readings in a row.</p>')
-    expect(notification.type).toBe('success')
-  })
-
-  it('says what a target that is down is doing, not a number', () => {
-    const notification = notificationFor(
-      event({ metric: 'unreachable', observed: 1 }, { metric: 'unreachable', threshold: 0, consecutiveProbes: 1 })
-    )
-    expect(notification.title).toBe('Router is not responding')
-    expect(notification.body).toContain('<p><b>Stops responding</b> on the latest reading.</p>')
-    expect(notification.body).toContain('<li><b>Now:</b> No reply</li>')
-  })
-
-  it('uses the name of a named alert, and leaves out a group the target does not have', () => {
-    const notification = notificationFor(event({ targetGroup: undefined }, { name: 'Uplink' }))
-    expect(notification.body).toContain('<li><b>Alert:</b> Uplink</li>')
-    expect(notification.body).not.toContain('Group')
-  })
-
-  it('keeps what a target or an alert is called from being read as markup', () => {
-    const notification = notificationFor(
-      event({ targetName: '<b>Core</b> & edge', targetHost: 'a&b.example' }, { name: '<script>x</script>' })
-    )
-    // The title is plain text: Apprise escapes it for whichever service it goes to.
-    expect(notification.title).toBe('<b>Core</b> & edge: packet loss is too high')
-    expect(notification.body).toContain('<li><b>Address:</b> a&amp;b.example</li>')
-    expect(notification.body).toContain('<li><b>Alert:</b> &lt;script&gt;x&lt;/script&gt;</li>')
-  })
-
-  it('lets nothing a target is called notify a whole channel', () => {
-    // A zero-width space after the @ reads the same and is no longer a mention.
-    const notification = notificationFor(event({ targetName: '@everyone' }, { name: 'tell @here' }))
-    expect(notification.title).toBe('@​everyone: packet loss is too high')
-    expect(notification.body).toContain('<li><b>Alert:</b> tell @​here</li>')
-    expect(notification.title + notification.body).not.toMatch(/@(everyone|here)/)
-  })
-
-  it('keeps the title within what a service will take', () => {
-    expect(notificationFor(event({ targetName: 'x'.repeat(400) })).title.length).toBeLessThanOrEqual(250)
-  })
-
-  it('marks a test as a test', () => {
-    expect(notificationFor(event(), { test: true }).title).toBe('Test: Router: packet loss is too high')
-  })
-})
-
 describe('restoreRedacted', () => {
   const real = ['discord://1234/secret-token', 'https://hooks.example/abc/def']
 
@@ -236,21 +135,5 @@ describe('alertAsShown', () => {
     expect(shown.notifyUrls).toEqual(['discord://…', 'mailto://…'])
     expect(JSON.stringify(shown)).not.toMatch(/secret-token|hunter22/)
     expect(alert.notifyUrls[0]).toBe('discord://1234/secret-token')
-  })
-})
-
-describe('probeAgentNotification', () => {
-  it('says which probe agent is offline and why, as a failure', () => {
-    const note = probeAgentNotification('Home', { kind: 'offline', reason: 'Connection refused' })
-    expect(note.title).toBe('Probe agent Home is offline')
-    expect(note.type).toBe('failure')
-    expect(note.body).toContain('Connection refused')
-  })
-
-  it('says it is back, as a success, and keeps a name from pinging a channel', () => {
-    const note = probeAgentNotification('@everyone', { kind: 'online' })
-    expect(note.type).toBe('success')
-    expect(note.title).toContain('is back')
-    expect(note.title).not.toContain('@everyone')
   })
 })

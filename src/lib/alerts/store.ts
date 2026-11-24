@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto';
 import { getDatabase } from '../db/database';
-import { describeCondition, notificationFor, parseNotifyUrls, probeAgentNotification, withEmbeds } from './delivery';
+import { describeCondition, parseNotifyUrls } from './delivery';
+import { alertNotification, probeAgentNotification } from './message';
 import { sendNotification, type DeliveryResult } from './apprise';
+import { getNotificationSender } from './sender';
 import type { Alert, AlertEvent, AlertMetric, AlertRule, AlertSettings, AlertTargetState, ProbeResult, Target } from '@/types/probe';
 import { LOCAL_PROBE, type ProbeAgentState } from '@/types/probe-agent';
 import type { AlertCombine, AlertCondition, AlertScopeEntry, ConditionResult, ProbePolicy, ProbeSpread, ProbeVerdict } from '@/types/alert-rules';
@@ -643,7 +645,27 @@ function worded(metric: AlertMetric, value: number | null): string | null {
  * monitor measured from one probe, with one condition, that is exactly what it
  * was before alerts had more to them.
  */
-export async function evaluateAlerts(
+export function evaluateAlerts(
+  target: Pick<Target, 'id' | 'name' | 'host' | 'group'> & { probedFrom?: string; interval?: number },
+  result: ProbeResult
+): Promise<AlertEvent[]> {
+  // One reading at a time for a monitor. Its probes' readings come in
+  // together, and two judged at once would each find the alert not yet
+  // firing, and each fire it: the same outage announced once per probe.
+  const before = evaluating.get(target.id) ?? Promise.resolve();
+  const mine = before.then(() => evaluateNow(target, result));
+  const settled = mine.then(() => undefined, () => undefined);
+  evaluating.set(target.id, settled);
+  void settled.then(() => {
+    if (evaluating.get(target.id) === settled) evaluating.delete(target.id);
+  });
+  return mine;
+}
+
+/** The reading each monitor is being judged on, for the next to wait behind. */
+const evaluating = new Map<string, Promise<void>>();
+
+async function evaluateNow(
   target: Pick<Target, 'id' | 'name' | 'host' | 'group'> & { probedFrom?: string; interval?: number },
   result: ProbeResult
 ): Promise<AlertEvent[]> {
@@ -826,14 +848,38 @@ export type { DeliveryResult };
 
 /** Send an alert transition to each of its notification URLs and say how that went. */
 export async function deliverAlert(event: AlertEvent, options: { test?: boolean } = {}): Promise<DeliveryResult> {
-  const urls = event.rule.notifyUrls;
+  return deliverAlerts([event], options);
+}
+
+/**
+ * Send one message for an alert that fired, or cleared, on one monitor or on
+ * several at once: every event is the same alert and the same transition.
+ */
+export async function deliverAlerts(events: AlertEvent[], options: { test?: boolean } = {}): Promise<DeliveryResult> {
+  const urls = events[0]?.rule.notifyUrls ?? [];
   if (urls.length === 0) return { ok: false, detail: 'This alert is not sent anywhere' };
 
   try {
-    return await sendNotification(urls.map(withEmbeds), notificationFor(event, options));
+    return await sendNotification(urls, alertNotification(events, options), await getNotificationSender());
   } catch (error) {
     return { ok: false, detail: `Could not run Apprise: ${error instanceof Error ? error.message : String(error)}` };
   }
+}
+
+/**
+ * An event with its probes as they stand now. A message waits a moment
+ * before it goes (outbox.ts), for the readings the other probes took at the
+ * same time: by then they have said whether they see it too.
+ */
+export async function withProbesNow(event: AlertEvent): Promise<AlertEvent> {
+  if (!event.probeVerdicts || event.probeVerdicts.length < 2) return event;
+  const rows = await all<{ probe: string; in_breach: number }>(
+    'SELECT probe, in_breach FROM alert_probe_states WHERE alert_id = ? AND target_id = ?',
+    [event.rule.id, event.rule.targetId]
+  );
+  const inBreach = new Map(rows.map(row => [row.probe, row.in_breach === 1]));
+  const probeVerdicts = event.probeVerdicts.map(each => ({ ...each, breaching: inBreach.get(each.probe) ?? each.breaching }));
+  return { ...event, probeVerdicts, breaching: probeVerdicts.filter(each => each.breaching).map(each => each.probe) };
 }
 
 /**
@@ -846,7 +892,7 @@ export async function dispatchProbeAgentChange(name: string, change: { kind: 'of
   const urls = [...new Set(rows.flatMap(row => parseUrls(row.notify_urls)))];
   if (urls.length === 0) return;
   try {
-    const result = await sendNotification(urls.map(withEmbeds), probeAgentNotification(name, change));
+    const result = await sendNotification(urls, probeAgentNotification(name, change), await getNotificationSender());
     if (!result.ok) console.error(`[ProbeAgents] Could not send the ${change.kind} notice for ${name}: ${result.detail}`);
   } catch (error) {
     console.error(`[ProbeAgents] Could not send the ${change.kind} notice for ${name}:`, error);

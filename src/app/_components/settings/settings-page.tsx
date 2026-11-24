@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
-import { Bot, EyeOff, Fingerprint, History, KeyRound, LogIn, LogOut, Network, RadioTower, RefreshCw, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
+import { Bell, Bot, EyeOff, Fingerprint, History, KeyRound, LogIn, LogOut, Network, RadioTower, RefreshCw, ShieldAlert, ShieldCheck, Trash2, User, Users, Wrench, type LucideIcon } from 'lucide-react'
 import { Accordion } from '@/components/arc/accordion/accordion'
 import { Alert } from '@/components/arc/alert/alert'
 import { Badge } from '@/components/arc/badge/badge'
@@ -27,6 +27,7 @@ import type { FactorPolicy } from '@/lib/security/factors'
 import { cn } from '@/lib/utils'
 import { FactorPolicyForm, SignInFactors, useMyFactors } from './sign-in-factors'
 import { MaintenanceTab } from './maintenance-tab'
+import { NotificationsTab } from './notifications-tab'
 import { PrivacyTab } from './privacy-tab'
 import { ProbeAgentsTab } from './probe-agents-tab'
 import { RoutingTab } from './routing-tab'
@@ -1273,6 +1274,7 @@ const ACTIONS: Record<string, string> = {
   'maintenance.run': 'ran maintenance',
   'maintenance.settings': 'changed the maintenance schedule',
   'privacy.settings': 'changed the privacy settings',
+  'notifications.sender': 'changed the name and picture notifications are posted with',
 }
 
 const VIA: Record<ActivityEntry['via'], string> = { dashboard: 'dashboard', api: 'API', mcp: 'MCP' }
@@ -1357,6 +1359,7 @@ const SECTIONS: Section[] = [
   { value: 'accounts', label: 'Accounts', intro: 'Everyone who can sign in, and their role: admins change settings, editors manage monitors and alerts, viewers only look.', icon: Users, group: 'Security' },
   { value: 'privacy', label: 'Privacy', intro: 'What ClearPing shows on screen, gives to AI assistants, keeps in its records, and asks services on the internet about.', icon: EyeOff, group: 'Security' },
   { value: 'probes', label: 'Probes', intro: 'Where readings are taken from. The local probe is the machine the dashboard runs on; probe agents are small programs you install on other machines, such as a VPS abroad, so a monitor can be measured from several places at once.', icon: RadioTower, group: 'Monitoring', adminOnly: true },
+  { value: 'notifications', label: 'Notifications', intro: 'How alerts look where they are sent: the name and picture they are posted with in Discord.', icon: Bell, group: 'Monitoring', adminOnly: true },
   { value: 'routing', label: 'Routing', intro: "Watch your own IP prefixes in BGP, as RIPE RIS's route collectors see them: who announces them, the paths networks take to reach them, and when that changes.", icon: Network, group: 'Monitoring', adminOnly: true },
   { value: 'maintenance', label: 'Maintenance', intro: "Look after the SQLite database ClearPing keeps everything in: check it for damage, remove leftovers and data past its retention, reclaim the space, and see each upgrade it has been through.", icon: Wrench, group: 'Monitoring', adminOnly: true },
   { value: 'activity', label: 'Activity', intro: 'A record of every change, sign-in and failed sign-in: who did it, when, and whether through the dashboard, a key or an assistant. How long it is kept is set under Privacy.', icon: History, group: 'More', adminOnly: true },
@@ -1563,6 +1566,7 @@ export function SettingsPage({ section, onSection, onShowTargetsFrom, onOpenRout
                 {current.value === 'activity' && <ActivityTab />}
                 {current.value === 'maintenance' && <MaintenanceTab />}
                 {current.value === 'probes' && <ProbeAgentsTab onShowTargets={onShowTargetsFrom} onProbesChanged={onProbesChanged} />}
+                {current.value === 'notifications' && <NotificationsTab />}
                 {current.value === 'routing' && <RoutingTab onOpenRouting={() => onOpenRouting?.()} />}
               </div>
             )}
