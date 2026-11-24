@@ -137,15 +137,26 @@ maintenance run, or only of the runs that found a problem
 
 ### What is sent
 
-Each time the alert fires or clears on a monitor, one message goes to every URL:
+Each time the alert fires or clears, one message goes to every URL:
 
 - a title saying what happened: `Router: packet loss is too high`, or
   `Router has recovered`
 - the condition and how long it has held, then the monitor's address, the
-  current reading, when it happened (in the zone set by `TZ`, with its offset
-  from UTC), the alert's name and the monitor's group
+  current reading or the likely cause, its group, the alert's name, and when
+  it happened (in the zone set by `TZ`, with its offset from UTC)
+- for a monitor measured from more than one probe, every probe and how it
+  stands, the failing ones first: `🔴 VPS: failing`, `🟢 Home: fine`,
+  `⚪ Office: not reporting`
 - Apprise's `failure` type when it fires and `success` when it clears, which
   services that have colours or icons show as red and green
+
+**One message for one outage.** A monitor's probes take their readings
+together, so a message waits 20 seconds before it goes, and by then every
+probe has said whether it sees the trouble too: an outage seen from two probes
+is one message listing both, not a message from each. Other monitors the same
+alert fires on in those 20 seconds go into the same message too (`3 monitors
+are not responding`), each with its address, likely cause and probes. Firing
+and clearing are always separate messages, in their own colours.
 
 The message is written once and Apprise turns it into what each service takes:
 rich text for an email or Telegram, Markdown for Discord or Slack, plain text
@@ -154,12 +165,14 @@ which with `?format=text`, `?format=markdown` or `?format=html`.
 
 Two examples of what that is for:
 
-- **Discord as an embed.** Apprise sends Discord (and Guilded) an embed only
-  when the URL asks for Markdown, so ClearPing asks for it: an alert is posted
-  as an embed, red when it fires and green when it clears, with the details on
-  lines of their own. Add `?format=text` to a URL to get a plain message
-  instead. Slack and Teams get a coloured attachment or card from Apprise
-  whatever the format.
+- **Discord as a card.** Discord (and Guilded) is sent the message as an
+  embed of ClearPing's own: red when it fires and green when it clears, the
+  address, group and alert side by side, the probes on lines of their own,
+  and the time shown in each reader's own zone. It is posted with the name and
+  picture set under **Settings → Notifications**; left empty, the webhook's own
+  name and Apprise's icons are used. A URL with a `template=` of its own keeps
+  it. Slack and Teams get a coloured attachment or card from Apprise whatever
+  the format.
 - **A JSON endpoint that wants plain text.** `jsons://host/path?format=text`.
   The body it receives is Apprise's:
 
@@ -179,8 +192,8 @@ Two examples of what that is for:
 **Mentions** belong to the URL too, in whatever way the service does them. For
 Discord that is `?ping=`, with role and user IDs:
 `discord://id/token/?format=markdown&ping=<@%26123…>,<@456…>` (`%26` is the `&`
-of a role mention). They are mentioned on every message sent to that URL, when
-the alert clears as well as when it fires. A monitor or an alert that happens to
+of a role mention; `format=markdown` can be left out). They are mentioned on
+every message sent to that URL, when the alert clears as well as when it fires. A monitor or an alert that happens to
 be called `@everyone` or `@here` is only ever text.
 
 ### Where Apprise comes from
@@ -329,6 +342,8 @@ they did. A firing one is still firing and does not announce itself again.
 | `GET /api/alerts/:id/events` | Its history: each fire and clear, with the conditions and probes behind it (`?limit=`) |
 | `DELETE /api/alerts/:id` | Delete one |
 | `POST /api/alerts/:id/test` | Send its notification URLs a test message |
+| `GET /api/notifications` | The name and picture notifications are posted with: `{ sender: { name, avatarUrl } }` |
+| `PUT /api/notifications` | Change them (an admin); `null` or empty for the service's own |
 
 An alert is created with `metric`, `threshold`, `consecutiveProbes`,
 `monitorIds` (or the older `targetIds`), and optionally `conditions` (a list of `{ metric, threshold,

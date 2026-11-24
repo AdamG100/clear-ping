@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import http from 'node:http'
-import { appriseEnvironment, checkNotifyUrls, readAppriseLog, sendNotification } from './apprise'
+import { appriseEnvironment, asciiJson, checkNotifyUrls, discordPayload, readAppriseLog, sendNotification } from './apprise'
 
 const configured = process.env.CLEARPING_APPRISE_BIN
 const installed = spawnSync(configured || 'apprise', ['--version']).status === 0
@@ -154,5 +154,45 @@ describe('appriseEnvironment', () => {
       'discord://x/y'
     )
     expect(env).toEqual({ PATH: '/usr/bin', HOME: '/home/node', HTTPS_PROXY: 'http://proxy:3128', APPRISE_URLS: 'discord://x/y' })
+  })
+})
+
+describe('discordPayload', () => {
+  const card = { title: 'Web is not responding', description: '**Stops responding**', fields: [{ name: 'Address', value: '`www.example.net`', inline: true }], at: new Date('2026-01-02T03:04:05Z') }
+  const none = { name: null, avatarUrl: null }
+
+  it('sends the card as an embed, coloured by what happened, pinging nobody', () => {
+    expect(discordPayload({ type: 'failure' }, card, 'discord://1/token', none)).toEqual({
+      allowed_mentions: { parse: [], roles: [], users: [] },
+      embeds: [{
+        title: 'Web is not responding',
+        description: '**Stops responding**',
+        color: 0xe5484d,
+        fields: [{ name: 'Address', value: '`www.example.net`', inline: true }],
+        timestamp: '2026-01-02T03:04:05.000Z',
+        footer: { text: 'ClearPing' },
+      }],
+    })
+    expect((discordPayload({ type: 'success' }, card, 'discord://1/token', none).embeds as Array<{ color: number }>)[0].color).toBe(0x30a46c)
+  })
+
+  it('posts as the name and picture chosen under Settings', () => {
+    expect(discordPayload({ type: 'failure' }, card, 'discord://1/token', { name: 'Outage Monitor', avatarUrl: 'https://example.com/a.png' }))
+      .toMatchObject({ username: 'Outage Monitor', avatar_url: 'https://example.com/a.png' })
+  })
+
+  it('pings who the URL asks for, as Apprise would have', () => {
+    const payload = discordPayload({ type: 'failure' }, card, 'discord://1/token/?format=markdown&ping=<@%26123>,<@456>,@here', none)
+    expect(payload.content).toBe('👉 @here <@&123> <@456>')
+    expect(payload.allowed_mentions).toEqual({ parse: ['here'], roles: ['123'], users: ['456'] })
+  })
+})
+
+describe('asciiJson', () => {
+  it('writes anything past ASCII as an escape, and no {{ that Apprise would fill in', () => {
+    const json = asciiJson({ title: '🔴 Café {{ app_id }}' })
+    expect(json).toMatch(/^[\x20-\x7e]*$/)
+    expect(json).not.toContain('{{')
+    expect(JSON.parse(json)).toEqual({ title: '🔴 Café {{ app_id }}' })
   })
 })

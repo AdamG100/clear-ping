@@ -1,5 +1,10 @@
 import { spawn } from 'child_process';
-import { reachesMachineOnly, type AlertNotification } from './delivery';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import path from 'path';
+import { isDiscordUrl, reachesMachineOnly, withEmbeds } from './delivery';
+import type { AlertNotification, NotificationCard } from './message';
+import type { NotificationSender } from './sender';
 
 /**
  * Sending a notification, which is Apprise's job.
@@ -147,26 +152,132 @@ function outcome(run: Run, failed: { all: string; some: string }): DeliveryResul
   return { ok: false, detail: `${what}: ${why}` };
 }
 
+// ─── Discord ────────────────────────────────────────────────────────────────
+
+/** The colours of a card: red when something is wrong, green when it is put right. */
+const COLOURS: Record<AlertNotification['type'], number> = { failure: 0xe5484d, success: 0x30a46c };
+
+/** Who a `ping=` on a Discord URL names, as Apprise reads it: `<@123>`, `<@&456>`, `@everyone`. */
+const MENTION = /<?@(&?)(\d+)>?|@([a-z0-9]+)/gi;
+
+const paramOf = (url: string, name: string): string | null => {
+  const query = url.indexOf('?');
+  return query === -1 ? null : new URLSearchParams(url.slice(query + 1)).get(name);
+};
+
+const withParam = (url: string, name: string, value: string) =>
+  `${url}${url.includes('?') ? (url.endsWith('?') || url.endsWith('&') ? '' : '&') : '?'}${name}=${encodeURIComponent(value)}`;
+
+/**
+ * What Discord is sent for a notification: the card as an embed, posted as
+ * the sender chosen under Settings, with the people and roles a `ping=` on
+ * the URL names. Apprise leaves those out of a message it is handed whole, so
+ * they are put in here, the way it would have.
+ */
+export function discordPayload(
+  notification: Pick<AlertNotification, 'type'>,
+  card: NotificationCard,
+  url: string,
+  sender: NotificationSender
+): Record<string, unknown> {
+  const roles = new Set<string>();
+  const users = new Set<string>();
+  const everyone = new Set<string>();
+  for (const [, role, id, word] of (paramOf(url, 'ping') ?? '').matchAll(MENTION)) {
+    if (word) everyone.add(word);
+    else if (role) roles.add(id);
+    else users.add(id);
+  }
+  const mentions = [...[...everyone].map(word => `@${word}`), ...[...roles].map(id => `<@&${id}>`), ...[...users].map(id => `<@${id}>`)];
+
+  return {
+    ...(sender.name ? { username: sender.name } : {}),
+    ...(sender.avatarUrl ? { avatar_url: sender.avatarUrl } : {}),
+    ...(mentions.length > 0 ? { content: `👉 ${mentions.join(' ')}` } : {}),
+    // Nothing else in the message pings anyone, whatever a monitor is called.
+    allowed_mentions: { parse: [...everyone], roles: [...roles], users: [...users] },
+    embeds: [
+      {
+        title: card.title,
+        description: card.description,
+        color: COLOURS[notification.type],
+        ...(card.fields.length > 0 ? { fields: card.fields.map(field => ({ name: field.name, value: field.value, inline: !!field.inline })) } : {}),
+        ...(card.at ? { timestamp: card.at.toISOString() } : {}),
+        footer: { text: 'ClearPing' },
+      },
+    ],
+  };
+}
+
+/**
+ * JSON with nothing in it but ASCII. Apprise reads a template in the
+ * machine's own encoding, which is not always UTF-8, so anything past ASCII
+ * (an emoji, an accent in a name) is written as an escape; and it fills in
+ * `{{ name }}` wherever it is, so a monitor called that is written so it is
+ * not one.
+ */
+export function asciiJson(value: unknown): string {
+  return JSON.stringify(value).replace(/[^\x00-\x7e]|\{(?=\{)/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+/**
+ * The URLs as Apprise is handed them, each Discord one with its message
+ * written to a file for Apprise's `template=`, which posts it as it stands.
+ * A URL that names a template of its own keeps it. Returns the folder the
+ * files are in, for it to be removed once Apprise is done.
+ */
+async function prepareUrls(urls: string[], notification: AlertNotification, sender: NotificationSender): Promise<{ urls: string[]; folder: string | null }> {
+  const card = notification.card;
+  const discord = (url: string) => !!card && isDiscordUrl(url) && !paramOf(url, 'template');
+  if (!urls.some(discord)) return { urls: urls.map(withEmbeds), folder: null };
+
+  const folder = await mkdtemp(path.join(tmpdir(), 'clearping-notify-'));
+  const prepared: string[] = [];
+  for (const [index, url] of urls.entries()) {
+    if (!discord(url)) {
+      prepared.push(withEmbeds(url));
+      continue;
+    }
+    const file = path.join(folder, `discord-${index}.json`);
+    const json = asciiJson(discordPayload(notification, card!, url, sender));
+    await writeFile(file, json, { mode: 0o600 });
+    prepared.push(withParam(withEmbeds(url), 'template', file));
+  }
+  return { urls: prepared, folder };
+}
+
+// ─── Sending ────────────────────────────────────────────────────────────────
+
 /** Send one notification to every URL, and say how that went. */
-export async function sendNotification(urls: string[], notification: AlertNotification): Promise<DeliveryResult> {
+export async function sendNotification(
+  urls: string[],
+  notification: AlertNotification,
+  sender: NotificationSender = { name: null, avatarUrl: null }
+): Promise<DeliveryResult> {
   // One saved before these were refused is not sent to either.
   const usable = urls.filter(url => !reachesMachineOnly(url));
   if (usable.length === 0 && urls.length > 0) return { ok: false, detail: 'ClearPing will not send to a link-local or cloud metadata address' };
-  const run = await runApprise(
-    [
-      // One level of verbosity is what makes it log why a service refused.
-      '-v',
-      `--title=${notification.title}`,
-      `--body=${notification.body}`,
-      `--notification-type=${notification.type}`,
-      '--input-format=html',
-    ],
-    usable
-  );
-  return outcome(run, {
-    all: 'Apprise could not deliver it',
-    some: 'Apprise delivered it to some of the notification URLs but not all',
-  });
+
+  const prepared = await prepareUrls(usable, notification, sender);
+  try {
+    const run = await runApprise(
+      [
+        // One level of verbosity is what makes it log why a service refused.
+        '-v',
+        `--title=${notification.title}`,
+        `--body=${notification.body}`,
+        `--notification-type=${notification.type}`,
+        '--input-format=html',
+      ],
+      prepared.urls
+    );
+    return outcome(run, {
+      all: 'Apprise could not deliver it',
+      some: 'Apprise delivered it to some of the notification URLs but not all',
+    });
+  } finally {
+    if (prepared.folder) await rm(prepared.folder, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 /**

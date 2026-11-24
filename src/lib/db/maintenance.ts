@@ -5,7 +5,8 @@ import { sendNotification } from '../alerts/apprise';
 import { groupWithAncestors, isWithinGroup, normalizeGroupPath } from '../targets/group-path';
 import { getScheduler } from '../scheduler';
 import { getJsonSetting, setJsonSetting } from '../security/settings-store';
-import type { AlertNotification } from '../alerts/delivery';
+import { plainNotification, type AlertNotification } from '../alerts/message';
+import { getNotificationSender } from '../alerts/sender';
 
 /**
  * Maintenance: clearing out what no longer belongs, and checking that what
@@ -443,20 +444,13 @@ export function maintenanceProgress(): MaintenanceProgress | null {
   return state().running;
 }
 
-const html = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
 function notificationFor(report: MaintenanceReport): AlertNotification {
-  const lines = report.steps
-    .filter(step => step.status === 'problem' || step.status === 'fixed')
-    .map(step => `<li><b>${html(step.label)}:</b> ${html(step.detail)}</li>`);
-  return {
-    title: report.ok ? 'ClearPing maintenance finished' : 'ClearPing maintenance found a problem',
-    body:
-      `<p>${report.ok ? 'Maintenance ran without problems.' : 'Maintenance ran and something needs a look.'} ` +
-      `${plural(report.removed, 'row')} removed.</p>` +
-      (lines.length ? `<ul>${lines.join('')}</ul>` : ''),
-    type: report.ok ? 'success' : 'failure',
-  };
+  return plainNotification(
+    report.ok ? 'ClearPing maintenance finished' : 'ClearPing maintenance found a problem',
+    `${report.ok ? 'Maintenance ran without problems.' : 'Maintenance ran and something needs a look.'} ${plural(report.removed, 'row')} removed.`,
+    report.steps.filter(step => step.status === 'problem' || step.status === 'fixed').map(step => [step.label, step.detail]),
+    report.ok ? 'success' : 'failure'
+  );
 }
 
 /** Send the report where the chosen alert sends its own. */
@@ -468,7 +462,7 @@ async function notify(settings: MaintenanceSettings, report: MaintenanceReport):
   if (!alert) return { ok: false, detail: 'The alert chosen for the report no longer exists.' };
   if (alert.notifyUrls.length === 0) return { ok: false, detail: 'The alert chosen for the report has nowhere to send to.' };
 
-  const result = await sendNotification(alert.notifyUrls, notificationFor(report));
+  const result = await sendNotification(alert.notifyUrls, notificationFor(report), await getNotificationSender());
   return { ok: result.ok, detail: result.detail };
 }
 

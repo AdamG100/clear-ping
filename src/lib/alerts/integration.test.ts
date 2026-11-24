@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { ProbeResult } from '@/types/probe'
-import type { AlertNotification } from './delivery'
+import type { AlertNotification } from './message'
 
 interface Delivery {
   urls: string[]

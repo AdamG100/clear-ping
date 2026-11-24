@@ -8,7 +8,7 @@ const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clearping-alert-
 process.env.CLEARPING_DB_PATH = dbFile
 
 const { initDatabase, closeDatabase, createTarget, getDatabase } = await import('../db/database')
-const { createAlert, evaluateAlerts, getAlerts, parseAlertInput, updateAlert } = await import('./store')
+const { createAlert, evaluateAlerts, getAlerts, parseAlertInput, updateAlert, withProbesNow } = await import('./store')
 const { getAlertEvents } = await import('./history')
 
 const MONITOR = { id: 'm1', name: 'Example DNS', host: '192.0.2.53', interval: 60, group: 'Lab' }
@@ -78,6 +78,25 @@ describe('an alert that needs two of three probes to agree', () => {
     expect(await feed('b', 100)).toHaveLength(0)
     expect(await feed('local', 50)).toHaveLength(0)
     expect(await feed('a', 50)).toHaveLength(1)
+  })
+})
+
+describe('an outage two probes see at once', () => {
+  const PAIR = { id: 'pair', name: 'Example web', host: 'www.example.net', interval: 60 }
+  const down = (probe: string): ProbeResult => ({ targetId: PAIR.id, timestamp: new Date(), latency: null, packetLoss: 100, jitter: null, success: false, probe })
+
+  it('fires once, not once for each probe, and then says both see it', async () => {
+    await createTarget({ ...PAIR, probeType: 'ping', status: 'active', probeAgentId: null, probes: [{ id: 'local', position: 0 }, { id: 'a', position: 1 }] })
+    await createAlert({ metric: 'unreachable', threshold: 0, consecutiveProbes: 1, notifyUrls: [], targetIds: [PAIR.id] })
+
+    // The two readings arrive together, as a monitor's probes' readings do.
+    const [first, second] = await Promise.all([evaluateAlerts(PAIR, down('local')), evaluateAlerts(PAIR, down('a'))])
+    const fired = [...first, ...second]
+    expect(fired).toHaveLength(1)
+
+    // Read again as the message goes, both probes are in breach.
+    const now = await withProbesNow(fired[0])
+    expect(now.probeVerdicts?.filter(each => each.breaching).map(each => each.probe).sort()).toEqual(['a', 'local'])
   })
 })
 
