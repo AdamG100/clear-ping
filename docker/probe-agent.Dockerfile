@@ -17,7 +17,7 @@
 # web app, no Apprise.
 
 # ── Build ────────────────────────────────────────────────────────────────────
-FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS build
+FROM node:26.13.1-trixie-slim@sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5 AS build
 WORKDIR /app
 
 # Only esbuild is needed, and none of the install scripts: sqlite3 and the
@@ -50,7 +50,7 @@ FROM scratch AS binary
 COPY --from=binary-build /app/dist/probe-agent/clearping-probe-agent /clearping-probe-agent
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
-FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS runtime
+FROM node:26.13.1-trixie-slim@sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5 AS runtime
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends iputils-ping iputils-arping traceroute \
